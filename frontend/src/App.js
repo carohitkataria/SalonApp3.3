@@ -1,53 +1,54 @@
-import { useEffect } from "react";
-import "@/App.css";
-import { BrowserRouter, Routes, Route } from "react-router-dom";
-import axios from "axios";
+import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import { AuthProvider } from '@/contexts/AuthContext';
+import { WebSocketProvider } from '@/contexts/WebSocketContext';
+import { ThemeProvider } from '@/contexts/ThemeContext';
+import { Toaster } from '@/components/ui/sonner';
 
-const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
-const API = `${BACKEND_URL}/api`;
+// User Pages
+import UserLoginPage from '@/pages/UserLoginPage';
+import HomePage from '@/pages/HomePage';
+import SalonSelectionPage from '@/pages/SalonSelectionPage';
+import SinglePageBooking from '@/pages/SinglePageBooking';
+import HistoryPage from '@/pages/HistoryPage';
 
-const Home = () => {
-  const helloWorldApi = async () => {
-    try {
-      const response = await axios.get(`${API}/`);
-      console.log(response.data.message);
-    } catch (e) {
-      console.error(e, `errored out requesting / api`);
-    }
-  };
+// Salon Pages
+import OTPLoginPage from '@/pages/OTPLoginPage';
+import SalonSignupPage from '@/pages/SalonSignupPage';
+import EnhancedSalonDashboard from '@/pages/EnhancedSalonDashboard';
 
-  useEffect(() => {
-    helloWorldApi();
-  }, []);
-
-  return (
-    <div>
-      <header className="App-header">
-        <a
-          className="App-link"
-          href="https://emergent.sh"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <img src="https://avatars.githubusercontent.com/in/1201222?s=120&u=2686cf91179bbafbc7a71bfbc43004cf9ae1acea&v=4" />
-        </a>
-        <p className="mt-5">Building something incredible ~!</p>
-      </header>
-    </div>
-  );
-};
+import '@/App.css';
 
 function App() {
   return (
-    <div className="App">
-      <BrowserRouter>
-        <Routes>
-          <Route path="/" element={<Home />}>
-            <Route index element={<Home />} />
-          </Route>
-        </Routes>
-      </BrowserRouter>
-    </div>
+    <ThemeProvider>
+      <AuthProvider>
+        <WebSocketProvider>
+          <div className="App">
+            <Toaster position="top-center" richColors />
+            <BrowserRouter>
+              <Routes>
+                {/* User Routes */}
+                <Route path="/user/login" element={<UserLoginPage />} />
+                <Route path="/" element={<HomePage />} />
+                <Route path="/salons" element={<SalonSelectionPage />} />
+                <Route path="/book/:salonId" element={<SinglePageBooking />} />
+                <Route path="/history" element={<HistoryPage />} />
+                
+                {/* Salon Routes */}
+                <Route path="/salon/login" element={<OTPLoginPage />} />
+                <Route path="/salon/signup" element={<SalonSignupPage />} />
+                <Route path="/salon/dashboard" element={<EnhancedSalonDashboard />} />
+                
+                {/* Redirect old routes */}
+                <Route path="/admin/login" element={<Navigate to="/salon/login" replace />} />
+                <Route path="/admin/dashboard" element={<Navigate to="/salon/dashboard" replace />} />
+                <Route path="/book" element={<Navigate to="/salons" replace />} />
+              </Routes>
+            </BrowserRouter>
+          </div>
+        </WebSocketProvider>
+      </AuthProvider>
+    </ThemeProvider>
   );
 }
 
