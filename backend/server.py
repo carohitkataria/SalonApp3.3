@@ -20,6 +20,9 @@ from passlib.context import CryptContext
 import random
 import math
 
+# Import Twilio service
+from twilio_service import send_whatsapp_otp
+
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
 
@@ -218,9 +221,8 @@ async def get_current_salon(credentials: HTTPAuthorizationCredentials = Depends(
 # ============ HELPER FUNCTIONS ============
 
 def generate_otp():
-    # For testing: always accept "123456" as valid OTP
-    # In production: return str(random.randint(100000, 999999))
-    return "123456"  # Hardcoded for testing
+    """Generate a random 6-digit OTP"""
+    return str(random.randint(100000, 999999))
 
 def calculate_distance(lat1, lon1, lat2, lon2):
     """Calculate distance between two coordinates in km"""
@@ -627,7 +629,7 @@ async def update_barber_service_price(barber_id: str, service_id: str, price: fl
 
 @api_router.post("/salon/send-otp")
 async def send_otp(request: SalonOTPRequest):
-    """Send OTP to salon phone number"""
+    """Send OTP to salon phone number via WhatsApp"""
     phone = request.phone
     if not phone.startswith("+91"):
         phone = f"+91{phone}"
@@ -640,7 +642,7 @@ async def send_otp(request: SalonOTPRequest):
     otp = generate_otp()
     expires_at = datetime.now(timezone.utc) + timedelta(minutes=10)
     
-    # Store OTP
+    # Store OTP in database
     await db.salon_otp.delete_many({"phone": phone})
     await db.salon_otp.insert_one({
         "phone": phone,
@@ -649,14 +651,24 @@ async def send_otp(request: SalonOTPRequest):
         "verified": False
     })
     
-    # Mock: In production, send actual SMS
-    logger.info(f"OTP for {phone}: {otp}")
+    # Send OTP via WhatsApp
+    whatsapp_result = await send_whatsapp_otp(phone, otp)
     
-    return {
-        "message": "OTP sent successfully",
-        "otp": otp,  # Remove in production
-        "salon_exists": salon_exists
+    logger.info(f"OTP sent to {phone} via WhatsApp. Status: {whatsapp_result.get('status')}")
+    
+    # Build response
+    response = {
+        "message": "OTP sent successfully via WhatsApp",
+        "salon_exists": salon_exists,
+        "delivery_status": whatsapp_result.get('status')
     }
+    
+    # Include OTP in response for testing/mock mode
+    if whatsapp_result.get('status') in ['mock', 'failed']:
+        response['otp'] = otp
+        response['note'] = "OTP included for testing (WhatsApp delivery failed or in mock mode)"
+    
+    return response
 
 @api_router.post("/salon/register", response_model=Salon)
 async def register_salon(salon: SalonCreate):
