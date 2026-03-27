@@ -21,7 +21,16 @@ import random
 import math
 
 # Import Twilio service
-from twilio_service import send_whatsapp_otp
+from twilio_service import (
+    send_whatsapp_otp, 
+    send_whatsapp_notification,
+    format_booking_confirmation,
+    format_queue_status,
+    format_token_near,
+    format_token_called,
+    format_token_cancelled,
+    format_token_rescheduled
+)
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
@@ -276,6 +285,83 @@ async def calculate_booking_total(service_ids: List[str], barber_id: str) -> flo
 async def broadcast_update(event_type: str, data: dict):
     """Broadcast updates via WebSocket"""
     await sio.emit(event_type, data)
+
+async def send_booking_notification(token_data: dict, notification_type: str):
+    """Send WhatsApp notification for booking events"""
+    try:
+        phone = token_data.get('phone')
+        customer_name = token_data.get('customer_name')
+        
+        if not phone:
+            logger.warning(f"No phone number for notification type: {notification_type}")
+            return
+        
+        # Get salon details
+        salon = await db.salons.find_one({"id": token_data.get('salon_id')}, {"_id": 0})
+        salon_name = salon.get('salon_name', 'The Looks Salon') if salon else 'The Looks Salon'
+        
+        message = None
+        
+        if notification_type == 'booking_confirmation':
+            message = format_booking_confirmation(
+                customer_name=customer_name,
+                token_number=token_data.get('token_number', 0),
+                date=token_data.get('date'),
+                time_slot=token_data.get('time_slot'),
+                barber_name=token_data.get('barber_name'),
+                salon_name=salon_name
+            )
+        elif notification_type == 'token_called':
+            message = format_token_called(
+                customer_name=customer_name,
+                token_number=token_data.get('token_number'),
+                barber_name=token_data.get('barber_name')
+            )
+        elif notification_type == 'token_cancelled':
+            message = format_token_cancelled(
+                customer_name=customer_name,
+                token_number=token_data.get('token_number'),
+                reason=token_data.get('cancellation_reason')
+            )
+        
+        if message:
+            result = await send_whatsapp_notification(phone, message, notification_type)
+            logger.info(f"Notification sent: {notification_type} to {phone}, status: {result.get('status')}")
+            
+    except Exception as e:
+        logger.error(f"Failed to send notification {notification_type}: {str(e)}")
+
+async def check_and_notify_nearby_tokens(salon_id: str, barber_id: str, date: str, current_token_number: int):
+    """Check and notify customers who are 3 or 1 token away"""
+    try:
+        # Get all waiting tokens for this barber
+        waiting_tokens = await db.tokens.find(
+            {"salon_id": salon_id, "barber_id": barber_id, "date": date, "status": "waiting"},
+            {"_id": 0}
+        ).sort("token_number", 1).to_list(100)
+        
+        for token in waiting_tokens:
+            token_number = token.get('token_number')
+            tokens_away = token_number - current_token_number
+            
+            # Notify if 3 tokens away or 1 token away
+            if tokens_away == 3 or tokens_away == 1:
+                message = format_token_near(
+                    customer_name=token.get('customer_name'),
+                    user_token=token_number,
+                    tokens_away=tokens_away
+                )
+                
+                await send_whatsapp_notification(
+                    token.get('phone'), 
+                    message, 
+                    f'token_{tokens_away}_away'
+                )
+                
+                logger.info(f"Notified token #{token_number} ({tokens_away} away)")
+                
+    except Exception as e:
+        logger.error(f"Failed to check nearby tokens: {str(e)}")
 
 # ============ INITIALIZATION ============
 
@@ -663,10 +749,11 @@ async def send_otp(request: SalonOTPRequest):
         "delivery_status": whatsapp_result.get('status')
     }
     
-    # Include OTP in response for testing/mock mode
-    if whatsapp_result.get('status') in ['mock', 'failed']:
+    # Only include OTP in response if delivery failed (for testing/debugging)
+    if whatsapp_result.get('status') == 'failed':
         response['otp'] = otp
-        response['note'] = "OTP included for testing (WhatsApp delivery failed or in mock mode)"
+        response['error'] = whatsapp_result.get('error')
+        response['note'] = "OTP included because WhatsApp delivery failed"
     
     return response
 
@@ -833,6 +920,9 @@ async def create_booking(booking: BookingCreate):
     token = TokenModel(**token_dict)
     await broadcast_update("token_created", token.model_dump())
     
+    # Send booking confirmation via WhatsApp
+    await send_booking_notification(token_dict, 'booking_confirmation')
+    
     return token
 
 @api_router.get("/salons/{salon_id}/barbers/{barber_id}/queue", response_model=List[TokenModel])
@@ -882,6 +972,13 @@ async def call_next_token(salon_id: str, barber_id: str, current_salon=Depends(g
         )
         updated = TokenModel(**{**next_token, "status": "in_progress"})
         await broadcast_update("token_called", updated.model_dump())
+        
+        # Send WhatsApp notification that token is called
+        await send_booking_notification(next_token, 'token_called')
+        
+        # Check and notify tokens that are near (3 away and 1 away)
+        await check_and_notify_nearby_tokens(salon_id, barber_id, date, next_token["token_number"])
+        
         return updated
     
     return {"message": "No more tokens in queue"}
@@ -931,6 +1028,10 @@ async def cancel_token(token_id: str, current_salon=Depends(get_current_salon)):
     
     await db.tokens.update_one({"id": token_id}, {"$set": {"status": "cancelled"}})
     await broadcast_update("token_cancelled", {"token_id": token_id})
+    
+    # Send cancellation notification
+    await send_booking_notification(token, 'token_cancelled')
+    
     return {"message": "Token cancelled"}
 
 @api_router.post("/tokens/{token_id}/defer")
@@ -946,25 +1047,62 @@ async def defer_token(token_id: str, new_slot: str, current_salon=Depends(get_cu
 
 @api_router.post("/tokens/{token_id}/notify")
 async def send_token_notification(token_id: str, current_salon=Depends(get_current_salon)):
-    """Send mock WhatsApp notification"""
+    """Send queue status notification to customer"""
     token = await db.tokens.find_one({"id": token_id}, {"_id": 0})
     if not token:
         raise HTTPException(status_code=404, detail="Token not found")
     
-    # Mock notification
+    # Get current token being served for this barber
+    current_token = await db.tokens.find_one(
+        {"salon_id": token["salon_id"], "barber_id": token["barber_id"], "date": token["date"], "status": "in_progress"},
+        {"_id": 0}
+    )
+    
+    current_token_number = current_token.get('token_number', 0) if current_token else 0
+    user_token_number = token.get('token_number')
+    tokens_away = user_token_number - current_token_number
+    
+    # Calculate estimated time (assume 20 minutes per token)
+    estimated_minutes = tokens_away * 20
+    if estimated_minutes < 60:
+        estimated_time = f"{estimated_minutes} minutes"
+    else:
+        hours = estimated_minutes // 60
+        mins = estimated_minutes % 60
+        estimated_time = f"{hours}h {mins}m" if mins > 0 else f"{hours}h"
+    
+    # Send queue status notification
+    message = format_queue_status(
+        customer_name=token.get('customer_name'),
+        current_token=current_token_number,
+        user_token=user_token_number,
+        tokens_away=tokens_away,
+        estimated_time=estimated_time
+    )
+    
+    result = await send_whatsapp_notification(token.get('phone'), message, 'queue_status')
+    
+    # Store notification record
     notification = {
         "id": str(uuid.uuid4()),
         "token_id": token_id,
-        "notification_type": "whatsapp",
-        "message": f"Hi {token['customer_name']}, your token #{token['token_number']} will be called soon!",
-        "status": "sent",
+        "notification_type": "whatsapp_queue_status",
+        "message": message,
+        "status": result.get('status'),
         "sent_at": datetime.now(timezone.utc).isoformat()
     }
     await db.notifications.insert_one(notification)
     
-    logger.info(f"Mock notification sent: {notification['message']}")
+    logger.info(f"Queue status notification sent to {token.get('phone')}: {result.get('status')}")
     
-    return {"message": "Notification sent (mock)", "notification": notification}
+    return {
+        "message": "Notification sent successfully",
+        "delivery_status": result.get('status'),
+        "current_token": current_token_number,
+        "user_token": user_token_number,
+        "tokens_away": tokens_away,
+        "estimated_time": estimated_time
+    }
 
 # ============ PAYMENT ROUTES ============
 

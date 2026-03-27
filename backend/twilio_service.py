@@ -5,6 +5,12 @@ Handles OTP sending and booking notifications via WhatsApp
 from twilio.rest import Client
 import os
 import logging
+from pathlib import Path
+from dotenv import load_dotenv
+
+# Load environment variables
+ROOT_DIR = Path(__file__).parent
+load_dotenv(ROOT_DIR / '.env')
 
 logger = logging.getLogger(__name__)
 
