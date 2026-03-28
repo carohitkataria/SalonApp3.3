@@ -184,12 +184,14 @@ class BarberCreate(BaseModel):
     salon_id: str
     experience: int
     category: str
+    specialization: Optional[str] = None
     mobile: str
 
 class BarberUpdate(BaseModel):
     name: Optional[str] = None
     experience: Optional[int] = None
     category: Optional[str] = None
+    specialization: Optional[str] = None
     mobile: Optional[str] = None
     queue_status: Optional[str] = None
 
@@ -200,6 +202,7 @@ class Barber(BaseModel):
     salon_id: str
     experience: int
     category: str
+    specialization: Optional[str] = None
     mobile: str
     queue_status: str = "available"  # available/busy/offline
     is_active: bool = True

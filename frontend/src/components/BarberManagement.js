@@ -14,6 +14,28 @@ import { motion, AnimatePresence } from 'framer-motion';
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
 const API = `${BACKEND_URL}/api`;
 
+// Category options
+const CATEGORY_OPTIONS = [
+  { value: 'Junior', label: 'Junior' },
+  { value: 'Stylist', label: 'Stylist' },
+  { value: 'Senior', label: 'Senior' },
+  { value: 'Master', label: 'Master' },
+  { value: 'custom', label: 'Custom' }
+];
+
+// Specialization options
+const SPECIALIZATION_OPTIONS = [
+  { value: 'Haircut Specialist', label: 'Haircut Specialist' },
+  { value: 'Beard Styling Expert', label: 'Beard Styling Expert' },
+  { value: 'Fade Specialist', label: 'Fade Specialist' },
+  { value: 'Kids Haircut Specialist', label: 'Kids Haircut Specialist' },
+  { value: 'Bridal/Groom Styling', label: 'Bridal/Groom Styling' },
+  { value: 'Hair Coloring Expert', label: 'Hair Coloring Expert' },
+  { value: 'Keratin/Smoothening Specialist', label: 'Keratin/Smoothening Specialist' },
+  { value: 'Quick Service (Fast barber)', label: 'Quick Service (Fast barber)' },
+  { value: 'custom', label: 'Custom' }
+];
+
 export default function BarberManagement({ salonId, getAuthHeaders }) {
   const [barbers, setBarbers] = useState([]);
   const [services, setServices] = useState([]);
@@ -25,7 +47,10 @@ export default function BarberManagement({ salonId, getAuthHeaders }) {
   const [newBarber, setNewBarber] = useState({
     name: '',
     experience: '',
-    category: 'normal',
+    category: 'Junior',
+    specialization: 'Haircut Specialist',
+    customCategory: '',
+    customSpecialization: '',
     mobile: ''
   });
 
@@ -66,18 +91,33 @@ export default function BarberManagement({ salonId, getAuthHeaders }) {
     }
 
     try {
+      // Determine final category and specialization (use custom if selected)
+      const finalCategory = newBarber.category === 'custom' ? newBarber.customCategory : newBarber.category;
+      const finalSpecialization = newBarber.specialization === 'custom' ? newBarber.customSpecialization : newBarber.specialization;
+
       const response = await axios.post(
         `${API}/salons/${salonId}/barbers`,
         {
-          ...newBarber,
+          name: newBarber.name,
+          mobile: newBarber.mobile,
           salon_id: salonId,
-          experience: parseInt(newBarber.experience) || 0
+          experience: parseInt(newBarber.experience) || 0,
+          category: finalCategory,
+          specialization: finalSpecialization
         },
         { headers: getAuthHeaders() }
       );
       
       setBarbers([...barbers, response.data]);
-      setNewBarber({ name: '', experience: '', category: 'normal', mobile: '' });
+      setNewBarber({ 
+        name: '', 
+        experience: '', 
+        category: 'Junior', 
+        specialization: 'Haircut Specialist',
+        customCategory: '',
+        customSpecialization: '',
+        mobile: '' 
+      });
       setShowAddForm(false);
       toast.success('Barber added successfully');
     } catch (error) {
@@ -186,20 +226,54 @@ export default function BarberManagement({ salonId, getAuthHeaders }) {
                 />
               </div>
               <div>
-                <Label htmlFor="category">Category</Label>
+                <Label htmlFor="category">Category *</Label>
                 <select
                   id="category"
                   data-testid="barber-category-select"
                   value={newBarber.category}
                   onChange={(e) => setNewBarber({ ...newBarber, category: e.target.value })}
                   className="w-full h-10 px-3 rounded-md border border-input bg-background text-foreground"
+                  required
                 >
-                  <option value="normal">Normal</option>
-                  <option value="star">Star</option>
-                  <option value="master">Master</option>
+                  {CATEGORY_OPTIONS.map(opt => (
+                    <option key={opt.value} value={opt.value}>{opt.label}</option>
+                  ))}
                 </select>
+                {newBarber.category === 'custom' && (
+                  <Input
+                    className="mt-2"
+                    placeholder="Enter custom category"
+                    value={newBarber.customCategory}
+                    onChange={(e) => setNewBarber({ ...newBarber, customCategory: e.target.value })}
+                    required
+                  />
+                )}
               </div>
             </div>
+
+            {/* Specialization Field */}
+            <div>
+              <Label htmlFor="specialization">Specialization</Label>
+              <select
+                id="specialization"
+                value={newBarber.specialization}
+                onChange={(e) => setNewBarber({ ...newBarber, specialization: e.target.value })}
+                className="w-full h-10 px-3 rounded-md border border-input bg-background text-foreground"
+              >
+                {SPECIALIZATION_OPTIONS.map(opt => (
+                  <option key={opt.value} value={opt.value}>{opt.label}</option>
+                ))}
+              </select>
+              {newBarber.specialization === 'custom' && (
+                <Input
+                  className="mt-2"
+                  placeholder="Enter custom specialization"
+                  value={newBarber.customSpecialization}
+                  onChange={(e) => setNewBarber({ ...newBarber, customSpecialization: e.target.value })}
+                />
+              )}
+            </div>
+
             <div className="flex justify-end space-x-2">
               <Button type="button" variant="outline" onClick={() => setShowAddForm(false)}>
                 Cancel
@@ -343,6 +417,11 @@ function BarberCard({
               <span className={`px-2 py-0.5 rounded-full text-xs border capitalize ${getCategoryBadge(barber.category)}`}>
                 {barber.category}
               </span>
+              {barber.specialization && (
+                <span className="px-2 py-0.5 rounded-full text-xs bg-purple-500/20 text-purple-400 border border-purple-500/30">
+                  {barber.specialization}
+                </span>
+              )}
             </div>
           </div>
         </div>
