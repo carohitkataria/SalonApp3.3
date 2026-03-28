@@ -330,6 +330,8 @@ function BarberCard({
   getAuthHeaders 
 }) {
   const [editData, setEditData] = useState({ ...barber });
+  const [customCategory, setCustomCategory] = useState('');
+  const [customSpecialization, setCustomSpecialization] = useState('');
   const [barberServices, setBarberServices] = useState([]);
   const [loadingServices, setLoadingServices] = useState(false);
   const [savingServices, setSavingServices] = useState(false);
@@ -491,21 +493,76 @@ function BarberCard({
                     <div>
                       <Label>Category</Label>
                       <select
-                        value={editData.category}
-                        onChange={(e) => setEditData({ ...editData, category: e.target.value })}
+                        value={CATEGORY_OPTIONS.find(opt => opt.value === editData.category) ? editData.category : 'custom'}
+                        onChange={(e) => {
+                          if (e.target.value === 'custom') {
+                            setCustomCategory(editData.category);
+                          }
+                          setEditData({ ...editData, category: e.target.value });
+                        }}
                         className="w-full h-10 px-3 rounded-md border border-input bg-background text-foreground"
                       >
-                        <option value="normal">Normal</option>
-                        <option value="star">Star</option>
-                        <option value="master">Master</option>
+                        {CATEGORY_OPTIONS.map(opt => (
+                          <option key={opt.value} value={opt.value}>{opt.label}</option>
+                        ))}
                       </select>
+                      {(!CATEGORY_OPTIONS.find(opt => opt.value === editData.category) || editData.category === 'custom') && (
+                        <Input
+                          className="mt-2"
+                          placeholder="Enter custom category"
+                          value={editData.category === 'custom' ? customCategory : editData.category}
+                          onChange={(e) => {
+                            setCustomCategory(e.target.value);
+                            setEditData({ ...editData, category: e.target.value });
+                          }}
+                        />
+                      )}
                     </div>
                   </div>
+                  
+                  {/* Specialization Field */}
+                  <div>
+                    <Label>Specialization</Label>
+                    <select
+                      value={SPECIALIZATION_OPTIONS.find(opt => opt.value === editData.specialization) ? editData.specialization : 'custom'}
+                      onChange={(e) => {
+                        if (e.target.value === 'custom') {
+                          setCustomSpecialization(editData.specialization || '');
+                        }
+                        setEditData({ ...editData, specialization: e.target.value });
+                      }}
+                      className="w-full h-10 px-3 rounded-md border border-input bg-background text-foreground"
+                    >
+                      {SPECIALIZATION_OPTIONS.map(opt => (
+                        <option key={opt.value} value={opt.value}>{opt.label}</option>
+                      ))}
+                    </select>
+                    {(!SPECIALIZATION_OPTIONS.find(opt => opt.value === editData.specialization) || editData.specialization === 'custom') && (
+                      <Input
+                        className="mt-2"
+                        placeholder="Enter custom specialization"
+                        value={editData.specialization === 'custom' ? customSpecialization : (editData.specialization || '')}
+                        onChange={(e) => {
+                          setCustomSpecialization(e.target.value);
+                          setEditData({ ...editData, specialization: e.target.value });
+                        }}
+                      />
+                    )}
+                  </div>
+
                   <div className="flex justify-end space-x-2">
                     <Button variant="outline" onClick={onCancelEdit}>Cancel</Button>
                     <Button 
                       className="bg-gold text-black hover:bg-gold/90"
-                      onClick={() => onUpdate(editData)}
+                      onClick={() => {
+                        const finalCategory = editData.category === 'custom' ? customCategory : editData.category;
+                        const finalSpecialization = editData.specialization === 'custom' ? customSpecialization : editData.specialization;
+                        onUpdate({
+                          ...editData,
+                          category: finalCategory,
+                          specialization: finalSpecialization
+                        });
+                      }}
                     >
                       <Save className="w-4 h-4 mr-2" /> Save Changes
                     </Button>
