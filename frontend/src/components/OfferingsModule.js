@@ -3,39 +3,19 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Checkbox } from '@/components/ui/checkbox';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { 
   Search, Plus, Star, Package, Sparkles, 
   ChevronDown, ChevronRight, Edit, Trash2,
-  Image as ImageIcon, Heart
+  Image as ImageIcon, Heart, Home, Save, X, GripVertical
 } from 'lucide-react';
 import axios from 'axios';
 import { toast } from 'sonner';
+import { DragDropContext, Droppable, Draggable } from 'react-beautiful-dnd';
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
 const API = `${BACKEND_URL}/api`;
-
-// Service categories from the menu
-const SERVICE_CATEGORIES = [
-  "Clean Up",
-  "Facial",
-  "Advance Facial",
-  "Menicure",
-  "Pedicure",
-  "Hair Cut",
-  "Hair Styling",
-  "Makeup",
-  "Hair Treatment",
-  "Hair Spa",
-  "Hair Colour",
-  "Normal Waxing",
-  "Rica Waxing",
-  "Body Care",
-  "Massage",
-  "Bleach",
-  "Face Treatments",
-  "Shampoo",
-  "Threading"
-];
 
 export default function OfferingsModule({ salonId, token }) {
   const [activeTab, setActiveTab] = useState('services');
@@ -47,8 +27,12 @@ export default function OfferingsModule({ salonId, token }) {
   const [searchQuery, setSearchQuery] = useState('');
   const [genderFilter, setGenderFilter] = useState('all');
   const [loading, setLoading] = useState(false);
-  const [showAddService, setShowAddService] = useState(false);
-  const [showAddPackage, setShowAddPackage] = useState(false);
+  
+  // Modal states
+  const [showServiceModal, setShowServiceModal] = useState(false);
+  const [showPackageModal, setShowPackageModal] = useState(false);
+  const [editingService, setEditingService] = useState(null);
+  const [editingPackage, setEditingPackage] = useState(null);
 
   useEffect(() => {
     fetchAllData();
@@ -108,6 +92,21 @@ export default function OfferingsModule({ salonId, token }) {
     }
   };
 
+  const toggleServiceEnabled = async (serviceId, currentStatus) => {
+    try {
+      await axios.put(
+        `${API}/services/${serviceId}`,
+        { is_enabled: !currentStatus },
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      toast.success(currentStatus ? 'Service disabled' : 'Service enabled');
+      fetchAllData();
+    } catch (error) {
+      console.error('Error toggling service:', error);
+      toast.error('Failed to update service');
+    }
+  };
+
   const deleteService = async (serviceId) => {
     if (!window.confirm('Are you sure you want to delete this service?')) return;
     
@@ -120,6 +119,55 @@ export default function OfferingsModule({ salonId, token }) {
     } catch (error) {
       console.error('Error deleting service:', error);
       toast.error('Failed to delete service');
+    }
+  };
+
+  const deletePackage = async (packageId) => {
+    if (!window.confirm('Are you sure you want to delete this package?')) return;
+    
+    try {
+      await axios.delete(`${API}/packages/${packageId}`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      toast.success('Package deleted successfully');
+      fetchAllData();
+    } catch (error) {
+      console.error('Error deleting package:', error);
+      toast.error('Failed to delete package');
+    }
+  };
+
+  const handleEditService = (service) => {
+    setEditingService(service);
+    setShowServiceModal(true);
+  };
+
+  const handleEditPackage = (pkg) => {
+    setEditingPackage(pkg);
+    setShowPackageModal(true);
+  };
+
+  const onDragEnd = async (result) => {
+    if (!result.destination) return;
+
+    const items = Array.from(favorites);
+    const [reorderedItem] = items.splice(result.source.index, 1);
+    items.splice(result.destination.index, 0, reorderedItem);
+
+    setFavorites(items);
+
+    try {
+      const serviceIds = items.map(item => item.id);
+      await axios.put(
+        `${API}/services/favorites/reorder`,
+        serviceIds,
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      toast.success('Favorites reordered');
+    } catch (error) {
+      console.error('Error reordering favorites:', error);
+      toast.error('Failed to reorder favorites');
+      fetchAllData();
     }
   };
 
@@ -174,17 +222,39 @@ export default function OfferingsModule({ salonId, token }) {
                 <p className="text-sm">Mark services as favorites to see them here</p>
               </div>
             ) : (
-              <div className="space-y-2">
-                {favorites.map((service) => (
-                  <ServiceCard
-                    key={service.id}
-                    service={service}
-                    onToggleFavorite={toggleFavorite}
-                    onDelete={deleteService}
-                    token={token}
-                  />
-                ))}
-              </div>
+              <DragDropContext onDragEnd={onDragEnd}>
+                <Droppable droppableId="favorites">
+                  {(provided) => (
+                    <div {...provided.droppableProps} ref={provided.innerRef} className="space-y-2">
+                      {favorites.map((service, index) => (
+                        <Draggable key={service.id} draggableId={service.id} index={index}>
+                          {(provided) => (
+                            <div
+                              ref={provided.innerRef}
+                              {...provided.draggableProps}
+                              className="bg-background border border-border rounded-lg p-4 hover:border-gold/50 transition-colors"
+                            >
+                              <div className="flex items-center gap-4">
+                                <div {...provided.dragHandleProps}>
+                                  <GripVertical className="w-5 h-5 text-muted-foreground cursor-move" />
+                                </div>
+                                <ServiceCardContent 
+                                  service={service} 
+                                  onToggleFavorite={toggleFavorite}
+                                  onToggleEnabled={toggleServiceEnabled}
+                                  onEdit={handleEditService}
+                                  onDelete={deleteService}
+                                />
+                              </div>
+                            </div>
+                          )}
+                        </Draggable>
+                      ))}
+                      {provided.placeholder}
+                    </div>
+                  )}
+                </Droppable>
+              </DragDropContext>
             )}
           </div>
         </TabsContent>
@@ -193,34 +263,30 @@ export default function OfferingsModule({ salonId, token }) {
         <TabsContent value="services" className="space-y-4">
           {/* Filters and Search */}
           <div className="bg-card border border-border rounded-lg p-4">
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              <div className="md:col-span-2">
-                <div className="relative">
-                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-                  <Input
-                    placeholder="Search services..."
-                    value={searchQuery}
-                    onChange={(e) => setSearchQuery(e.target.value)}
-                    className="pl-10"
-                  />
-                </div>
+            <div className="flex gap-4">
+              <div className="flex-1 relative">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+                <Input
+                  placeholder="Search services..."
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  className="pl-10"
+                />
               </div>
 
-              <div>
-                <select
-                  value={genderFilter}
-                  onChange={(e) => setGenderFilter(e.target.value)}
-                  className="w-full p-2 bg-background border border-border rounded-md text-foreground"
-                >
-                  <option value="all">All Genders</option>
-                  <option value="Men">Men Only</option>
-                  <option value="Women">Women Only</option>
-                  <option value="Unisex">Unisex</option>
-                </select>
-              </div>
+              <select
+                value={genderFilter}
+                onChange={(e) => setGenderFilter(e.target.value)}
+                className="px-4 py-2 bg-background border border-border rounded-md text-foreground"
+              >
+                <option value="all">All Genders</option>
+                <option value="Men">Men Only</option>
+                <option value="Women">Women Only</option>
+                <option value="Unisex">Unisex</option>
+              </select>
             </div>
 
-            <Button onClick={() => setShowAddService(true)} className="mt-4 w-full">
+            <Button onClick={() => { setEditingService(null); setShowServiceModal(true); }} className="mt-4 w-full">
               <Plus className="w-4 h-4 mr-2" />
               Add New Service
             </Button>
@@ -228,7 +294,7 @@ export default function OfferingsModule({ salonId, token }) {
 
           {/* Categorized Services */}
           <div className="space-y-3">
-            {Object.entries(filteredServices).map(([category, servicesList]) => (
+            {Object.entries(filteredServices).sort().map(([category, servicesList]) => (
               <div key={category} className="bg-card border border-border rounded-lg overflow-hidden">
                 <button
                   onClick={() => toggleCategory(category)}
@@ -250,13 +316,15 @@ export default function OfferingsModule({ salonId, token }) {
                 {expandedCategories[category] && (
                   <div className="p-4 space-y-2">
                     {servicesList.map((service) => (
-                      <ServiceCard
-                        key={service.id}
-                        service={service}
-                        onToggleFavorite={toggleFavorite}
-                        onDelete={deleteService}
-                        token={token}
-                      />
+                      <div key={service.id} className="bg-background border border-border rounded-lg p-4 hover:border-gold/50 transition-colors">
+                        <ServiceCardContent 
+                          service={service} 
+                          onToggleFavorite={toggleFavorite}
+                          onToggleEnabled={toggleServiceEnabled}
+                          onEdit={handleEditService}
+                          onDelete={deleteService}
+                        />
+                      </div>
                     ))}
                   </div>
                 )}
@@ -276,7 +344,7 @@ export default function OfferingsModule({ salonId, token }) {
         {/* PACKAGES TAB */}
         <TabsContent value="packages" className="space-y-4">
           <div className="bg-card border border-border rounded-lg p-4">
-            <Button onClick={() => setShowAddPackage(true)} className="w-full">
+            <Button onClick={() => { setEditingPackage(null); setShowPackageModal(true); }} className="w-full">
               <Plus className="w-4 h-4 mr-2" />
               Create New Package
             </Button>
@@ -291,18 +359,46 @@ export default function OfferingsModule({ salonId, token }) {
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               {packages.map((pkg) => (
-                <PackageCard key={pkg.id} package={pkg} token={token} />
+                <PackageCard 
+                  key={pkg.id} 
+                  package={pkg} 
+                  onEdit={handleEditPackage}
+                  onDelete={deletePackage}
+                />
               ))}
             </div>
           )}
         </TabsContent>
       </Tabs>
+
+      {/* Service Modal */}
+      {showServiceModal && (
+        <ServiceModal
+          service={editingService}
+          open={showServiceModal}
+          onClose={() => { setShowServiceModal(false); setEditingService(null); }}
+          onSave={fetchAllData}
+          token={token}
+        />
+      )}
+
+      {/* Package Modal */}
+      {showPackageModal && (
+        <PackageModal
+          package={editingPackage}
+          services={services}
+          open={showPackageModal}
+          onClose={() => { setShowPackageModal(false); setEditingPackage(null); }}
+          onSave={fetchAllData}
+          token={token}
+        />
+      )}
     </div>
   );
 }
 
-// Service Card Component
-function ServiceCard({ service, onToggleFavorite, onDelete, token }) {
+// Service Card Content Component
+function ServiceCardContent({ service, onToggleFavorite, onToggleEnabled, onEdit, onDelete }) {
   const getGenderBadge = (gender) => {
     const colors = {
       Men: 'bg-blue-500/20 text-blue-400 border-blue-500/30',
@@ -313,7 +409,7 @@ function ServiceCard({ service, onToggleFavorite, onDelete, token }) {
   };
 
   return (
-    <div className="flex items-center justify-between p-4 bg-background border border-border rounded-lg hover:border-gold/50 transition-colors">
+    <div className="flex items-center justify-between w-full">
       <div className="flex items-center gap-4 flex-1">
         {service.images && service.images.length > 0 ? (
           <img
@@ -333,6 +429,17 @@ function ServiceCard({ service, onToggleFavorite, onDelete, token }) {
             <span className={`px-2 py-0.5 text-xs border rounded ${getGenderBadge(service.gender_tag)}`}>
               {service.gender_tag}
             </span>
+            {service.available_at_home && (
+              <span className="px-2 py-0.5 text-xs bg-green-500/20 text-green-400 border border-green-500/30 rounded flex items-center gap-1">
+                <Home className="w-3 h-3" />
+                Home
+              </span>
+            )}
+            {!service.is_enabled && (
+              <span className="px-2 py-0.5 text-xs bg-red-500/20 text-red-400 border border-red-500/30 rounded">
+                Disabled
+              </span>
+            )}
           </div>
           {service.description && (
             <p className="text-sm text-muted-foreground">{service.description}</p>
@@ -349,6 +456,11 @@ function ServiceCard({ service, onToggleFavorite, onDelete, token }) {
       </div>
 
       <div className="flex items-center gap-2 ml-4">
+        <Checkbox
+          checked={service.is_enabled}
+          onCheckedChange={() => onToggleEnabled(service.id, service.is_enabled)}
+          className="data-[state=checked]:bg-gold data-[state=checked]:border-gold"
+        />
         <button
           onClick={() => onToggleFavorite(service.id, service.is_favorite)}
           className="p-2 hover:bg-muted rounded-lg transition-colors"
@@ -359,7 +471,10 @@ function ServiceCard({ service, onToggleFavorite, onDelete, token }) {
             <Heart className="w-5 h-5 text-muted-foreground" />
           )}
         </button>
-        <button className="p-2 hover:bg-muted rounded-lg transition-colors">
+        <button 
+          onClick={() => onEdit(service)}
+          className="p-2 hover:bg-muted rounded-lg transition-colors"
+        >
           <Edit className="w-5 h-5 text-muted-foreground" />
         </button>
         <button
@@ -374,7 +489,7 @@ function ServiceCard({ service, onToggleFavorite, onDelete, token }) {
 }
 
 // Package Card Component
-function PackageCard({ package: pkg, token }) {
+function PackageCard({ package: pkg, onEdit, onDelete }) {
   return (
     <div className="bg-card border border-border rounded-lg overflow-hidden hover:border-gold/50 transition-colors">
       {pkg.image_url && (
@@ -398,20 +513,365 @@ function PackageCard({ package: pkg, token }) {
 
         <div className="space-y-2">
           <p className="text-sm font-semibold text-foreground">Includes:</p>
-          <p className="text-sm text-muted-foreground">{pkg.service_ids.length} services</p>
+          <p className="text-sm text-muted-foreground">{pkg.service_ids?.length || 0} services</p>
         </div>
 
         <div className="mt-4 pt-4 border-t border-border flex gap-2">
-          <Button variant="outline" size="sm" className="flex-1">
+          <Button 
+            onClick={() => onEdit(pkg)}
+            variant="outline" 
+            size="sm" 
+            className="flex-1"
+          >
             <Edit className="w-4 h-4 mr-1" />
             Edit
           </Button>
-          <Button variant="outline" size="sm" className="text-red-500 border-red-500/50 hover:bg-red-500/10">
+          <Button 
+            onClick={() => onDelete(pkg.id)}
+            variant="outline" 
+            size="sm" 
+            className="text-red-500 border-red-500/50 hover:bg-red-500/10"
+          >
             <Trash2 className="w-4 h-4 mr-1" />
             Delete
           </Button>
         </div>
       </div>
     </div>
+  );
+}
+
+// Service Modal Component
+function ServiceModal({ service, open, onClose, onSave, token }) {
+  const [formData, setFormData] = useState({
+    service_name: '',
+    description: '',
+    category: 'General',
+    gender_tag: 'Unisex',
+    default_duration: 30,
+    base_price: 0,
+    price_type: 'fixed',
+    images: [],
+    available_at_home: false,
+    is_enabled: true
+  });
+
+  useEffect(() => {
+    if (service) {
+      setFormData(service);
+    } else {
+      setFormData({
+        service_name: '',
+        description: '',
+        category: 'General',
+        gender_tag: 'Unisex',
+        default_duration: 30,
+        base_price: 0,
+        price_type: 'fixed',
+        images: [],
+        available_at_home: false,
+        is_enabled: true
+      });
+    }
+  }, [service]);
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    
+    try {
+      if (service) {
+        // Update
+        await axios.put(
+          `${API}/services/${service.id}`,
+          formData,
+          { headers: { Authorization: `Bearer ${token}` } }
+        );
+        toast.success('Service updated successfully');
+      } else {
+        // Create
+        await axios.post(
+          `${API}/services`,
+          formData,
+          { headers: { Authorization: `Bearer ${token}` } }
+        );
+        toast.success('Service created successfully');
+      }
+      onSave();
+      onClose();
+    } catch (error) {
+      console.error('Error saving service:', error);
+      toast.error('Failed to save service');
+    }
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={onClose}>
+      <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+        <DialogHeader>
+          <DialogTitle>{service ? 'Edit Service' : 'Add New Service'}</DialogTitle>
+        </DialogHeader>
+        
+        <form onSubmit={handleSubmit} className="space-y-4">
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <Label>Service Name *</Label>
+              <Input
+                value={formData.service_name}
+                onChange={(e) => setFormData({...formData, service_name: e.target.value})}
+                required
+              />
+            </div>
+
+            <div>
+              <Label>Category *</Label>
+              <Input
+                value={formData.category}
+                onChange={(e) => setFormData({...formData, category: e.target.value})}
+                required
+              />
+            </div>
+
+            <div>
+              <Label>Gender *</Label>
+              <select
+                value={formData.gender_tag}
+                onChange={(e) => setFormData({...formData, gender_tag: e.target.value})}
+                className="w-full p-2 bg-background border border-border rounded-md"
+              >
+                <option value="Unisex">Unisex</option>
+                <option value="Men">Men</option>
+                <option value="Women">Women</option>
+              </select>
+            </div>
+
+            <div>
+              <Label>Duration (minutes) *</Label>
+              <Input
+                type="number"
+                value={formData.default_duration}
+                onChange={(e) => setFormData({...formData, default_duration: parseInt(e.target.value)})}
+                required
+              />
+            </div>
+
+            <div>
+              <Label>Base Price (₹) *</Label>
+              <Input
+                type="number"
+                value={formData.base_price}
+                onChange={(e) => setFormData({...formData, base_price: parseFloat(e.target.value)})}
+                required
+              />
+            </div>
+
+            <div>
+              <Label>Price Type *</Label>
+              <select
+                value={formData.price_type}
+                onChange={(e) => setFormData({...formData, price_type: e.target.value})}
+                className="w-full p-2 bg-background border border-border rounded-md"
+              >
+                <option value="fixed">Fixed</option>
+                <option value="onwards">Onwards</option>
+              </select>
+            </div>
+          </div>
+
+          <div>
+            <Label>Description</Label>
+            <textarea
+              value={formData.description}
+              onChange={(e) => setFormData({...formData, description: e.target.value})}
+              className="w-full p-2 bg-background border border-border rounded-md min-h-[80px]"
+            />
+          </div>
+
+          <div className="flex items-center gap-6">
+            <label className="flex items-center gap-2 cursor-pointer">
+              <Checkbox
+                checked={formData.available_at_home}
+                onCheckedChange={(checked) => setFormData({...formData, available_at_home: checked})}
+              />
+              <Home className="w-4 h-4" />
+              <span className="text-sm">Available at Home</span>
+            </label>
+
+            <label className="flex items-center gap-2 cursor-pointer">
+              <Checkbox
+                checked={formData.is_enabled}
+                onCheckedChange={(checked) => setFormData({...formData, is_enabled: checked})}
+              />
+              <span className="text-sm">Service Enabled</span>
+            </label>
+          </div>
+
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={onClose}>
+              <X className="w-4 h-4 mr-2" />
+              Cancel
+            </Button>
+            <Button type="submit">
+              <Save className="w-4 h-4 mr-2" />
+              {service ? 'Update' : 'Create'} Service
+            </Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+// Package Modal Component
+function PackageModal({ package: pkg, services, open, onClose, onSave, token }) {
+  const [formData, setFormData] = useState({
+    package_name: '',
+    description: '',
+    service_ids: [],
+    total_price: 0,
+    image_url: '',
+    gender_tag: 'Unisex'
+  });
+
+  useEffect(() => {
+    if (pkg) {
+      setFormData(pkg);
+    } else {
+      setFormData({
+        package_name: '',
+        description: '',
+        service_ids: [],
+        total_price: 0,
+        image_url: '',
+        gender_tag: 'Unisex'
+      });
+    }
+  }, [pkg]);
+
+  const toggleService = (serviceId) => {
+    setFormData(prev => ({
+      ...prev,
+      service_ids: prev.service_ids.includes(serviceId)
+        ? prev.service_ids.filter(id => id !== serviceId)
+        : [...prev.service_ids, serviceId]
+    }));
+  };
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    
+    try {
+      if (pkg) {
+        await axios.put(
+          `${API}/packages/${pkg.id}`,
+          formData,
+          { headers: { Authorization: `Bearer ${token}` } }
+        );
+        toast.success('Package updated successfully');
+      } else {
+        await axios.post(
+          `${API}/packages`,
+          formData,
+          { headers: { Authorization: `Bearer ${token}` } }
+        );
+        toast.success('Package created successfully');
+      }
+      onSave();
+      onClose();
+    } catch (error) {
+      console.error('Error saving package:', error);
+      toast.error('Failed to save package');
+    }
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={onClose}>
+      <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
+        <DialogHeader>
+          <DialogTitle>{pkg ? 'Edit Package' : 'Create New Package'}</DialogTitle>
+        </DialogHeader>
+        
+        <form onSubmit={handleSubmit} className="space-y-4">
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <Label>Package Name *</Label>
+              <Input
+                value={formData.package_name}
+                onChange={(e) => setFormData({...formData, package_name: e.target.value})}
+                required
+              />
+            </div>
+
+            <div>
+              <Label>Total Price (₹) *</Label>
+              <Input
+                type="number"
+                value={formData.total_price}
+                onChange={(e) => setFormData({...formData, total_price: parseFloat(e.target.value)})}
+                required
+              />
+            </div>
+
+            <div>
+              <Label>Gender Tag</Label>
+              <select
+                value={formData.gender_tag}
+                onChange={(e) => setFormData({...formData, gender_tag: e.target.value})}
+                className="w-full p-2 bg-background border border-border rounded-md"
+              >
+                <option value="Unisex">Unisex</option>
+                <option value="Men">Men</option>
+                <option value="Women">Women</option>
+              </select>
+            </div>
+
+            <div>
+              <Label>Image URL (optional)</Label>
+              <Input
+                value={formData.image_url}
+                onChange={(e) => setFormData({...formData, image_url: e.target.value})}
+                placeholder="https://..."
+              />
+            </div>
+          </div>
+
+          <div>
+            <Label>Description</Label>
+            <textarea
+              value={formData.description}
+              onChange={(e) => setFormData({...formData, description: e.target.value})}
+              className="w-full p-2 bg-background border border-border rounded-md min-h-[80px]"
+              placeholder="Package description..."
+            />
+          </div>
+
+          <div>
+            <Label>Select Services ({formData.service_ids.length} selected)</Label>
+            <div className="mt-2 max-h-60 overflow-y-auto border border-border rounded-md p-3 space-y-2">
+              {services.map(service => (
+                <label key={service.id} className="flex items-center gap-2 p-2 hover:bg-muted rounded cursor-pointer">
+                  <Checkbox
+                    checked={formData.service_ids.includes(service.id)}
+                    onCheckedChange={() => toggleService(service.id)}
+                  />
+                  <span className="text-sm">{service.service_name}</span>
+                  <span className="text-xs text-muted-foreground ml-auto">₹{service.base_price}</span>
+                </label>
+              ))}
+            </div>
+          </div>
+
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={onClose}>
+              <X className="w-4 h-4 mr-2" />
+              Cancel
+            </Button>
+            <Button type="submit" disabled={formData.service_ids.length === 0}>
+              <Save className="w-4 h-4 mr-2" />
+              {pkg ? 'Update' : 'Create'} Package
+            </Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
   );
 }

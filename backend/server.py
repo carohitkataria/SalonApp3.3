@@ -96,6 +96,8 @@ class ServiceCreate(BaseModel):
     price_type: str = "fixed"  # fixed/onwards
     images: List[str] = []  # List of image URLs
     is_favorite: bool = False
+    is_enabled: bool = True  # Salon can enable/disable
+    available_at_home: bool = False  # Can be delivered at home
 
 class ServiceUpdate(BaseModel):
     service_name: Optional[str] = None
@@ -108,6 +110,8 @@ class ServiceUpdate(BaseModel):
     images: Optional[List[str]] = None
     is_favorite: Optional[bool] = None
     favorite_order: Optional[int] = None
+    is_enabled: Optional[bool] = None
+    available_at_home: Optional[bool] = None
 
 class Service(BaseModel):
     model_config = ConfigDict(extra="ignore")
@@ -123,6 +127,8 @@ class Service(BaseModel):
     is_favorite: bool = False
     favorite_order: Optional[int] = None
     is_active: bool = True
+    is_enabled: bool = True
+    available_at_home: bool = False
 
 # Package Models
 class PackageService(BaseModel):
