@@ -361,7 +361,8 @@ export default function OfferingsModule({ salonId, token }) {
               {packages.map((pkg) => (
                 <PackageCard 
                   key={pkg.id} 
-                  package={pkg} 
+                  package={pkg}
+                  services={services}
                   onEdit={handleEditPackage}
                   onDelete={deletePackage}
                 />
@@ -489,7 +490,19 @@ function ServiceCardContent({ service, onToggleFavorite, onToggleEnabled, onEdit
 }
 
 // Package Card Component
-function PackageCard({ package: pkg, onEdit, onDelete }) {
+function PackageCard({ package: pkg, services, onEdit, onDelete }) {
+  const getGenderBadge = (gender) => {
+    const colors = {
+      Men: 'bg-blue-500/20 text-blue-400 border-blue-500/30',
+      Women: 'bg-pink-500/20 text-pink-400 border-pink-500/30',
+      Unisex: 'bg-purple-500/20 text-purple-400 border-purple-500/30'
+    };
+    return colors[gender] || colors.Unisex;
+  };
+
+  // Get service details for services in this package
+  const packageServices = services.filter(s => pkg.service_ids?.includes(s.id));
+
   return (
     <div className="bg-card border border-border rounded-lg overflow-hidden hover:border-gold/50 transition-colors">
       {pkg.image_url && (
@@ -501,7 +514,12 @@ function PackageCard({ package: pkg, onEdit, onDelete }) {
       )}
       <div className="p-6">
         <div className="flex items-start justify-between mb-3">
-          <h3 className="text-xl font-bold text-foreground">{pkg.package_name}</h3>
+          <div className="flex-1">
+            <h3 className="text-xl font-bold text-foreground mb-2">{pkg.package_name}</h3>
+            <span className={`px-2 py-1 text-xs border rounded ${getGenderBadge(pkg.gender_tag)}`}>
+              {pkg.gender_tag}
+            </span>
+          </div>
           <span className="px-3 py-1 bg-gold/20 text-gold rounded-full text-sm font-semibold">
             ₹{pkg.total_price}
           </span>
@@ -512,8 +530,18 @@ function PackageCard({ package: pkg, onEdit, onDelete }) {
         )}
 
         <div className="space-y-2">
-          <p className="text-sm font-semibold text-foreground">Includes:</p>
-          <p className="text-sm text-muted-foreground">{pkg.service_ids?.length || 0} services</p>
+          <p className="text-sm font-semibold text-foreground">Includes ({packageServices.length} services):</p>
+          <div className="space-y-1 max-h-40 overflow-y-auto">
+            {packageServices.map((service) => (
+              <div key={service.id} className="flex justify-between items-center text-sm p-2 bg-background rounded">
+                <span className="text-foreground">{service.service_name}</span>
+                <span className="text-gold font-semibold">₹{service.base_price}</span>
+              </div>
+            ))}
+          </div>
+          {packageServices.length === 0 && (
+            <p className="text-sm text-muted-foreground italic">No services selected</p>
+          )}
         </div>
 
         <div className="mt-4 pt-4 border-t border-border flex gap-2">
@@ -732,6 +760,8 @@ function PackageModal({ package: pkg, services, open, onClose, onSave, token }) 
     gender_tag: 'Unisex'
   });
 
+  const [searchQuery, setSearchQuery] = useState('');
+
   useEffect(() => {
     if (pkg) {
       setFormData(pkg);
@@ -745,6 +775,7 @@ function PackageModal({ package: pkg, services, open, onClose, onSave, token }) 
         gender_tag: 'Unisex'
       });
     }
+    setSearchQuery('');
   }, [pkg]);
 
   const toggleService = (serviceId) => {
@@ -783,6 +814,25 @@ function PackageModal({ package: pkg, services, open, onClose, onSave, token }) 
     }
   };
 
+  // Filter services based on search query
+  const filteredServices = services.filter(service =>
+    service.service_name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+    service.category.toLowerCase().includes(searchQuery.toLowerCase())
+  );
+
+  // Calculate total from selected services
+  const calculateTotal = () => {
+    return services
+      .filter(s => formData.service_ids.includes(s.id))
+      .reduce((sum, s) => sum + s.base_price, 0);
+  };
+
+  const autoCalculateTotal = () => {
+    const total = calculateTotal();
+    setFormData(prev => ({ ...prev, total_price: total }));
+    toast.success(`Total calculated: ₹${total}`);
+  };
+
   return (
     <Dialog open={open} onOpenChange={onClose}>
       <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
@@ -798,21 +848,33 @@ function PackageModal({ package: pkg, services, open, onClose, onSave, token }) 
                 value={formData.package_name}
                 onChange={(e) => setFormData({...formData, package_name: e.target.value})}
                 required
+                placeholder="e.g., Bridal Package 1"
               />
             </div>
 
             <div>
               <Label>Total Price (₹) *</Label>
-              <Input
-                type="number"
-                value={formData.total_price}
-                onChange={(e) => setFormData({...formData, total_price: parseFloat(e.target.value)})}
-                required
-              />
+              <div className="flex gap-2">
+                <Input
+                  type="number"
+                  value={formData.total_price}
+                  onChange={(e) => setFormData({...formData, total_price: parseFloat(e.target.value)})}
+                  required
+                  placeholder="6999"
+                />
+                <Button 
+                  type="button" 
+                  variant="outline" 
+                  onClick={autoCalculateTotal}
+                  title="Auto-calculate from selected services"
+                >
+                  Σ
+                </Button>
+              </div>
             </div>
 
             <div>
-              <Label>Gender Tag</Label>
+              <Label>Gender Tag *</Label>
               <select
                 value={formData.gender_tag}
                 onChange={(e) => setFormData({...formData, gender_tag: e.target.value})}
@@ -845,18 +907,56 @@ function PackageModal({ package: pkg, services, open, onClose, onSave, token }) 
           </div>
 
           <div>
-            <Label>Select Services ({formData.service_ids.length} selected)</Label>
-            <div className="mt-2 max-h-60 overflow-y-auto border border-border rounded-md p-3 space-y-2">
-              {services.map(service => (
-                <label key={service.id} className="flex items-center gap-2 p-2 hover:bg-muted rounded cursor-pointer">
-                  <Checkbox
-                    checked={formData.service_ids.includes(service.id)}
-                    onCheckedChange={() => toggleService(service.id)}
-                  />
-                  <span className="text-sm">{service.service_name}</span>
-                  <span className="text-xs text-muted-foreground ml-auto">₹{service.base_price}</span>
-                </label>
-              ))}
+            <div className="flex items-center justify-between mb-2">
+              <Label>Select Services ({formData.service_ids.length} selected, Total: ₹{calculateTotal()})</Label>
+            </div>
+
+            {/* Search Box */}
+            <div className="relative mb-2">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+              <Input
+                placeholder="Search services by name or category..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="pl-10"
+              />
+            </div>
+
+            {/* Services List */}
+            <div className="max-h-80 overflow-y-auto border border-border rounded-md p-3 space-y-2">
+              {filteredServices.length > 0 ? (
+                filteredServices.map(service => (
+                  <label key={service.id} className="flex items-center gap-3 p-3 hover:bg-muted rounded cursor-pointer border border-transparent hover:border-gold/30 transition-colors">
+                    <Checkbox
+                      checked={formData.service_ids.includes(service.id)}
+                      onCheckedChange={() => toggleService(service.id)}
+                      className="flex-shrink-0"
+                    />
+                    <div className="flex-1">
+                      <div className="flex items-center gap-2">
+                        <span className="font-medium text-sm">{service.service_name}</span>
+                        <span className="text-xs px-2 py-0.5 bg-muted rounded">
+                          {service.category}
+                        </span>
+                      </div>
+                      {service.description && (
+                        <p className="text-xs text-muted-foreground mt-0.5">{service.description}</p>
+                      )}
+                    </div>
+                    <span className="text-sm font-semibold text-gold ml-auto flex-shrink-0">
+                      ₹{service.base_price}
+                    </span>
+                  </label>
+                ))
+              ) : (
+                <div className="text-center py-8 text-muted-foreground">
+                  <Search className="w-8 h-8 mx-auto mb-2 opacity-50" />
+                  <p className="text-sm">No services found</p>
+                  {searchQuery && (
+                    <p className="text-xs mt-1">Try adjusting your search</p>
+                  )}
+                </div>
+              )}
             </div>
           </div>
 
