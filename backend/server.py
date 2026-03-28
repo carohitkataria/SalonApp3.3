@@ -1,5 +1,6 @@
 from fastapi import FastAPI, APIRouter, HTTPException, Depends, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from fastapi.responses import Response
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
@@ -31,6 +32,9 @@ from twilio_service import (
     format_token_cancelled,
     format_token_rescheduled
 )
+
+# Import invoice service
+from invoice_service import generate_invoice_pdf, save_invoice_pdf
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
@@ -70,6 +74,21 @@ class SalonCreate(BaseModel):
     upi_id: Optional[str] = None
     payment_timing: str = "after"  # before/after
 
+class SalonUpdate(BaseModel):
+    salon_name: Optional[str] = None
+    owner_name: Optional[str] = None
+    phone: Optional[str] = None
+    email: Optional[str] = None
+    address: Optional[str] = None
+    latitude: Optional[float] = None
+    longitude: Optional[float] = None
+    upi_id: Optional[str] = None
+    payment_timing: Optional[str] = None
+    is_gst_registered: Optional[bool] = None
+    gstin: Optional[str] = None
+    logo_url: Optional[str] = None
+    tax_rate: Optional[float] = None
+
 class Salon(BaseModel):
     model_config = ConfigDict(extra="ignore")
     id: str
@@ -83,6 +102,10 @@ class Salon(BaseModel):
     upi_id: Optional[str] = None
     payment_timing: str
     is_active: bool = True
+    is_gst_registered: bool = False
+    gstin: Optional[str] = None
+    logo_url: Optional[str] = None
+    tax_rate: float = 9.0  # Default GST rate (CGST + SGST = 18%)
     created_at: str
 
 # Service Models
@@ -417,6 +440,132 @@ async def check_and_notify_nearby_tokens(salon_id: str, barber_id: str, date: st
     except Exception as e:
         logger.error(f"Failed to check nearby tokens: {str(e)}")
 
+async def generate_and_send_invoice(token_id: str):
+    """Generate invoice PDF and send via WhatsApp"""
+    try:
+        # Get token details
+        token = await db.tokens.find_one({"id": token_id}, {"_id": 0})
+        if not token:
+            raise Exception("Token not found")
+        
+        # Get salon details
+        salon = await db.salons.find_one({"id": token['salon_id']}, {"_id": 0})
+        if not salon:
+            raise Exception("Salon not found")
+        
+        # Get services details
+        services_data = []
+        total_amount = 0
+        
+        for service_id in token.get('selected_services', []):
+            service = await db.services.find_one({"id": service_id}, {"_id": 0})
+            if service:
+                # For simplicity, no discount here - can be added later
+                price = service.get('base_price', 0)
+                services_data.append({
+                    "name": service.get('service_name'),
+                    "price": price,
+                    "discount": 0,
+                    "amount": price
+                })
+                total_amount += price
+        
+        # Calculate tax if GST registered
+        is_tax_invoice = salon.get('is_gst_registered', False)
+        tax_rate = salon.get('tax_rate', 9.0)
+        
+        if is_tax_invoice:
+            subtotal = total_amount
+            cgst = subtotal * (tax_rate / 100)
+            sgst = subtotal * (tax_rate / 100)
+            total = subtotal + cgst + sgst
+        else:
+            subtotal = total_amount
+            cgst = 0
+            sgst = 0
+            total = subtotal
+        
+        # Generate invoice number
+        invoice_no = f"{salon.get('salon_name', 'SALON')[:2].upper()}-{token.get('token_number', 0):04d}"
+        
+        # Prepare invoice data
+        invoice_data = {
+            "salon": {
+                "salon_name": salon.get('salon_name', 'Salon'),
+                "address": salon.get('address', ''),
+                "gstin": salon.get('gstin'),
+                "logo_url": salon.get('logo_url')
+            },
+            "customer": {
+                "name": token.get('customer_name', 'Customer'),
+                "phone": token.get('phone', '')
+            },
+            "invoice_no": invoice_no,
+            "date": datetime.now().strftime('%d/%m/%Y'),
+            "services": services_data,
+            "subtotal": subtotal,
+            "cgst": cgst,
+            "sgst": sgst,
+            "tax_rate": tax_rate,
+            "total": total,
+            "payment_method": "UPI",
+            "is_tax_invoice": is_tax_invoice
+        }
+        
+        # Generate PDF
+        pdf_data = generate_invoice_pdf(invoice_data)
+        
+        # Save PDF
+        filename = f"invoice_{invoice_no}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf"
+        filepath = save_invoice_pdf(pdf_data, filename)
+        
+        # Send via WhatsApp (using Twilio)
+        # Note: Twilio requires media URL - in production, upload to S3/CDN first
+        message = f"""
+📄 *Invoice Generated*
+
+Hello {token.get('customer_name')}!
+
+Your service at {salon.get('salon_name')} is complete.
+
+Invoice No: {invoice_no}
+Total Amount: ₹{total:.2f}
+
+Thank you for visiting us! 💈
+        """.strip()
+        
+        # For now, send message without attachment
+        # In production, upload PDF to S3 and include media_url
+        result = await send_whatsapp_notification(
+            token.get('phone'),
+            message,
+            'invoice_sent'
+        )
+        
+        # Store invoice record
+        invoice_record = {
+            "id": str(uuid.uuid4()),
+            "token_id": token_id,
+            "invoice_no": invoice_no,
+            "salon_id": token['salon_id'],
+            "customer_name": token.get('customer_name'),
+            "customer_phone": token.get('phone'),
+            "amount": total,
+            "pdf_path": filepath,
+            "sent_at": datetime.now(timezone.utc).isoformat(),
+            "sent_status": result.get('status')
+        }
+        
+        await db.invoices.insert_one(invoice_record)
+        
+        logger.info(f"Invoice {invoice_no} generated and sent to {token.get('phone')}")
+        
+        return True
+        
+    except Exception as e:
+        logger.error(f"Failed to generate and send invoice: {str(e)}")
+        return False
+
 # ============ INITIALIZATION ============
 
 async def initialize_data():
@@ -600,13 +749,17 @@ async def create_salon(salon: SalonCreate, current_salon=Depends(get_current_sal
     return Salon(**salon_dict)
 
 @api_router.put("/salons/{salon_id}", response_model=Salon)
-async def update_salon(salon_id: str, salon: SalonCreate, current_salon=Depends(get_current_salon)):
+async def update_salon(salon_id: str, salon: SalonUpdate, current_salon=Depends(get_current_salon)):
+    """Update salon profile (now supports partial updates)"""
     existing = await db.salons.find_one({"id": salon_id}, {"_id": 0})
     if not existing:
         raise HTTPException(status_code=404, detail="Salon not found")
     
-    update_data = salon.model_dump()
-    await db.salons.update_one({"id": salon_id}, {"$set": update_data})
+    # Only update fields that are provided
+    update_data = {k: v for k, v in salon.model_dump().items() if v is not None}
+    
+    if update_data:
+        await db.salons.update_one({"id": salon_id}, {"$set": update_data})
     
     updated = await db.salons.find_one({"id": salon_id}, {"_id": 0})
     return Salon(**updated)
@@ -1114,14 +1267,10 @@ async def get_salon_queue(salon_id: str, date: Optional[str] = None):
 
 @api_router.post("/salons/{salon_id}/barbers/{barber_id}/call-next")
 async def call_next_token(salon_id: str, barber_id: str, current_salon=Depends(get_current_salon)):
-    """Call next token for specific barber"""
+    """Call next token for specific barber - Does NOT auto-complete previous token"""
     date = datetime.now(timezone.utc).date().isoformat()
     
-    # Mark current in_progress as completed
-    await db.tokens.update_many(
-        {"salon_id": salon_id, "barber_id": barber_id, "date": date, "status": "in_progress"},
-        {"$set": {"status": "completed"}}
-    )
+    # DON'T auto-complete previous tokens - barber must manually complete
     
     # Get next waiting token
     next_token = await db.tokens.find_one(
@@ -1147,6 +1296,90 @@ async def call_next_token(salon_id: str, barber_id: str, current_salon=Depends(g
         return updated
     
     return {"message": "No more tokens in queue"}
+
+@api_router.post("/tokens/{token_id}/complete")
+async def complete_token(token_id: str, current_salon=Depends(get_current_salon)):
+    """Manually mark token as completed and generate invoice"""
+    token = await db.tokens.find_one({"id": token_id}, {"_id": 0})
+    if not token:
+        raise HTTPException(status_code=404, detail="Token not found")
+    
+    # Mark as completed
+    await db.tokens.update_one(
+        {"id": token_id},
+        {"$set": {"status": "completed", "completed_at": datetime.now(timezone.utc).isoformat()}}
+    )
+    
+    # Generate and send invoice
+    try:
+        invoice_sent = await generate_and_send_invoice(token_id)
+        await broadcast_update("token_completed", {"token_id": token_id})
+        
+        return {
+            "message": "Token marked as completed",
+            "invoice_sent": invoice_sent
+        }
+    except Exception as e:
+        logger.error(f"Error generating invoice: {e}")
+        return {
+            "message": "Token marked as completed but invoice generation failed",
+            "error": str(e)
+        }
+
+@api_router.post("/tokens/{token_id}/recall")
+async def recall_token(token_id: str, current_salon=Depends(get_current_salon)):
+    """Re-call a token (if customer not available)"""
+    token = await db.tokens.find_one({"id": token_id}, {"_id": 0})
+    if not token:
+        raise HTTPException(status_code=404, detail="Token not found")
+    
+    # Send notification again
+    await send_booking_notification(token, 'token_called')
+    
+    return {"message": "Token recalled and notification sent"}
+
+@api_router.post("/tokens/{token_id}/skip")
+async def skip_token(token_id: str, reason: Optional[str] = None, current_salon=Depends(get_current_salon)):
+    """Skip/Cancel a token (if customer doesn't show up)"""
+    token = await db.tokens.find_one({"id": token_id}, {"_id": 0})
+    if not token:
+        raise HTTPException(status_code=404, detail="Token not found")
+    
+    # Mark as cancelled/skipped
+    await db.tokens.update_one(
+        {"id": token_id},
+        {"$set": {
+            "status": "cancelled",
+            "cancellation_reason": reason or "Customer no-show"
+        }}
+    )
+    
+    # Send cancellation notification
+    token['cancellation_reason'] = reason or "Customer no-show"
+    await send_booking_notification(token, 'token_cancelled')
+    await broadcast_update("token_cancelled", {"token_id": token_id})
+    
+    return {"message": "Token skipped/cancelled"}
+
+@api_router.post("/tokens/{token_id}/resend-invoice")
+async def resend_invoice(token_id: str, current_salon=Depends(get_current_salon)):
+    """Resend invoice to customer"""
+    token = await db.tokens.find_one({"id": token_id}, {"_id": 0})
+    if not token:
+        raise HTTPException(status_code=404, detail="Token not found")
+    
+    if token.get('status') != 'completed':
+        raise HTTPException(status_code=400, detail="Can only resend invoice for completed bookings")
+    
+    try:
+        invoice_sent = await generate_and_send_invoice(token_id)
+        return {
+            "message": "Invoice resent successfully",
+            "sent": invoice_sent
+        }
+    except Exception as e:
+        logger.error(f"Error resending invoice: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to resend invoice: {str(e)}")
 
 @api_router.post("/tokens/{token_id}/call")
 async def call_token(token_id: str, current_salon=Depends(get_current_salon)):
