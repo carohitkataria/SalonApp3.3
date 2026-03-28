@@ -1038,6 +1038,8 @@ async def send_otp(request: SalonOTPRequest):
     if not phone.startswith("+91"):
         phone = f"+91{phone}"
     
+    logger.info(f"OTP request received for phone: {phone}")
+    
     # Check if salon exists with this phone
     salon = await db.salons.find_one({"phone": phone}, {"_id": 0})
     salon_exists = salon is not None
@@ -1045,6 +1047,8 @@ async def send_otp(request: SalonOTPRequest):
     # Generate OTP
     otp = generate_otp()
     expires_at = datetime.now(timezone.utc) + timedelta(minutes=10)
+    
+    logger.info(f"Generated OTP for {phone}: {otp}")
     
     # Store OTP in database
     await db.salon_otp.delete_many({"phone": phone})
@@ -1055,10 +1059,12 @@ async def send_otp(request: SalonOTPRequest):
         "verified": False
     })
     
+    logger.info(f"OTP stored in database for {phone}")
+    
     # Send OTP via WhatsApp
     whatsapp_result = await send_whatsapp_otp(phone, otp)
     
-    logger.info(f"OTP sent to {phone} via WhatsApp. Status: {whatsapp_result.get('status')}")
+    logger.info(f"WhatsApp send result for {phone}: {whatsapp_result}")
     
     # Build response
     response = {
@@ -1072,6 +1078,7 @@ async def send_otp(request: SalonOTPRequest):
         response['otp'] = otp
         response['error'] = whatsapp_result.get('error')
         response['note'] = "OTP included because WhatsApp delivery failed"
+        logger.error(f"WhatsApp delivery failed for {phone}: {whatsapp_result.get('error')}")
     
     return response
 

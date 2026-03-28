@@ -30,9 +30,7 @@ export default function OTPLoginPage() {
     setLoading(true);
     try {
       const response = await axios.post(`${API}/salon/send-otp`, { phone });
-      setSentOtp(response.data.otp); // Remove in production
-      toast.success('OTP sent successfully!');
-      toast.info(`OTP: ${response.data.otp}`, { duration: 10000 }); // Mock - remove in production
+      toast.success('OTP sent to your WhatsApp! Please check your messages.');
       setStep(2);
     } catch (error) {
       toast.error(error.response?.data?.detail || 'Failed to send OTP');
