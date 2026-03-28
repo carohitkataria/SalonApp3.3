@@ -6,7 +6,7 @@ import { Button } from '@/components/ui/button';
 import { toast } from 'sonner';
 import ThemeToggle from '@/components/ThemeToggle';
 import BarberManagement from '@/components/BarberManagement';
-import ServiceManagement from '@/components/ServiceManagement';
+import OfferingsModule from '@/components/OfferingsModule';
 import { 
   Scissors, LogOut, ChevronRight, SkipForward, RotateCcw, XCircle,
   Clock, User, Phone, Bell, MapPin, Settings, CheckCircle, Calendar,
@@ -230,7 +230,7 @@ export default function EnhancedSalonDashboard() {
           {[
             { id: 'queue', label: 'Token Queue', icon: Calendar },
             { id: 'barbers', label: 'Barbers', icon: Users },
-            { id: 'services', label: 'Services', icon: Scissors },
+            { id: 'services', label: 'Offerings', icon: Scissors },
             { id: 'salon', label: 'Salon Info', icon: MapPin }
           ].map((tab) => {
             const Icon = tab.icon;
@@ -395,7 +395,10 @@ export default function EnhancedSalonDashboard() {
         )}
 
         {activeTab === 'services' && (
-          <ServiceManagement getAuthHeaders={getAuthHeaders} />
+          <OfferingsModule 
+            salonId={salonId} 
+            token={localStorage.getItem('salon_admin_token')}
+          />
         )}
 
         {activeTab === 'salon' && salon && (

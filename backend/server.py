@@ -89,17 +89,65 @@ class Salon(BaseModel):
 class ServiceCreate(BaseModel):
     service_name: str
     description: Optional[str] = None
+    category: str = "General"  # Category for grouping
+    gender_tag: str = "Unisex"  # Men/Women/Unisex
     default_duration: int = 30  # minutes
     base_price: float = 0
+    price_type: str = "fixed"  # fixed/onwards
+    images: List[str] = []  # List of image URLs
+    is_favorite: bool = False
+
+class ServiceUpdate(BaseModel):
+    service_name: Optional[str] = None
+    description: Optional[str] = None
+    category: Optional[str] = None
+    gender_tag: Optional[str] = None
+    default_duration: Optional[int] = None
+    base_price: Optional[float] = None
+    price_type: Optional[str] = None
+    images: Optional[List[str]] = None
+    is_favorite: Optional[bool] = None
+    favorite_order: Optional[int] = None
 
 class Service(BaseModel):
     model_config = ConfigDict(extra="ignore")
     id: str
     service_name: str
     description: Optional[str] = None
+    category: str = "General"
+    gender_tag: str = "Unisex"
     default_duration: int
     base_price: float
+    price_type: str = "fixed"
+    images: List[str] = []
+    is_favorite: bool = False
+    favorite_order: Optional[int] = None
     is_active: bool = True
+
+# Package Models
+class PackageService(BaseModel):
+    service_id: str
+    service_name: str
+
+class PackageCreate(BaseModel):
+    package_name: str
+    description: Optional[str] = None
+    service_ids: List[str]
+    total_price: float
+    image_url: Optional[str] = None
+    gender_tag: str = "Unisex"
+
+class Package(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    id: str
+    package_name: str
+    description: Optional[str] = None
+    service_ids: List[str]
+    total_price: float
+    image_url: Optional[str] = None
+    gender_tag: str = "Unisex"
+    is_active: bool = True
+    created_at: str
 
 # Barber Models
 class BarberCreate(BaseModel):
@@ -574,13 +622,14 @@ async def create_service(service: ServiceCreate, current_salon=Depends(get_curre
     return Service(**service_dict)
 
 @api_router.put("/services/{service_id}", response_model=Service)
-async def update_service(service_id: str, service: ServiceCreate, current_salon=Depends(get_current_salon)):
+async def update_service(service_id: str, service: ServiceUpdate, current_salon=Depends(get_current_salon)):
     existing = await db.services.find_one({"id": service_id}, {"_id": 0})
     if not existing:
         raise HTTPException(status_code=404, detail="Service not found")
     
-    update_data = service.model_dump()
-    await db.services.update_one({"id": service_id}, {"$set": update_data})
+    update_data = {k: v for k, v in service.model_dump().items() if v is not None}
+    if update_data:
+        await db.services.update_one({"id": service_id}, {"$set": update_data})
     
     updated = await db.services.find_one({"id": service_id}, {"_id": 0})
     return Service(**updated)
@@ -596,6 +645,116 @@ async def delete_service(service_id: str, current_salon=Depends(get_current_salo
     # Also remove from all barber_services
     await db.barber_services.delete_many({"service_id": service_id})
     return {"message": "Service deleted"}
+
+@api_router.get("/services/categories")
+async def get_service_categories():
+    """Get all unique service categories"""
+    services = await db.services.find({"is_active": True}, {"_id": 0, "category": 1}).to_list(1000)
+    categories = list(set([s.get("category", "General") for s in services]))
+    return {"categories": sorted(categories)}
+
+@api_router.get("/services/by-category")
+async def get_services_by_category(gender: Optional[str] = None):
+    """Get services grouped by category"""
+    query = {"is_active": True}
+    if gender and gender != "all":
+        query["$or"] = [{"gender_tag": gender}, {"gender_tag": "Unisex"}]
+    
+    services = await db.services.find(query, {"_id": 0}).to_list(1000)
+    
+    # Group by category
+    categorized = {}
+    for service in services:
+        category = service.get("category", "General")
+        if category not in categorized:
+            categorized[category] = []
+        categorized[category].append(service)
+    
+    return categorized
+
+@api_router.get("/services/favorites", response_model=List[Service])
+async def get_favorite_services():
+    """Get all favorite services"""
+    services = await db.services.find(
+        {"is_active": True, "is_favorite": True}, 
+        {"_id": 0}
+    ).sort("favorite_order", 1).to_list(100)
+    return services
+
+@api_router.put("/services/{service_id}/favorite")
+async def toggle_favorite(service_id: str, is_favorite: bool, current_salon=Depends(get_current_salon)):
+    """Mark/unmark service as favorite"""
+    existing = await db.services.find_one({"id": service_id}, {"_id": 0})
+    if not existing:
+        raise HTTPException(status_code=404, detail="Service not found")
+    
+    update_data = {"is_favorite": is_favorite}
+    if is_favorite:
+        # Get max favorite_order and increment
+        favorites = await db.services.find({"is_favorite": True}, {"_id": 0, "favorite_order": 1}).to_list(100)
+        max_order = max([f.get("favorite_order", 0) for f in favorites]) if favorites else 0
+        update_data["favorite_order"] = max_order + 1
+    else:
+        update_data["favorite_order"] = None
+    
+    await db.services.update_one({"id": service_id}, {"$set": update_data})
+    return {"message": "Favorite status updated", "is_favorite": is_favorite}
+
+@api_router.put("/services/favorites/reorder")
+async def reorder_favorites(service_ids: List[str], current_salon=Depends(get_current_salon)):
+    """Reorder favorites based on array order"""
+    for index, service_id in enumerate(service_ids):
+        await db.services.update_one(
+            {"id": service_id},
+            {"$set": {"favorite_order": index}}
+        )
+    return {"message": "Favorites reordered successfully"}
+
+# ============ PACKAGE ROUTES ============
+
+@api_router.get("/packages", response_model=List[Package])
+async def get_packages(gender: Optional[str] = None):
+    """Get all packages"""
+    query = {"is_active": True}
+    if gender and gender != "all":
+        query["$or"] = [{"gender_tag": gender}, {"gender_tag": "Unisex"}]
+    
+    packages = await db.packages.find(query, {"_id": 0}).to_list(100)
+    return packages
+
+@api_router.post("/packages", response_model=Package)
+async def create_package(package: PackageCreate, current_salon=Depends(get_current_salon)):
+    """Create a new package"""
+    package_dict = package.model_dump()
+    package_dict["id"] = str(uuid.uuid4())
+    package_dict["is_active"] = True
+    package_dict["created_at"] = datetime.now(timezone.utc).isoformat()
+    
+    await db.packages.insert_one(package_dict)
+    return Package(**package_dict)
+
+@api_router.put("/packages/{package_id}", response_model=Package)
+async def update_package(package_id: str, package: PackageCreate, current_salon=Depends(get_current_salon)):
+    """Update a package"""
+    existing = await db.packages.find_one({"id": package_id}, {"_id": 0})
+    if not existing:
+        raise HTTPException(status_code=404, detail="Package not found")
+    
+    update_data = package.model_dump()
+    await db.packages.update_one({"id": package_id}, {"$set": update_data})
+    
+    updated = await db.packages.find_one({"id": package_id}, {"_id": 0})
+    return Package(**updated)
+
+@api_router.delete("/packages/{package_id}")
+async def delete_package(package_id: str, current_salon=Depends(get_current_salon)):
+    """Delete a package"""
+    existing = await db.packages.find_one({"id": package_id}, {"_id": 0})
+    if not existing:
+        raise HTTPException(status_code=404, detail="Package not found")
+    
+    await db.packages.update_one({"id": package_id}, {"$set": {"is_active": False}})
+    return {"message": "Package deleted"}
 
 # ============ BARBER ROUTES ============
 
