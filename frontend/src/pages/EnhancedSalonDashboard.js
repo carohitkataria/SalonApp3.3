@@ -189,17 +189,6 @@ export default function EnhancedSalonDashboard() {
     }
   };
 
-  const handleSkipToken = async (tokenId) => {
-    if (!window.confirm('Skip this customer?')) return;
-    
-    try {
-      await axios.post(`${API}/tokens/${tokenId}/skip`, {}, { headers: getAuthHeaders() });
-      toast.success('Customer skipped');
-    } catch (error) {
-      toast.error('Failed to skip token');
-    }
-  };
-
   const handleSendNotification = async (tokenId) => {
     try {
       await axios.post(`${API}/tokens/${tokenId}/notify`, {}, { headers: getAuthHeaders() });
