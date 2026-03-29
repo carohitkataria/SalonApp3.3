@@ -11,7 +11,7 @@ import MyProfile from '@/components/MyProfile';
 import { 
   Scissors, LogOut, ChevronRight, SkipForward, RotateCcw, XCircle,
   Clock, User, Phone, Bell, MapPin, Settings, CheckCircle, Calendar,
-  Users, ArrowLeft
+  Users, ArrowLeft, FileText, Download
 } from 'lucide-react';
 import { motion } from 'framer-motion';
 
@@ -467,6 +467,35 @@ export default function EnhancedSalonDashboard() {
                           <RotateCcw className="w-3 h-3 mr-1" />
                           Recall
                         </Button>
+                      )}
+                      
+                      {/* Completed Status Actions - View Invoice */}
+                      {token.status === 'completed' && token.invoice_id && (
+                        <div className="flex items-center space-x-2">
+                          <Button 
+                            size="sm" 
+                            onClick={() => window.open(`${API}/invoices/${token.invoice_id}/view`, '_blank')} 
+                            className="bg-purple-600 hover:bg-purple-700 text-white"
+                            title="View invoice"
+                          >
+                            <FileText className="w-3 h-3 mr-1" />
+                            View Invoice
+                          </Button>
+                          <Button 
+                            size="sm" 
+                            onClick={() => {
+                              const link = document.createElement('a');
+                              link.href = `${API}/invoices/${token.invoice_id}/download`;
+                              link.download = `invoice_${token.token_number}.pdf`;
+                              link.click();
+                            }}
+                            className="bg-green-600 hover:bg-green-700 text-white"
+                            title="Download invoice"
+                          >
+                            <Download className="w-3 h-3 mr-1" />
+                            Download
+                          </Button>
+                        </div>
                       )}
                     </div>
                   </div>

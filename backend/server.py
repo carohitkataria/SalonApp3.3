@@ -321,6 +321,20 @@ class TokenModel(BaseModel):
     called_at: Optional[str] = None
     completed_at: Optional[str] = None
     recall_count: int = 0
+    invoice_id: Optional[str] = None  # Link to invoice
+    created_at: str
+
+# Invoice Model
+class Invoice(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    id: str
+    token_id: str
+    salon_id: str
+    invoice_number: str
+    customer_name: str
+    customer_phone: str
+    invoice_data: dict  # Complete invoice data including services, amounts, etc.
+    pdf_base64: Optional[str] = None  # Base64 encoded PDF
     created_at: str
 
 # ============ AUTH HELPERS ============
@@ -577,12 +591,17 @@ async def generate_and_send_invoice(token_id: str):
         # Generate PDF
         pdf_data = generate_invoice_pdf(invoice_data)
         
-        # Save PDF
-        filename = f"invoice_{invoice_no}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf"
-        filepath = save_invoice_pdf(pdf_data, filename)
+        # Convert PDF to base64 for storage
+        import base64
+        pdf_base64 = base64.b64encode(pdf_data).decode('utf-8')
         
-        # Send via WhatsApp (using Twilio)
-        # Note: Twilio requires media URL - in production, upload to S3/CDN first
+        # Create invoice ID
+        invoice_id = str(uuid.uuid4())
+        
+        # Generate invoice link
+        invoice_link = f"{os.getenv('REACT_APP_BACKEND_URL', 'http://localhost:8001')}/api/invoices/{invoice_id}/view"
+        
+        # Send link via WhatsApp
         message = f"""
 📄 *Invoice Generated*
 
@@ -590,43 +609,58 @@ Hello {token.get('customer_name')}!
 
 Your service at {salon.get('salon_name')} is complete.
 
-Invoice No: {invoice_no}
+*Invoice #{invoice_no}*
 Total Amount: ₹{total:.2f}
+
+🔗 View/Download Invoice:
+{invoice_link}
 
 Thank you for visiting us! 💈
         """.strip()
         
-        # For now, send message without attachment
-        # In production, upload PDF to S3 and include media_url
+        # Send message with link
         result = await send_whatsapp_notification(
             token.get('phone'),
             message,
             'invoice_sent'
         )
         
-        # Store invoice record
+        # Store invoice record with base64 PDF
         invoice_record = {
-            "id": str(uuid.uuid4()),
+            "id": invoice_id,
             "token_id": token_id,
             "invoice_no": invoice_no,
             "salon_id": token['salon_id'],
             "customer_name": token.get('customer_name'),
             "customer_phone": token.get('phone'),
+            "invoice_data": invoice_data,
+            "pdf_base64": pdf_base64,
             "amount": total,
-            "pdf_path": filepath,
             "sent_at": datetime.now(timezone.utc).isoformat(),
-            "sent_status": result.get('status')
+            "sent_status": result.get('status'),
+            "created_at": datetime.now(timezone.utc).isoformat()
         }
         
         await db.invoices.insert_one(invoice_record)
         
-        logger.info(f"Invoice {invoice_no} generated and sent to {token.get('phone')}")
+        # Update token with invoice_id
+        await db.tokens.update_one(
+            {"id": token_id},
+            {"$set": {"invoice_id": invoice_id}}
+        )
         
-        return True
+        logger.info(f"Invoice {invoice_no} generated and link sent to {token.get('phone')}")
+        
+        return {
+            "success": True,
+            "invoice_id": invoice_id,
+            "invoice_number": invoice_no,
+            "invoice_link": invoice_link
+        }
         
     except Exception as e:
         logger.error(f"Failed to generate and send invoice: {str(e)}")
-        return False
+        return {"success": False, "error": str(e)}
 
 # ============ INITIALIZATION ============
 
@@ -1953,6 +1987,89 @@ async def startup_event():
     await initialize_data()
     scheduler.start()
     logger.info("Application started with multi-salon support")
+
+# ============ INVOICE ROUTES ============
+
+@api_router.get("/invoices/{invoice_id}")
+async def get_invoice(invoice_id: str):
+    """Get invoice data"""
+    invoice = await db.invoices.find_one({"id": invoice_id}, {"_id": 0})
+    if not invoice:
+        raise HTTPException(status_code=404, detail="Invoice not found")
+    
+    # Remove base64 from response (too large)
+    invoice_data = {k: v for k, v in invoice.items() if k != 'pdf_base64'}
+    return invoice_data
+
+@api_router.get("/invoices/{invoice_id}/view")
+async def view_invoice(invoice_id: str):
+    """View invoice PDF in browser"""
+    from fastapi.responses import Response
+    
+    invoice = await db.invoices.find_one({"id": invoice_id}, {"_id": 0})
+    if not invoice:
+        raise HTTPException(status_code=404, detail="Invoice not found")
+    
+    if not invoice.get('pdf_base64'):
+        raise HTTPException(status_code=404, detail="Invoice PDF not found")
+    
+    # Decode base64 PDF
+    import base64
+    pdf_bytes = base64.b64decode(invoice['pdf_base64'])
+    
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition": f"inline; filename=invoice_{invoice['invoice_no']}.pdf"
+        }
+    )
+
+@api_router.get("/invoices/{invoice_id}/download")
+async def download_invoice(invoice_id: str):
+    """Download invoice PDF"""
+    from fastapi.responses import Response
+    
+    invoice = await db.invoices.find_one({"id": invoice_id}, {"_id": 0})
+    if not invoice:
+        raise HTTPException(status_code=404, detail="Invoice not found")
+    
+    if not invoice.get('pdf_base64'):
+        raise HTTPException(status_code=404, detail="Invoice PDF not found")
+    
+    # Decode base64 PDF
+    import base64
+    pdf_bytes = base64.b64decode(invoice['pdf_base64'])
+    
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition": f"attachment; filename=invoice_{invoice['invoice_no']}.pdf"
+        }
+    )
+
+@api_router.get("/tokens/{token_id}/invoice")
+async def get_token_invoice(token_id: str):
+    """Get invoice for a specific token"""
+    token = await db.tokens.find_one({"id": token_id}, {"_id": 0})
+    if not token:
+        raise HTTPException(status_code=404, detail="Token not found")
+    
+    if not token.get('invoice_id'):
+        raise HTTPException(status_code=404, detail="Invoice not generated yet")
+    
+    invoice = await db.invoices.find_one({"id": token['invoice_id']}, {"_id": 0})
+    if not invoice:
+        raise HTTPException(status_code=404, detail="Invoice not found")
+    
+    # Return invoice data without base64
+    invoice_data = {k: v for k, v in invoice.items() if k != 'pdf_base64'}
+    invoice_data['view_link'] = f"/api/invoices/{invoice['id']}/view"
+    invoice_data['download_link'] = f"/api/invoices/{invoice['id']}/download"
+    
+    return invoice_data
+
 
 @app.on_event("shutdown")
 async def shutdown_db_client():
