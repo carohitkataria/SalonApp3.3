@@ -189,6 +189,17 @@ export default function EnhancedSalonDashboard() {
     }
   };
 
+  const handleSkipToken = async (tokenId) => {
+    if (!window.confirm('Skip this customer?')) return;
+    
+    try {
+      await axios.post(`${API}/tokens/${tokenId}/skip`, {}, { headers: getAuthHeaders() });
+      toast.success('Customer skipped');
+    } catch (error) {
+      toast.error('Failed to skip token');
+    }
+  };
+
   const handleSendNotification = async (tokenId) => {
     try {
       await axios.post(`${API}/tokens/${tokenId}/notify`, {}, { headers: getAuthHeaders() });
@@ -320,7 +331,7 @@ export default function EnhancedSalonDashboard() {
 
             {/* Status Filters */}
             <div className="flex space-x-2">
-              {['all', 'waiting', 'called', 'completed', 'skipped'].map((f) => (
+              {['all', 'waiting', 'called', 'completed', 'skipped', 'cancelled'].map((f) => (
                 <button
                   key={f}
                   onClick={() => setFilter(f)}
@@ -410,6 +421,14 @@ export default function EnhancedSalonDashboard() {
                             title="Send notification"
                           >
                             <Bell className="w-3 h-3" />
+                          </Button>
+                          <Button 
+                            size="sm" 
+                            onClick={() => handleSkipToken(token.id)} 
+                            className="bg-orange-600 hover:bg-orange-700 text-white"
+                            title="Skip this customer"
+                          >
+                            <SkipForward className="w-3 h-3" />
                           </Button>
                           <Button 
                             size="sm" 

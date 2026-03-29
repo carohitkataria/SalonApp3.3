@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import React from 'react';
 import axios from 'axios';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -17,6 +18,7 @@ const API = `${BACKEND_URL}/api`;
 // Services by Category View Component
 function ServicesByCategoryView({ services, onServiceToggle, onPriceChange }) {
   const [expandedCategories, setExpandedCategories] = useState({});
+  const checkboxRefs = React.useRef({});
 
   // Group services by category
   const servicesByCategory = services.reduce((acc, service) => {
@@ -53,6 +55,7 @@ function ServicesByCategoryView({ services, onServiceToggle, onPriceChange }) {
 
   const isAllSelected = (category) => {
     const categoryServices = servicesByCategory[category];
+    if (categoryServices.length === 0) return false;
     return categoryServices.every(s => s.is_available);
   };
 
@@ -61,6 +64,16 @@ function ServicesByCategoryView({ services, onServiceToggle, onPriceChange }) {
     const selectedCount = categoryServices.filter(s => s.is_available).length;
     return selectedCount > 0 && selectedCount < categoryServices.length;
   };
+
+  // Set indeterminate state
+  useEffect(() => {
+    Object.keys(servicesByCategory).forEach(category => {
+      const checkbox = checkboxRefs.current[category];
+      if (checkbox) {
+        checkbox.indeterminate = isSomeSelected(category);
+      }
+    });
+  });
 
   return (
     <div className="space-y-2">
@@ -82,8 +95,8 @@ function ServicesByCategoryView({ services, onServiceToggle, onPriceChange }) {
             </div>
             <div className="flex items-center space-x-2" onClick={(e) => e.stopPropagation()}>
               <Checkbox
+                ref={(el) => checkboxRefs.current[category] = el}
                 checked={isAllSelected(category)}
-                indeterminate={isSomeSelected(category)}
                 onCheckedChange={(checked) => handleSelectAll(category, checked)}
                 className="data-[state=checked]:bg-gold data-[state=checked]:border-gold"
               />
