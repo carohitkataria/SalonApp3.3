@@ -755,11 +755,14 @@ async def initialize_predefined_services_for_salon(salon_id: str):
     if initialized:
         return {"already_initialized": True}
     
-    # Initialize global services if not exists
-    service_count = await db.services.count_documents({})
-    if service_count == 0:
-        services_to_insert = []
-        for service_data in PREDEFINED_SERVICES:
+    # Always ensure predefined services exist (add missing ones)
+    existing_services = await db.services.find({}, {"_id": 0, "service_name": 1, "category": 1}).to_list(1000)
+    existing_set = {(s["service_name"], s.get("category", "General")) for s in existing_services}
+    
+    services_to_insert = []
+    for service_data in PREDEFINED_SERVICES:
+        service_key = (service_data["service_name"], service_data.get("category", "General"))
+        if service_key not in existing_set:
             service = {
                 "id": str(uuid.uuid4()),
                 **service_data,
@@ -768,28 +771,38 @@ async def initialize_predefined_services_for_salon(salon_id: str):
                 "is_favorite": False
             }
             services_to_insert.append(service)
-        
-        if services_to_insert:
-            await db.services.insert_many(services_to_insert)
+    
+    if services_to_insert:
+        await db.services.insert_many(services_to_insert)
+        logger.info(f"Inserted {len(services_to_insert)} new predefined services")
     
     # Get all service IDs
     all_services = await db.services.find({}, {"_id": 0, "id": 1}).to_list(1000)
     service_ids = [s["id"] for s in all_services]
     
     # Initialize salon_services (all disabled by default - salon can enable them)
+    # Only add services that don't already exist for this salon
+    existing_salon_services = await db.salon_services.find(
+        {"salon_id": salon_id},
+        {"_id": 0, "service_id": 1}
+    ).to_list(1000)
+    existing_salon_service_ids = {ss["service_id"] for ss in existing_salon_services}
+    
     salon_services_to_insert = []
     for service_id in service_ids:
-        salon_service = {
-            "id": str(uuid.uuid4()),
-            "salon_id": salon_id,
-            "service_id": service_id,
-            "is_enabled": False,  # Salon must enable services they want to offer
-            "created_at": datetime.now(timezone.utc).isoformat()
-        }
-        salon_services_to_insert.append(salon_service)
+        if service_id not in existing_salon_service_ids:
+            salon_service = {
+                "id": str(uuid.uuid4()),
+                "salon_id": salon_id,
+                "service_id": service_id,
+                "is_enabled": False,  # Salon must enable services they want to offer
+                "created_at": datetime.now(timezone.utc).isoformat()
+            }
+            salon_services_to_insert.append(salon_service)
     
     if salon_services_to_insert:
         await db.salon_services.insert_many(salon_services_to_insert)
+        logger.info(f"Inserted {len(salon_services_to_insert)} salon_service mappings")
     
     # Initialize predefined packages for this salon
     packages_to_insert = []
@@ -815,6 +828,7 @@ async def initialize_predefined_services_for_salon(salon_id: str):
     
     return {
         "initialized": True,
+        "new_services_added": len(services_to_insert),
         "services_count": len(service_ids),
         "packages_count": len(packages_to_insert)
     }
@@ -886,6 +900,12 @@ async def initialize_salon_services(salon_id: str, current_salon=Depends(get_cur
     
     result = await initialize_predefined_services_for_salon(salon_id)
     return result
+
+@api_router.post("/salons/{salon_id}/reset-initialization")
+async def reset_salon_initialization(salon_id: str, current_salon=Depends(get_current_salon)):
+    """Reset initialization flag - allows re-initialization of services"""
+    await db.salon_initialized.delete_many({"salon_id": salon_id})
+    return {"message": "Initialization reset. Services can be re-initialized now."}
 
 @api_router.get("/salons/{salon_id}/services/enabled")
 async def get_salon_enabled_services(salon_id: str):
@@ -964,7 +984,7 @@ async def toggle_service_for_salon(
 
 @api_router.get("/services", response_model=List[Service])
 async def get_services():
-    services = await db.services.find({"is_active": True}, {"_id": 0}).to_list(100)
+    services = await db.services.find({"is_active": True}, {"_id": 0}).to_list(1000)
     return services
 
 @api_router.post("/services", response_model=Service)

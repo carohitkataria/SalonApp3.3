@@ -45,16 +45,40 @@ export default function OfferingsModule({ salonId, token }) {
     setLoading(true);
     try {
       // Try to initialize predefined services for this salon
-      await axios.post(
+      const response = await axios.post(
         `${API}/salons/${salonId}/initialize`,
         {},
         { headers: { Authorization: `Bearer ${token}` } }
       );
+      console.log('Initialization result:', response.data);
+      if (response.data.new_services_added > 0) {
+        toast.success(`Added ${response.data.new_services_added} new services!`);
+      }
       setInitialized(true);
     } catch (error) {
-      console.log('Initialization:', error.response?.data || error.message);
+      console.log('Initialization error:', error.response?.data || error.message);
     } finally {
       fetchAllData();
+    }
+  };
+
+  const forceReinitialize = async () => {
+    if (!window.confirm('This will reset and re-add all predefined services. Continue?')) return;
+    
+    try {
+      // Reset initialization flag
+      await axios.post(
+        `${API}/salons/${salonId}/reset-initialization`,
+        {},
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      
+      // Re-initialize
+      await initializeSalonServices();
+      toast.success('Services reinitialized successfully!');
+    } catch (error) {
+      console.error('Error reinitializing:', error);
+      toast.error('Failed to reinitialize services');
     }
   };
 
@@ -209,6 +233,15 @@ export default function OfferingsModule({ salonId, token }) {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <h2 className="text-2xl font-bold text-foreground">Offerings</h2>
+        <Button
+          onClick={forceReinitialize}
+          variant="outline"
+          size="sm"
+          className="text-xs"
+        >
+          <Sparkles className="w-3 h-3 mr-1" />
+          Load Predefined Services
+        </Button>
       </div>
 
       <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
