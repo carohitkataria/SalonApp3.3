@@ -1778,8 +1778,19 @@ async def call_token(token_id: str, current_salon=Depends(get_current_salon)):
     if not token:
         raise HTTPException(status_code=404, detail="Token not found")
     
-    await db.tokens.update_one({"id": token_id}, {"$set": {"status": "in_progress"}})
+    # Update status to "called" with timestamp
+    await db.tokens.update_one(
+        {"id": token_id}, 
+        {"$set": {
+            "status": "called",
+            "called_at": datetime.now(timezone.utc).isoformat()
+        }}
+    )
     await broadcast_update("token_called", {"token_id": token_id})
+    
+    # Send notification
+    await send_booking_notification(token, 'token_called')
+    
     return {"message": "Token called"}
 
 @api_router.post("/tokens/{token_id}/skip")
@@ -1960,34 +1971,6 @@ async def get_user_active_bookings(user_id: str):
     ).sort("date", 1).to_list(10)
     return tokens
 
-# Include router
-app.include_router(api_router)
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_credentials=True,
-    allow_origins=os.environ.get('CORS_ORIGINS', '*').split(','),
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
-logger = logging.getLogger(__name__)
-
-# Scheduler for token allocation
-scheduler = AsyncIOScheduler()
-scheduler.add_job(allocate_future_tokens, 'cron', hour=5, minute=30)  # Run at 5:30 AM daily
-
-@app.on_event("startup")
-async def startup_event():
-    await initialize_data()
-    scheduler.start()
-    logger.info("Application started with multi-salon support")
-
 # ============ INVOICE ROUTES ============
 
 @api_router.get("/invoices/{invoice_id}")
@@ -2070,6 +2053,33 @@ async def get_token_invoice(token_id: str):
     
     return invoice_data
 
+# Include router
+app.include_router(api_router)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_credentials=True,
+    allow_origins=os.environ.get('CORS_ORIGINS', '*').split(','),
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
+
+# Scheduler for token allocation
+scheduler = AsyncIOScheduler()
+scheduler.add_job(allocate_future_tokens, 'cron', hour=5, minute=30)  # Run at 5:30 AM daily
+
+@app.on_event("startup")
+async def startup_event():
+    await initialize_data()
+    scheduler.start()
+    logger.info("Application started with multi-salon support")
 
 @app.on_event("shutdown")
 async def shutdown_db_client():
