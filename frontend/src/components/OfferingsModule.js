@@ -351,43 +351,67 @@ export default function OfferingsModule({ salonId, token }) {
 
           {/* Categorized Services */}
           <div className="space-y-3">
-            {Object.entries(filteredServices).sort().map(([category, servicesList]) => (
-              <div key={category} className="bg-card border border-border rounded-lg overflow-hidden">
-                <button
-                  onClick={() => toggleCategory(category)}
-                  className="w-full px-6 py-4 flex items-center justify-between bg-muted/50 hover:bg-muted transition-colors"
-                >
-                  <div className="flex items-center gap-3">
-                    {expandedCategories[category] ? (
-                      <ChevronDown className="w-5 h-5 text-gold" />
-                    ) : (
-                      <ChevronRight className="w-5 h-5 text-muted-foreground" />
-                    )}
-                    <h3 className="text-lg font-semibold text-foreground">{category}</h3>
-                    <span className="text-sm text-muted-foreground">
-                      ({servicesList.length})
-                    </span>
-                  </div>
-                </button>
-
-                {expandedCategories[category] && (
-                  <div className="p-4 space-y-2">
-                    {servicesList.map((service) => (
-                      <div key={service.id} className="bg-background border border-border rounded-lg p-4 hover:border-gold/50 transition-colors">
-                        <ServiceCardContent 
-                          service={service} 
-                          onToggleFavorite={toggleFavorite}
-                          onToggleEnabled={toggleServiceEnabled}
-                          onEdit={handleEditService}
-                          onDelete={deleteService}
-                          salonId={salonId}
-                        />
+            {Object.entries(filteredServices).sort().map(([category, servicesList]) => {
+              const enabledCount = servicesList.filter(s => s.is_enabled_for_salon).length;
+              const allEnabled = enabledCount === servicesList.length;
+              
+              const handleCategorySelectAll = () => {
+                const shouldEnable = !allEnabled;
+                servicesList.forEach(service => {
+                  if (service.is_enabled_for_salon !== shouldEnable) {
+                    toggleServiceEnabled(service.id, service.is_enabled_for_salon);
+                  }
+                });
+              };
+              
+              return (
+                <div key={category} className="bg-card border border-border rounded-lg overflow-hidden">
+                  <div className="w-full px-6 py-4 flex items-center justify-between bg-muted/50 hover:bg-muted transition-colors">
+                    <button
+                      onClick={() => toggleCategory(category)}
+                      className="flex items-center gap-3 flex-1"
+                    >
+                      <div className="flex items-center gap-3">
+                        {expandedCategories[category] ? (
+                          <ChevronDown className="w-5 h-5 text-gold" />
+                        ) : (
+                          <ChevronRight className="w-5 h-5 text-muted-foreground" />
+                        )}
+                        <h3 className="text-lg font-semibold text-foreground">{category}</h3>
+                        <span className="text-sm text-muted-foreground">
+                          ({enabledCount}/{servicesList.length} enabled)
+                        </span>
                       </div>
-                    ))}
+                    </button>
+                    <div className="flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
+                      <Checkbox
+                        checked={allEnabled}
+                        onCheckedChange={handleCategorySelectAll}
+                        className="data-[state=checked]:bg-gold data-[state=checked]:border-gold"
+                      />
+                      <span className="text-xs text-muted-foreground">Select All</span>
+                    </div>
                   </div>
-                )}
-              </div>
-            ))}
+
+                  {expandedCategories[category] && (
+                    <div className="p-4 space-y-2">
+                      {servicesList.map((service) => (
+                        <div key={service.id} className="bg-background border border-border rounded-lg p-4 hover:border-gold/50 transition-colors">
+                          <ServiceCardContent 
+                            service={service} 
+                            onToggleFavorite={toggleFavorite}
+                            onToggleEnabled={toggleServiceEnabled}
+                            onEdit={handleEditService}
+                            onDelete={deleteService}
+                            salonId={salonId}
+                          />
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
 
             {Object.keys(filteredServices).length === 0 && (
               <div className="text-center py-12 text-muted-foreground bg-card border border-border rounded-lg">

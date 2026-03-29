@@ -556,8 +556,16 @@ function BarberCard({
         onClick={onToggleExpand}
       >
         <div className="flex items-center space-x-4">
-          <div className="w-12 h-12 rounded-full bg-gold/20 flex items-center justify-center">
-            <User className="w-6 h-6 text-gold" />
+          <div className="w-12 h-12 rounded-full bg-gold/20 flex items-center justify-center overflow-hidden">
+            {barber.image_url ? (
+              <img 
+                src={barber.image_url} 
+                alt={barber.name} 
+                className="w-full h-full object-cover"
+              />
+            ) : (
+              <User className="w-6 h-6 text-gold" />
+            )}
           </div>
           <div>
             <h3 className="font-bold text-card-foreground">{barber.name}</h3>
@@ -614,6 +622,49 @@ function BarberCard({
               {isEditing ? (
                 <div className="space-y-4">
                   <h4 className="font-bold text-card-foreground">Edit Barber Details</h4>
+                  
+                  {/* Barber Image Upload */}
+                  <div>
+                    <Label>Barber Photo</Label>
+                    <div className="space-y-2">
+                      <Input
+                        type="file"
+                        accept="image/*"
+                        onChange={(e) => {
+                          const file = e.target.files[0];
+                          if (!file) return;
+                          if (file.size > 2 * 1024 * 1024) {
+                            toast.error('Image must be less than 2MB');
+                            return;
+                          }
+                          const reader = new FileReader();
+                          reader.onloadend = () => {
+                            setEditData({ ...editData, image_url: reader.result });
+                            toast.success('Image uploaded');
+                          };
+                          reader.onerror = () => toast.error('Failed to upload image');
+                          reader.readAsDataURL(file);
+                        }}
+                      />
+                      {editData.image_url && (
+                        <div className="relative inline-block">
+                          <img 
+                            src={editData.image_url} 
+                            alt="Barber" 
+                            className="w-24 h-24 object-cover rounded-full border border-border"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => setEditData({ ...editData, image_url: '' })}
+                            className="absolute -top-1 -right-1 p-1 bg-red-500 text-white rounded-full hover:bg-red-600"
+                          >
+                            <X className="w-3 h-3" />
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                  
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div>
                       <Label>Name</Label>

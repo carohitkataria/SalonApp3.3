@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import React from 'react';
 import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
 import { Button } from '@/components/ui/button';
@@ -18,6 +19,18 @@ export default function OTPLoginPage() {
   const [otp, setOtp] = useState('');
   const [loading, setLoading] = useState(false);
   const [sentOtp, setSentOtp] = useState('');
+  const [countdown, setCountdown] = useState(0);
+  const [canResend, setCanResend] = useState(false);
+
+  // Countdown timer for resend
+  React.useEffect(() => {
+    if (countdown > 0) {
+      const timer = setTimeout(() => setCountdown(countdown - 1), 1000);
+      return () => clearTimeout(timer);
+    } else if (countdown === 0 && step === 2) {
+      setCanResend(true);
+    }
+  }, [countdown, step]);
 
   const handleSendOTP = async (e) => {
     e.preventDefault();
@@ -32,8 +45,25 @@ export default function OTPLoginPage() {
       const response = await axios.post(`${API}/salon/send-otp`, { phone });
       toast.success('OTP sent to your WhatsApp! Please check your messages.');
       setStep(2);
+      setCountdown(30); // Start 30 second countdown
+      setCanResend(false);
     } catch (error) {
       toast.error(error.response?.data?.detail || 'Failed to send OTP');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleResendOTP = async () => {
+    setLoading(true);
+    try {
+      await axios.post(`${API}/salon/send-otp`, { phone });
+      toast.success('OTP resent to your WhatsApp!');
+      setCountdown(30); // Reset countdown
+      setCanResend(false);
+      setOtp(''); // Clear OTP input
+    } catch (error) {
+      toast.error(error.response?.data?.detail || 'Failed to resend OTP');
     } finally {
       setLoading(false);
     }
@@ -165,11 +195,26 @@ export default function OTPLoginPage() {
               {loading ? 'Verifying...' : 'Verify & Login'}
             </Button>
 
-            <div className="text-center">
+            <div className="text-center space-y-2">
+              {canResend ? (
+                <Button
+                  type="button"
+                  onClick={handleResendOTP}
+                  disabled={loading}
+                  variant="outline"
+                  className="w-full"
+                >
+                  Resend OTP
+                </Button>
+              ) : (
+                <p className="text-sm text-muted-foreground">
+                  Resend OTP in {countdown}s
+                </p>
+              )}
               <button
                 type="button"
                 onClick={() => setStep(1)}
-                className="text-sm text-muted-foreground hover:text-gold transition-colors"
+                className="text-sm text-muted-foreground hover:text-gold transition-colors block w-full"
               >
                 Change phone number
               </button>

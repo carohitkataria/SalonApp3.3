@@ -147,6 +147,47 @@ export default function MyProfile({ salon, onUpdate, getAuthHeaders }) {
               />
             </div>
             <div className="md:col-span-2">
+              <Label htmlFor="logo">Salon Logo</Label>
+              <div className="space-y-2">
+                <Input
+                  id="logo"
+                  type="file"
+                  accept="image/*"
+                  onChange={(e) => {
+                    const file = e.target.files[0];
+                    if (!file) return;
+                    if (file.size > 2 * 1024 * 1024) {
+                      toast.error('Logo must be less than 2MB');
+                      return;
+                    }
+                    const reader = new FileReader();
+                    reader.onloadend = () => {
+                      setEditData({ ...editData, logo_url: reader.result });
+                      toast.success('Logo uploaded');
+                    };
+                    reader.onerror = () => toast.error('Failed to upload logo');
+                    reader.readAsDataURL(file);
+                  }}
+                />
+                {editData.logo_url && (
+                  <div className="relative inline-block">
+                    <img 
+                      src={editData.logo_url} 
+                      alt="Salon logo" 
+                      className="w-32 h-32 object-contain border border-border rounded-lg"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setEditData({ ...editData, logo_url: '' })}
+                      className="absolute -top-2 -right-2 p-1 bg-red-500 text-white rounded-full hover:bg-red-600"
+                    >
+                      <X className="w-4 h-4" />
+                    </button>
+                  </div>
+                )}
+              </div>
+            </div>
+            <div className="md:col-span-2">
               <Label htmlFor="address">Address *</Label>
               <Input
                 id="address"
@@ -269,6 +310,16 @@ export default function MyProfile({ salon, onUpdate, getAuthHeaders }) {
         </div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          {salon.logo_url && (
+            <div className="md:col-span-2">
+              <p className="text-sm text-muted-foreground mb-2">Salon Logo</p>
+              <img 
+                src={salon.logo_url} 
+                alt="Salon logo" 
+                className="w-32 h-32 object-contain border border-border rounded-lg"
+              />
+            </div>
+          )}
           <div>
             <p className="text-sm text-muted-foreground mb-1">Salon Name</p>
             <p className="text-foreground font-bold">{salon.salon_name}</p>
