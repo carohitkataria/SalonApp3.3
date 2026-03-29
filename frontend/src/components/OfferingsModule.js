@@ -27,6 +27,7 @@ export default function OfferingsModule({ salonId, token }) {
   const [searchQuery, setSearchQuery] = useState('');
   const [genderFilter, setGenderFilter] = useState('all');
   const [loading, setLoading] = useState(false);
+  const [initialized, setInitialized] = useState(false);
   
   // Modal states
   const [showServiceModal, setShowServiceModal] = useState(false);
@@ -35,16 +36,35 @@ export default function OfferingsModule({ salonId, token }) {
   const [editingPackage, setEditingPackage] = useState(null);
 
   useEffect(() => {
-    fetchAllData();
-  }, []);
+    initializeSalonServices();
+  }, [salonId]);
+
+  const initializeSalonServices = async () => {
+    if (!salonId) return;
+    
+    setLoading(true);
+    try {
+      // Try to initialize predefined services for this salon
+      await axios.post(
+        `${API}/salons/${salonId}/initialize`,
+        {},
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      setInitialized(true);
+    } catch (error) {
+      console.log('Initialization:', error.response?.data || error.message);
+    } finally {
+      fetchAllData();
+    }
+  };
 
   const fetchAllData = async () => {
     setLoading(true);
     try {
       const [servicesRes, favoritesRes, packagesRes] = await Promise.all([
-        axios.get(`${API}/services`),
+        axios.get(`${API}/salons/${salonId}/services/all`),
         axios.get(`${API}/services/favorites`),
-        axios.get(`${API}/packages`)
+        axios.get(`${API}/salons/${salonId}/packages`)
       ]);
 
       setServices(servicesRes.data);
@@ -95,11 +115,11 @@ export default function OfferingsModule({ salonId, token }) {
   const toggleServiceEnabled = async (serviceId, currentStatus) => {
     try {
       await axios.put(
-        `${API}/services/${serviceId}`,
-        { is_enabled: !currentStatus },
+        `${API}/salons/${salonId}/services/${serviceId}/toggle?is_enabled=${!currentStatus}`,
+        {},
         { headers: { Authorization: `Bearer ${token}` } }
       );
-      toast.success(currentStatus ? 'Service disabled' : 'Service enabled');
+      toast.success(currentStatus ? 'Service disabled for your salon' : 'Service enabled for your salon');
       fetchAllData();
     } catch (error) {
       console.error('Error toggling service:', error);
@@ -126,7 +146,7 @@ export default function OfferingsModule({ salonId, token }) {
     if (!window.confirm('Are you sure you want to delete this package?')) return;
     
     try {
-      await axios.delete(`${API}/packages/${packageId}`, {
+      await axios.delete(`${API}/salons/${salonId}/packages/${packageId}`, {
         headers: { Authorization: `Bearer ${token}` }
       });
       toast.success('Package deleted successfully');
@@ -244,6 +264,7 @@ export default function OfferingsModule({ salonId, token }) {
                                   onToggleEnabled={toggleServiceEnabled}
                                   onEdit={handleEditService}
                                   onDelete={deleteService}
+                                  salonId={salonId}
                                 />
                               </div>
                             </div>
@@ -274,6 +295,14 @@ export default function OfferingsModule({ salonId, token }) {
                 />
               </div>
 
+              <Button 
+                onClick={() => { setEditingService(null); setShowServiceModal(true); }}
+                className="bg-gold text-black hover:bg-gold/90 whitespace-nowrap"
+              >
+                <Plus className="w-4 h-4 mr-2" />
+                Add Service
+              </Button>
+
               <select
                 value={genderFilter}
                 onChange={(e) => setGenderFilter(e.target.value)}
@@ -285,11 +314,6 @@ export default function OfferingsModule({ salonId, token }) {
                 <option value="Unisex">Unisex</option>
               </select>
             </div>
-
-            <Button onClick={() => { setEditingService(null); setShowServiceModal(true); }} className="mt-4 w-full">
-              <Plus className="w-4 h-4 mr-2" />
-              Add New Service
-            </Button>
           </div>
 
           {/* Categorized Services */}
@@ -323,6 +347,7 @@ export default function OfferingsModule({ salonId, token }) {
                           onToggleEnabled={toggleServiceEnabled}
                           onEdit={handleEditService}
                           onDelete={deleteService}
+                          salonId={salonId}
                         />
                       </div>
                     ))}
@@ -392,6 +417,7 @@ export default function OfferingsModule({ salonId, token }) {
           onClose={() => { setShowPackageModal(false); setEditingPackage(null); }}
           onSave={fetchAllData}
           token={token}
+          salonId={salonId}
         />
       )}
     </div>
@@ -399,7 +425,7 @@ export default function OfferingsModule({ salonId, token }) {
 }
 
 // Service Card Content Component
-function ServiceCardContent({ service, onToggleFavorite, onToggleEnabled, onEdit, onDelete }) {
+function ServiceCardContent({ service, onToggleFavorite, onToggleEnabled, onEdit, onDelete, salonId }) {
   const getGenderBadge = (gender) => {
     const colors = {
       Men: 'bg-blue-500/20 text-blue-400 border-blue-500/30',
@@ -408,6 +434,8 @@ function ServiceCardContent({ service, onToggleFavorite, onToggleEnabled, onEdit
     };
     return colors[gender] || colors.Unisex;
   };
+
+  const isEnabledForSalon = service.is_enabled_for_salon;
 
   return (
     <div className="flex items-center justify-between w-full">
@@ -425,20 +453,25 @@ function ServiceCardContent({ service, onToggleFavorite, onToggleEnabled, onEdit
         )}
 
         <div className="flex-1">
-          <div className="flex items-center gap-2 mb-1">
+          <div className="flex items-center gap-2 mb-1 flex-wrap">
             <h4 className="font-semibold text-foreground">{service.service_name}</h4>
             <span className={`px-2 py-0.5 text-xs border rounded ${getGenderBadge(service.gender_tag)}`}>
               {service.gender_tag}
             </span>
+            {service.category && (
+              <span className="px-2 py-0.5 text-xs bg-gray-500/20 text-gray-400 border border-gray-500/30 rounded">
+                {service.category}
+              </span>
+            )}
             {service.available_at_home && (
               <span className="px-2 py-0.5 text-xs bg-green-500/20 text-green-400 border border-green-500/30 rounded flex items-center gap-1">
                 <Home className="w-3 h-3" />
                 Home
               </span>
             )}
-            {!service.is_enabled && (
+            {!isEnabledForSalon && (
               <span className="px-2 py-0.5 text-xs bg-red-500/20 text-red-400 border border-red-500/30 rounded">
-                Disabled
+                Disabled for Salon
               </span>
             )}
           </div>
@@ -450,21 +483,25 @@ function ServiceCardContent({ service, onToggleFavorite, onToggleEnabled, onEdit
         <div className="text-right">
           <p className="text-lg font-bold text-gold">
             ₹{service.base_price}
-            {service.price_type === 'onwards' && <span className="text-sm font-normal"> onwards</span>}
+            {service.price_type === 'onwards' && <span className="text-sm font-normal text-muted-foreground"> onwards</span>}
           </p>
           <p className="text-xs text-muted-foreground">{service.default_duration} min</p>
         </div>
       </div>
 
       <div className="flex items-center gap-2 ml-4">
-        <Checkbox
-          checked={service.is_enabled}
-          onCheckedChange={() => onToggleEnabled(service.id, service.is_enabled)}
-          className="data-[state=checked]:bg-gold data-[state=checked]:border-gold"
-        />
+        <div className="flex flex-col items-center">
+          <Checkbox
+            checked={isEnabledForSalon}
+            onCheckedChange={() => onToggleEnabled(service.id, isEnabledForSalon)}
+            className="data-[state=checked]:bg-gold data-[state=checked]:border-gold"
+          />
+          <span className="text-[10px] text-muted-foreground mt-1">Enable</span>
+        </div>
         <button
           onClick={() => onToggleFavorite(service.id, service.is_favorite)}
           className="p-2 hover:bg-muted rounded-lg transition-colors"
+          title="Add to favorites"
         >
           {service.is_favorite ? (
             <Heart className="w-5 h-5 text-gold fill-gold" />
@@ -475,12 +512,14 @@ function ServiceCardContent({ service, onToggleFavorite, onToggleEnabled, onEdit
         <button 
           onClick={() => onEdit(service)}
           className="p-2 hover:bg-muted rounded-lg transition-colors"
+          title="Edit service"
         >
           <Edit className="w-5 h-5 text-muted-foreground" />
         </button>
         <button
           onClick={() => onDelete(service.id)}
           className="p-2 hover:bg-muted rounded-lg transition-colors"
+          title="Delete service"
         >
           <Trash2 className="w-5 h-5 text-red-500" />
         </button>
@@ -583,6 +622,7 @@ function ServiceModal({ service, open, onClose, onSave, token }) {
     available_at_home: false,
     is_enabled: true
   });
+  const [uploadingImage, setUploadingImage] = useState(false);
 
   useEffect(() => {
     if (service) {
@@ -602,6 +642,39 @@ function ServiceModal({ service, open, onClose, onSave, token }) {
       });
     }
   }, [service]);
+
+  const handleImageUpload = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+
+    if (file.size > 5 * 1024 * 1024) {
+      toast.error('Image must be less than 5MB');
+      return;
+    }
+
+    setUploadingImage(true);
+    const reader = new FileReader();
+    reader.onloadend = () => {
+      setFormData(prev => ({ 
+        ...prev, 
+        images: [...(prev.images || []), reader.result] 
+      }));
+      setUploadingImage(false);
+      toast.success('Image uploaded successfully');
+    };
+    reader.onerror = () => {
+      toast.error('Failed to upload image');
+      setUploadingImage(false);
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const removeImage = (index) => {
+    setFormData(prev => ({
+      ...prev,
+      images: prev.images.filter((_, i) => i !== index)
+    }));
+  };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -714,6 +787,40 @@ function ServiceModal({ service, open, onClose, onSave, token }) {
             />
           </div>
 
+          {/* Image Upload */}
+          <div>
+            <Label>Service Images</Label>
+            <div className="space-y-2">
+              <Input
+                type="file"
+                accept="image/*"
+                onChange={handleImageUpload}
+                disabled={uploadingImage}
+              />
+              {formData.images && formData.images.length > 0 && (
+                <div className="grid grid-cols-3 gap-2">
+                  {formData.images.map((img, index) => (
+                    <div key={index} className="relative">
+                      <img 
+                        src={img} 
+                        alt={`Service ${index + 1}`} 
+                        className="w-full h-24 object-cover rounded-lg border border-border"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => removeImage(index)}
+                        className="absolute top-1 right-1 p-1 bg-red-500 text-white rounded-full hover:bg-red-600"
+                      >
+                        <X className="w-3 h-3" />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+              {uploadingImage && <p className="text-sm text-muted-foreground">Uploading...</p>}
+            </div>
+          </div>
+
           <div className="flex items-center gap-6">
             <label className="flex items-center gap-2 cursor-pointer">
               <Checkbox
@@ -750,8 +857,9 @@ function ServiceModal({ service, open, onClose, onSave, token }) {
 }
 
 // Package Modal Component
-function PackageModal({ package: pkg, services, open, onClose, onSave, token }) {
+function PackageModal({ package: pkg, services, open, onClose, onSave, token, salonId }) {
   const [formData, setFormData] = useState({
+    salon_id: salonId,
     package_name: '',
     description: '',
     service_ids: [],
@@ -761,12 +869,14 @@ function PackageModal({ package: pkg, services, open, onClose, onSave, token }) 
   });
 
   const [searchQuery, setSearchQuery] = useState('');
+  const [uploadingImage, setUploadingImage] = useState(false);
 
   useEffect(() => {
     if (pkg) {
-      setFormData(pkg);
+      setFormData({ ...pkg, salon_id: salonId });
     } else {
       setFormData({
+        salon_id: salonId,
         package_name: '',
         description: '',
         service_ids: [],
@@ -776,7 +886,30 @@ function PackageModal({ package: pkg, services, open, onClose, onSave, token }) 
       });
     }
     setSearchQuery('');
-  }, [pkg]);
+  }, [pkg, salonId]);
+
+  const handleImageUpload = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+
+    if (file.size > 5 * 1024 * 1024) {
+      toast.error('Image must be less than 5MB');
+      return;
+    }
+
+    setUploadingImage(true);
+    const reader = new FileReader();
+    reader.onloadend = () => {
+      setFormData(prev => ({ ...prev, image_url: reader.result }));
+      setUploadingImage(false);
+      toast.success('Image uploaded successfully');
+    };
+    reader.onerror = () => {
+      toast.error('Failed to upload image');
+      setUploadingImage(false);
+    };
+    reader.readAsDataURL(file);
+  };
 
   const toggleService = (serviceId) => {
     setFormData(prev => ({
@@ -793,14 +926,14 @@ function PackageModal({ package: pkg, services, open, onClose, onSave, token }) 
     try {
       if (pkg) {
         await axios.put(
-          `${API}/packages/${pkg.id}`,
+          `${API}/salons/${salonId}/packages/${pkg.id}`,
           formData,
           { headers: { Authorization: `Bearer ${token}` } }
         );
         toast.success('Package updated successfully');
       } else {
         await axios.post(
-          `${API}/packages`,
+          `${API}/salons/${salonId}/packages`,
           formData,
           { headers: { Authorization: `Bearer ${token}` } }
         );
@@ -886,13 +1019,33 @@ function PackageModal({ package: pkg, services, open, onClose, onSave, token }) 
               </select>
             </div>
 
-            <div>
-              <Label>Image URL (optional)</Label>
-              <Input
-                value={formData.image_url}
-                onChange={(e) => setFormData({...formData, image_url: e.target.value})}
-                placeholder="https://..."
-              />
+            <div className="col-span-2">
+              <Label>Package Image</Label>
+              <div className="space-y-2">
+                <Input
+                  type="file"
+                  accept="image/*"
+                  onChange={handleImageUpload}
+                  disabled={uploadingImage}
+                />
+                {formData.image_url && (
+                  <div className="relative">
+                    <img 
+                      src={formData.image_url} 
+                      alt="Package preview" 
+                      className="w-full h-40 object-cover rounded-lg border border-border"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setFormData(prev => ({ ...prev, image_url: '' }))}
+                      className="absolute top-2 right-2 p-1 bg-red-500 text-white rounded-full hover:bg-red-600"
+                    >
+                      <X className="w-4 h-4" />
+                    </button>
+                  </div>
+                )}
+                {uploadingImage && <p className="text-sm text-muted-foreground">Uploading...</p>}
+              </div>
             </div>
           </div>
 
