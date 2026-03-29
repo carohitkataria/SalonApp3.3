@@ -116,6 +116,17 @@ export default function EnhancedSalonDashboard() {
 
   const handleCallNext = async (barberId) => {
     try {
+      if (!barberId) {
+        // Call next for any barber (first waiting token in queue)
+        const waitingTokens = tokens.filter(t => t.status === 'waiting').sort((a, b) => a.token_number - b.token_number);
+        if (waitingTokens.length === 0) {
+          toast.error('No waiting customers in queue');
+          return;
+        }
+        const nextToken = waitingTokens[0];
+        barberId = nextToken.barber_id;
+      }
+      
       await axios.post(
         `${API}/salons/${salonId}/barbers/${barberId}/call-next`,
         {},
@@ -295,17 +306,16 @@ export default function EnhancedSalonDashboard() {
               ))}
             </div>
 
-            {/* Call Next Buttons */}
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-              {barbers.map(barber => (
-                <Button
-                  key={barber.id}
-                  onClick={() => handleCallNext(barber.id)}
-                  className="bg-gold text-black hover:bg-gold/90"
-                >
-                  <ChevronRight className="mr-2" /> Call Next ({barber.name})
-                </Button>
-              ))}
+            {/* Single Call Next Button Based on Selected Barber */}
+            <div className="flex justify-center">
+              <Button
+                onClick={() => handleCallNext(selectedBarber === 'all' ? null : selectedBarber)}
+                className="bg-gold text-black hover:bg-gold/90 px-8 py-3 text-lg"
+                disabled={!tokens.some(t => t.status === 'waiting')}
+              >
+                <ChevronRight className="mr-2 w-5 h-5" /> 
+                Call Next Customer {selectedBarber !== 'all' && `(${barbers.find(b => b.id === selectedBarber)?.name})`}
+              </Button>
             </div>
 
             {/* Status Filters */}
@@ -351,7 +361,11 @@ export default function EnhancedSalonDashboard() {
                           </a>
                         </p>
                         <p className="text-muted-foreground text-xs">
-                          {token.barber_name} - {token.time_slot} - Rs. {token.total_amount}
+                          {token.barber_name} • {token.time_slot} • ₹{token.total_amount}
+                        </p>
+                        <p className="text-muted-foreground text-xs flex items-center space-x-1 mt-1">
+                          <Calendar className="w-3 h-3" />
+                          <span>{new Date(token.date).toLocaleDateString('en-IN')} at {token.created_at ? new Date(token.created_at).toLocaleTimeString('en-IN', {hour: '2-digit', minute: '2-digit'}) : token.time_slot}</span>
                         </p>
                       </div>
                     </div>
@@ -380,6 +394,15 @@ export default function EnhancedSalonDashboard() {
                       {/* Waiting Status Actions */}
                       {token.status === 'waiting' && (
                         <>
+                          <Button 
+                            size="sm" 
+                            onClick={() => handleCallToken(token.id)} 
+                            className="bg-blue-600 hover:bg-blue-700"
+                            title="Call this customer now"
+                          >
+                            <ChevronRight className="w-3 h-3 mr-1" />
+                            Call
+                          </Button>
                           <Button 
                             size="sm" 
                             onClick={() => handleSendNotification(token.id)} 

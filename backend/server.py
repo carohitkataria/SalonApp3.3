@@ -530,8 +530,20 @@ async def generate_and_send_invoice(token_id: str):
         
         # Generate invoice number using salon's prefix and counter
         invoice_prefix = salon.get('invoice_prefix', 'INV')
-        current_number = salon.get('current_invoice_number', 1)
-        invoice_no = f"{invoice_prefix}{current_number:04d}"
+        current_number = salon.get('current_invoice_number')
+        
+        # If current_invoice_number not set, initialize from invoice_start_number
+        if current_number is None:
+            current_number = salon.get('invoice_start_number', 1)
+            # Set it in database
+            await db.salons.update_one(
+                {"id": salon['id']},
+                {"$set": {"current_invoice_number": current_number}}
+            )
+        
+        # Calculate padding based on number size (minimum 4 digits)
+        padding = max(4, len(str(current_number)))
+        invoice_no = f"{invoice_prefix}{str(current_number).zfill(padding)}"
         
         # Increment invoice counter for next time
         await db.salons.update_one(
@@ -899,6 +911,10 @@ async def update_salon(salon_id: str, salon: SalonUpdate, current_salon=Depends(
     
     # Only update fields that are provided
     update_data = {k: v for k, v in salon.model_dump().items() if v is not None}
+    
+    # If invoice_start_number is being changed, reset current_invoice_number
+    if 'invoice_start_number' in update_data:
+        update_data['current_invoice_number'] = update_data['invoice_start_number']
     
     if update_data:
         await db.salons.update_one({"id": salon_id}, {"$set": update_data})
