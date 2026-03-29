@@ -156,6 +156,17 @@ export default function EnhancedSalonDashboard() {
     }
   };
 
+  const handleCompleteToken = async (tokenId) => {
+    if (!window.confirm('Mark this customer as completed? Invoice will be generated.')) return;
+    
+    try {
+      await axios.post(`${API}/tokens/${tokenId}/complete`, {}, { headers: getAuthHeaders() });
+      toast.success('Token marked as completed');
+    } catch (error) {
+      toast.error(error.response?.data?.detail || 'Failed to complete token');
+    }
+  };
+
   const handleCancelToken = async (tokenId) => {
     if (!window.confirm('Cancel this token?')) return;
     
@@ -185,9 +196,9 @@ export default function EnhancedSalonDashboard() {
   const getStatusIcon = (status) => {
     switch (status) {
       case 'waiting': return <Clock className="w-4 h-4 text-yellow-500" />;
-      case 'in_progress': return <ChevronRight className="w-4 h-4 text-blue-500" />;
+      case 'called': return <ChevronRight className="w-4 h-4 text-blue-500" />;
       case 'completed': return <CheckCircle className="w-4 h-4 text-green-500" />;
-      case 'skipped': return <XCircle className="w-4 h-4 text-red-500" />;
+      case 'skipped': return <SkipForward className="w-4 h-4 text-red-500" />;
       case 'cancelled': return <XCircle className="w-4 h-4 text-gray-500" />;
       default: return null;
     }
@@ -196,7 +207,7 @@ export default function EnhancedSalonDashboard() {
   const getStatusColor = (status) => {
     switch (status) {
       case 'waiting': return 'border-yellow-500/30 bg-yellow-500/5';
-      case 'in_progress': return 'border-blue-500/30 bg-blue-500/5';
+      case 'called': return 'border-blue-500/50 bg-blue-500/10';
       case 'completed': return 'border-green-500/30 bg-green-500/5';
       case 'skipped': return 'border-red-500/30 bg-red-500/5';
       case 'cancelled': return 'border-gray-500/30 bg-gray-500/5';
@@ -299,7 +310,7 @@ export default function EnhancedSalonDashboard() {
 
             {/* Status Filters */}
             <div className="flex space-x-2">
-              {['all', 'waiting', 'in_progress', 'completed'].map((f) => (
+              {['all', 'waiting', 'called', 'completed', 'skipped'].map((f) => (
                 <button
                   key={f}
                   onClick={() => setFilter(f)}
@@ -309,7 +320,7 @@ export default function EnhancedSalonDashboard() {
                       : 'bg-card border border-border text-foreground'
                   }`}
                 >
-                  {f.replace('_', ' ')}
+                  {f === 'all' ? 'All' : f.charAt(0).toUpperCase() + f.slice(1)}
                 </button>
               ))}
             </div>
@@ -346,34 +357,92 @@ export default function EnhancedSalonDashboard() {
                     </div>
                     
                     <div className="flex items-center space-x-2">
-                      <div className="flex items-center space-x-1 px-2 py-1 bg-background/50 border border-border rounded">
+                      <div className={`flex items-center space-x-1 px-3 py-1 rounded-full ${
+                        token.status === 'called' ? 'bg-blue-500/20 border border-blue-500' :
+                        token.status === 'completed' ? 'bg-green-500/20 border border-green-500' :
+                        token.status === 'skipped' ? 'bg-red-500/20 border border-red-500' :
+                        'bg-muted border border-border'
+                      }`}>
                         {getStatusIcon(token.status)}
-                        <span className="text-xs uppercase">{token.status.replace('_', ' ')}</span>
+                        <span className="text-xs uppercase font-bold">
+                          {token.status === 'called' ? 'Called' : 
+                           token.status === 'waiting' ? 'Waiting' :
+                           token.status === 'completed' ? 'Completed' :
+                           token.status === 'skipped' ? 'Skipped' : token.status}
+                        </span>
+                        {token.recall_count > 0 && (
+                          <span className="text-xs text-muted-foreground ml-1">
+                            ({token.recall_count}x)
+                          </span>
+                        )}
                       </div>
                       
+                      {/* Waiting Status Actions */}
                       {token.status === 'waiting' && (
                         <>
-                          <Button size="sm" onClick={() => handleCallToken(token.id)} className="bg-blue-600 hover:bg-blue-700">
-                            <ChevronRight className="w-3 h-3" />
-                          </Button>
-                          <Button size="sm" onClick={() => handleSendNotification(token.id)} className="bg-purple-600 hover:bg-purple-700">
+                          <Button 
+                            size="sm" 
+                            onClick={() => handleSendNotification(token.id)} 
+                            className="bg-purple-600 hover:bg-purple-700"
+                            title="Send notification"
+                          >
                             <Bell className="w-3 h-3" />
                           </Button>
-                          <Button size="sm" onClick={() => handleSkipToken(token.id)} className="bg-red-600 hover:bg-red-700">
-                            <SkipForward className="w-3 h-3" />
+                          <Button 
+                            size="sm" 
+                            onClick={() => handleCancelToken(token.id)} 
+                            variant="outline"
+                            className="border-red-500 text-red-500 hover:bg-red-500 hover:text-white"
+                            title="Cancel token"
+                          >
+                            <XCircle className="w-3 h-3" />
                           </Button>
                         </>
                       )}
                       
-                      {token.status === 'skipped' && (
-                        <Button size="sm" onClick={() => handleRecallToken(token.id)} className="bg-blue-600 hover:bg-blue-700">
-                          <RotateCcw className="w-3 h-3" />
-                        </Button>
+                      {/* Called Status Actions - MAIN CONTROLS */}
+                      {token.status === 'called' && (
+                        <div className="flex items-center space-x-2">
+                          <Button 
+                            size="sm" 
+                            onClick={() => handleCompleteToken(token.id)} 
+                            className="bg-green-600 hover:bg-green-700 text-white"
+                            title="Mark as completed"
+                          >
+                            <CheckCircle className="w-3 h-3 mr-1" />
+                            Complete
+                          </Button>
+                          <Button 
+                            size="sm" 
+                            onClick={() => handleRecallToken(token.id)} 
+                            className="bg-blue-600 hover:bg-blue-700 text-white"
+                            title="Re-call customer"
+                          >
+                            <RotateCcw className="w-3 h-3 mr-1" />
+                            Re-call
+                          </Button>
+                          <Button 
+                            size="sm" 
+                            onClick={() => handleSkipToken(token.id)} 
+                            className="bg-red-600 hover:bg-red-700 text-white"
+                            title="Skip customer"
+                          >
+                            <SkipForward className="w-3 h-3 mr-1" />
+                            Skip
+                          </Button>
+                        </div>
                       )}
-
-                      {(token.status === 'waiting' || token.status === 'in_progress') && (
-                        <Button size="sm" onClick={() => handleCancelToken(token.id)} variant="outline">
-                          <XCircle className="w-3 h-3" />
+                      
+                      {/* Skipped Status Actions */}
+                      {token.status === 'skipped' && (
+                        <Button 
+                          size="sm" 
+                          onClick={() => handleRecallToken(token.id)} 
+                          className="bg-blue-600 hover:bg-blue-700"
+                          title="Recall this customer"
+                        >
+                          <RotateCcw className="w-3 h-3 mr-1" />
+                          Recall
                         </Button>
                       )}
                     </div>

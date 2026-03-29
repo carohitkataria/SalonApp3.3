@@ -14,6 +14,140 @@ import { motion, AnimatePresence } from 'framer-motion';
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
 const API = `${BACKEND_URL}/api`;
 
+// Services by Category View Component
+function ServicesByCategoryView({ services, onServiceToggle, onPriceChange }) {
+  const [expandedCategories, setExpandedCategories] = useState({});
+
+  // Group services by category
+  const servicesByCategory = services.reduce((acc, service) => {
+    const category = service.category || 'General';
+    if (!acc[category]) {
+      acc[category] = [];
+    }
+    acc[category].push(service);
+    return acc;
+  }, {});
+
+  // Expand all categories by default
+  useEffect(() => {
+    const initialExpanded = {};
+    Object.keys(servicesByCategory).forEach(cat => {
+      initialExpanded[cat] = true;
+    });
+    setExpandedCategories(initialExpanded);
+  }, []);
+
+  const toggleCategory = (category) => {
+    setExpandedCategories(prev => ({
+      ...prev,
+      [category]: !prev[category]
+    }));
+  };
+
+  const handleSelectAll = (category, checked) => {
+    const categoryServices = servicesByCategory[category];
+    categoryServices.forEach(service => {
+      onServiceToggle(service.id, checked);
+    });
+  };
+
+  const isAllSelected = (category) => {
+    const categoryServices = servicesByCategory[category];
+    return categoryServices.every(s => s.is_available);
+  };
+
+  const isSomeSelected = (category) => {
+    const categoryServices = servicesByCategory[category];
+    const selectedCount = categoryServices.filter(s => s.is_available).length;
+    return selectedCount > 0 && selectedCount < categoryServices.length;
+  };
+
+  return (
+    <div className="space-y-2">
+      {Object.keys(servicesByCategory).sort().map(category => (
+        <div key={category} className="border border-border rounded-lg">
+          {/* Category Header */}
+          <div 
+            className="flex items-center justify-between p-3 bg-muted/50 cursor-pointer hover:bg-muted"
+            onClick={() => toggleCategory(category)}
+          >
+            <div className="flex items-center space-x-3">
+              <button className="text-gold">
+                {expandedCategories[category] ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+              </button>
+              <h5 className="font-bold text-foreground">{category}</h5>
+              <span className="text-xs text-muted-foreground">
+                ({servicesByCategory[category].filter(s => s.is_available).length}/{servicesByCategory[category].length} selected)
+              </span>
+            </div>
+            <div className="flex items-center space-x-2" onClick={(e) => e.stopPropagation()}>
+              <Checkbox
+                checked={isAllSelected(category)}
+                indeterminate={isSomeSelected(category)}
+                onCheckedChange={(checked) => handleSelectAll(category, checked)}
+                className="data-[state=checked]:bg-gold data-[state=checked]:border-gold"
+              />
+              <span className="text-xs text-muted-foreground">Select All</span>
+            </div>
+          </div>
+
+          {/* Category Services */}
+          {expandedCategories[category] && (
+            <div className="p-2 space-y-2">
+              {servicesByCategory[category].map(service => (
+                <div 
+                  key={service.id}
+                  className={`flex items-center justify-between p-3 rounded-lg border ${
+                    service.is_available 
+                      ? 'bg-gold/5 border-gold/30' 
+                      : 'bg-muted/30 border-border'
+                  }`}
+                >
+                  <div className="flex items-center space-x-3 flex-1">
+                    <Checkbox
+                      id={`service-${service.id}`}
+                      checked={service.is_available}
+                      onCheckedChange={(checked) => onServiceToggle(service.id, checked)}
+                      data-testid={`service-checkbox-${service.id}`}
+                      className="data-[state=checked]:bg-gold data-[state=checked]:border-gold"
+                    />
+                    <div className="flex-1">
+                      <label 
+                        htmlFor={`service-${service.id}`}
+                        className={`font-medium cursor-pointer ${
+                          service.is_available ? 'text-foreground' : 'text-muted-foreground'
+                        }`}
+                      >
+                        {service.service_name}
+                      </label>
+                      <p className="text-xs text-muted-foreground">
+                        Base: ₹{service.base_price}
+                        {service.price_type === 'onwards' && <span className="ml-1 text-gold">onwards</span>}
+                      </p>
+                    </div>
+                  </div>
+                  <div className="flex items-center space-x-2">
+                    <IndianRupee className="w-4 h-4 text-muted-foreground" />
+                    <Input
+                      type="number"
+                      value={service.barber_price}
+                      onChange={(e) => onPriceChange(service.id, e.target.value)}
+                      className="w-24 text-right"
+                      disabled={!service.is_available}
+                      data-testid={`service-price-${service.id}`}
+                      placeholder="Price"
+                    />
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}
+
 // Category options
 const CATEGORY_OPTIONS = [
   { value: 'Junior', label: 'Junior' },
@@ -607,51 +741,11 @@ function BarberCard({
                     <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-gold mx-auto"></div>
                   </div>
                 ) : (
-                  <div className="space-y-2">
-                    {barberServices.map((service) => (
-                      <div 
-                        key={service.id}
-                        className={`flex items-center justify-between p-3 rounded-lg border ${
-                          service.is_available 
-                            ? 'bg-gold/5 border-gold/30' 
-                            : 'bg-muted/30 border-border'
-                        }`}
-                      >
-                        <div className="flex items-center space-x-3">
-                          <Checkbox
-                            id={`service-${service.id}`}
-                            checked={service.is_available}
-                            onCheckedChange={(checked) => handleServiceToggle(service.id, checked)}
-                            data-testid={`service-checkbox-${service.id}`}
-                          />
-                          <div>
-                            <label 
-                              htmlFor={`service-${service.id}`}
-                              className={`font-medium cursor-pointer ${
-                                service.is_available ? 'text-foreground' : 'text-muted-foreground'
-                              }`}
-                            >
-                              {service.service_name}
-                            </label>
-                            <p className="text-xs text-muted-foreground">
-                              Base price: Rs. {service.base_price}
-                            </p>
-                          </div>
-                        </div>
-                        <div className="flex items-center space-x-2">
-                          <IndianRupee className="w-4 h-4 text-muted-foreground" />
-                          <Input
-                            type="number"
-                            value={service.barber_price}
-                            onChange={(e) => handlePriceChange(service.id, e.target.value)}
-                            className="w-24 text-right"
-                            disabled={!service.is_available}
-                            data-testid={`service-price-${service.id}`}
-                          />
-                        </div>
-                      </div>
-                    ))}
-                  </div>
+                  <ServicesByCategoryView 
+                    services={barberServices}
+                    onServiceToggle={handleServiceToggle}
+                    onPriceChange={handlePriceChange}
+                  />
                 )}
               </div>
             </div>
