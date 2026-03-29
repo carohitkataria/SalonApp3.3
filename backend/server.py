@@ -306,13 +306,16 @@ class TokenModel(BaseModel):
     barber_name: str
     selected_services: List[str]
     total_amount: float
-    status: str = "waiting"
+    status: str = "waiting"  # waiting | called | completed | skipped
     payment_status: str = "pending"
     payment_mode: Optional[str] = None
     upi_transaction_id: Optional[str] = None
     source: str
     booking_type: str
     allocated_at: Optional[str] = None
+    called_at: Optional[str] = None
+    completed_at: Optional[str] = None
+    recall_count: int = 0
     created_at: str
 
 # ============ AUTH HELPERS ============
@@ -1583,9 +1586,14 @@ async def call_next_token(salon_id: str, barber_id: str, current_salon=Depends(g
     if next_token:
         await db.tokens.update_one(
             {"id": next_token["id"]},
-            {"$set": {"status": "in_progress"}}
+            {
+                "$set": {
+                    "status": "called",
+                    "called_at": datetime.now(timezone.utc).isoformat()
+                }
+            }
         )
-        updated = TokenModel(**{**next_token, "status": "in_progress"})
+        updated = TokenModel(**{**next_token, "status": "called", "called_at": datetime.now(timezone.utc).isoformat()})
         await broadcast_update("token_called", updated.model_dump())
         
         # Send WhatsApp notification that token is called
@@ -1597,6 +1605,7 @@ async def call_next_token(salon_id: str, barber_id: str, current_salon=Depends(g
         return updated
     
     return {"message": "No more tokens in queue"}
+
 
 @api_router.post("/tokens/{token_id}/complete")
 async def complete_token(token_id: str, current_salon=Depends(get_current_salon)):
@@ -1634,10 +1643,23 @@ async def recall_token(token_id: str, current_salon=Depends(get_current_salon)):
     if not token:
         raise HTTPException(status_code=404, detail="Token not found")
     
+    # Increment recall count and update called_at timestamp
+    recall_count = token.get("recall_count", 0) + 1
+    await db.tokens.update_one(
+        {"id": token_id},
+        {
+            "$set": {
+                "recall_count": recall_count,
+                "called_at": datetime.now(timezone.utc).isoformat()
+            }
+        }
+    )
+    
     # Send notification again
     await send_booking_notification(token, 'token_called')
+    await broadcast_update("token_recalled", {"token_id": token_id, "recall_count": recall_count})
     
-    return {"message": "Token recalled and notification sent"}
+    return {"message": "Token recalled and notification sent", "recall_count": recall_count}
 
 @api_router.post("/tokens/{token_id}/skip")
 async def skip_token(token_id: str, reason: Optional[str] = None, current_salon=Depends(get_current_salon)):
@@ -1646,21 +1668,22 @@ async def skip_token(token_id: str, reason: Optional[str] = None, current_salon=
     if not token:
         raise HTTPException(status_code=404, detail="Token not found")
     
-    # Mark as cancelled/skipped
+    # Mark as skipped (not cancelled, different meaning)
     await db.tokens.update_one(
         {"id": token_id},
         {"$set": {
-            "status": "cancelled",
-            "cancellation_reason": reason or "Customer no-show"
+            "status": "skipped",
+            "skipped_reason": reason or "Customer no-show",
+            "skipped_at": datetime.now(timezone.utc).isoformat()
         }}
     )
     
-    # Send cancellation notification
-    token['cancellation_reason'] = reason or "Customer no-show"
-    await send_booking_notification(token, 'token_cancelled')
-    await broadcast_update("token_cancelled", {"token_id": token_id})
+    # Send notification
+    token['skipped_reason'] = reason or "Customer no-show"
+    await send_booking_notification(token, 'token_skipped')
+    await broadcast_update("token_skipped", {"token_id": token_id})
     
-    return {"message": "Token skipped/cancelled"}
+    return {"message": "Token skipped"}
 
 @api_router.post("/tokens/{token_id}/resend-invoice")
 async def resend_invoice(token_id: str, current_salon=Depends(get_current_salon)):
