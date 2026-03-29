@@ -225,6 +225,47 @@ export default function MyProfile({ salon, onUpdate, getAuthHeaders }) {
               )}
             </div>
           </div>
+
+          {/* Invoice Settings Section */}
+          <div className="border-t border-border pt-6">
+            <h4 className="font-bold text-card-foreground mb-4">Invoice Settings</h4>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <Label htmlFor="invoice_prefix">Invoice Prefix</Label>
+                <Input
+                  id="invoice_prefix"
+                  value={editData.invoice_prefix || 'INV'}
+                  onChange={(e) => setEditData({ ...editData, invoice_prefix: e.target.value.toUpperCase() })}
+                  placeholder="e.g., MG37, INV, BILL"
+                  maxLength={10}
+                />
+                <p className="text-xs text-muted-foreground mt-1">
+                  Prefix for invoice numbers (e.g., MG37)
+                </p>
+              </div>
+              <div>
+                <Label htmlFor="invoice_start_number">Starting Invoice Number</Label>
+                <Input
+                  id="invoice_start_number"
+                  type="number"
+                  value={editData.invoice_start_number || 1}
+                  onChange={(e) => setEditData({ ...editData, invoice_start_number: parseInt(e.target.value) || 1 })}
+                  placeholder="1"
+                  min="1"
+                />
+                <p className="text-xs text-muted-foreground mt-1">
+                  Invoice numbering starts from this number
+                </p>
+              </div>
+              <div className="md:col-span-2">
+                <p className="text-sm text-muted-foreground bg-muted p-3 rounded-md">
+                  <strong>Preview:</strong> {editData.invoice_prefix || 'INV'}{String(editData.current_invoice_number || editData.invoice_start_number || 1).padStart(4, '0')}
+                  <br />
+                  <span className="text-xs">Next invoice will be numbered as shown above</span>
+                </p>
+              </div>
+            </div>
+          </div>
         </div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -283,6 +324,27 @@ export default function MyProfile({ salon, onUpdate, getAuthHeaders }) {
                   </div>
                 </>
               )}
+            </div>
+          </div>
+
+          {/* Invoice Settings (View Mode) */}
+          <div className="md:col-span-2 border-t border-border pt-6">
+            <h4 className="font-bold text-card-foreground mb-4">Invoice Settings</h4>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              <div>
+                <p className="text-sm text-muted-foreground mb-1">Invoice Prefix</p>
+                <p className="text-foreground font-bold">{salon.invoice_prefix || 'INV'}</p>
+              </div>
+              <div>
+                <p className="text-sm text-muted-foreground mb-1">Starting Number</p>
+                <p className="text-foreground font-bold">{salon.invoice_start_number || 1}</p>
+              </div>
+              <div>
+                <p className="text-sm text-muted-foreground mb-1">Current Invoice Number</p>
+                <p className="text-foreground font-bold">
+                  {salon.invoice_prefix || 'INV'}{String(salon.current_invoice_number || salon.invoice_start_number || 1).padStart(4, '0')}
+                </p>
+              </div>
             </div>
           </div>
         </div>

@@ -88,6 +88,8 @@ class SalonUpdate(BaseModel):
     gstin: Optional[str] = None
     logo_url: Optional[str] = None
     tax_rate: Optional[float] = None
+    invoice_prefix: Optional[str] = None
+    invoice_start_number: Optional[int] = None
 
 class Salon(BaseModel):
     model_config = ConfigDict(extra="ignore")
@@ -106,6 +108,9 @@ class Salon(BaseModel):
     gstin: Optional[str] = None
     logo_url: Optional[str] = None
     tax_rate: float = 2.5  # Default GST rate (CGST + SGST = 5%)
+    invoice_prefix: str = "INV"  # Invoice number prefix
+    invoice_start_number: int = 1  # Starting invoice number
+    current_invoice_number: int = 1  # Current invoice counter
     created_at: str
 
 # Service Models
@@ -523,9 +528,16 @@ async def generate_and_send_invoice(token_id: str):
             sgst = 0
             total = subtotal
         
-        # Generate invoice number
-        invoice_no = f"{salon.get('salon_name', 'SALON')[:2].upper()}-{token.get('token_number', 0):04d}"
+        # Generate invoice number using salon's prefix and counter
+        invoice_prefix = salon.get('invoice_prefix', 'INV')
+        current_number = salon.get('current_invoice_number', 1)
+        invoice_no = f"{invoice_prefix}{current_number:04d}"
         
+        # Increment invoice counter for next time
+        await db.salons.update_one(
+            {"id": salon['id']},
+            {"$inc": {"current_invoice_number": 1}}
+        )        
         # Prepare invoice data
         invoice_data = {
             "salon": {
@@ -1561,12 +1573,16 @@ async def get_barber_queue(salon_id: str, barber_id: str, date: Optional[str] = 
     return tokens
 
 @api_router.get("/salons/{salon_id}/queue", response_model=List[TokenModel])
-async def get_salon_queue(salon_id: str, date: Optional[str] = None):
+async def get_salon_queue(salon_id: str, date: Optional[str] = None, status: Optional[str] = None):
     """Get entire salon queue (all barbers)"""
     if not date:
         date = datetime.now(timezone.utc).date().isoformat()
     
-    tokens = await db.tokens.find({"salon_id": salon_id, "date": date}, {"_id": 0}).sort([("barber_id", 1), ("token_number", 1)]).to_list(1000)
+    query = {"salon_id": salon_id, "date": date}
+    if status:
+        query["status"] = status
+    
+    tokens = await db.tokens.find(query, {"_id": 0}).sort([("barber_id", 1), ("token_number", 1)]).to_list(1000)
     return tokens
 
 @api_router.post("/salons/{salon_id}/barbers/{barber_id}/call-next")
