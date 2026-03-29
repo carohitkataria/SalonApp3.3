@@ -105,7 +105,7 @@ class Salon(BaseModel):
     is_gst_registered: bool = False
     gstin: Optional[str] = None
     logo_url: Optional[str] = None
-    tax_rate: float = 9.0  # Default GST rate (CGST + SGST = 18%)
+    tax_rate: float = 2.5  # Default GST rate (CGST + SGST = 5%)
     created_at: str
 
 # Service Models
@@ -169,6 +169,38 @@ class PackageCreate(BaseModel):
 class Package(BaseModel):
     model_config = ConfigDict(extra="ignore")
     id: str
+    package_name: str
+    description: Optional[str] = None
+    service_ids: List[str]
+    total_price: float
+    image_url: Optional[str] = None
+    gender_tag: str = "Unisex"
+    is_active: bool = True
+    created_at: str
+
+# Salon-Specific Package Models (for customized packages per salon)
+class SalonPackageCreate(BaseModel):
+    salon_id: str
+    package_name: str
+    description: Optional[str] = None
+    service_ids: List[str]
+    total_price: float
+    image_url: Optional[str] = None
+    gender_tag: str = "Unisex"
+
+class SalonPackageUpdate(BaseModel):
+    package_name: Optional[str] = None
+    description: Optional[str] = None
+    service_ids: Optional[List[str]] = None
+    total_price: Optional[float] = None
+    image_url: Optional[str] = None
+    gender_tag: Optional[str] = None
+    is_active: Optional[bool] = None
+
+class SalonPackage(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    id: str
+    salon_id: str
     package_name: str
     description: Optional[str] = None
     service_ids: List[str]
@@ -709,6 +741,84 @@ async def connect(sid, environ):
 async def disconnect(sid):
     logger.info(f"Client disconnected: {sid}")
 
+
+
+# ============ PREDEFINED SERVICES INITIALIZATION ============
+
+from predefined_services import PREDEFINED_SERVICES, PREDEFINED_PACKAGES
+
+async def initialize_predefined_services_for_salon(salon_id: str):
+    """Initialize predefined services and packages for a salon on first access"""
+    
+    # Check if already initialized
+    initialized = await db.salon_initialized.find_one({"salon_id": salon_id})
+    if initialized:
+        return {"already_initialized": True}
+    
+    # Initialize global services if not exists
+    service_count = await db.services.count_documents({})
+    if service_count == 0:
+        services_to_insert = []
+        for service_data in PREDEFINED_SERVICES:
+            service = {
+                "id": str(uuid.uuid4()),
+                **service_data,
+                "is_active": True,
+                "images": [],
+                "is_favorite": False
+            }
+            services_to_insert.append(service)
+        
+        if services_to_insert:
+            await db.services.insert_many(services_to_insert)
+    
+    # Get all service IDs
+    all_services = await db.services.find({}, {"_id": 0, "id": 1}).to_list(1000)
+    service_ids = [s["id"] for s in all_services]
+    
+    # Initialize salon_services (all disabled by default - salon can enable them)
+    salon_services_to_insert = []
+    for service_id in service_ids:
+        salon_service = {
+            "id": str(uuid.uuid4()),
+            "salon_id": salon_id,
+            "service_id": service_id,
+            "is_enabled": False,  # Salon must enable services they want to offer
+            "created_at": datetime.now(timezone.utc).isoformat()
+        }
+        salon_services_to_insert.append(salon_service)
+    
+    if salon_services_to_insert:
+        await db.salon_services.insert_many(salon_services_to_insert)
+    
+    # Initialize predefined packages for this salon
+    packages_to_insert = []
+    for package_data in PREDEFINED_PACKAGES:
+        package = {
+            "id": str(uuid.uuid4()),
+            "salon_id": salon_id,
+            **package_data,
+            "service_ids": [],  # Salon will add services to packages
+            "is_active": True,
+            "created_at": datetime.now(timezone.utc).isoformat()
+        }
+        packages_to_insert.append(package)
+    
+    if packages_to_insert:
+        await db.salon_packages.insert_many(packages_to_insert)
+    
+    # Mark as initialized
+    await db.salon_initialized.insert_one({
+        "salon_id": salon_id,
+        "initialized_at": datetime.now(timezone.utc).isoformat()
+    })
+    
+    return {
+        "initialized": True,
+        "services_count": len(service_ids),
+        "packages_count": len(packages_to_insert)
+    }
+
 # ============ API ROUTES ============
 
 @api_router.get("/")
@@ -766,6 +876,89 @@ async def update_salon(salon_id: str, salon: SalonUpdate, current_salon=Depends(
     
     updated = await db.salons.find_one({"id": salon_id}, {"_id": 0})
     return Salon(**updated)
+
+@api_router.post("/salons/{salon_id}/initialize")
+async def initialize_salon_services(salon_id: str, current_salon=Depends(get_current_salon)):
+    """Initialize predefined services and packages for a salon"""
+    salon = await db.salons.find_one({"id": salon_id}, {"_id": 0})
+    if not salon:
+        raise HTTPException(status_code=404, detail="Salon not found")
+    
+    result = await initialize_predefined_services_for_salon(salon_id)
+    return result
+
+@api_router.get("/salons/{salon_id}/services/enabled")
+async def get_salon_enabled_services(salon_id: str):
+    """Get all services enabled for a specific salon"""
+    # Get salon's enabled services
+    salon_services = await db.salon_services.find(
+        {"salon_id": salon_id, "is_enabled": True},
+        {"_id": 0}
+    ).to_list(1000)
+    
+    service_ids = [ss["service_id"] for ss in salon_services]
+    
+    # Get service details
+    services = await db.services.find(
+        {"id": {"$in": service_ids}, "is_active": True},
+        {"_id": 0}
+    ).to_list(1000)
+    
+    return services
+
+@api_router.get("/salons/{salon_id}/services/all")
+async def get_all_services_with_salon_status(salon_id: str):
+    """Get all services with their enabled status for the salon"""
+    # Get all services
+    all_services = await db.services.find({"is_active": True}, {"_id": 0}).to_list(1000)
+    
+    # Get salon's service statuses
+    salon_services = await db.salon_services.find(
+        {"salon_id": salon_id},
+        {"_id": 0, "service_id": 1, "is_enabled": 1}
+    ).to_list(1000)
+    
+    # Create a map of service_id to is_enabled
+    salon_service_map = {ss["service_id"]: ss["is_enabled"] for ss in salon_services}
+    
+    # Add is_enabled field to each service
+    for service in all_services:
+        service["is_enabled_for_salon"] = salon_service_map.get(service["id"], False)
+    
+    return all_services
+
+@api_router.put("/salons/{salon_id}/services/{service_id}/toggle")
+async def toggle_service_for_salon(
+    salon_id: str, 
+    service_id: str, 
+    is_enabled: bool,
+    current_salon=Depends(get_current_salon)
+):
+    """Enable or disable a service for a specific salon"""
+    # Check if salon_service entry exists
+    salon_service = await db.salon_services.find_one({
+        "salon_id": salon_id,
+        "service_id": service_id
+    })
+    
+    if salon_service:
+        # Update existing
+        await db.salon_services.update_one(
+            {"salon_id": salon_id, "service_id": service_id},
+            {"$set": {"is_enabled": is_enabled}}
+        )
+    else:
+        # Create new entry
+        await db.salon_services.insert_one({
+            "id": str(uuid.uuid4()),
+            "salon_id": salon_id,
+            "service_id": service_id,
+            "is_enabled": is_enabled,
+            "created_at": datetime.now(timezone.utc).isoformat()
+        })
+    
+    return {"success": True, "is_enabled": is_enabled}
+
 
 # ============ SERVICE ROUTES ============
 
@@ -917,6 +1110,84 @@ async def delete_package(package_id: str, current_salon=Depends(get_current_salo
     
     await db.packages.update_one({"id": package_id}, {"$set": {"is_active": False}})
     return {"message": "Package deleted"}
+
+# ============ SALON-SPECIFIC PACKAGE ROUTES ============
+
+@api_router.get("/salons/{salon_id}/packages", response_model=List[SalonPackage])
+async def get_salon_packages(salon_id: str, gender: Optional[str] = None):
+    """Get all packages for a specific salon"""
+    query = {"salon_id": salon_id, "is_active": True}
+    if gender and gender != "all":
+        query["$or"] = [{"gender_tag": gender}, {"gender_tag": "Unisex"}]
+    
+    packages = await db.salon_packages.find(query, {"_id": 0}).to_list(100)
+    return packages
+
+@api_router.post("/salons/{salon_id}/packages", response_model=SalonPackage)
+async def create_salon_package(
+    salon_id: str,
+    package: SalonPackageCreate,
+    current_salon=Depends(get_current_salon)
+):
+    """Create a new package for a salon"""
+    package_dict = package.model_dump()
+    package_dict["id"] = str(uuid.uuid4())
+    package_dict["is_active"] = True
+    package_dict["created_at"] = datetime.now(timezone.utc).isoformat()
+    
+    await db.salon_packages.insert_one(package_dict)
+    return SalonPackage(**package_dict)
+
+@api_router.put("/salons/{salon_id}/packages/{package_id}", response_model=SalonPackage)
+async def update_salon_package(
+    salon_id: str,
+    package_id: str,
+    package: SalonPackageUpdate,
+    current_salon=Depends(get_current_salon)
+):
+    """Update a salon's package"""
+    existing = await db.salon_packages.find_one(
+        {"id": package_id, "salon_id": salon_id},
+        {"_id": 0}
+    )
+    if not existing:
+        raise HTTPException(status_code=404, detail="Package not found")
+    
+    # Only update provided fields
+    update_data = {k: v for k, v in package.model_dump().items() if v is not None}
+    
+    if update_data:
+        await db.salon_packages.update_one(
+            {"id": package_id, "salon_id": salon_id},
+            {"$set": update_data}
+        )
+    
+    updated = await db.salon_packages.find_one(
+        {"id": package_id, "salon_id": salon_id},
+        {"_id": 0}
+    )
+    return SalonPackage(**updated)
+
+@api_router.delete("/salons/{salon_id}/packages/{package_id}")
+async def delete_salon_package(
+    salon_id: str,
+    package_id: str,
+    current_salon=Depends(get_current_salon)
+):
+    """Delete a salon's package"""
+    existing = await db.salon_packages.find_one(
+        {"id": package_id, "salon_id": salon_id},
+        {"_id": 0}
+    )
+    if not existing:
+        raise HTTPException(status_code=404, detail="Package not found")
+    
+    await db.salon_packages.update_one(
+        {"id": package_id, "salon_id": salon_id},
+        {"$set": {"is_active": False}}
+    )
+    return {"message": "Package deleted"}
+
 
 # ============ BARBER ROUTES ============
 

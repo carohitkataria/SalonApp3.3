@@ -7,6 +7,7 @@ import { toast } from 'sonner';
 import ThemeToggle from '@/components/ThemeToggle';
 import BarberManagement from '@/components/BarberManagement';
 import OfferingsModule from '@/components/OfferingsModule';
+import MyProfile from '@/components/MyProfile';
 import { 
   Scissors, LogOut, ChevronRight, SkipForward, RotateCcw, XCircle,
   Clock, User, Phone, Bell, MapPin, Settings, CheckCircle, Calendar,
@@ -231,7 +232,7 @@ export default function EnhancedSalonDashboard() {
             { id: 'queue', label: 'Token Queue', icon: Calendar },
             { id: 'barbers', label: 'Barbers', icon: Users },
             { id: 'services', label: 'Offerings', icon: Scissors },
-            { id: 'salon', label: 'Salon Info', icon: MapPin }
+            { id: 'salon', label: 'My Profile', icon: MapPin }
           ].map((tab) => {
             const Icon = tab.icon;
             return (
@@ -401,43 +402,12 @@ export default function EnhancedSalonDashboard() {
           />
         )}
 
-        {activeTab === 'salon' && salon && (
-          <div className="bg-card border border-border rounded-lg p-8">
-            <h3 className="text-lg font-bold text-card-foreground mb-6 flex items-center">
-              <MapPin className="w-5 h-5 mr-2 text-gold" />
-              Salon Information
-            </h3>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              <div>
-                <p className="text-sm text-muted-foreground mb-1">Salon Name</p>
-                <p className="text-foreground font-bold">{salon.salon_name}</p>
-              </div>
-              <div>
-                <p className="text-sm text-muted-foreground mb-1">Owner</p>
-                <p className="text-foreground font-bold">{salon.owner_name}</p>
-              </div>
-              <div>
-                <p className="text-sm text-muted-foreground mb-1">Phone</p>
-                <p className="text-foreground font-bold">{salon.phone}</p>
-              </div>
-              <div>
-                <p className="text-sm text-muted-foreground mb-1">Email</p>
-                <p className="text-foreground font-bold">{salon.email || 'N/A'}</p>
-              </div>
-              <div className="md:col-span-2">
-                <p className="text-sm text-muted-foreground mb-1">Address</p>
-                <p className="text-foreground font-bold">{salon.address}</p>
-              </div>
-              <div>
-                <p className="text-sm text-muted-foreground mb-1">UPI ID</p>
-                <p className="text-foreground font-bold">{salon.upi_id || 'Not configured'}</p>
-              </div>
-              <div>
-                <p className="text-sm text-muted-foreground mb-1">Payment Timing</p>
-                <p className="text-foreground font-bold capitalize">{salon.payment_timing}</p>
-              </div>
-            </div>
-          </div>
+        {activeTab === 'salon' && (
+          <MyProfile 
+            salon={salon}
+            onUpdate={(updatedSalon) => setSalon(updatedSalon)}
+            getAuthHeaders={getAuthHeaders}
+          />
         )}
       </div>
     </div>
