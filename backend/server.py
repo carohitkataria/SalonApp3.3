@@ -1479,12 +1479,20 @@ async def send_otp(request: SalonOTPRequest):
         "delivery_status": whatsapp_result.get('status')
     }
     
-    # Only include OTP in response if delivery failed (for testing/debugging)
-    if whatsapp_result.get('status') == 'failed':
+    # Include OTP in response for testing (mock mode or failed delivery)
+    if whatsapp_result.get('status') in ['mock', 'failed']:
         response['otp'] = otp
-        response['error'] = whatsapp_result.get('error')
-        response['note'] = "OTP included because WhatsApp delivery failed"
-        logger.error(f"WhatsApp delivery failed for {phone}: {whatsapp_result.get('error')}")
+        if whatsapp_result.get('status') == 'mock':
+            response['note'] = "⚠️ Twilio not configured - OTP shown for testing"
+            logger.warning(f"Mock OTP for {phone}: {otp}")
+        else:
+            response['error'] = whatsapp_result.get('error')
+            response['note'] = "OTP included because WhatsApp delivery failed"
+            logger.error(f"WhatsApp delivery failed for {phone}: {whatsapp_result.get('error')}")
+    else:
+        # For successful WhatsApp delivery, also log OTP for debugging
+        logger.info(f"✅ OTP sent via WhatsApp to {phone}. Check WhatsApp for OTP: {otp}")
+        response['note'] = "OTP sent to your WhatsApp. Please check your messages."
     
     return response
 
