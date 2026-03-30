@@ -3,6 +3,9 @@ import { useNavigate } from 'react-router-dom';
 import { useWebSocket } from '@/contexts/WebSocketContext';
 import axios from 'axios';
 import { Button } from '@/components/ui/button';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
+import { Checkbox } from '@/components/ui/checkbox';
+import { Label } from '@/components/ui/label';
 import { toast } from 'sonner';
 import ThemeToggle from '@/components/ThemeToggle';
 import BarberManagement from '@/components/BarberManagement';
@@ -11,7 +14,7 @@ import MyProfile from '@/components/MyProfile';
 import { 
   Scissors, LogOut, ChevronRight, SkipForward, RotateCcw, XCircle,
   Clock, User, Phone, Bell, MapPin, Settings, CheckCircle, Calendar,
-  Users, ArrowLeft, FileText, Download
+  Users, ArrowLeft, FileText, Download, Plus
 } from 'lucide-react';
 import { motion } from 'framer-motion';
 
@@ -30,6 +33,12 @@ export default function EnhancedSalonDashboard() {
   const [selectedBarber, setSelectedBarber] = useState('all');
   const [filter, setFilter] = useState('all');
   const [date] = useState(new Date().toISOString().split('T')[0]);
+  
+  // Add Services Dialog State
+  const [addServicesDialog, setAddServicesDialog] = useState(false);
+  const [selectedToken, setSelectedToken] = useState(null);
+  const [allServices, setAllServices] = useState([]);
+  const [selectedNewServices, setSelectedNewServices] = useState([]);
 
   useEffect(() => {
     const storedSalonId = localStorage.getItem('salon_id');
@@ -196,6 +205,52 @@ export default function EnhancedSalonDashboard() {
     } catch (error) {
       toast.error('Failed to send notification');
     }
+  };
+
+  const fetchAllServices = async () => {
+    try {
+      const response = await axios.get(`${API}/services`);
+      setAllServices(response.data);
+    } catch (error) {
+      console.error('Error fetching services:', error);
+      toast.error('Failed to load services');
+    }
+  };
+
+  const handleOpenAddServices = async (token) => {
+    setSelectedToken(token);
+    setSelectedNewServices([]);
+    await fetchAllServices();
+    setAddServicesDialog(true);
+  };
+
+  const handleAddServices = async () => {
+    if (selectedNewServices.length === 0) {
+      toast.error('Please select at least one service');
+      return;
+    }
+
+    try {
+      const response = await axios.put(
+        `${API}/tokens/${selectedToken.id}/add-services`,
+        { service_ids: selectedNewServices },
+        { headers: getAuthHeaders() }
+      );
+      
+      toast.success('Services added successfully');
+      setAddServicesDialog(false);
+      fetchTokens(salonId);
+    } catch (error) {
+      toast.error(error.response?.data?.detail || 'Failed to add services');
+    }
+  };
+
+  const toggleServiceSelection = (serviceId) => {
+    setSelectedNewServices(prev =>
+      prev.includes(serviceId)
+        ? prev.filter(id => id !== serviceId)
+        : [...prev, serviceId]
+    );
   };
 
   const handleLogout = () => {
@@ -405,8 +460,17 @@ export default function EnhancedSalonDashboard() {
                           </Button>
                           <Button 
                             size="sm" 
-                            onClick={() => handleSendNotification(token.id)} 
+                            onClick={() => handleOpenAddServices(token)} 
                             className="bg-purple-600 hover:bg-purple-700"
+                            title="Add more services"
+                          >
+                            <Plus className="w-3 h-3 mr-1" />
+                            Add Services
+                          </Button>
+                          <Button 
+                            size="sm" 
+                            onClick={() => handleSendNotification(token.id)} 
+                            className="bg-gray-600 hover:bg-gray-700"
                             title="Send notification"
                           >
                             <Bell className="w-3 h-3" />
@@ -442,6 +506,15 @@ export default function EnhancedSalonDashboard() {
                           >
                             <CheckCircle className="w-3 h-3 mr-1" />
                             Complete
+                          </Button>
+                          <Button 
+                            size="sm" 
+                            onClick={() => handleOpenAddServices(token)} 
+                            className="bg-purple-600 hover:bg-purple-700 text-white"
+                            title="Add more services"
+                          >
+                            <Plus className="w-3 h-3 mr-1" />
+                            Add Services
                           </Button>
                           <Button 
                             size="sm" 
@@ -539,6 +612,68 @@ export default function EnhancedSalonDashboard() {
           />
         )}
       </div>
+
+      {/* Add Services Dialog */}
+      <Dialog open={addServicesDialog} onOpenChange={setAddServicesDialog}>
+        <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Add Services to Booking</DialogTitle>
+          </DialogHeader>
+          
+          {selectedToken && (
+            <div className="mb-4 p-4 bg-muted rounded-lg">
+              <p className="text-sm"><strong>Customer:</strong> {selectedToken.customer_name}</p>
+              <p className="text-sm"><strong>Token:</strong> {selectedToken.token_number}</p>
+              <p className="text-sm"><strong>Current Amount:</strong> ₹{selectedToken.total_amount}</p>
+            </div>
+          )}
+
+          <div className="space-y-3">
+            <p className="text-sm text-muted-foreground">Select services to add:</p>
+            {allServices.map(service => {
+              const alreadySelected = selectedToken?.selected_services?.includes(service.id);
+              return (
+                <div 
+                  key={service.id}
+                  className={`flex items-center space-x-3 p-3 border rounded-lg ${
+                    alreadySelected ? 'opacity-50 bg-muted' : 'hover:border-gold cursor-pointer'
+                  }`}
+                  onClick={() => !alreadySelected && toggleServiceSelection(service.id)}
+                >
+                  <Checkbox
+                    checked={selectedNewServices.includes(service.id)}
+                    disabled={alreadySelected}
+                    onCheckedChange={() => toggleServiceSelection(service.id)}
+                  />
+                  <div className="flex-1">
+                    <p className="font-semibold">{service.service_name}</p>
+                    <p className="text-xs text-muted-foreground">{service.category}</p>
+                  </div>
+                  <div className="text-right">
+                    <p className="font-bold text-gold">₹{service.base_price}</p>
+                  </div>
+                  {alreadySelected && (
+                    <span className="text-xs text-muted-foreground">(Already added)</span>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+
+          <div className="flex justify-end space-x-2 mt-4">
+            <Button variant="outline" onClick={() => setAddServicesDialog(false)}>
+              Cancel
+            </Button>
+            <Button 
+              onClick={handleAddServices}
+              className="bg-gold text-black hover:bg-gold/90"
+              disabled={selectedNewServices.length === 0}
+            >
+              Add {selectedNewServices.length} Service{selectedNewServices.length !== 1 ? 's' : ''}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

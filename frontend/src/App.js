@@ -10,6 +10,8 @@ import HomePage from '@/pages/HomePage';
 import SalonSelectionPage from '@/pages/SalonSelectionPage';
 import SinglePageBooking from '@/pages/SinglePageBooking';
 import HistoryPage from '@/pages/HistoryPage';
+import TokenDashboard from '@/pages/TokenDashboard';
+import ServicesBrowser from '@/pages/ServicesBrowser';
 
 // Salon Pages
 import OTPLoginPage from '@/pages/OTPLoginPage';
@@ -32,6 +34,8 @@ function App() {
                 <Route path="/" element={<HomePage />} />
                 <Route path="/salons" element={<SalonSelectionPage />} />
                 <Route path="/book/:salonId" element={<SinglePageBooking />} />
+                <Route path="/salon/:salonId/queue" element={<TokenDashboard />} />
+                <Route path="/salon/:salonId/services" element={<ServicesBrowser />} />
                 <Route path="/history" element={<HistoryPage />} />
                 
                 {/* Salon Routes */}

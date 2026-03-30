@@ -283,6 +283,28 @@ export default function SinglePageBooking() {
           {salon && <p className="text-muted-foreground">{salon.salon_name}</p>}
         </div>
 
+        {/* Quick Access Links */}
+        <div className="grid grid-cols-2 gap-3 mb-6">
+          <Button
+            type="button"
+            variant="outline"
+            onClick={() => navigate(`/salon/${salonId}/queue`)}
+            className="border-gold text-gold hover:bg-gold/10"
+          >
+            <Clock className="w-4 h-4 mr-2" />
+            Live Queue
+          </Button>
+          <Button
+            type="button"
+            variant="outline"
+            onClick={() => navigate(`/salon/${salonId}/services`)}
+            className="border-gold text-gold hover:bg-gold/10"
+          >
+            <Scissors className="w-4 h-4 mr-2" />
+            Browse Services
+          </Button>
+        </div>
+
         <form onSubmit={handleSubmit} className="space-y-6">
           {/* Date & Time Selection */}
           <div className="bg-card border border-border rounded-lg p-6">
