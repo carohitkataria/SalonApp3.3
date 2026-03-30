@@ -14,6 +14,7 @@ export default function UserLoginPage() {
   const { loginUser } = useAuth();
   const [name, setName] = useState('');
   const [phone, setPhone] = useState('');
+  const [gender, setGender] = useState('Men');
   const [loading, setLoading] = useState(false);
 
   // Get the redirect path from state or default to home
@@ -28,7 +29,7 @@ export default function UserLoginPage() {
     }
 
     setLoading(true);
-    const result = await loginUser(name, phone);
+    const result = await loginUser(name, phone, gender);
     setLoading(false);
 
     if (result.success) {
@@ -89,6 +90,34 @@ export default function UserLoginPage() {
                 required
                 className="flex-1 bg-transparent border-b border-white/20 rounded-none px-0 py-3 text-white focus:border-gold focus:ring-0 placeholder:text-white/30"
               />
+            </div>
+          </div>
+
+          <div>
+            <Label className="text-white text-sm mb-2 block">Gender</Label>
+            <div className="flex gap-4">
+              <button
+                type="button"
+                onClick={() => setGender('Men')}
+                className={`flex-1 py-3 px-4 border transition-all ${
+                  gender === 'Men'
+                    ? 'bg-gold text-black border-gold'
+                    : 'bg-transparent text-white border-white/20 hover:border-gold'
+                }`}
+              >
+                Men
+              </button>
+              <button
+                type="button"
+                onClick={() => setGender('Women')}
+                className={`flex-1 py-3 px-4 border transition-all ${
+                  gender === 'Women'
+                    ? 'bg-gold text-black border-gold'
+                    : 'bg-transparent text-white border-white/20 hover:border-gold'
+                }`}
+              >
+                Women
+              </button>
             </div>
           </div>
 

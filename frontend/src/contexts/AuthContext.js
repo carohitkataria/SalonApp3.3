@@ -27,7 +27,7 @@ export const AuthProvider = ({ children }) => {
     setLoading(false);
   }, []);
 
-  const loginUser = async (name, phone) => {
+  const loginUser = async (name, phone, gender = null) => {
     try {
       // Auto-append +91 if not present
       let formattedPhone = phone;
@@ -37,7 +37,8 @@ export const AuthProvider = ({ children }) => {
 
       const response = await axios.post(`${API}/user/login`, {
         name,
-        phone: formattedPhone
+        phone: formattedPhone,
+        gender
       });
 
       const userData = response.data;

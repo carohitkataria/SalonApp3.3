@@ -276,12 +276,14 @@ class SalonToken(BaseModel):
 class UserLogin(BaseModel):
     name: str
     phone: str
+    gender: Optional[str] = None  # Men/Women
 
 class User(BaseModel):
     model_config = ConfigDict(extra="ignore")
     id: str
     name: str
     phone: str
+    gender: Optional[str] = None  # Men/Women
     created_at: str
 
 # Token/Booking Models
@@ -291,22 +293,25 @@ class BookingCreate(BaseModel):
     customer_name: str
     phone: str
     date: str
-    time_slot: str  # "08:00-10:00"
+    shift: str  # Morning/Noon/Evening
+    time_slot: Optional[str] = None  # Keep for backward compatibility
     barber_id: str  # can be "any"
     selected_services: List[str]
     source: str = "online"
     booking_type: str = "instant"  # instant/future
+    booking_for_self: bool = True  # True = self, False = others
 
 class TokenModel(BaseModel):
     model_config = ConfigDict(extra="ignore")
     id: str
     salon_id: str
-    token_number: int
+    token_number: str  # Now string format: M001, N001, E001
     customer_name: str
     phone: str
     user_id: Optional[str] = None
     date: str
-    time_slot: str
+    shift: str  # Morning/Noon/Evening
+    time_slot: Optional[str] = None  # Keep for backward compatibility
     barber_id: str
     barber_name: str
     selected_services: List[str]
@@ -317,12 +322,16 @@ class TokenModel(BaseModel):
     upi_transaction_id: Optional[str] = None
     source: str
     booking_type: str
+    booking_for_self: bool = True
     allocated_at: Optional[str] = None
     called_at: Optional[str] = None
     completed_at: Optional[str] = None
     recall_count: int = 0
     invoice_id: Optional[str] = None  # Link to invoice
     created_at: str
+
+class AddServicesRequest(BaseModel):
+    service_ids: List[str]  # List of new service IDs to add
 
 # Invoice Model
 class Invoice(BaseModel):
@@ -381,8 +390,54 @@ def calculate_distance(lat1, lon1, lat2, lon2):
     
     return R * c
 
+def get_shifts():
+    """Get available shifts with timings"""
+    return [
+        {"id": "Morning", "name": "Morning", "time": "7 AM - 11 AM"},
+        {"id": "Noon", "name": "Noon", "time": "11 AM - 4 PM"},
+        {"id": "Evening", "name": "Evening", "time": "4 PM - 9 PM"}
+    ]
+
+def get_shift_prefix(shift: str) -> str:
+    """Get token prefix for shift"""
+    prefixes = {
+        "Morning": "M",
+        "Noon": "N",
+        "Evening": "E"
+    }
+    return prefixes.get(shift, "M")
+
+def extract_token_sequence(token_number: str) -> int:
+    """Extract numeric sequence from token (e.g., M001 -> 1)"""
+    try:
+        return int(token_number[1:])  # Skip first character (prefix)
+    except:
+        return 0
+
+async def get_next_token_number(salon_id: str, barber_id: str, date: str, shift: str) -> str:
+    """Get next token number for specific salon/barber/date/shift"""
+    prefix = get_shift_prefix(shift)
+    
+    # Find all tokens for this shift (tokens starting with the shift prefix)
+    tokens = await db.tokens.find(
+        {"salon_id": salon_id, "barber_id": barber_id, "date": date},
+        {"_id": 0, "token_number": 1}
+    ).to_list(1000)
+    
+    # Filter tokens for this shift and get max sequence
+    shift_tokens = [t for t in tokens if t.get("token_number", "").startswith(prefix)]
+    
+    if shift_tokens:
+        max_seq = max([extract_token_sequence(t["token_number"]) for t in shift_tokens])
+        next_seq = max_seq + 1
+    else:
+        next_seq = 1
+    
+    # Format as prefix + 3-digit number (e.g., M001, N042)
+    return f"{prefix}{next_seq:03d}"
+
 def generate_2hour_slots():
-    """Generate 2-hour time slots"""
+    """DEPRECATED: Generate 2-hour time slots (kept for backward compatibility)"""
     slots = []
     start_times = list(range(8, 22, 2))  # 8AM to 10PM, every 2 hours
     
@@ -392,17 +447,6 @@ def generate_2hour_slots():
         slots.append(slot)
     
     return slots
-
-async def get_next_token_number(salon_id: str, barber_id: str, date: str) -> int:
-    """Get next token number for specific salon/barber/date"""
-    tokens = await db.tokens.find(
-        {"salon_id": salon_id, "barber_id": barber_id, "date": date},
-        {"_id": 0}
-    ).sort("token_number", -1).limit(1).to_list(1)
-    
-    if tokens:
-        return tokens[0]["token_number"] + 1
-    return 1
 
 async def calculate_booking_total(service_ids: List[str], barber_id: str) -> float:
     """Calculate total amount for selected services"""
@@ -465,7 +509,7 @@ async def send_booking_notification(token_data: dict, notification_type: str):
     except Exception as e:
         logger.error(f"Failed to send notification {notification_type}: {str(e)}")
 
-async def check_and_notify_nearby_tokens(salon_id: str, barber_id: str, date: str, current_token_number: int):
+async def check_and_notify_nearby_tokens(salon_id: str, barber_id: str, date: str, current_token_number: str):
     """Check and notify customers who are 3 or 1 token away"""
     try:
         # Get all waiting tokens for this barber
@@ -474,9 +518,12 @@ async def check_and_notify_nearby_tokens(salon_id: str, barber_id: str, date: st
             {"_id": 0}
         ).sort("token_number", 1).to_list(100)
         
+        current_seq = extract_token_sequence(current_token_number)
+        
         for token in waiting_tokens:
             token_number = token.get('token_number')
-            tokens_away = token_number - current_token_number
+            token_seq = extract_token_sequence(token_number)
+            tokens_away = token_seq - current_seq
             
             # Notify if 3 tokens away or 1 token away
             if tokens_away == 3 or tokens_away == 1:
@@ -1515,18 +1562,27 @@ async def user_login(credentials: UserLogin):
     user = await db.users.find_one({"phone": phone}, {"_id": 0})
     
     if user:
+        # Update name and gender if changed
+        update_fields = {}
         if user["name"] != credentials.name:
+            update_fields["name"] = credentials.name
+        if credentials.gender and user.get("gender") != credentials.gender:
+            update_fields["gender"] = credentials.gender
+        
+        if update_fields:
             await db.users.update_one(
                 {"phone": phone},
-                {"$set": {"name": credentials.name}}
+                {"$set": update_fields}
             )
-            user["name"] = credentials.name
+            user.update(update_fields)
+        
         return User(**user)
     else:
         new_user = {
             "id": str(uuid.uuid4()),
             "name": credentials.name,
             "phone": phone,
+            "gender": credentials.gender,
             "created_at": datetime.now(timezone.utc).isoformat()
         }
         await db.users.insert_one(new_user)
@@ -1534,9 +1590,14 @@ async def user_login(credentials: UserLogin):
 
 # ============ BOOKING/TOKEN ROUTES ============
 
+@api_router.get("/shifts")
+async def get_available_shifts():
+    """Get available shifts for booking"""
+    return {"shifts": get_shifts()}
+
 @api_router.get("/slots")
 async def get_available_slots(date: Optional[str] = None):
-    """Get 2-hour time slots"""
+    """DEPRECATED: Get 2-hour time slots (kept for backward compatibility)"""
     if date:
         parsed_date = datetime.fromisoformat(date).date()
         day_name = parsed_date.strftime("%A")
@@ -1549,7 +1610,7 @@ async def get_available_slots(date: Optional[str] = None):
 
 @api_router.post("/bookings", response_model=TokenModel)
 async def create_booking(booking: BookingCreate):
-    """Create new booking/token"""
+    """Create new booking/token with shift-based system"""
     # Validate phone
     phone = booking.phone
     if not phone.startswith("+91"):
@@ -1569,11 +1630,12 @@ async def create_booking(booking: BookingCreate):
     if booking.barber_id != "any":
         total_amount = await calculate_booking_total(booking.selected_services, booking.barber_id)
     
-    # Get token number
+    # Get token number with shift
     if booking.booking_type == "instant":
-        token_number = await get_next_token_number(booking.salon_id, booking.barber_id, booking.date)
+        token_number = await get_next_token_number(booking.salon_id, booking.barber_id, booking.date, booking.shift)
     else:
-        token_number = 0  # Will be allocated at 5-6 AM
+        # For future bookings, assign temporary token
+        token_number = f"{get_shift_prefix(booking.shift)}000"
     
     # Create token
     token_dict = {
@@ -1584,7 +1646,8 @@ async def create_booking(booking: BookingCreate):
         "phone": phone,
         "user_id": booking.user_id,
         "date": booking.date,
-        "time_slot": booking.time_slot,
+        "shift": booking.shift,
+        "time_slot": booking.time_slot,  # Optional, for backward compatibility
         "barber_id": booking.barber_id,
         "barber_name": barber_name,
         "selected_services": booking.selected_services,
@@ -1595,6 +1658,7 @@ async def create_booking(booking: BookingCreate):
         "upi_transaction_id": None,
         "source": booking.source,
         "booking_type": booking.booking_type,
+        "booking_for_self": booking.booking_for_self,
         "allocated_at": datetime.now(timezone.utc).isoformat() if booking.booking_type == "instant" else None,
         "created_at": datetime.now(timezone.utc).isoformat()
     }
@@ -1857,9 +1921,13 @@ async def send_token_notification(token_id: str, current_salon=Depends(get_curre
         {"_id": 0}
     )
     
-    current_token_number = current_token.get('token_number', 0) if current_token else 0
+    current_token_number = current_token.get('token_number', "M000") if current_token else "M000"
     user_token_number = token.get('token_number')
-    tokens_away = user_token_number - current_token_number
+    
+    # Calculate tokens away using sequence numbers
+    current_seq = extract_token_sequence(current_token_number) if current_token else 0
+    user_seq = extract_token_sequence(user_token_number)
+    tokens_away = user_seq - current_seq
     
     # Calculate estimated time (assume 20 minutes per token)
     estimated_minutes = tokens_away * 20
@@ -1902,6 +1970,189 @@ async def send_token_notification(token_id: str, current_salon=Depends(get_curre
         "tokens_away": tokens_away,
         "estimated_time": estimated_time
     }
+
+@api_router.put("/tokens/{token_id}/add-services")
+async def add_services_to_token(token_id: str, request: AddServicesRequest, current_salon=Depends(get_current_salon)):
+    """Add services to existing booking (before completion)"""
+    token = await db.tokens.find_one({"id": token_id}, {"_id": 0})
+    if not token:
+        raise HTTPException(status_code=404, detail="Token not found")
+    
+    # Check if token is already completed
+    if token.get("status") == "completed":
+        raise HTTPException(status_code=400, detail="Cannot add services to completed booking")
+    
+    # Get current services
+    current_services = token.get("selected_services", [])
+    
+    # Add new services (avoid duplicates)
+    for service_id in request.service_ids:
+        if service_id not in current_services:
+            current_services.append(service_id)
+    
+    # Recalculate total amount
+    total_amount = 0
+    if token["barber_id"] != "any":
+        total_amount = await calculate_booking_total(current_services, token["barber_id"])
+    
+    # Update token
+    await db.tokens.update_one(
+        {"id": token_id},
+        {"$set": {
+            "selected_services": current_services,
+            "total_amount": total_amount
+        }}
+    )
+    
+    # Get updated token
+    updated_token = await db.tokens.find_one({"id": token_id}, {"_id": 0})
+    
+    # Broadcast update
+    await broadcast_update("token_updated", updated_token)
+    
+    return {
+        "message": "Services added successfully",
+        "token": TokenModel(**updated_token)
+    }
+
+@api_router.get("/users/last-salon")
+async def get_last_salon_by_phone(phone: str):
+    """Get last visited salon by user phone number"""
+    # Normalize phone
+    if not phone.startswith("+91"):
+        phone = f"+91{phone}"
+    
+    # Find most recent booking for this phone
+    recent_booking = await db.tokens.find_one(
+        {"phone": phone},
+        {"_id": 0, "salon_id": 1},
+        sort=[("created_at", -1)]
+    )
+    
+    if not recent_booking:
+        return {"salon": None}
+    
+    # Get salon details
+    salon = await db.salons.find_one(
+        {"id": recent_booking["salon_id"]},
+        {"_id": 0}
+    )
+    
+    if salon:
+        return {"salon": Salon(**salon)}
+    
+    return {"salon": None}
+
+@api_router.get("/salons/search")
+async def search_salons(name: str):
+    """Search salons by name (case-insensitive partial match)"""
+    if not name or len(name) < 2:
+        raise HTTPException(status_code=400, detail="Search query must be at least 2 characters")
+    
+    # Search using case-insensitive regex
+    salons = await db.salons.find(
+        {
+            "is_active": True,
+            "salon_name": {"$regex": name, "$options": "i"}
+        },
+        {"_id": 0}
+    ).limit(20).to_list(20)
+    
+    return {"salons": [Salon(**s) for s in salons]}
+
+@api_router.get("/users/{user_id}/recent-services")
+async def get_user_recent_services(user_id: str):
+    """Get user's recent services from last 5 bookings"""
+    # Find last 5 bookings for this user
+    recent_bookings = await db.tokens.find(
+        {"user_id": user_id},
+        {"_id": 0, "selected_services": 1}
+    ).sort("created_at", -1).limit(5).to_list(5)
+    
+    # Collect all unique service IDs
+    service_ids = set()
+    for booking in recent_bookings:
+        service_ids.update(booking.get("selected_services", []))
+    
+    # Get service details
+    if service_ids:
+        services = await db.services.find(
+            {"id": {"$in": list(service_ids)}, "is_active": True},
+            {"_id": 0}
+        ).to_list(100)
+        return {"services": [Service(**s) for s in services]}
+    
+    return {"services": []}
+
+@api_router.get("/salons/{salon_id}/token-status")
+async def get_salon_token_status(salon_id: str, shift: Optional[str] = None):
+    """Get current token status for salon (overall and per barber)"""
+    today = datetime.now().date().isoformat()
+    
+    # Get all barbers for this salon
+    barbers = await db.barbers.find(
+        {"salon_id": salon_id, "is_active": True},
+        {"_id": 0}
+    ).to_list(100)
+    
+    result = {
+        "date": today,
+        "overall": {},
+        "barbers": []
+    }
+    
+    # Get overall salon status
+    query = {"salon_id": salon_id, "date": today, "status": {"$in": ["waiting", "called"]}}
+    if shift:
+        query["shift"] = shift
+    
+    waiting_tokens = await db.tokens.find(query, {"_id": 0}).to_list(1000)
+    
+    # Get currently called token
+    called_query = {"salon_id": salon_id, "date": today, "status": "called"}
+    if shift:
+        called_query["shift"] = shift
+    
+    called_token = await db.tokens.find_one(called_query, {"_id": 0}, sort=[("called_at", -1)])
+    
+    result["overall"] = {
+        "current_token": called_token.get("token_number") if called_token else None,
+        "waiting_count": len(waiting_tokens),
+        "shift": shift
+    }
+    
+    # Get per-barber status
+    for barber in barbers:
+        barber_query = {
+            "salon_id": salon_id,
+            "barber_id": barber["id"],
+            "date": today
+        }
+        if shift:
+            barber_query["shift"] = shift
+        
+        barber_waiting = await db.tokens.find(
+            {**barber_query, "status": {"$in": ["waiting", "called"]}},
+            {"_id": 0}
+        ).to_list(1000)
+        
+        barber_called = await db.tokens.find_one(
+            {**barber_query, "status": "called"},
+            {"_id": 0},
+            sort=[("called_at", -1)]
+        )
+        
+        result["barbers"].append({
+            "barber_id": barber["id"],
+            "barber_name": barber["name"],
+            "category": barber.get("category"),
+            "specialization": barber.get("specialization"),
+            "current_token": barber_called.get("token_number") if barber_called else None,
+            "waiting_count": len(barber_waiting),
+            "queue_status": barber.get("queue_status", "available")
+        })
+    
+    return result
 
 # ============ PAYMENT ROUTES ============
 

@@ -23,13 +23,16 @@ export default function SinglePageBooking() {
   const [barbers, setBarbers] = useState([]);
   const [services, setServices] = useState([]);
   const [barberServices, setBarberServices] = useState([]);
-  const [slots, setSlots] = useState([]);
+  const [shifts, setShifts] = useState([]);
   const [bookedToken, setBookedToken] = useState(null);
   const [loading, setLoading] = useState(false);
+  const [bookingForSelf, setBookingForSelf] = useState(true);
+  const [otherPersonName, setOtherPersonName] = useState('');
+  const [otherPersonPhone, setOtherPersonPhone] = useState('');
 
   const [formData, setFormData] = useState({
     date: new Date().toISOString().split('T')[0],
-    timeSlot: '',
+    shift: '',
     barberId: 'any',
     selectedServices: [],
     bookingType: 'instant'
@@ -44,7 +47,7 @@ export default function SinglePageBooking() {
     }
 
     fetchSalonData();
-    fetchSlots();
+    fetchShifts();
   }, [isUserLoggedIn, salonId]);
 
   useEffect(() => {
@@ -78,12 +81,12 @@ export default function SinglePageBooking() {
     }
   };
 
-  const fetchSlots = async () => {
+  const fetchShifts = async () => {
     try {
-      const response = await axios.get(`${API}/slots`);
-      setSlots(response.data.slots);
+      const response = await axios.get(`${API}/shifts`);
+      setShifts(response.data.shifts);
     } catch (error) {
-      console.error('Error fetching slots:', error);
+      console.error('Error fetching shifts:', error);
     }
   };
 
@@ -143,8 +146,8 @@ export default function SinglePageBooking() {
   const handleSubmit = async (e) => {
     e.preventDefault();
 
-    if (!formData.date || !formData.timeSlot) {
-      toast.error('Please select date and time slot');
+    if (!formData.date || !formData.shift) {
+      toast.error('Please select date and shift');
       return;
     }
 
@@ -153,20 +156,32 @@ export default function SinglePageBooking() {
       return;
     }
 
+    if (!bookingForSelf) {
+      if (!otherPersonName || !otherPersonPhone) {
+        toast.error('Please enter name and phone for the person you are booking for');
+        return;
+      }
+      if (otherPersonPhone.length < 10) {
+        toast.error('Please enter a valid 10-digit phone number');
+        return;
+      }
+    }
+
     setLoading(true);
 
     try {
       const bookingData = {
         salon_id: salonId,
         user_id: user.id,
-        customer_name: user.name,
-        phone: user.phone,
+        customer_name: bookingForSelf ? user.name : otherPersonName,
+        phone: bookingForSelf ? user.phone : otherPersonPhone,
         date: formData.date,
-        time_slot: formData.timeSlot,
+        shift: formData.shift,
         barber_id: formData.barberId,
         selected_services: formData.selectedServices,
         source: source,
-        booking_type: formData.bookingType
+        booking_type: formData.bookingType,
+        booking_for_self: bookingForSelf
       };
 
       const response = await axios.post(`${API}/bookings`, bookingData);
@@ -216,10 +231,10 @@ export default function SinglePageBooking() {
           <div className="bg-card border border-border rounded-lg p-8">
             <p className="text-muted-foreground text-sm mb-2 text-center">Your Token Number</p>
             <div className="text-7xl font-bebas text-gold text-center mb-6">
-              {bookedToken.token_number > 0 ? bookedToken.token_number.toString().padStart(2, '0') : 'TBA'}
+              {bookedToken.token_number}
             </div>
             
-            {bookedToken.token_number === 0 && (
+            {bookedToken.token_number.endsWith('000') && (
               <p className="text-sm text-muted-foreground text-center mb-4">
                 Token will be assigned at 5:30 AM on {formData.date}
               </p>
@@ -231,8 +246,8 @@ export default function SinglePageBooking() {
                 <span className="text-foreground font-bold">{formData.date}</span>
               </div>
               <div className="flex justify-between">
-                <span className="text-muted-foreground">Time:</span>
-                <span className="text-foreground font-bold">{formData.timeSlot}</span>
+                <span className="text-muted-foreground">Shift:</span>
+                <span className="text-foreground font-bold">{bookedToken.shift}</span>
               </div>
               <div className="flex justify-between">
                 <span className="text-muted-foreground">Barber:</span>
@@ -302,20 +317,85 @@ export default function SinglePageBooking() {
               </div>
 
               <div>
-                <Label className="mb-2 block">Time Slot (2 hours)</Label>
+                <Label className="mb-2 block">Select Shift</Label>
                 <select
-                  value={formData.timeSlot}
-                  onChange={(e) => setFormData({ ...formData, timeSlot: e.target.value })}
+                  value={formData.shift}
+                  onChange={(e) => setFormData({ ...formData, shift: e.target.value })}
                   className="w-full p-3 bg-background border border-border rounded-md text-foreground"
                   required
                 >
-                  <option value="">Select time slot</option>
-                  {slots.map(slot => (
-                    <option key={slot} value={slot}>{slot}</option>
+                  <option value="">Select shift</option>
+                  {shifts.map(shift => (
+                    <option key={shift.id} value={shift.id}>
+                      {shift.name} ({shift.time})
+                    </option>
                   ))}
                 </select>
               </div>
             </div>
+          </div>
+
+          {/* Booking For */}
+          <div className="bg-card border border-border rounded-lg p-6">
+            <h3 className="text-lg font-bold text-card-foreground mb-4 flex items-center">
+              <User className="w-5 h-5 mr-2 text-gold" />
+              Booking For
+            </h3>
+
+            <div className="flex gap-4 mb-4">
+              <button
+                type="button"
+                onClick={() => setBookingForSelf(true)}
+                className={`flex-1 py-3 px-4 border-2 rounded-lg transition-all ${
+                  bookingForSelf
+                    ? 'bg-gold text-black border-gold'
+                    : 'bg-background text-foreground border-border hover:border-gold'
+                }`}
+              >
+                Myself
+              </button>
+              <button
+                type="button"
+                onClick={() => setBookingForSelf(false)}
+                className={`flex-1 py-3 px-4 border-2 rounded-lg transition-all ${
+                  !bookingForSelf
+                    ? 'bg-gold text-black border-gold'
+                    : 'bg-background text-foreground border-border hover:border-gold'
+                }`}
+              >
+                Someone Else
+              </button>
+            </div>
+
+            {!bookingForSelf && (
+              <div className="space-y-4 pt-4 border-t border-border">
+                <div>
+                  <Label className="mb-2 block">Person's Name</Label>
+                  <input
+                    type="text"
+                    value={otherPersonName}
+                    onChange={(e) => setOtherPersonName(e.target.value)}
+                    placeholder="Enter name"
+                    className="w-full p-3 bg-background border border-border rounded-md text-foreground"
+                    required={!bookingForSelf}
+                  />
+                </div>
+                <div>
+                  <Label className="mb-2 block">Person's Mobile Number</Label>
+                  <div className="flex items-center">
+                    <span className="text-foreground mr-2">+91</span>
+                    <input
+                      type="tel"
+                      value={otherPersonPhone}
+                      onChange={(e) => setOtherPersonPhone(e.target.value.replace(/\D/g, '').slice(0, 10))}
+                      placeholder="10-digit mobile number"
+                      className="flex-1 p-3 bg-background border border-border rounded-md text-foreground"
+                      required={!bookingForSelf}
+                    />
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
 
           {/* Barber Selection */}
@@ -358,10 +438,13 @@ export default function SinglePageBooking() {
                     <div className="flex items-center justify-between">
                       <p className="font-bold text-foreground">{barber.name}</p>
                       <span className={`px-2 py-1 text-xs border rounded ${getBadgeColor(barber.category)}`}>
-                        {barber.category === 'master' ? '👑 Master' : barber.category === 'star' ? '⭐ Star' : 'Normal'}
+                        {barber.category === 'master' ? '👑 Master' : barber.category === 'star' ? '⭐ Star' : barber.category}
                       </span>
                     </div>
                     <p className="text-sm text-muted-foreground">{barber.experience} years experience</p>
+                    {barber.specialization && (
+                      <p className="text-xs text-gold mt-1">Speciality: {barber.specialization}</p>
+                    )}
                   </div>
                 </label>
               ))}

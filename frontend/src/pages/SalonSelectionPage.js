@@ -1,3 +1,4 @@
+import React from 'react';
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
@@ -5,7 +6,7 @@ import axios from 'axios';
 import { MapContainer, TileLayer, Marker, Popup, useMap } from 'react-leaflet';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { MapPin, List, Navigation, Scissors } from 'lucide-react';
+import { MapPin, List, Navigation, Scissors, Search, Star, Clock } from 'lucide-react';
 import { toast } from 'sonner';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
@@ -35,10 +36,14 @@ export default function SalonSelectionPage() {
   const navigate = useNavigate();
   const { user, isUserLoggedIn } = useAuth();
   const [salons, setSalons] = useState([]);
+  const [lastVisitedSalon, setLastVisitedSalon] = useState(null);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [searchResults, setSearchResults] = useState([]);
   const [view, setView] = useState('list'); // 'list' or 'map'
   const [userLocation, setUserLocation] = useState(null);
   const [radius, setRadius] = useState(2);
   const [loading, setLoading] = useState(true);
+  const [searching, setSearching] = useState(false);
 
   useEffect(() => {
     if (!isUserLoggedIn) {
@@ -46,8 +51,22 @@ export default function SalonSelectionPage() {
       return;
     }
 
+    fetchLastVisitedSalon();
     getUserLocation();
   }, [isUserLoggedIn]);
+
+  const fetchLastVisitedSalon = async () => {
+    try {
+      if (user && user.phone) {
+        const response = await axios.get(`${API}/users/last-salon?phone=${user.phone}`);
+        if (response.data.salon) {
+          setLastVisitedSalon(response.data.salon);
+        }
+      }
+    } catch (error) {
+      console.error('Error fetching last salon:', error);
+    }
+  };
 
   const getUserLocation = () => {
     if (navigator.geolocation) {
@@ -62,12 +81,11 @@ export default function SalonSelectionPage() {
         },
         (error) => {
           console.error('Error getting location:', error);
-          toast.error('Could not get your location. Showing all salons.');
+          toast.info('Showing all salons');
           fetchAllSalons();
         }
       );
     } else {
-      toast.error('Geolocation not supported');
       fetchAllSalons();
     }
   };
@@ -96,9 +114,29 @@ export default function SalonSelectionPage() {
     }
   };
 
+  const handleSearch = async (query) => {
+    setSearchQuery(query);
+    if (query.length < 2) {
+      setSearchResults([]);
+      return;
+    }
+
+    setSearching(true);
+    try {
+      const response = await axios.get(`${API}/salons/search?name=${query}`);
+      setSearchResults(response.data.salons || []);
+    } catch (error) {
+      console.error('Error searching salons:', error);
+      toast.error('Failed to search salons');
+    } finally {
+      setSearching(false);
+    }
+  };
+
   const handleRadiusChange = (newRadius) => {
     setRadius(newRadius);
     if (userLocation) {
+      setLoading(true);
       fetchNearbySalons(userLocation.lat, userLocation.lng);
     }
   };
@@ -106,6 +144,36 @@ export default function SalonSelectionPage() {
   const handleSelectSalon = (salon) => {
     navigate(`/book/${salon.id}`);
   };
+
+  const SalonCard = ({ salon, isLastVisited = false }) => (
+    <div
+      className={`bg-card border ${isLastVisited ? 'border-gold border-2' : 'border-border'} rounded-lg p-6 hover:shadow-lg transition-shadow cursor-pointer relative`}
+      onClick={() => handleSelectSalon(salon)}
+    >
+      {isLastVisited && (
+        <div className="absolute top-2 right-2 bg-gold text-black text-xs px-2 py-1 rounded flex items-center">
+          <Clock className="w-3 h-3 mr-1" />
+          Last Visited
+        </div>
+      )}
+      <div className="flex items-start space-x-4">
+        <Scissors className="w-10 h-10 text-gold" />
+        <div className="flex-1">
+          <h3 className="text-lg font-bold text-card-foreground mb-1">{salon.salon_name}</h3>
+          <p className="text-sm text-muted-foreground mb-2">{salon.address}</p>
+          {salon.distance && (
+            <div className="flex items-center text-xs text-gold">
+              <Navigation className="w-3 h-3 mr-1" />
+              {salon.distance} km away
+            </div>
+          )}
+        </div>
+      </div>
+      <Button className="w-full mt-4 bg-gold text-black hover:bg-gold/90">
+        {isLastVisited ? 'Book Again' : 'Select Salon'}
+      </Button>
+    </div>
+  );
 
   if (loading) {
     return (
@@ -117,6 +185,8 @@ export default function SalonSelectionPage() {
       </div>
     );
   }
+
+  const displaySalons = searchQuery ? searchResults : salons;
 
   return (
     <div className="min-h-screen bg-background">
@@ -146,8 +216,27 @@ export default function SalonSelectionPage() {
             </div>
           </div>
 
-          {/* Radius Filter */}
-          {userLocation && (
+          {/* Search Bar */}
+          <div className="mb-4">
+            <div className="relative">
+              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-muted-foreground w-4 h-4" />
+              <Input
+                type="text"
+                placeholder="Search salon by name..."
+                value={searchQuery}
+                onChange={(e) => handleSearch(e.target.value)}
+                className="pl-10"
+              />
+              {searching && (
+                <div className="absolute right-3 top-1/2 transform -translate-y-1/2">
+                  <Scissors className="w-4 h-4 text-gold animate-spin" />
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Radius Filter - only show when not searching */}
+          {userLocation && !searchQuery && (
             <div className="flex items-center space-x-4">
               <label className="text-sm text-foreground">Radius: {radius} km</label>
               <Input
@@ -164,33 +253,50 @@ export default function SalonSelectionPage() {
       </div>
 
       <div className="max-w-7xl mx-auto p-4">
-        {view === 'list' ? (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-            {salons.map((salon) => (
-              <div
-                key={salon.id}
-                className="bg-card border border-border rounded-lg p-6 hover:shadow-lg transition-shadow cursor-pointer"
-                onClick={() => handleSelectSalon(salon)}
-              >
-                <div className="flex items-start space-x-4">
-                  <Scissors className="w-10 h-10 text-gold" />
-                  <div className="flex-1">
-                    <h3 className="text-lg font-bold text-card-foreground mb-1">{salon.salon_name}</h3>
-                    <p className="text-sm text-muted-foreground mb-2">{salon.address}</p>
-                    {salon.distance && (
-                      <div className="flex items-center text-xs text-gold">
-                        <Navigation className="w-3 h-3 mr-1" />
-                        {salon.distance} km away
-                      </div>
-                    )}
-                  </div>
-                </div>
-                <Button className="w-full mt-4 bg-gold text-black hover:bg-gold/90">
-                  Select Salon
-                </Button>
-              </div>
-            ))}
+        {/* Last Visited Salon */}
+        {lastVisitedSalon && !searchQuery && (
+          <div className="mb-6">
+            <h2 className="text-lg font-semibold text-foreground mb-3 flex items-center">
+              <Star className="w-5 h-5 text-gold mr-2" />
+              Your Last Visit
+            </h2>
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+              <SalonCard salon={lastVisitedSalon} isLastVisited={true} />
+            </div>
           </div>
+        )}
+
+        {/* Salons List/Map */}
+        {view === 'list' ? (
+          <>
+            {!searchQuery && lastVisitedSalon && (
+              <h2 className="text-lg font-semibold text-foreground mb-3 mt-6">
+                {userLocation ? 'Nearby Salons' : 'All Salons'}
+              </h2>
+            )}
+            {searchQuery && (
+              <h2 className="text-lg font-semibold text-foreground mb-3">
+                Search Results ({displaySalons.length})
+              </h2>
+            )}
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+              {displaySalons.map((salon) => (
+                <SalonCard 
+                  key={salon.id} 
+                  salon={salon} 
+                  isLastVisited={false}
+                />
+              ))}
+            </div>
+            {displaySalons.length === 0 && (
+              <div className="text-center py-12">
+                <Scissors className="w-16 h-16 text-muted-foreground mx-auto mb-4" />
+                <p className="text-muted-foreground">
+                  {searchQuery ? 'No salons found matching your search' : 'No salons available'}
+                </p>
+              </div>
+            )}
+          </>
         ) : (
           <div className="h-[600px] rounded-lg overflow-hidden">
             {userLocation && (
@@ -200,8 +306,8 @@ export default function SalonSelectionPage() {
                 style={{ height: '100%', width: '100%' }}
               >
                 <TileLayer
-                  url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
                   attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
+                  url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
                 />
                 <LocationUpdater center={[userLocation.lat, userLocation.lng]} />
                 
@@ -211,40 +317,25 @@ export default function SalonSelectionPage() {
                 </Marker>
 
                 {/* Salon markers */}
-                {salons.map((salon) => (
+                {displaySalons.map((salon) => (
                   <Marker
                     key={salon.id}
                     position={[salon.latitude, salon.longitude]}
+                    eventHandlers={{
+                      click: () => handleSelectSalon(salon)
+                    }}
                   >
                     <Popup>
                       <div className="text-center">
-                        <h3 className="font-bold mb-2">{salon.salon_name}</h3>
-                        <p className="text-xs mb-2">{salon.address}</p>
-                        {salon.distance && (
-                          <p className="text-xs text-gold mb-2">{salon.distance} km away</p>
-                        )}
-                        <button
-                          onClick={() => handleSelectSalon(salon)}
-                          className="bg-gold text-black px-4 py-1 rounded text-sm"
-                        >
-                          Select
-                        </button>
+                        <strong>{salon.salon_name}</strong>
+                        <p className="text-sm">{salon.address}</p>
+                        {salon.distance && <p className="text-xs text-gold">{salon.distance} km away</p>}
                       </div>
                     </Popup>
                   </Marker>
                 ))}
               </MapContainer>
             )}
-          </div>
-        )}
-
-        {salons.length === 0 && (
-          <div className="text-center py-12">
-            <Scissors className="w-16 h-16 text-muted-foreground mx-auto mb-4" />
-            <p className="text-muted-foreground">No salons found within {radius} km</p>
-            <Button onClick={() => handleRadiusChange(radius + 2)} className="mt-4">
-              Increase Search Radius
-            </Button>
           </div>
         )}
       </div>
