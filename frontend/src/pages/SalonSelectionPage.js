@@ -145,35 +145,87 @@ export default function SalonSelectionPage() {
     navigate(`/book/${salon.id}`);
   };
 
-  const SalonCard = ({ salon, isLastVisited = false }) => (
-    <div
-      className={`bg-card border ${isLastVisited ? 'border-gold border-2' : 'border-border'} rounded-lg p-6 hover:shadow-lg transition-shadow cursor-pointer relative`}
-      onClick={() => handleSelectSalon(salon)}
-    >
-      {isLastVisited && (
-        <div className="absolute top-2 right-2 bg-gold text-black text-xs px-2 py-1 rounded flex items-center">
-          <Clock className="w-3 h-3 mr-1" />
-          Last Visited
-        </div>
-      )}
-      <div className="flex items-start space-x-4">
-        <Scissors className="w-10 h-10 text-gold" />
-        <div className="flex-1">
-          <h3 className="text-lg font-bold text-card-foreground mb-1">{salon.salon_name}</h3>
-          <p className="text-sm text-muted-foreground mb-2">{salon.address}</p>
-          {salon.distance && (
-            <div className="flex items-center text-xs text-gold">
-              <Navigation className="w-3 h-3 mr-1" />
-              {salon.distance} km away
+  const SalonCard = ({ salon, isLastVisited = false }) => {
+    const galleryImage = salon.photo_gallery && salon.photo_gallery.length > 0 
+      ? salon.photo_gallery[0] 
+      : null;
+      
+    return (
+      <div
+        className={`bg-card border ${isLastVisited ? 'border-gold border-2' : 'border-border'} rounded-lg overflow-hidden hover:shadow-lg transition-all cursor-pointer relative group`}
+        onClick={() => handleSelectSalon(salon)}
+      >
+        {isLastVisited && (
+          <div className="absolute top-2 right-2 bg-gold text-black text-xs px-2 py-1 rounded flex items-center z-10">
+            <Clock className="w-3 h-3 mr-1" />
+            Last Visited
+          </div>
+        )}
+        
+        {/* Salon Image/Gallery */}
+        {galleryImage && (
+          <div className="relative h-40 overflow-hidden">
+            <img 
+              src={galleryImage} 
+              alt={salon.salon_name}
+              className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-300"
+            />
+            <div className="absolute inset-0 bg-gradient-to-t from-black/60 to-transparent"></div>
+            
+            {/* Logo overlay */}
+            {salon.logo_url && (
+              <div className="absolute top-2 left-2 w-12 h-12 bg-white rounded-full p-1 shadow-lg">
+                <img 
+                  src={salon.logo_url} 
+                  alt={`${salon.salon_name} logo`}
+                  className="w-full h-full object-contain"
+                />
+              </div>
+            )}
+            
+            {/* Gallery indicator */}
+            {salon.photo_gallery && salon.photo_gallery.length > 1 && (
+              <div className="absolute bottom-2 right-2 bg-black/70 text-white text-xs px-2 py-1 rounded flex items-center">
+                <Star className="w-3 h-3 mr-1" />
+                {salon.photo_gallery.length} photos
+              </div>
+            )}
+          </div>
+        )}
+        
+        <div className="p-6">
+          <div className="flex items-start space-x-4">
+            {!galleryImage && (
+              <div className="w-16 h-16 rounded-full bg-gold/20 flex items-center justify-center overflow-hidden flex-shrink-0">
+                {salon.logo_url ? (
+                  <img 
+                    src={salon.logo_url} 
+                    alt={salon.salon_name}
+                    className="w-full h-full object-cover"
+                  />
+                ) : (
+                  <Scissors className="w-8 h-8 text-gold" />
+                )}
+              </div>
+            )}
+            <div className="flex-1">
+              <h3 className="text-lg font-bold text-card-foreground mb-1">{salon.salon_name}</h3>
+              <p className="text-sm text-muted-foreground mb-2">{salon.address}</p>
+              {salon.distance && (
+                <div className="flex items-center text-xs text-gold">
+                  <Navigation className="w-3 h-3 mr-1" />
+                  {salon.distance} km away
+                </div>
+              )}
             </div>
-          )}
+          </div>
+          <Button className="w-full mt-4 bg-gold text-black hover:bg-gold/90">
+            {isLastVisited ? 'Book Again' : 'Select Salon'}
+          </Button>
         </div>
       </div>
-      <Button className="w-full mt-4 bg-gold text-black hover:bg-gold/90">
-        {isLastVisited ? 'Book Again' : 'Select Salon'}
-      </Button>
-    </div>
-  );
+    );
+  };
 
   if (loading) {
     return (

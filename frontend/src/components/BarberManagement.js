@@ -18,7 +18,6 @@ const API = `${BACKEND_URL}/api`;
 // Services by Category View Component
 function ServicesByCategoryView({ services, onServiceToggle, onPriceChange }) {
   const [expandedCategories, setExpandedCategories] = useState({});
-  const checkboxRefs = React.useRef({});
 
   // Group services by category
   const servicesByCategory = services.reduce((acc, service) => {
@@ -59,22 +58,6 @@ function ServicesByCategoryView({ services, onServiceToggle, onPriceChange }) {
     return categoryServices.every(s => s.is_available);
   };
 
-  const isSomeSelected = (category) => {
-    const categoryServices = servicesByCategory[category];
-    const selectedCount = categoryServices.filter(s => s.is_available).length;
-    return selectedCount > 0 && selectedCount < categoryServices.length;
-  };
-
-  // Set indeterminate state
-  useEffect(() => {
-    Object.keys(servicesByCategory).forEach(category => {
-      const checkbox = checkboxRefs.current[category];
-      if (checkbox) {
-        checkbox.indeterminate = isSomeSelected(category);
-      }
-    });
-  });
-
   return (
     <div className="space-y-2">
       {Object.keys(servicesByCategory).sort().map(category => (
@@ -95,7 +78,6 @@ function ServicesByCategoryView({ services, onServiceToggle, onPriceChange }) {
             </div>
             <div className="flex items-center space-x-2" onClick={(e) => e.stopPropagation()}>
               <Checkbox
-                ref={(el) => checkboxRefs.current[category] = el}
                 checked={isAllSelected(category)}
                 onCheckedChange={(checked) => handleSelectAll(category, checked)}
                 className="data-[state=checked]:bg-gold data-[state=checked]:border-gold"
@@ -198,7 +180,9 @@ export default function BarberManagement({ salonId, getAuthHeaders }) {
     specialization: 'Haircut Specialist',
     customCategory: '',
     customSpecialization: '',
-    mobile: ''
+    mobile: '',
+    profile_image: '',
+    on_leave: false
   });
 
   useEffect(() => {
@@ -250,7 +234,9 @@ export default function BarberManagement({ salonId, getAuthHeaders }) {
           salon_id: salonId,
           experience: parseInt(newBarber.experience) || 0,
           category: finalCategory,
-          specialization: finalSpecialization
+          specialization: finalSpecialization,
+          profile_image: newBarber.profile_image || null,
+          on_leave: newBarber.on_leave || false
         },
         { headers: getAuthHeaders() }
       );
@@ -263,7 +249,9 @@ export default function BarberManagement({ salonId, getAuthHeaders }) {
         specialization: 'Haircut Specialist',
         customCategory: '',
         customSpecialization: '',
-        mobile: '' 
+        mobile: '',
+        profile_image: '',
+        on_leave: false
       });
       setShowAddForm(false);
       toast.success('Barber added successfully');
@@ -421,6 +409,30 @@ export default function BarberManagement({ salonId, getAuthHeaders }) {
               )}
             </div>
 
+            {/* Profile Image URL */}
+            <div>
+              <Label htmlFor="profile_image">Profile Image URL (optional)</Label>
+              <Input
+                id="profile_image"
+                value={newBarber.profile_image}
+                onChange={(e) => setNewBarber({ ...newBarber, profile_image: e.target.value })}
+                placeholder="https://example.com/image.jpg"
+              />
+              <p className="text-xs text-muted-foreground mt-1">Enter a URL for the barber's profile photo</p>
+            </div>
+
+            {/* On Leave Checkbox */}
+            <div className="flex items-center space-x-2">
+              <Checkbox
+                id="on_leave"
+                checked={newBarber.on_leave}
+                onCheckedChange={(checked) => setNewBarber({ ...newBarber, on_leave: checked })}
+              />
+              <Label htmlFor="on_leave" className="cursor-pointer">
+                Barber is on leave (won't be shown to customers for booking)
+              </Label>
+            </div>
+
             <div className="flex justify-end space-x-2">
               <Button type="button" variant="outline" onClick={() => setShowAddForm(false)}>
                 Cancel
@@ -557,9 +569,9 @@ function BarberCard({
       >
         <div className="flex items-center space-x-4">
           <div className="w-12 h-12 rounded-full bg-gold/20 flex items-center justify-center overflow-hidden">
-            {barber.image_url ? (
+            {barber.profile_image ? (
               <img 
-                src={barber.image_url} 
+                src={barber.profile_image} 
                 alt={barber.name} 
                 className="w-full h-full object-cover"
               />
@@ -568,7 +580,14 @@ function BarberCard({
             )}
           </div>
           <div>
-            <h3 className="font-bold text-card-foreground">{barber.name}</h3>
+            <h3 className="font-bold text-card-foreground flex items-center gap-2">
+              {barber.name}
+              {barber.on_leave && (
+                <span className="text-xs bg-orange-500/20 text-orange-500 px-2 py-0.5 rounded border border-orange-500/30">
+                  On Leave
+                </span>
+              )}
+            </h3>
             <div className="flex items-center space-x-2 text-sm text-muted-foreground">
               <span>{barber.experience} years exp</span>
               <span className={`px-2 py-0.5 rounded-full text-xs border capitalize ${getCategoryBadge(barber.category)}`}>
@@ -639,23 +658,28 @@ function BarberCard({
                           }
                           const reader = new FileReader();
                           reader.onloadend = () => {
-                            setEditData({ ...editData, image_url: reader.result });
+                            setEditData({ ...editData, profile_image: reader.result });
                             toast.success('Image uploaded');
                           };
                           reader.onerror = () => toast.error('Failed to upload image');
                           reader.readAsDataURL(file);
                         }}
                       />
-                      {editData.image_url && (
+                      <Input
+                        placeholder="Or enter image URL"
+                        value={editData.profile_image || ''}
+                        onChange={(e) => setEditData({ ...editData, profile_image: e.target.value })}
+                      />
+                      {editData.profile_image && (
                         <div className="relative inline-block">
                           <img 
-                            src={editData.image_url} 
+                            src={editData.profile_image} 
                             alt="Barber" 
                             className="w-24 h-24 object-cover rounded-full border border-border"
                           />
                           <button
                             type="button"
-                            onClick={() => setEditData({ ...editData, image_url: '' })}
+                            onClick={() => setEditData({ ...editData, profile_image: '' })}
                             className="absolute -top-1 -right-1 p-1 bg-red-500 text-white rounded-full hover:bg-red-600"
                           >
                             <X className="w-3 h-3" />
@@ -746,6 +770,18 @@ function BarberCard({
                         }}
                       />
                     )}
+                  </div>
+
+                  {/* On Leave Checkbox */}
+                  <div className="flex items-center space-x-2 p-3 bg-muted/50 rounded-lg">
+                    <Checkbox
+                      id="edit_on_leave"
+                      checked={editData.on_leave || false}
+                      onCheckedChange={(checked) => setEditData({ ...editData, on_leave: checked })}
+                    />
+                    <Label htmlFor="edit_on_leave" className="cursor-pointer">
+                      Barber is on leave (won't be shown to customers for booking)
+                    </Label>
                   </div>
 
                   <div className="flex justify-end space-x-2">

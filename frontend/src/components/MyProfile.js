@@ -169,6 +169,11 @@ export default function MyProfile({ salon, onUpdate, getAuthHeaders }) {
                     reader.readAsDataURL(file);
                   }}
                 />
+                <Input
+                  placeholder="Or enter logo URL"
+                  value={editData.logo_url || ''}
+                  onChange={(e) => setEditData({ ...editData, logo_url: e.target.value })}
+                />
                 {editData.logo_url && (
                   <div className="relative inline-block">
                     <img 
@@ -185,6 +190,73 @@ export default function MyProfile({ salon, onUpdate, getAuthHeaders }) {
                     </button>
                   </div>
                 )}
+              </div>
+            </div>
+            <div className="md:col-span-2">
+              <Label htmlFor="gallery">Salon Photo Gallery</Label>
+              <div className="space-y-2">
+                <Input
+                  id="gallery"
+                  type="file"
+                  accept="image/*"
+                  multiple
+                  onChange={(e) => {
+                    const files = Array.from(e.target.files);
+                    if (files.length === 0) return;
+                    
+                    files.forEach(file => {
+                      if (file.size > 2 * 1024 * 1024) {
+                        toast.error(`${file.name} is too large (max 2MB)`);
+                        return;
+                      }
+                      const reader = new FileReader();
+                      reader.onloadend = () => {
+                        setEditData(prev => ({
+                          ...prev,
+                          photo_gallery: [...(prev.photo_gallery || []), reader.result]
+                        }));
+                      };
+                      reader.onerror = () => toast.error(`Failed to upload ${file.name}`);
+                      reader.readAsDataURL(file);
+                    });
+                    toast.success(`${files.length} photo(s) uploaded`);
+                  }}
+                />
+                <Input
+                  placeholder="Or enter image URLs (comma-separated)"
+                  onChange={(e) => {
+                    const urls = e.target.value.split(',').map(url => url.trim()).filter(Boolean);
+                    if (urls.length > 0) {
+                      setEditData({ ...editData, photo_gallery: urls });
+                    }
+                  }}
+                />
+                {editData.photo_gallery && editData.photo_gallery.length > 0 && (
+                  <div className="grid grid-cols-3 md:grid-cols-4 gap-2">
+                    {editData.photo_gallery.map((url, index) => (
+                      <div key={index} className="relative group">
+                        <img 
+                          src={url} 
+                          alt={`Gallery ${index + 1}`} 
+                          className="w-full h-24 object-cover border border-border rounded-lg"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setEditData({
+                              ...editData,
+                              photo_gallery: editData.photo_gallery.filter((_, i) => i !== index)
+                            });
+                          }}
+                          className="absolute -top-1 -right-1 p-1 bg-red-500 text-white rounded-full hover:bg-red-600 opacity-0 group-hover:opacity-100 transition-opacity"
+                        >
+                          <X className="w-3 h-3" />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                <p className="text-xs text-muted-foreground">Upload multiple photos to showcase your salon</p>
               </div>
             </div>
             <div className="md:col-span-2">

@@ -87,6 +87,7 @@ class SalonUpdate(BaseModel):
     is_gst_registered: Optional[bool] = None
     gstin: Optional[str] = None
     logo_url: Optional[str] = None
+    photo_gallery: Optional[List[str]] = None
     tax_rate: Optional[float] = None
     invoice_prefix: Optional[str] = None
     invoice_start_number: Optional[int] = None
@@ -107,6 +108,7 @@ class Salon(BaseModel):
     is_gst_registered: bool = False
     gstin: Optional[str] = None
     logo_url: Optional[str] = None
+    photo_gallery: List[str] = []  # Array of image URLs
     tax_rate: float = 2.5  # Default GST rate (CGST + SGST = 5%)
     invoice_prefix: str = "INV"  # Invoice number prefix
     invoice_start_number: int = 1  # Starting invoice number
@@ -223,6 +225,7 @@ class BarberCreate(BaseModel):
     category: str
     specialization: Optional[str] = None
     mobile: str
+    profile_image: Optional[str] = None
 
 class BarberUpdate(BaseModel):
     name: Optional[str] = None
@@ -231,6 +234,8 @@ class BarberUpdate(BaseModel):
     specialization: Optional[str] = None
     mobile: Optional[str] = None
     queue_status: Optional[str] = None
+    profile_image: Optional[str] = None
+    on_leave: Optional[bool] = None
 
 class Barber(BaseModel):
     model_config = ConfigDict(extra="ignore")
@@ -241,7 +246,9 @@ class Barber(BaseModel):
     category: str
     specialization: Optional[str] = None
     mobile: str
+    profile_image: Optional[str] = None
     queue_status: str = "available"  # available/busy/offline
+    on_leave: bool = False  # True if barber is on leave
     is_active: bool = True
 
 class BarberServicePrice(BaseModel):
@@ -1324,8 +1331,17 @@ async def delete_salon_package(
 # ============ BARBER ROUTES ============
 
 @api_router.get("/salons/{salon_id}/barbers", response_model=List[Barber])
-async def get_salon_barbers(salon_id: str):
-    barbers = await db.barbers.find({"salon_id": salon_id, "is_active": True}, {"_id": 0}).to_list(100)
+async def get_salon_barbers(salon_id: str, available_only: bool = False):
+    """
+    Get barbers for a salon
+    available_only=True: Only return barbers not on leave (for customer booking)
+    available_only=False: Return all active barbers (for admin)
+    """
+    query = {"salon_id": salon_id, "is_active": True}
+    if available_only:
+        query["on_leave"] = {"$ne": True}  # Exclude barbers on leave
+    
+    barbers = await db.barbers.find(query, {"_id": 0}).to_list(100)
     return barbers
 
 @api_router.post("/salons/{salon_id}/barbers", response_model=Barber)

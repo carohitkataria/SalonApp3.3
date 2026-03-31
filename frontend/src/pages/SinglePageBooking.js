@@ -68,7 +68,7 @@ export default function SinglePageBooking() {
     try {
       const [salonRes, barbersRes, servicesRes] = await Promise.all([
         axios.get(`${API}/salons/${salonId}`),
-        axios.get(`${API}/salons/${salonId}/barbers`),
+        axios.get(`${API}/salons/${salonId}/barbers?available_only=true`), // Only fetch barbers not on leave
         axios.get(`${API}/services`)
       ]);
 
