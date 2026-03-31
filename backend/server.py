@@ -73,6 +73,7 @@ class SalonCreate(BaseModel):
     longitude: float
     upi_id: Optional[str] = None
     payment_timing: str = "after"  # before/after
+    password: Optional[str] = None  # Optional password for login
 
 class SalonUpdate(BaseModel):
     salon_name: Optional[str] = None
@@ -91,6 +92,11 @@ class SalonUpdate(BaseModel):
     tax_rate: Optional[float] = None
     invoice_prefix: Optional[str] = None
     invoice_start_number: Optional[int] = None
+    password: Optional[str] = None  # To update password
+
+class SalonPasswordLogin(BaseModel):
+    phone: str
+    password: str
 
 class Salon(BaseModel):
     model_config = ConfigDict(extra="ignore")
@@ -1535,6 +1541,11 @@ async def register_salon(salon: SalonCreate):
     salon_dict["is_active"] = True
     salon_dict["created_at"] = datetime.now(timezone.utc).isoformat()
     
+    # Hash password if provided
+    if salon.password:
+        salon_dict["password_hash"] = pwd_context.hash(salon.password)
+        del salon_dict["password"]  # Don't store plain password
+    
     await db.salons.insert_one(salon_dict)
     
     return Salon(**salon_dict)
@@ -1571,6 +1582,48 @@ async def verify_otp(request: SalonOTPVerify):
     token = create_access_token({"sub": salon["id"], "role": "salon", "phone": phone})
     
     return SalonToken(access_token=token, salon_id=salon["id"])
+
+@api_router.post("/salon/password-login", response_model=SalonToken)
+async def salon_password_login(credentials: SalonPasswordLogin):
+    """Login with phone and password"""
+    phone = credentials.phone
+    if not phone.startswith("+91"):
+        phone = f"+91{phone}"
+    
+    # Find salon by phone
+    salon = await db.salons.find_one({"phone": phone}, {"_id": 0})
+    if not salon:
+        raise HTTPException(status_code=404, detail="Salon not found for this phone number")
+    
+    # Check if password exists
+    if "password_hash" not in salon or not salon["password_hash"]:
+        raise HTTPException(status_code=400, detail="Password not set for this salon. Please use OTP login.")
+    
+    # Verify password
+    if not pwd_context.verify(credentials.password, salon["password_hash"]):
+        raise HTTPException(status_code=401, detail="Incorrect password")
+    
+    # Generate token
+    token = create_access_token({"sub": salon["id"], "role": "salon", "phone": phone})
+    
+    return SalonToken(access_token=token, salon_id=salon["id"])
+
+@api_router.put("/salon/{salon_id}/set-password")
+async def set_salon_password(salon_id: str, new_password: str, current_salon=Depends(get_current_salon)):
+    """Set or update salon password"""
+    if len(new_password) < 6:
+        raise HTTPException(status_code=400, detail="Password must be at least 6 characters")
+    
+    # Hash password
+    password_hash = pwd_context.hash(new_password)
+    
+    # Update salon
+    await db.salons.update_one(
+        {"id": salon_id},
+        {"$set": {"password_hash": password_hash}}
+    )
+    
+    return {"message": "Password updated successfully"}
 
 @api_router.post("/user/login", response_model=User)
 async def user_login(credentials: UserLogin):
