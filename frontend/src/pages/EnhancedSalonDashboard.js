@@ -40,6 +40,7 @@ export default function EnhancedSalonDashboard() {
   const [selectedToken, setSelectedToken] = useState(null);
   const [allServices, setAllServices] = useState([]);
   const [selectedNewServices, setSelectedNewServices] = useState([]);
+  const [serviceSearchQuery, setServiceSearchQuery] = useState('');
 
   useEffect(() => {
     const storedSalonId = localStorage.getItem('salon_id');
