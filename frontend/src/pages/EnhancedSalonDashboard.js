@@ -290,56 +290,77 @@ export default function EnhancedSalonDashboard() {
   };
 
   return (
-    <div className="min-h-screen bg-background">
-      {/* Header */}
-      <div className="border-b border-border p-4">
-        <div className="max-w-7xl mx-auto flex items-center justify-between">
-          <div className="flex items-center space-x-3">
-            <Scissors className="w-8 h-8 text-gold" />
-            <div>
-              <h1 className="text-xl font-playfair font-bold text-foreground">Salon Dashboard</h1>
-              <p className="text-xs text-muted-foreground">{salon?.salon_name || 'Loading...'}</p>
+    <div className="min-h-screen bg-background relative overflow-hidden">
+      {/* Background Image with Overlay */}
+      <div className="fixed inset-0 z-0">
+        <div 
+          className="absolute inset-0 bg-cover bg-center bg-no-repeat opacity-20"
+          style={{
+            backgroundImage: `url('https://images.pexels.com/photos/3993293/pexels-photo-3993293.jpeg?auto=compress&cs=tinysrgb&dpr=2&h=650&w=940')`
+          }}
+        />
+        <div className="absolute inset-0 bg-gradient-to-br from-background/95 via-background/90 to-gold/10" />
+      </div>
+
+      {/* Content */}
+      <div className="relative z-10">
+        {/* Header */}
+        <div className="backdrop-blur-xl bg-background/80 border-b border-gold/20 p-4 shadow-lg">
+          <div className="max-w-7xl mx-auto flex items-center justify-between">
+            <div className="flex items-center space-x-4">
+              <div className="p-3 bg-gradient-to-br from-gold/20 to-gold/5 rounded-xl border border-gold/30">
+                <Scissors className="w-8 h-8 text-gold" />
+              </div>
+              <div>
+                <h1 className="text-2xl font-playfair font-bold text-foreground">Salon Dashboard</h1>
+                <p className="text-sm text-gold">{salon?.salon_name || 'Loading...'}</p>
+              </div>
+            </div>
+            <div className="flex items-center space-x-3">
+              <ThemeToggle />
+              <Button 
+                onClick={handleLogout} 
+                variant="outline" 
+                size="sm"
+                className="border-gold/30 hover:bg-gold/10"
+              >
+                <LogOut className="w-4 h-4 mr-2" /> Logout
+              </Button>
             </div>
           </div>
-          <div className="flex items-center space-x-2">
-            <ThemeToggle />
-            <Button onClick={handleLogout} variant="outline" size="sm">
-              <LogOut className="w-4 h-4 mr-2" /> Logout
-            </Button>
+        </div>
+
+        {/* Tabs */}
+        <div className="border-b border-gold/20 backdrop-blur-lg bg-background/60">
+          <div className="max-w-7xl mx-auto flex overflow-x-auto">
+            {[
+              { id: 'queue', label: 'Token Queue', icon: Calendar },
+              { id: 'barbers', label: 'Barbers', icon: Users },
+              { id: 'services', label: 'Offerings', icon: Scissors },
+              { id: 'gallery', label: 'Gallery', icon: FileText },
+              { id: 'salon', label: 'My Profile', icon: MapPin }
+            ].map((tab) => {
+              const Icon = tab.icon;
+              return (
+                <button
+                  key={tab.id}
+                  onClick={() => setActiveTab(tab.id)}
+                  data-testid={`tab-${tab.id}`}
+                  className={`flex items-center space-x-2 px-6 py-4 border-b-2 transition-all whitespace-nowrap ${
+                    activeTab === tab.id
+                      ? 'border-gold text-gold bg-gold/10'
+                      : 'border-transparent text-muted-foreground hover:text-gold hover:bg-gold/5'
+                  }`}
+                >
+                  <Icon className="w-4 h-4" />
+                  <span className="font-semibold">{tab.label}</span>
+                </button>
+              );
+            })}
           </div>
         </div>
-      </div>
 
-      {/* Tabs */}
-      <div className="border-b border-border">
-        <div className="max-w-7xl mx-auto flex overflow-x-auto">
-          {[
-            { id: 'queue', label: 'Token Queue', icon: Calendar },
-            { id: 'barbers', label: 'Barbers', icon: Users },
-            { id: 'services', label: 'Offerings', icon: Scissors },
-            { id: 'salon', label: 'My Profile', icon: MapPin }
-          ].map((tab) => {
-            const Icon = tab.icon;
-            return (
-              <button
-                key={tab.id}
-                onClick={() => setActiveTab(tab.id)}
-                data-testid={`tab-${tab.id}`}
-                className={`flex items-center space-x-2 px-6 py-4 border-b-2 transition-colors whitespace-nowrap ${
-                  activeTab === tab.id
-                    ? 'border-gold text-gold'
-                    : 'border-transparent text-muted-foreground hover:text-foreground'
-                }`}
-              >
-                <Icon className="w-4 h-4" />
-                <span className="font-bold text-sm uppercase tracking-wider">{tab.label}</span>
-              </button>
-            );
-          })}
-        </div>
-      </div>
-
-      <div className="max-w-7xl mx-auto p-4">
+        <div className="max-w-7xl mx-auto p-4">
         {activeTab === 'queue' && (
           <div className="space-y-6">
             {/* Barber Filter */}
@@ -400,16 +421,17 @@ export default function EnhancedSalonDashboard() {
 
             {/* Token List */}
             <div className="space-y-3">
-              {tokens.map((token) => (
+              {tokens.map((token, index) => (
                 <motion.div
                   key={token.id}
-                  initial={{ opacity: 0 }}
-                  animate={{ opacity: 1 }}
-                  className={`bg-card border p-4 rounded-lg ${getStatusColor(token.status)}`}
+                  initial={{ opacity: 0, y: 20 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ delay: index * 0.05 }}
+                  className={`bg-card/90 backdrop-blur-sm border-2 ${getStatusColor(token.status)} rounded-xl p-4 hover:shadow-xl transition-all`}
                 >
                   <div className="flex items-center justify-between">
                     <div className="flex items-center space-x-4 flex-1">
-                      <div className="text-3xl font-bebas text-gold min-w-[60px] text-center">
+                      <div className="text-3xl font-bebas text-gold min-w-[60px] text-center bg-gold/10 rounded-lg p-2 border border-gold/30">
                         {token.token_number || 'TBA'}
                       </div>
                       <div className="flex-1">
@@ -610,6 +632,139 @@ export default function EnhancedSalonDashboard() {
             salonId={salonId} 
             token={localStorage.getItem('salon_admin_token')}
           />
+        )}
+
+        {activeTab === 'gallery' && (
+          <div className="space-y-6">
+            <div className="bg-card/50 backdrop-blur-sm border border-gold/20 rounded-2xl p-6 shadow-xl">
+              <h2 className="text-2xl font-playfair font-bold text-foreground mb-4 flex items-center">
+                <FileText className="w-6 h-6 mr-3 text-gold" />
+                Salon Photo Gallery
+              </h2>
+              <p className="text-muted-foreground mb-6">
+                Showcase your salon's ambiance, services, and style. Upload photos to attract more customers.
+              </p>
+
+              {/* Upload Section */}
+              <div className="mb-6 p-4 bg-background/50 rounded-lg border border-border">
+                <Label className="mb-2 block font-semibold">Add Photos</Label>
+                <Input
+                  type="file"
+                  accept="image/*"
+                  multiple
+                  onChange={async (e) => {
+                    const files = Array.from(e.target.files);
+                    if (files.length === 0) return;
+                    
+                    const newPhotos = [];
+                    for (const file of files) {
+                      if (file.size > 2 * 1024 * 1024) {
+                        toast.error(`${file.name} is too large (max 2MB)`);
+                        continue;
+                      }
+                      const reader = new FileReader();
+                      await new Promise((resolve) => {
+                        reader.onloadend = () => {
+                          newPhotos.push(reader.result);
+                          resolve();
+                        };
+                        reader.readAsDataURL(file);
+                      });
+                    }
+                    
+                    if (newPhotos.length > 0) {
+                      const updatedGallery = [...(salon.photo_gallery || []), ...newPhotos];
+                      try {
+                        await axios.put(
+                          `${API}/salons/${salonId}`,
+                          { photo_gallery: updatedGallery },
+                          { headers: getAuthHeaders() }
+                        );
+                        setSalon({ ...salon, photo_gallery: updatedGallery });
+                        toast.success(`${newPhotos.length} photo(s) added!`);
+                      } catch (error) {
+                        toast.error('Failed to upload photos');
+                      }
+                    }
+                  }}
+                  className="mb-2"
+                />
+                <p className="text-xs text-muted-foreground">Upload multiple photos (max 2MB each)</p>
+              </div>
+
+              {/* Gallery Grid */}
+              {salon?.photo_gallery && salon.photo_gallery.length > 0 ? (
+                <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+                  {salon.photo_gallery.map((url, index) => (
+                    <motion.div
+                      key={index}
+                      initial={{ opacity: 0, scale: 0.9 }}
+                      animate={{ opacity: 1, scale: 1 }}
+                      transition={{ delay: index * 0.05 }}
+                      className="relative group aspect-square rounded-lg overflow-hidden border border-gold/20 shadow-lg hover:shadow-2xl transition-all"
+                    >
+                      <img 
+                        src={url} 
+                        alt={`Gallery ${index + 1}`} 
+                        className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-300"
+                      />
+                      <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
+                      <button
+                        onClick={async () => {
+                          const updatedGallery = salon.photo_gallery.filter((_, i) => i !== index);
+                          try {
+                            await axios.put(
+                              `${API}/salons/${salonId}`,
+                              { photo_gallery: updatedGallery },
+                              { headers: getAuthHeaders() }
+                            );
+                            setSalon({ ...salon, photo_gallery: updatedGallery });
+                            toast.success('Photo removed');
+                          } catch (error) {
+                            toast.error('Failed to remove photo');
+                          }
+                        }}
+                        className="absolute top-2 right-2 p-2 bg-red-500 text-white rounded-full opacity-0 group-hover:opacity-100 transition-opacity hover:bg-red-600 shadow-lg"
+                      >
+                        <X className="w-4 h-4" />
+                      </button>
+                      <div className="absolute bottom-2 left-2 right-2 text-white text-xs font-semibold opacity-0 group-hover:opacity-100 transition-opacity">
+                        Photo {index + 1}
+                      </div>
+                    </motion.div>
+                  ))}
+                </div>
+              ) : (
+                <div className="text-center py-12 bg-background/50 rounded-lg border border-dashed border-gold/30">
+                  <FileText className="w-16 h-16 text-gold/50 mx-auto mb-4" />
+                  <p className="text-muted-foreground mb-2">No photos yet</p>
+                  <p className="text-sm text-muted-foreground">Upload photos to showcase your salon!</p>
+                </div>
+              )}
+
+              {/* Sample Salon Images */}
+              {(!salon?.photo_gallery || salon.photo_gallery.length === 0) && (
+                <div className="mt-8">
+                  <h3 className="text-lg font-semibold text-foreground mb-4">Inspiration Gallery</h3>
+                  <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+                    {[
+                      'https://images.pexels.com/photos/3993293/pexels-photo-3993293.jpeg?auto=compress&cs=tinysrgb&w=400',
+                      'https://images.pexels.com/photos/853427/pexels-photo-853427.jpeg?auto=compress&cs=tinysrgb&w=400',
+                      'https://images.pexels.com/photos/9146943/pexels-photo-9146943.jpeg?auto=compress&cs=tinysrgb&w=400',
+                      'https://images.pexels.com/photos/3998403/pexels-photo-3998403.jpeg?auto=compress&cs=tinysrgb&w=400',
+                      'https://images.unsplash.com/photo-1600948836101-f9ffda59d250?w=400&q=80',
+                      'https://images.pexels.com/photos/3993295/pexels-photo-3993295.jpeg?auto=compress&cs=tinysrgb&w=400'
+                    ].map((url, i) => (
+                      <div key={i} className="aspect-square rounded-lg overflow-hidden opacity-50 hover:opacity-100 transition-opacity">
+                        <img src={url} alt={`Sample ${i + 1}`} className="w-full h-full object-cover" />
+                      </div>
+                    ))}
+                  </div>
+                  <p className="text-xs text-muted-foreground text-center mt-4">Sample professional salon photos for inspiration</p>
+                </div>
+              )}
+            </div>
+          </div>
         )}
 
         {activeTab === 'salon' && (
