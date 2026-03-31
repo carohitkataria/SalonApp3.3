@@ -221,30 +221,35 @@ export default function EnhancedSalonDashboard() {
 
   const handleOpenAddServices = async (token) => {
     setSelectedToken(token);
-    setSelectedNewServices([]);
+    setSelectedNewServices(token.selected_services || []); // Pre-select existing services
     setServiceSearchQuery('');
     await fetchAllServices();
     setAddServicesDialog(true);
   };
 
-  const handleAddServices = async () => {
-    if (selectedNewServices.length === 0) {
-      toast.error('Please select at least one service');
+  const handleUpdateServices = async () => {
+    // Check if any change was made
+    const originalServices = selectedToken.selected_services || [];
+    const hasChanges = JSON.stringify([...selectedNewServices].sort()) !== JSON.stringify([...originalServices].sort());
+    
+    if (!hasChanges) {
+      toast.info('No changes made');
+      setAddServicesDialog(false);
       return;
     }
 
     try {
       const response = await axios.put(
-        `${API}/tokens/${selectedToken.id}/add-services`,
+        `${API}/tokens/${selectedToken.id}/update-services`,
         { service_ids: selectedNewServices },
         { headers: getAuthHeaders() }
       );
       
-      toast.success('Services added successfully');
+      toast.success('Services updated successfully');
       setAddServicesDialog(false);
-      fetchTokens(salonId);
+      fetchTokens(salonId); // Refresh token list to show updated amount
     } catch (error) {
-      toast.error(error.response?.data?.detail || 'Failed to add services');
+      toast.error(error.response?.data?.detail || 'Failed to update services');
     }
   };
 
@@ -404,8 +409,8 @@ export default function EnhancedSalonDashboard() {
                 >
                   <div className="flex items-center justify-between">
                     <div className="flex items-center space-x-4 flex-1">
-                      <div className="text-3xl font-bebas text-gold w-12">
-                        {token.token_number > 0 ? token.token_number.toString().padStart(2, '0') : 'TBA'}
+                      <div className="text-3xl font-bebas text-gold min-w-[60px] text-center">
+                        {token.token_number || 'TBA'}
                       </div>
                       <div className="flex-1">
                         <p className="text-foreground font-bold flex items-center space-x-2">
@@ -419,11 +424,11 @@ export default function EnhancedSalonDashboard() {
                           </a>
                         </p>
                         <p className="text-muted-foreground text-xs">
-                          {token.barber_name} • {token.time_slot} • ₹{token.total_amount}
+                          {token.barber_name} • {token.shift || token.time_slot} • ₹{token.total_amount}
                         </p>
                         <p className="text-muted-foreground text-xs flex items-center space-x-1 mt-1">
                           <Calendar className="w-3 h-3" />
-                          <span>{new Date(token.date).toLocaleDateString('en-IN')} at {token.created_at ? new Date(token.created_at).toLocaleTimeString('en-IN', {hour: '2-digit', minute: '2-digit'}) : token.time_slot}</span>
+                          <span>{new Date(token.date).toLocaleDateString('en-IN')} at {token.created_at ? new Date(token.created_at).toLocaleTimeString('en-IN', {hour: '2-digit', minute: '2-digit'}) : token.shift || token.time_slot}</span>
                         </p>
                       </div>
                     </div>
@@ -616,11 +621,11 @@ export default function EnhancedSalonDashboard() {
         )}
       </div>
 
-      {/* Add Services Dialog */}
+      {/* Manage Services Dialog */}
       <Dialog open={addServicesDialog} onOpenChange={setAddServicesDialog}>
         <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>Add Services to Booking</DialogTitle>
+            <DialogTitle>Manage Services</DialogTitle>
           </DialogHeader>
           
           {selectedToken && (
@@ -637,11 +642,11 @@ export default function EnhancedSalonDashboard() {
               Cancel
             </Button>
             <Button 
-              onClick={handleAddServices}
+              onClick={handleUpdateServices}
               className="bg-gold text-black hover:bg-gold/90"
               disabled={selectedNewServices.length === 0}
             >
-              Add {selectedNewServices.length} Service{selectedNewServices.length !== 1 ? 's' : ''}
+              Update Services ({selectedNewServices.length} selected)
             </Button>
           </div>
 
@@ -657,25 +662,24 @@ export default function EnhancedSalonDashboard() {
           </div>
 
           <div className="space-y-3">
-            <p className="text-sm text-muted-foreground">Select services to add:</p>
+            <p className="text-sm text-muted-foreground">
+              <strong>Select/Deselect services:</strong> Check to add, Uncheck to remove
+            </p>
             {allServices
               .filter(service => 
                 service.service_name.toLowerCase().includes(serviceSearchQuery.toLowerCase()) ||
                 service.category?.toLowerCase().includes(serviceSearchQuery.toLowerCase())
               )
               .map(service => {
-              const alreadySelected = selectedToken?.selected_services?.includes(service.id);
+              const isSelected = selectedNewServices.includes(service.id);
               return (
                 <div 
                   key={service.id}
-                  className={`flex items-center space-x-3 p-3 border rounded-lg ${
-                    alreadySelected ? 'opacity-50 bg-muted' : 'hover:border-gold cursor-pointer'
-                  }`}
-                  onClick={() => !alreadySelected && toggleServiceSelection(service.id)}
+                  className="flex items-center space-x-3 p-3 border rounded-lg hover:border-gold cursor-pointer transition-all"
+                  onClick={() => toggleServiceSelection(service.id)}
                 >
                   <Checkbox
-                    checked={selectedNewServices.includes(service.id)}
-                    disabled={alreadySelected}
+                    checked={isSelected}
                     onCheckedChange={() => toggleServiceSelection(service.id)}
                   />
                   <div className="flex-1">
@@ -685,9 +689,6 @@ export default function EnhancedSalonDashboard() {
                   <div className="text-right">
                     <p className="font-bold text-gold">₹{service.base_price}</p>
                   </div>
-                  {alreadySelected && (
-                    <span className="text-xs text-muted-foreground">(Already added)</span>
-                  )}
                 </div>
               );
             })}

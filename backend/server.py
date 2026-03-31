@@ -1760,7 +1760,7 @@ async def get_barber_queue(salon_id: str, barber_id: str, date: Optional[str] = 
     if status:
         query["status"] = status
     
-    tokens = await db.tokens.find(query, {"_id": 0}).sort("created_at", 1).to_list(1000)
+    tokens = await db.tokens.find(query, {"_id": 0}).sort("created_at", -1).to_list(1000)
     return tokens
 
 @api_router.get("/salons/{salon_id}/queue", response_model=List[TokenModel])
@@ -1773,7 +1773,7 @@ async def get_salon_queue(salon_id: str, date: Optional[str] = None, status: Opt
     if status:
         query["status"] = status
     
-    tokens = await db.tokens.find(query, {"_id": 0}).sort("created_at", 1).to_list(1000)
+    tokens = await db.tokens.find(query, {"_id": 0}).sort("created_at", -1).to_list(1000)
     return tokens
 
 @api_router.post("/salons/{salon_id}/barbers/{barber_id}/call-next")
@@ -2089,6 +2089,45 @@ async def add_services_to_token(token_id: str, request: AddServicesRequest, curr
     
     return {
         "message": "Services added successfully",
+        "token": TokenModel(**updated_token)
+    }
+
+@api_router.put("/tokens/{token_id}/update-services")
+async def update_token_services(token_id: str, request: AddServicesRequest, current_salon=Depends(get_current_salon)):
+    """Update services for existing booking - can add or remove (before completion)"""
+    token = await db.tokens.find_one({"id": token_id}, {"_id": 0})
+    if not token:
+        raise HTTPException(status_code=404, detail="Token not found")
+    
+    # Check if token is already completed
+    if token.get("status") == "completed":
+        raise HTTPException(status_code=400, detail="Cannot modify services for completed booking")
+    
+    # Replace services entirely with new selection
+    new_services = request.service_ids
+    
+    # Recalculate total amount
+    total_amount = 0
+    if token["barber_id"] != "any":
+        total_amount = await calculate_booking_total(new_services, token["barber_id"])
+    
+    # Update token
+    await db.tokens.update_one(
+        {"id": token_id},
+        {"$set": {
+            "selected_services": new_services,
+            "total_amount": total_amount
+        }}
+    )
+    
+    # Get updated token
+    updated_token = await db.tokens.find_one({"id": token_id}, {"_id": 0})
+    
+    # Broadcast update
+    await broadcast_update("token_updated", updated_token)
+    
+    return {
+        "message": "Services updated successfully",
         "token": TokenModel(**updated_token)
     }
 
