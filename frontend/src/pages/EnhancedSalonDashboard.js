@@ -12,10 +12,11 @@ import ThemeToggle from '@/components/ThemeToggle';
 import BarberManagement from '@/components/BarberManagement';
 import OfferingsModule from '@/components/OfferingsModule';
 import MyProfile from '@/components/MyProfile';
+import Analytics from '@/components/Analytics';
 import { 
   Scissors, LogOut, ChevronRight, SkipForward, RotateCcw, XCircle,
   Clock, User, Phone, Bell, MapPin, Settings, CheckCircle, Calendar,
-  Users, ArrowLeft, FileText, Download, Plus, X
+  Users, ArrowLeft, FileText, Download, Plus, X, TrendingUp
 } from 'lucide-react';
 import { motion } from 'framer-motion';
 
@@ -337,6 +338,7 @@ export default function EnhancedSalonDashboard() {
               { id: 'queue', label: 'Token Queue', icon: Calendar },
               { id: 'barbers', label: 'Barbers', icon: Users },
               { id: 'services', label: 'Offerings', icon: Scissors },
+              { id: 'analytics', label: 'Analytics', icon: TrendingUp },
               { id: 'gallery', label: 'Gallery', icon: FileText },
               { id: 'salon', label: 'My Profile', icon: MapPin }
             ].map((tab) => {
@@ -765,6 +767,13 @@ export default function EnhancedSalonDashboard() {
               )}
             </div>
           </div>
+        )}
+
+        {activeTab === 'analytics' && (
+          <Analytics 
+            salonId={salonId}
+            getAuthHeaders={getAuthHeaders}
+          />
         )}
 
         {activeTab === 'salon' && (

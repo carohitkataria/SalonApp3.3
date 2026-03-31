@@ -2270,6 +2270,221 @@ async def get_salon_token_status(salon_id: str, shift: Optional[str] = None):
     
     return result
 
+# ============ ANALYTICS ROUTES ============
+
+@api_router.get("/analytics/day-wise-sales")
+async def get_day_wise_sales(
+    salon_id: str,
+    start_date: str,
+    end_date: Optional[str] = None,
+    current_salon=Depends(get_current_salon)
+):
+    """Get day-wise sales for the salon"""
+    if not end_date:
+        # Default to 10 days from start_date
+        start = datetime.fromisoformat(start_date)
+        end = start + timedelta(days=10)
+        end_date = end.date().isoformat()
+    
+    # Get all completed tokens in date range
+    tokens = await db.tokens.find({
+        "salon_id": salon_id,
+        "date": {"$gte": start_date, "$lte": end_date},
+        "status": "completed"
+    }, {"_id": 0}).to_list(10000)
+    
+    # Group by date
+    day_wise = {}
+    for token in tokens:
+        date = token["date"]
+        if date not in day_wise:
+            day_wise[date] = {
+                "date": date,
+                "total_sales": 0,
+                "total_bookings": 0
+            }
+        day_wise[date]["total_sales"] += token.get("total_amount", 0)
+        day_wise[date]["total_bookings"] += 1
+    
+    # Convert to list and sort
+    result = sorted(day_wise.values(), key=lambda x: x["date"])
+    return {"data": result}
+
+@api_router.get("/analytics/barber-wise-sales")
+async def get_barber_wise_sales(
+    salon_id: str,
+    start_date: str,
+    end_date: str,
+    current_salon=Depends(get_current_salon)
+):
+    """Get barber-wise sales for the salon"""
+    # Get all completed tokens in date range
+    tokens = await db.tokens.find({
+        "salon_id": salon_id,
+        "date": {"$gte": start_date, "$lte": end_date},
+        "status": "completed"
+    }, {"_id": 0}).to_list(10000)
+    
+    # Group by barber
+    barber_wise = {}
+    for token in tokens:
+        barber_id = token["barber_id"]
+        barber_name = token.get("barber_name", "Unknown")
+        
+        if barber_id not in barber_wise:
+            barber_wise[barber_id] = {
+                "barber_id": barber_id,
+                "barber_name": barber_name,
+                "total_sales": 0,
+                "total_bookings": 0
+            }
+        barber_wise[barber_id]["total_sales"] += token.get("total_amount", 0)
+        barber_wise[barber_id]["total_bookings"] += 1
+    
+    # Convert to list and sort by sales
+    result = sorted(barber_wise.values(), key=lambda x: x["total_sales"], reverse=True)
+    return {"data": result}
+
+@api_router.get("/analytics/service-wise-sales")
+async def get_service_wise_sales(
+    salon_id: str,
+    start_date: str,
+    end_date: str,
+    current_salon=Depends(get_current_salon)
+):
+    """Get top 10 services by sales"""
+    # Get all completed tokens in date range
+    tokens = await db.tokens.find({
+        "salon_id": salon_id,
+        "date": {"$gte": start_date, "$lte": end_date},
+        "status": "completed"
+    }, {"_id": 0}).to_list(10000)
+    
+    # Get all services
+    services_dict = {}
+    all_services = await db.services.find({"salon_id": salon_id}, {"_id": 0}).to_list(1000)
+    for service in all_services:
+        services_dict[service["id"]] = service["service_name"]
+    
+    # Count service usage
+    service_count = {}
+    for token in tokens:
+        for service_id in token.get("selected_services", []):
+            service_name = services_dict.get(service_id, "Unknown Service")
+            if service_id not in service_count:
+                service_count[service_id] = {
+                    "service_id": service_id,
+                    "service_name": service_name,
+                    "count": 0,
+                    "revenue": 0
+                }
+            service_count[service_id]["count"] += 1
+    
+    # Calculate approximate revenue per service
+    for service_id, data in service_count.items():
+        service = next((s for s in all_services if s["id"] == service_id), None)
+        if service:
+            data["revenue"] = data["count"] * service.get("base_price", 0)
+    
+    # Get top 10
+    result = sorted(service_count.values(), key=lambda x: x["count"], reverse=True)[:10]
+    return {"data": result}
+
+@api_router.get("/analytics/gender-distribution")
+async def get_gender_distribution(
+    salon_id: str,
+    start_date: str,
+    end_date: str,
+    current_salon=Depends(get_current_salon)
+):
+    """Get gender distribution of customers"""
+    # Get all completed tokens in date range
+    tokens = await db.tokens.find({
+        "salon_id": salon_id,
+        "date": {"$gte": start_date, "$lte": end_date},
+        "status": "completed"
+    }, {"_id": 0}).to_list(10000)
+    
+    # Get unique user IDs
+    user_ids = list(set([t.get("user_id") for t in tokens if t.get("user_id")]))
+    
+    # Get user gender data
+    users = await db.users.find(
+        {"id": {"$in": user_ids}},
+        {"_id": 0, "id": 1, "gender": 1}
+    ).to_list(10000)
+    
+    # Count by gender
+    gender_count = {"Men": 0, "Women": 0, "Not Specified": 0}
+    
+    for user in users:
+        gender = user.get("gender", "Not Specified")
+        if gender in gender_count:
+            gender_count[gender] += 1
+        else:
+            gender_count["Not Specified"] += 1
+    
+    result = [
+        {"name": "Men", "value": gender_count["Men"]},
+        {"name": "Women", "value": gender_count["Women"]},
+        {"name": "Not Specified", "value": gender_count["Not Specified"]}
+    ]
+    
+    return {"data": result}
+
+@api_router.get("/analytics/detailed-report")
+async def get_detailed_report(
+    salon_id: str,
+    start_date: str,
+    end_date: str,
+    current_salon=Depends(get_current_salon)
+):
+    """Get detailed booking report for export"""
+    # Get all tokens in date range
+    tokens = await db.tokens.find({
+        "salon_id": salon_id,
+        "date": {"$gte": start_date, "$lte": end_date}
+    }, {"_id": 0}).sort("created_at", -1).to_list(10000)
+    
+    # Get all services for name mapping
+    services_dict = {}
+    all_services = await db.services.find({}, {"_id": 0}).to_list(1000)
+    for service in all_services:
+        services_dict[service["id"]] = service["service_name"]
+    
+    # Format data for export
+    detailed_data = []
+    for token in tokens:
+        # Get service names
+        service_names = [services_dict.get(sid, "Unknown") for sid in token.get("selected_services", [])]
+        
+        # Calculate time taken
+        time_taken = ""
+        if token.get("called_at") and token.get("completed_at"):
+            called = datetime.fromisoformat(token["called_at"])
+            completed = datetime.fromisoformat(token["completed_at"])
+            duration = completed - called
+            minutes = int(duration.total_seconds() / 60)
+            time_taken = f"{minutes} min"
+        
+        detailed_data.append({
+            "date": token["date"],
+            "token_number": token.get("token_number", ""),
+            "customer_name": token["customer_name"],
+            "phone": token["phone"],
+            "barber_name": token.get("barber_name", ""),
+            "services": ", ".join(service_names),
+            "amount": token.get("total_amount", 0),
+            "status": token.get("status", ""),
+            "shift": token.get("shift", token.get("time_slot", "")),
+            "call_time": token.get("called_at", ""),
+            "complete_time": token.get("completed_at", ""),
+            "time_taken": time_taken,
+            "payment_status": token.get("payment_status", "")
+        })
+    
+    return {"data": detailed_data}
+
 # ============ PAYMENT ROUTES ============
 
 @api_router.post("/payments/generate-upi-qr")
