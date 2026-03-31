@@ -15,7 +15,7 @@ import MyProfile from '@/components/MyProfile';
 import { 
   Scissors, LogOut, ChevronRight, SkipForward, RotateCcw, XCircle,
   Clock, User, Phone, Bell, MapPin, Settings, CheckCircle, Calendar,
-  Users, ArrowLeft, FileText, Download, Plus
+  Users, ArrowLeft, FileText, Download, Plus, X
 } from 'lucide-react';
 import { motion } from 'framer-motion';
 
@@ -856,6 +856,7 @@ export default function EnhancedSalonDashboard() {
           </div>
         </DialogContent>
       </Dialog>
+      </div>
     </div>
   );
 }
