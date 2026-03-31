@@ -514,9 +514,11 @@ function BarberCard({
   };
 
   const handleServiceToggle = (serviceId, checked) => {
-    setBarberServices(barberServices.map(s => 
-      s.id === serviceId ? { ...s, is_available: checked } : s
-    ));
+    setBarberServices(prevServices => 
+      prevServices.map(s => 
+        s.id === serviceId ? { ...s, is_available: checked } : s
+      )
+    );
   };
 
   const handlePriceChange = (serviceId, price) => {

@@ -220,6 +220,7 @@ export default function EnhancedSalonDashboard() {
   const handleOpenAddServices = async (token) => {
     setSelectedToken(token);
     setSelectedNewServices([]);
+    setServiceSearchQuery('');
     await fetchAllServices();
     setAddServicesDialog(true);
   };
@@ -628,9 +629,39 @@ export default function EnhancedSalonDashboard() {
             </div>
           )}
 
+          {/* Action Buttons at Top */}
+          <div className="flex justify-between items-center space-x-2 mb-4 pb-4 border-b">
+            <Button variant="outline" onClick={() => setAddServicesDialog(false)}>
+              Cancel
+            </Button>
+            <Button 
+              onClick={handleAddServices}
+              className="bg-gold text-black hover:bg-gold/90"
+              disabled={selectedNewServices.length === 0}
+            >
+              Add {selectedNewServices.length} Service{selectedNewServices.length !== 1 ? 's' : ''}
+            </Button>
+          </div>
+
+          {/* Search Bar */}
+          <div className="mb-4">
+            <Input
+              type="text"
+              placeholder="Search services..."
+              value={serviceSearchQuery}
+              onChange={(e) => setServiceSearchQuery(e.target.value)}
+              className="w-full"
+            />
+          </div>
+
           <div className="space-y-3">
             <p className="text-sm text-muted-foreground">Select services to add:</p>
-            {allServices.map(service => {
+            {allServices
+              .filter(service => 
+                service.service_name.toLowerCase().includes(serviceSearchQuery.toLowerCase()) ||
+                service.category?.toLowerCase().includes(serviceSearchQuery.toLowerCase())
+              )
+              .map(service => {
               const alreadySelected = selectedToken?.selected_services?.includes(service.id);
               return (
                 <div 
@@ -658,19 +689,12 @@ export default function EnhancedSalonDashboard() {
                 </div>
               );
             })}
-          </div>
-
-          <div className="flex justify-end space-x-2 mt-4">
-            <Button variant="outline" onClick={() => setAddServicesDialog(false)}>
-              Cancel
-            </Button>
-            <Button 
-              onClick={handleAddServices}
-              className="bg-gold text-black hover:bg-gold/90"
-              disabled={selectedNewServices.length === 0}
-            >
-              Add {selectedNewServices.length} Service{selectedNewServices.length !== 1 ? 's' : ''}
-            </Button>
+            {allServices.filter(service => 
+              service.service_name.toLowerCase().includes(serviceSearchQuery.toLowerCase()) ||
+              service.category?.toLowerCase().includes(serviceSearchQuery.toLowerCase())
+            ).length === 0 && (
+              <p className="text-center text-muted-foreground py-8">No services found</p>
+            )}
           </div>
         </DialogContent>
       </Dialog>

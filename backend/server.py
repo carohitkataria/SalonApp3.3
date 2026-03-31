@@ -1760,7 +1760,7 @@ async def get_barber_queue(salon_id: str, barber_id: str, date: Optional[str] = 
     if status:
         query["status"] = status
     
-    tokens = await db.tokens.find(query, {"_id": 0}).sort("token_number", 1).to_list(1000)
+    tokens = await db.tokens.find(query, {"_id": 0}).sort("created_at", 1).to_list(1000)
     return tokens
 
 @api_router.get("/salons/{salon_id}/queue", response_model=List[TokenModel])
@@ -1773,7 +1773,7 @@ async def get_salon_queue(salon_id: str, date: Optional[str] = None, status: Opt
     if status:
         query["status"] = status
     
-    tokens = await db.tokens.find(query, {"_id": 0}).sort([("barber_id", 1), ("token_number", 1)]).to_list(1000)
+    tokens = await db.tokens.find(query, {"_id": 0}).sort("created_at", 1).to_list(1000)
     return tokens
 
 @api_router.post("/salons/{salon_id}/barbers/{barber_id}/call-next")
