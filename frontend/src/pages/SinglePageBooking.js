@@ -97,18 +97,26 @@ const ServiceCard = ({ service, selected, onToggle, price }) => (
 );
 
 // Barber Selection Component
-const BarberChip = ({ barber, selected, onSelect, liveStatus }) => {
+const BarberChip = ({ barber, selected, onSelect, liveStatus, slotAvailability }) => {
   const status = liveStatus?.barbers?.find(b => b.barber_id === barber.id);
   const waitingCount = status?.waiting_count || 0;
+  
+  // Get slot availability for this barber
+  const barberSlot = slotAvailability?.barbers?.find(b => b.barber_id === barber.id);
+  const isFull = barberSlot?.is_full || false;
+  const slotsLeft = barberSlot?.available ?? 10;
   
   return (
     <motion.button
       type="button"
-      whileHover={{ scale: 1.02 }}
-      whileTap={{ scale: 0.98 }}
-      onClick={() => onSelect(barber.id)}
+      whileHover={isFull ? {} : { scale: 1.02 }}
+      whileTap={isFull ? {} : { scale: 0.98 }}
+      onClick={isFull ? undefined : () => onSelect(barber.id)}
+      disabled={isFull}
       className={`relative p-3 rounded-xl border-2 transition-all text-left ${
-        selected
+        isFull
+          ? 'bg-muted/30 border-border/50 opacity-60 cursor-not-allowed'
+          : selected
           ? 'bg-gold/10 border-gold shadow-md'
           : 'bg-card border-border hover:border-gold/40'
       }`}
@@ -128,11 +136,15 @@ const BarberChip = ({ barber, selected, onSelect, liveStatus }) => {
           <div className="flex items-center gap-2 mt-0.5">
             <Star className="w-3 h-3 text-yellow-500 fill-yellow-500" />
             <span className="text-xs text-muted-foreground">{barber.rating || '4.5'}</span>
-            <span className="text-xs text-muted-foreground">• {waitingCount} waiting</span>
+            {isFull ? (
+              <span className="text-xs text-red-500 font-medium">• Full</span>
+            ) : (
+              <span className="text-xs text-muted-foreground">• {slotsLeft} slots</span>
+            )}
           </div>
         </div>
       </div>
-      {selected && (
+      {selected && !isFull && (
         <motion.div
           initial={{ scale: 0 }}
           animate={{ scale: 1 }}
@@ -140,6 +152,11 @@ const BarberChip = ({ barber, selected, onSelect, liveStatus }) => {
         >
           <Check className="w-3 h-3 text-black" />
         </motion.div>
+      )}
+      {isFull && (
+        <div className="absolute top-2 right-2 px-2 py-0.5 bg-red-500/20 text-red-500 text-xs rounded-full font-medium">
+          Booked
+        </div>
       )}
     </motion.button>
   );
@@ -198,6 +215,8 @@ export default function SinglePageBooking() {
   const { user, isUserLoggedIn } = useAuth();
   const [searchParams] = useSearchParams();
   const source = searchParams.get('source') || 'online';
+  const forSelf = searchParams.get('for') === 'self';
+  const whenParam = searchParams.get('when');
 
   const [salon, setSalon] = useState(null);
   const [barbers, setBarbers] = useState([]);
@@ -207,9 +226,10 @@ export default function SinglePageBooking() {
   const [liveStatus, setLiveStatus] = useState(null);
   const [bookedToken, setBookedToken] = useState(null);
   const [loading, setLoading] = useState(false);
+  const [slotAvailability, setSlotAvailability] = useState(null);
   
   // Form state
-  const [bookingForSelf, setBookingForSelf] = useState(true);
+  const [bookingForSelf, setBookingForSelf] = useState(forSelf || true);
   const [otherPersonName, setOtherPersonName] = useState('');
   const [otherPersonPhone, setOtherPersonPhone] = useState('');
   const [otherPersonGender, setOtherPersonGender] = useState('');
@@ -218,11 +238,11 @@ export default function SinglePageBooking() {
   const [openCategories, setOpenCategories] = useState({});
 
   const [formData, setFormData] = useState({
-    date: getTodayIST(),
+    date: whenParam === 'today' ? getTodayIST() : getTodayIST(),
     shift: '',
     barberId: 'any',
     selectedServices: [],
-    bookingType: 'instant'
+    bookingType: whenParam === 'today' ? 'instant' : 'instant'
   });
 
   const [totalAmount, setTotalAmount] = useState(0);
@@ -299,6 +319,24 @@ export default function SinglePageBooking() {
       console.error('Error fetching live status:', error);
     }
   };
+
+  const fetchSlotAvailability = async (date, shift) => {
+    try {
+      const response = await axios.get(`${API}/salons/${salonId}/slot-availability`, {
+        params: { date, shift }
+      });
+      setSlotAvailability(response.data);
+    } catch (error) {
+      console.error('Error fetching slot availability:', error);
+    }
+  };
+
+  // Fetch slot availability when date or shift changes
+  useEffect(() => {
+    if (formData.date && formData.shift) {
+      fetchSlotAvailability(formData.date, formData.shift);
+    }
+  }, [formData.date, formData.shift]);
 
   const fetchBarberServices = async (barberId) => {
     try {
@@ -663,9 +701,19 @@ export default function SinglePageBooking() {
                 selected={!fastestAvailable && formData.barberId === barber.id}
                 onSelect={handleBarberSelect}
                 liveStatus={liveStatus}
+                slotAvailability={slotAvailability}
               />
             ))}
           </div>
+          
+          {/* Show if all slots are full */}
+          {slotAvailability?.all_slots_full && formData.shift && (
+            <div className="p-3 bg-red-500/10 border border-red-500/30 rounded-xl">
+              <p className="text-sm text-red-500 font-medium text-center">
+                All slots are booked for this time. Please select a different time slot.
+              </p>
+            </div>
+          )}
         </div>
 
         {/* Section 3: Services with Filters and Categories */}

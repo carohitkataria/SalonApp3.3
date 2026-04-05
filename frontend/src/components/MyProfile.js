@@ -1,25 +1,63 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import axios from 'axios';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Checkbox } from '@/components/ui/checkbox';
 import { toast } from 'sonner';
-import { MapPin, Edit2, Save, X } from 'lucide-react';
+import { MapPin, Edit2, Save, X, QrCode, Download, Copy } from 'lucide-react';
+import { QRCodeSVG } from 'qrcode.react';
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
 const API = `${BACKEND_URL}/api`;
+const FRONTEND_URL = window.location.origin;
 
 export default function MyProfile({ salon, onUpdate, getAuthHeaders }) {
   const [isEditing, setIsEditing] = useState(false);
   const [editData, setEditData] = useState(salon || {});
   const [saving, setSaving] = useState(false);
+  const [showQRModal, setShowQRModal] = useState(false);
+  const qrRef = useRef(null);
+
+  // QR Code URL - direct to booking page with defaults
+  const bookingUrl = salon ? `${FRONTEND_URL}/book/${salon.id}?source=qr&for=self&when=today` : '';
 
   useEffect(() => {
     if (salon) {
       setEditData(salon);
     }
   }, [salon]);
+
+  const handleDownloadQR = () => {
+    const svg = qrRef.current?.querySelector('svg');
+    if (!svg) return;
+
+    const svgData = new XMLSerializer().serializeToString(svg);
+    const canvas = document.createElement('canvas');
+    const ctx = canvas.getContext('2d');
+    const img = new Image();
+    
+    img.onload = () => {
+      canvas.width = 512;
+      canvas.height = 512;
+      ctx.fillStyle = 'white';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.drawImage(img, 0, 0, 512, 512);
+      
+      const link = document.createElement('a');
+      link.download = `${salon.salon_name.replace(/\s+/g, '_')}_QR.png`;
+      link.href = canvas.toDataURL('image/png');
+      link.click();
+      toast.success('QR Code downloaded!');
+    };
+    
+    img.src = 'data:image/svg+xml;base64,' + btoa(unescape(encodeURIComponent(svgData)));
+  };
+
+  const handleCopyLink = () => {
+    navigator.clipboard.writeText(bookingUrl);
+    toast.success('Booking link copied!');
+  };
 
   const handleSave = async () => {
     setSaving(true);
@@ -70,38 +108,101 @@ export default function MyProfile({ salon, onUpdate, getAuthHeaders }) {
           <MapPin className="w-5 h-5 mr-2 text-gold" />
           My Profile
         </h3>
-        {!isEditing ? (
-          <Button
-            onClick={() => setIsEditing(true)}
-            variant="outline"
-            size="sm"
-          >
-            <Edit2 className="w-4 h-4 mr-2" />
-            Edit Profile
-          </Button>
-        ) : (
-          <div className="flex space-x-2">
+        <div className="flex space-x-2">
+          {!isEditing && (
             <Button
-              onClick={handleCancel}
+              onClick={() => setShowQRModal(true)}
               variant="outline"
               size="sm"
-              disabled={saving}
+              className="border-gold text-gold hover:bg-gold/10"
             >
-              <X className="w-4 h-4 mr-2" />
-              Cancel
+              <QrCode className="w-4 h-4 mr-2" />
+              QR Code
             </Button>
+          )}
+          {!isEditing ? (
             <Button
-              onClick={handleSave}
-              className="bg-gold text-black hover:bg-gold/90"
+              onClick={() => setIsEditing(true)}
+              variant="outline"
               size="sm"
-              disabled={saving}
             >
-              <Save className="w-4 h-4 mr-2" />
-              {saving ? 'Saving...' : 'Save Changes'}
+              <Edit2 className="w-4 h-4 mr-2" />
+              Edit Profile
             </Button>
-          </div>
-        )}
+          ) : (
+            <>
+              <Button
+                onClick={handleCancel}
+                variant="outline"
+                size="sm"
+                disabled={saving}
+              >
+                <X className="w-4 h-4 mr-2" />
+                Cancel
+              </Button>
+              <Button
+                onClick={handleSave}
+                className="bg-gold text-black hover:bg-gold/90"
+                size="sm"
+                disabled={saving}
+              >
+                <Save className="w-4 h-4 mr-2" />
+                {saving ? 'Saving...' : 'Save Changes'}
+              </Button>
+            </>
+          )}
+        </div>
       </div>
+
+      {/* QR Code Modal */}
+      {showQRModal && (
+        <div className="fixed inset-0 bg-black/70 z-50 flex items-center justify-center p-4" onClick={() => setShowQRModal(false)}>
+          <div className="bg-card rounded-2xl p-6 max-w-md w-full" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-xl font-bold text-card-foreground">Booking QR Code</h3>
+              <button onClick={() => setShowQRModal(false)} className="p-2 hover:bg-muted rounded-full">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            
+            <div className="text-center mb-4">
+              <p className="text-muted-foreground text-sm mb-4">
+                Scan this QR code to book an appointment directly
+              </p>
+              <div ref={qrRef} className="bg-white p-6 rounded-xl inline-block mb-4">
+                <QRCodeSVG 
+                  value={bookingUrl} 
+                  size={200}
+                  level="H"
+                  includeMargin={true}
+                />
+              </div>
+              <p className="font-bold text-foreground">{salon.salon_name}</p>
+              <p className="text-xs text-muted-foreground mt-1">
+                Defaults: Self booking • Today • First available slot
+              </p>
+            </div>
+
+            <div className="flex gap-3">
+              <Button
+                onClick={handleCopyLink}
+                variant="outline"
+                className="flex-1"
+              >
+                <Copy className="w-4 h-4 mr-2" />
+                Copy Link
+              </Button>
+              <Button
+                onClick={handleDownloadQR}
+                className="flex-1 bg-gold text-black hover:bg-gold/90"
+              >
+                <Download className="w-4 h-4 mr-2" />
+                Download
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {isEditing ? (
         <div className="space-y-6">

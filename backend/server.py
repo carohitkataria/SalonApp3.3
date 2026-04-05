@@ -1739,20 +1739,57 @@ async def create_booking(booking: BookingCreate):
         if not barber:
             raise HTTPException(status_code=404, detail="Barber not found")
         barber_name = barber["name"]
+        
+        # Check slot availability - limit 10 tokens per barber per slot
+        existing_count = await db.tokens.count_documents({
+            "salon_id": booking.salon_id,
+            "barber_id": booking.barber_id,
+            "date": booking.date,
+            "shift": booking.shift,
+            "status": {"$nin": ["cancelled"]}
+        })
+        
+        if existing_count >= 10:
+            raise HTTPException(
+                status_code=400, 
+                detail=f"All slots are booked for this barber in {booking.shift} shift. Please select another barber or time slot."
+            )
     else:
         barber_name = "Any Available"
+        
+        # For "any" barber, check if any barber has availability
+        salon = await db.salons.find_one({"id": booking.salon_id}, {"_id": 0})
+        barbers = await db.barbers.find(
+            {"salon_id": booking.salon_id, "is_active": True, "on_leave": False}, 
+            {"_id": 0}
+        ).to_list(100)
+        
+        has_availability = False
+        for b in barbers:
+            count = await db.tokens.count_documents({
+                "salon_id": booking.salon_id,
+                "barber_id": b["id"],
+                "date": booking.date,
+                "shift": booking.shift,
+                "status": {"$nin": ["cancelled"]}
+            })
+            if count < 10:
+                has_availability = True
+                break
+        
+        if not has_availability and barbers:
+            raise HTTPException(
+                status_code=400, 
+                detail=f"All slots are booked for {booking.shift} shift. Please select another time slot."
+            )
     
     # Calculate total amount
     total_amount = 0
     if booking.barber_id != "any":
         total_amount = await calculate_booking_total(booking.selected_services, booking.barber_id)
     
-    # Get token number with shift
-    if booking.booking_type == "instant":
-        token_number = await get_next_token_number(booking.salon_id, booking.barber_id, booking.date, booking.shift)
-    else:
-        # For future bookings, assign temporary token
-        token_number = f"{get_shift_prefix(booking.shift)}000"
+    # Get token number - always assign immediately (even for future bookings)
+    token_number = await get_next_token_number(booking.salon_id, booking.barber_id, booking.date, booking.shift)
     
     # Create token
     token_dict = {
@@ -1769,14 +1806,14 @@ async def create_booking(booking: BookingCreate):
         "barber_name": barber_name,
         "selected_services": booking.selected_services,
         "total_amount": total_amount,
-        "status": "waiting",
+        "status": "waiting" if booking.booking_type == "instant" else "future",
         "payment_status": "pending",
         "payment_mode": None,
         "upi_transaction_id": None,
         "source": booking.source,
         "booking_type": booking.booking_type,
         "booking_for_self": booking.booking_for_self,
-        "allocated_at": datetime.now(timezone.utc).isoformat() if booking.booking_type == "instant" else None,
+        "allocated_at": datetime.now(timezone.utc).isoformat(),
         "created_at": datetime.now(timezone.utc).isoformat()
     }
     
@@ -1789,6 +1826,43 @@ async def create_booking(booking: BookingCreate):
     await send_booking_notification(token_dict, 'booking_confirmation')
     
     return token
+
+# Slot availability endpoint
+@api_router.get("/salons/{salon_id}/slot-availability")
+async def get_slot_availability(salon_id: str, date: str, shift: str):
+    """Check slot availability per barber for a given date and shift"""
+    barbers = await db.barbers.find(
+        {"salon_id": salon_id, "is_active": True, "on_leave": False}, 
+        {"_id": 0, "id": 1, "name": 1}
+    ).to_list(100)
+    
+    result = []
+    for barber in barbers:
+        count = await db.tokens.count_documents({
+            "salon_id": salon_id,
+            "barber_id": barber["id"],
+            "date": date,
+            "shift": shift,
+            "status": {"$nin": ["cancelled"]}
+        })
+        result.append({
+            "barber_id": barber["id"],
+            "barber_name": barber["name"],
+            "booked": count,
+            "available": max(0, 10 - count),
+            "is_full": count >= 10
+        })
+    
+    # Check if all slots are full
+    all_full = all(b["is_full"] for b in result) if result else True
+    
+    return {
+        "date": date,
+        "shift": shift,
+        "barbers": result,
+        "all_slots_full": all_full,
+        "max_per_slot": 10
+    }
 
 @api_router.get("/salons/{salon_id}/barbers/{barber_id}/queue", response_model=List[TokenModel])
 async def get_barber_queue(salon_id: str, barber_id: str, date: Optional[str] = None, status: Optional[str] = None):

@@ -6,9 +6,16 @@ import { Button } from '@/components/ui/button';
 import { toast } from 'sonner';
 import { 
   Scissors, Calendar, User, MapPin, Star, Clock, 
-  ArrowLeft, Users, TrendingUp, CheckCircle, AlertCircle, XCircle
+  ArrowLeft, Users, CheckCircle, AlertCircle, ChevronRight, X
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
+
+// Import tab components
+import SalonServicesTab from './salon-tabs/SalonServicesTab';
+import SalonBarbersTab from './salon-tabs/SalonBarbersTab';
+import SalonShopTab from './salon-tabs/SalonShopTab';
+import SalonGalleryTab from './salon-tabs/SalonGalleryTab';
+import SalonProfileTab from './salon-tabs/SalonProfileTab';
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
 const API = `${BACKEND_URL}/api`;
@@ -22,6 +29,8 @@ export default function SalonMainPage() {
   const [loading, setLoading] = useState(true);
   const [liveStatus, setLiveStatus] = useState(null);
   const [userBookings, setUserBookings] = useState([]);
+  const [activeTab, setActiveTab] = useState('dashboard');
+  const [showLiveQueue, setShowLiveQueue] = useState(false);
 
   useEffect(() => {
     if (!isUserLoggedIn) {
@@ -38,6 +47,19 @@ export default function SalonMainPage() {
     }, 30000);
     return () => clearInterval(interval);
   }, [isUserLoggedIn, salonId]);
+
+  // Listen for tab change events from hamburger menu
+  useEffect(() => {
+    const handleTabChange = (event) => {
+      const tabId = event.detail;
+      if (tabId) {
+        setActiveTab(tabId);
+      }
+    };
+
+    window.addEventListener('setTab', handleTabChange);
+    return () => window.removeEventListener('setTab', handleTabChange);
+  }, []);
 
   const fetchSalonData = async () => {
     try {
@@ -65,7 +87,6 @@ export default function SalonMainPage() {
     if (!user?.id) return;
     try {
       const response = await axios.get(`${API}/user/${user.id}/history`);
-      // Filter for active bookings at this salon
       const activeStatuses = ['waiting', 'called', 'in_progress'];
       const todayBookings = response.data.filter(b => 
         b.salon_id === salonId && activeStatuses.includes(b.status)
@@ -126,13 +147,184 @@ export default function SalonMainPage() {
     );
   }
 
+  // Render tab content based on activeTab
+  const renderTabContent = () => {
+    switch (activeTab) {
+      case 'services':
+        return <SalonServicesTab salonId={salonId} />;
+      case 'barbers':
+        return <SalonBarbersTab salonId={salonId} />;
+      case 'shop':
+        return <SalonShopTab salonId={salonId} />;
+      case 'gallery':
+        return <SalonGalleryTab salonId={salonId} />;
+      case 'profile':
+        return <SalonProfileTab salon={salon} />;
+      default:
+        return renderDashboard();
+    }
+  };
+
+  const renderDashboard = () => (
+    <div className="space-y-6">
+      {/* Active Booking Status */}
+      {userBookings.length > 0 && (
+        <div className="space-y-3">
+          {userBookings.map((booking) => (
+            <motion.div
+              key={booking.id}
+              initial={{ opacity: 0, y: -10 }}
+              animate={{ opacity: 1, y: 0 }}
+              className={`p-4 rounded-xl border-2 ${
+                booking.status === 'called' 
+                  ? 'bg-blue-500/10 border-blue-500 animate-pulse' 
+                  : booking.status === 'in_progress'
+                  ? 'bg-green-500/10 border-green-500'
+                  : 'bg-gold/10 border-gold/50'
+              }`}
+            >
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  {getStatusIcon(booking.status)}
+                  <div>
+                    <p className="font-bold text-foreground">{getStatusMessage(booking)}</p>
+                    <p className="text-sm text-muted-foreground">
+                      Token: #{booking.token_number} • {booking.shift}
+                    </p>
+                  </div>
+                </div>
+                <div className="text-right">
+                  <p className="text-3xl font-bebas text-gold">#{booking.token_number}</p>
+                </div>
+              </div>
+              {booking.status === 'waiting' && liveStatus?.overall?.current_token && (
+                <div className="mt-3 pt-3 border-t border-border/50">
+                  <p className="text-sm text-muted-foreground">
+                    Currently serving: <span className="font-bold text-foreground">#{liveStatus.overall.current_token}</span>
+                  </p>
+                </div>
+              )}
+            </motion.div>
+          ))}
+        </div>
+      )}
+
+      {/* Welcome Banner - Only when no active booking */}
+      {userBookings.length === 0 && (
+        <div className="bg-gradient-to-r from-gold/20 to-gold/5 rounded-2xl p-6 border border-gold/30">
+          <h2 className="text-2xl font-playfair font-bold text-foreground mb-2">
+            Welcome to {salon.salon_name}
+          </h2>
+          <p className="text-muted-foreground mb-4">
+            {salon.description || 'Your trusted destination for premium grooming services.'}
+          </p>
+        </div>
+      )}
+
+      {/* Quick Actions - Three Cards like the image */}
+      <div className="grid grid-cols-3 gap-3">
+        <button
+          onClick={() => navigate(`/book/${salonId}`)}
+          className="p-4 bg-card rounded-xl border border-border hover:border-gold transition-colors text-left"
+        >
+          <Calendar className="w-8 h-8 text-gold mb-3" />
+          <p className="font-bold text-foreground">Book Appointment</p>
+          <p className="text-xs text-muted-foreground">Schedule your visit</p>
+        </button>
+        
+        <button
+          onClick={() => setShowLiveQueue(true)}
+          className="p-4 bg-card rounded-xl border border-border hover:border-gold transition-colors text-left"
+        >
+          <Clock className="w-8 h-8 text-gold mb-3" />
+          <p className="font-bold text-foreground">Live Queue</p>
+          <p className="text-xs text-muted-foreground">Check wait times</p>
+        </button>
+
+        <button
+          onClick={() => setActiveTab('services')}
+          className="p-4 bg-card rounded-xl border border-border hover:border-gold transition-colors text-left"
+        >
+          <Scissors className="w-8 h-8 text-gold mb-3" />
+          <p className="font-bold text-foreground">Our Services</p>
+          <p className="text-xs text-muted-foreground">Browse all services</p>
+        </button>
+      </div>
+
+      {/* Live Status Summary Cards */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+        <div className="bg-card rounded-xl p-4 border border-border">
+          <div className="flex items-center gap-3">
+            <div className="p-2 bg-blue-500/10 rounded-lg">
+              <Users className="w-5 h-5 text-blue-500" />
+            </div>
+            <div>
+              <p className="text-xs text-muted-foreground">Queue</p>
+              <p className="text-2xl font-bold text-foreground">
+                {liveStatus?.overall?.waiting_count || 0}
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <div className="bg-card rounded-xl p-4 border border-border">
+          <div className="flex items-center gap-3">
+            <div className="p-2 bg-green-500/10 rounded-lg">
+              <Clock className="w-5 h-5 text-green-500" />
+            </div>
+            <div>
+              <p className="text-xs text-muted-foreground">Serving</p>
+              <p className="text-2xl font-bold text-foreground">
+                {liveStatus?.overall?.current_token || '-'}
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <div className="bg-card rounded-xl p-4 border border-border">
+          <div className="flex items-center gap-3">
+            <div className="p-2 bg-gold/10 rounded-lg">
+              <Star className="w-5 h-5 text-gold" />
+            </div>
+            <div>
+              <p className="text-xs text-muted-foreground">Rating</p>
+              <p className="text-2xl font-bold text-foreground">
+                {salon.rating || '4.5'}
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <div className="bg-card rounded-xl p-4 border border-border">
+          <div className="flex items-center gap-3">
+            <div className="p-2 bg-purple-500/10 rounded-lg">
+              <User className="w-5 h-5 text-purple-500" />
+            </div>
+            <div>
+              <p className="text-xs text-muted-foreground">Barbers</p>
+              <p className="text-2xl font-bold text-foreground">
+                {liveStatus?.barbers?.length || 0}
+              </p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+
   return (
     <div className="min-h-screen bg-background">
       {/* Compact Header */}
       <div className="bg-card border-b border-border sticky top-0 z-20">
         <div className="max-w-4xl mx-auto flex items-center p-3 gap-3">
           <button 
-            onClick={() => navigate('/salons')}
+            onClick={() => {
+              if (activeTab !== 'dashboard') {
+                setActiveTab('dashboard');
+              } else {
+                navigate('/salons');
+              }
+            }}
             className="p-2 rounded-full hover:bg-muted transition-colors"
           >
             <ArrowLeft className="w-5 h-5 text-foreground" />
@@ -172,177 +364,151 @@ export default function SalonMainPage() {
         </div>
       </div>
 
-      <div className="max-w-4xl mx-auto p-4 space-y-6">
-        
-        {/* Active Booking Status - Shows instead of Welcome Banner */}
-        {userBookings.length > 0 ? (
-          <div className="space-y-3">
-            {userBookings.map((booking) => (
-              <motion.div
-                key={booking.id}
-                initial={{ opacity: 0, y: -10 }}
-                animate={{ opacity: 1, y: 0 }}
-                className={`p-4 rounded-xl border-2 ${
-                  booking.status === 'called' 
-                    ? 'bg-blue-500/10 border-blue-500 animate-pulse' 
-                    : booking.status === 'in_progress'
-                    ? 'bg-green-500/10 border-green-500'
-                    : 'bg-gold/10 border-gold/50'
-                }`}
-              >
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-3">
-                    {getStatusIcon(booking.status)}
+      <div className="max-w-4xl mx-auto p-4">
+        {renderTabContent()}
+      </div>
+
+      {/* Live Queue Modal */}
+      <AnimatePresence>
+        {showLiveQueue && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-black/70 z-50 flex items-center justify-center p-4"
+            onClick={() => setShowLiveQueue(false)}
+          >
+            <motion.div
+              initial={{ scale: 0.9, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.9, opacity: 0 }}
+              onClick={(e) => e.stopPropagation()}
+              className="bg-card rounded-2xl w-full max-w-lg max-h-[80vh] overflow-hidden"
+            >
+              {/* Header */}
+              <div className="p-4 border-b border-border flex items-center justify-between">
+                <div>
+                  <h2 className="text-xl font-bold text-foreground">Live Queue</h2>
+                  <p className="text-sm text-muted-foreground">Real-time wait times</p>
+                </div>
+                <button
+                  onClick={() => setShowLiveQueue(false)}
+                  className="p-2 rounded-full hover:bg-muted"
+                >
+                  <X className="w-5 h-5 text-foreground" />
+                </button>
+              </div>
+
+              {/* Content */}
+              <div className="p-4 overflow-y-auto max-h-[60vh]">
+                {/* Overall Status */}
+                <div className="bg-gradient-to-r from-gold/20 to-gold/5 rounded-xl p-4 mb-4">
+                  <div className="grid grid-cols-3 gap-4 text-center">
                     <div>
-                      <p className="font-bold text-foreground">{getStatusMessage(booking)}</p>
-                      <p className="text-sm text-muted-foreground">
-                        Token: #{booking.token_number} • {booking.shift}
+                      <p className="text-3xl font-bebas text-gold">
+                        {liveStatus?.overall?.waiting_count || 0}
                       </p>
+                      <p className="text-xs text-muted-foreground">In Queue</p>
+                    </div>
+                    <div>
+                      <p className="text-3xl font-bebas text-foreground">
+                        #{liveStatus?.overall?.current_token || '-'}
+                      </p>
+                      <p className="text-xs text-muted-foreground">Now Serving</p>
+                    </div>
+                    <div>
+                      <p className="text-3xl font-bebas text-green-500">
+                        {liveStatus?.overall?.completed_today || 0}
+                      </p>
+                      <p className="text-xs text-muted-foreground">Completed</p>
                     </div>
                   </div>
-                  <div className="text-right">
-                    <p className="text-3xl font-bebas text-gold">#{booking.token_number}</p>
-                  </div>
                 </div>
-                {booking.status === 'waiting' && liveStatus?.overall?.current_token && (
-                  <div className="mt-3 pt-3 border-t border-border/50">
-                    <p className="text-sm text-muted-foreground">
-                      Currently serving: <span className="font-bold text-foreground">#{liveStatus.overall.current_token}</span>
-                    </p>
-                  </div>
-                )}
-              </motion.div>
-            ))}
-          </div>
-        ) : (
-          /* Welcome Banner - Only when no active booking */
-          <div className="bg-gradient-to-r from-gold/20 to-gold/5 rounded-2xl p-6 border border-gold/30">
-            <h2 className="text-2xl font-playfair font-bold text-foreground mb-2">
-              Welcome to {salon.salon_name}
-            </h2>
-            <p className="text-muted-foreground mb-4">
-              {salon.description || 'Your trusted destination for premium grooming services.'}
-            </p>
-            <Button 
-              onClick={() => navigate(`/book/${salonId}`)}
-              className="bg-gold text-black hover:bg-gold/90"
-            >
-              <Calendar className="w-4 h-4 mr-2" />
-              Book Your Appointment
-            </Button>
-          </div>
-        )}
 
-        {/* Live Status Cards */}
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-          <div className="bg-card rounded-xl p-4 border border-border">
-            <div className="flex items-center gap-3">
-              <div className="p-2 bg-blue-500/10 rounded-lg">
-                <Users className="w-5 h-5 text-blue-500" />
-              </div>
-              <div>
-                <p className="text-xs text-muted-foreground">Queue</p>
-                <p className="text-2xl font-bold text-foreground">
-                  {liveStatus?.overall?.waiting_count || 0}
-                </p>
-              </div>
-            </div>
-          </div>
+                {/* Barber-wise Queue */}
+                <h3 className="font-bold text-foreground mb-3">Barber Queue Status</h3>
+                <div className="space-y-3">
+                  {liveStatus?.barbers && liveStatus.barbers.length > 0 ? (
+                    liveStatus.barbers.map((barber) => (
+                      <div
+                        key={barber.barber_id}
+                        className="bg-background rounded-xl p-4 border border-border"
+                      >
+                        <div className="flex items-center justify-between mb-3">
+                          <div className="flex items-center gap-3">
+                            <div className="w-10 h-10 rounded-full bg-gold/20 flex items-center justify-center">
+                              <User className="w-5 h-5 text-gold" />
+                            </div>
+                            <div>
+                              <p className="font-bold text-foreground">{barber.barber_name}</p>
+                              <p className="text-xs text-muted-foreground">
+                                {barber.status === 'busy' ? 'Currently Busy' : 'Available'}
+                              </p>
+                            </div>
+                          </div>
+                          {barber.current_token && (
+                            <div className="px-3 py-1 bg-green-500/10 rounded-full">
+                              <span className="text-green-500 font-bold">Serving #{barber.current_token}</span>
+                            </div>
+                          )}
+                        </div>
 
-          <div className="bg-card rounded-xl p-4 border border-border">
-            <div className="flex items-center gap-3">
-              <div className="p-2 bg-green-500/10 rounded-lg">
-                <Clock className="w-5 h-5 text-green-500" />
-              </div>
-              <div>
-                <p className="text-xs text-muted-foreground">Serving</p>
-                <p className="text-2xl font-bold text-foreground">
-                  {liveStatus?.overall?.current_token || '-'}
-                </p>
-              </div>
-            </div>
-          </div>
+                        <div className="grid grid-cols-3 gap-3 text-center">
+                          <div className="bg-muted/50 rounded-lg p-2">
+                            <p className="text-lg font-bold text-foreground">{barber.waiting_count}</p>
+                            <p className="text-xs text-muted-foreground">Waiting</p>
+                          </div>
+                          <div className="bg-muted/50 rounded-lg p-2">
+                            <p className="text-lg font-bold text-foreground">{barber.total_tokens_today || 0}</p>
+                            <p className="text-xs text-muted-foreground">Served Today</p>
+                          </div>
+                          <div className="bg-muted/50 rounded-lg p-2">
+                            <p className="text-lg font-bold text-foreground">
+                              {barber.waiting_count > 0 ? `~${barber.waiting_count * 20}min` : 'Now'}
+                            </p>
+                            <p className="text-xs text-muted-foreground">Est. Wait</p>
+                          </div>
+                        </div>
 
-          <div className="bg-card rounded-xl p-4 border border-border">
-            <div className="flex items-center gap-3">
-              <div className="p-2 bg-gold/10 rounded-lg">
-                <Star className="w-5 h-5 text-gold" />
-              </div>
-              <div>
-                <p className="text-xs text-muted-foreground">Rating</p>
-                <p className="text-2xl font-bold text-foreground">
-                  {salon.rating || '4.5'}
-                </p>
-              </div>
-            </div>
-          </div>
-
-          <div className="bg-card rounded-xl p-4 border border-border">
-            <div className="flex items-center gap-3">
-              <div className="p-2 bg-purple-500/10 rounded-lg">
-                <TrendingUp className="w-5 h-5 text-purple-500" />
-              </div>
-              <div>
-                <p className="text-xs text-muted-foreground">Barbers</p>
-                <p className="text-2xl font-bold text-foreground">
-                  {liveStatus?.barbers?.length || 0}
-                </p>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        {/* Active Barbers */}
-        {liveStatus?.barbers && liveStatus.barbers.length > 0 && (
-          <div className="bg-card rounded-xl p-5 border border-border">
-            <h3 className="text-lg font-bold text-foreground mb-4">Active Barbers</h3>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-              {liveStatus.barbers.map((barber) => (
-                <div 
-                  key={barber.barber_id}
-                  className="flex items-center gap-3 p-3 bg-background rounded-lg border border-border"
-                >
-                  <div className="w-10 h-10 rounded-full bg-gold/20 flex items-center justify-center">
-                    <User className="w-5 h-5 text-gold" />
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <p className="font-medium text-foreground truncate">{barber.barber_name}</p>
-                    <p className="text-xs text-muted-foreground">
-                      {barber.waiting_count} waiting • {barber.total_tokens_today || 0} served
-                    </p>
-                  </div>
-                  {barber.current_token && (
-                    <div className="px-2 py-1 bg-green-500/10 rounded text-green-500 text-sm font-bold">
-                      #{barber.current_token}
+                        {/* Waiting Queue List */}
+                        {barber.waiting_tokens && barber.waiting_tokens.length > 0 && (
+                          <div className="mt-3 pt-3 border-t border-border">
+                            <p className="text-xs text-muted-foreground mb-2">Queue:</p>
+                            <div className="flex flex-wrap gap-2">
+                              {barber.waiting_tokens.slice(0, 10).map((token, idx) => (
+                                <span
+                                  key={token}
+                                  className={`px-2 py-1 rounded text-xs font-bold ${
+                                    idx === 0 
+                                      ? 'bg-gold/20 text-gold' 
+                                      : 'bg-muted text-foreground'
+                                  }`}
+                                >
+                                  #{token}
+                                </span>
+                              ))}
+                              {barber.waiting_tokens.length > 10 && (
+                                <span className="text-xs text-muted-foreground">
+                                  +{barber.waiting_tokens.length - 10} more
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    ))
+                  ) : (
+                    <div className="text-center py-8">
+                      <Users className="w-12 h-12 text-muted-foreground/30 mx-auto mb-3" />
+                      <p className="text-muted-foreground">No active barbers at the moment</p>
                     </div>
                   )}
                 </div>
-              ))}
-            </div>
-          </div>
+              </div>
+            </motion.div>
+          </motion.div>
         )}
-
-        {/* Quick Actions */}
-        <div className="grid grid-cols-2 gap-3">
-          <button
-            onClick={() => navigate(`/book/${salonId}`)}
-            className="p-4 bg-card rounded-xl border border-border hover:border-gold transition-colors text-left"
-          >
-            <Calendar className="w-6 h-6 text-gold mb-2" />
-            <p className="font-medium text-foreground">Book Appointment</p>
-            <p className="text-xs text-muted-foreground">Schedule your visit</p>
-          </button>
-          
-          <button
-            onClick={() => navigate('/history')}
-            className="p-4 bg-card rounded-xl border border-border hover:border-gold transition-colors text-left"
-          >
-            <Clock className="w-6 h-6 text-gold mb-2" />
-            <p className="font-medium text-foreground">My Bookings</p>
-            <p className="text-xs text-muted-foreground">View & manage</p>
-          </button>
-        </div>
-      </div>
+      </AnimatePresence>
     </div>
   );
 }
