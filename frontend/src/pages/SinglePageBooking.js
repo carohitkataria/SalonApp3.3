@@ -4,8 +4,9 @@ import { useAuth } from '@/contexts/AuthContext';
 import axios from 'axios';
 import { Button } from '@/components/ui/button';
 import { toast } from 'sonner';
-import { Scissors, Calendar, User, CheckCircle, Star, Clock, ArrowLeft, Home, Zap, Check } from 'lucide-react';
+import { Scissors, Calendar, User, CheckCircle, Star, Clock, ArrowLeft, Home, Zap, Check, ChevronDown, ChevronRight, Search } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
+import { Input } from '@/components/ui/input';
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
 const API = `${BACKEND_URL}/api`;
@@ -29,21 +30,24 @@ const getTomorrowIST = () => {
 const getCurrentHourIST = () => getISTDate().getHours();
 
 // Chip Component for selections
-const SelectChip = ({ selected, onClick, children, icon: Icon, premium = false }) => (
+const SelectChip = ({ selected, onClick, children, icon: Icon, disabled = false }) => (
   <motion.button
     type="button"
-    whileHover={{ scale: 1.02 }}
-    whileTap={{ scale: 0.98 }}
-    onClick={onClick}
+    whileHover={disabled ? {} : { scale: 1.02 }}
+    whileTap={disabled ? {} : { scale: 0.98 }}
+    onClick={disabled ? undefined : onClick}
+    disabled={disabled}
     className={`relative px-4 py-2.5 rounded-full border-2 transition-all flex items-center gap-2 text-sm font-medium ${
-      selected
+      disabled
+        ? 'bg-muted/50 text-muted-foreground/50 border-border/50 cursor-not-allowed opacity-50'
+        : selected
         ? 'bg-gold text-black border-gold shadow-lg shadow-gold/20'
         : 'bg-background text-foreground border-border hover:border-gold/50'
-    } ${premium ? 'ring-1 ring-gold/30' : ''}`}
+    }`}
   >
     {Icon && <Icon className="w-4 h-4" />}
     {children}
-    {selected && (
+    {selected && !disabled && (
       <motion.span
         initial={{ scale: 0 }}
         animate={{ scale: 1 }}
@@ -61,34 +65,34 @@ const ServiceCard = ({ service, selected, onToggle, price }) => (
     whileHover={{ scale: 1.01 }}
     whileTap={{ scale: 0.99 }}
     onClick={onToggle}
-    className={`relative p-4 rounded-xl cursor-pointer transition-all border-2 ${
+    className={`relative p-3 rounded-xl cursor-pointer transition-all border-2 ${
       selected
         ? 'bg-gold/10 border-gold shadow-md'
         : 'bg-card border-border hover:border-gold/40'
     }`}
   >
-    <div className="flex justify-between items-start">
-      <div className="flex-1">
-        <h4 className="font-bold text-foreground">{service.service_name}</h4>
+    <div className="flex justify-between items-center">
+      <div className="flex-1 min-w-0">
+        <h4 className="font-bold text-foreground text-sm truncate">{service.service_name}</h4>
         {service.default_duration && (
-          <p className="text-xs text-muted-foreground flex items-center mt-1">
+          <p className="text-xs text-muted-foreground flex items-center mt-0.5">
             <Clock className="w-3 h-3 mr-1" /> {service.default_duration} mins
           </p>
         )}
       </div>
-      <div className="text-right">
-        <p className="text-lg font-bold text-gold">₹{price}</p>
+      <div className="flex items-center gap-2">
+        <p className="text-base font-bold text-gold">₹{price}</p>
+        {selected && (
+          <motion.div
+            initial={{ scale: 0 }}
+            animate={{ scale: 1 }}
+            className="w-5 h-5 bg-gold rounded-full flex items-center justify-center"
+          >
+            <Check className="w-3 h-3 text-black" />
+          </motion.div>
+        )}
       </div>
     </div>
-    {selected && (
-      <motion.div
-        initial={{ scale: 0 }}
-        animate={{ scale: 1 }}
-        className="absolute top-2 right-2 w-6 h-6 bg-gold rounded-full flex items-center justify-center"
-      >
-        <Check className="w-4 h-4 text-black" />
-      </motion.div>
-    )}
   </motion.div>
 );
 
@@ -110,7 +114,7 @@ const BarberChip = ({ barber, selected, onSelect, liveStatus }) => {
       }`}
     >
       <div className="flex items-center gap-3">
-        <div className="w-12 h-12 rounded-full overflow-hidden bg-muted flex-shrink-0 border-2 border-gold/30">
+        <div className="w-10 h-10 rounded-full overflow-hidden bg-muted flex-shrink-0 border-2 border-gold/30">
           {barber.photo_url ? (
             <img src={barber.photo_url} alt={barber.name} className="w-full h-full object-cover" />
           ) : (
@@ -141,6 +145,53 @@ const BarberChip = ({ barber, selected, onSelect, liveStatus }) => {
   );
 };
 
+// Collapsible Category Component
+const CategorySection = ({ category, services, selectedServices, onToggle, priceGetter, isOpen, onToggleOpen }) => (
+  <div className="border border-border rounded-xl overflow-hidden">
+    <button
+      type="button"
+      onClick={onToggleOpen}
+      className="w-full flex items-center justify-between p-3 bg-card hover:bg-muted/50 transition-colors"
+    >
+      <div className="flex items-center gap-2">
+        <Scissors className="w-4 h-4 text-gold" />
+        <span className="font-bold text-foreground">{category}</span>
+        <span className="text-xs bg-gold/20 text-gold px-2 py-0.5 rounded-full">
+          {services.length}
+        </span>
+      </div>
+      {isOpen ? (
+        <ChevronDown className="w-5 h-5 text-muted-foreground" />
+      ) : (
+        <ChevronRight className="w-5 h-5 text-muted-foreground" />
+      )}
+    </button>
+    <AnimatePresence>
+      {isOpen && (
+        <motion.div
+          initial={{ height: 0, opacity: 0 }}
+          animate={{ height: 'auto', opacity: 1 }}
+          exit={{ height: 0, opacity: 0 }}
+          transition={{ duration: 0.2 }}
+          className="overflow-hidden"
+        >
+          <div className="p-3 pt-0 space-y-2">
+            {services.map(service => (
+              <ServiceCard
+                key={service.id}
+                service={service}
+                selected={selectedServices.includes(service.id)}
+                onToggle={() => onToggle(service.id)}
+                price={priceGetter(service)}
+              />
+            ))}
+          </div>
+        </motion.div>
+      )}
+    </AnimatePresence>
+  </div>
+);
+
 export default function SinglePageBooking() {
   const { salonId } = useParams();
   const navigate = useNavigate();
@@ -163,6 +214,8 @@ export default function SinglePageBooking() {
   const [otherPersonPhone, setOtherPersonPhone] = useState('');
   const [otherPersonGender, setOtherPersonGender] = useState('');
   const [fastestAvailable, setFastestAvailable] = useState(true);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [openCategories, setOpenCategories] = useState({});
 
   const [formData, setFormData] = useState({
     date: getTodayIST(),
@@ -201,6 +254,17 @@ export default function SinglePageBooking() {
   useEffect(() => {
     calculateTotal();
   }, [formData.selectedServices, barberServices, salonServices]);
+
+  // Initialize open categories
+  useEffect(() => {
+    const services = (fastestAvailable || formData.barberId === 'any') ? salonServices : barberServices;
+    const categories = [...new Set(services.map(s => s.category || 'General'))];
+    const initial = {};
+    categories.forEach((cat, idx) => {
+      initial[cat] = idx === 0; // Open first category by default
+    });
+    setOpenCategories(initial);
+  }, [salonServices, barberServices, fastestAvailable, formData.barberId]);
 
   const fetchSalonData = async () => {
     try {
@@ -245,30 +309,31 @@ export default function SinglePageBooking() {
     }
   };
 
-  // Filter shifts based on current time
-  const availableShifts = useMemo(() => {
+  // Get available shifts for a date
+  const getShiftAvailability = (shiftId) => {
     const currentHour = getCurrentHourIST();
     const isToday = formData.date === getTodayIST();
     
-    if (!isToday) return shifts;
+    if (!isToday) return true;
 
-    return shifts.filter(shift => {
-      const timeParts = shift.time.split(' - ');
-      if (timeParts.length !== 2) return true;
-      
-      const endTimeStr = timeParts[1].trim();
-      const endMatch = endTimeStr.match(/(\d+)\s*(AM|PM)/i);
-      if (!endMatch) return true;
-      
-      let endHour = parseInt(endMatch[1]);
-      const period = endMatch[2].toUpperCase();
-      
-      if (period === 'PM' && endHour !== 12) endHour += 12;
-      else if (period === 'AM' && endHour === 12) endHour = 0;
-      
-      return currentHour < endHour;
-    });
-  }, [shifts, formData.date]);
+    const shift = shifts.find(s => s.id === shiftId);
+    if (!shift) return false;
+    
+    const timeParts = shift.time.split(' - ');
+    if (timeParts.length !== 2) return true;
+    
+    const endTimeStr = timeParts[1].trim();
+    const endMatch = endTimeStr.match(/(\d+)\s*(AM|PM)/i);
+    if (!endMatch) return true;
+    
+    let endHour = parseInt(endMatch[1]);
+    const period = endMatch[2].toUpperCase();
+    
+    if (period === 'PM' && endHour !== 12) endHour += 12;
+    else if (period === 'AM' && endHour === 12) endHour = 0;
+    
+    return currentHour < endHour;
+  };
 
   const calculateTotal = () => {
     if (formData.selectedServices.length === 0) {
@@ -305,6 +370,12 @@ export default function SinglePageBooking() {
   const handleFastestAvailable = () => {
     setFastestAvailable(true);
     setFormData(prev => ({ ...prev, barberId: 'any' }));
+  };
+
+  const getServicePrice = (service) => {
+    return (fastestAvailable || formData.barberId === 'any') 
+      ? service.base_price 
+      : (service.barber_price || service.base_price);
   };
 
   const handleSubmit = async (e) => {
@@ -423,9 +494,21 @@ export default function SinglePageBooking() {
   }
 
   const services = (fastestAvailable || formData.barberId === 'any') ? salonServices : barberServices;
+  
+  // Filter and group services
+  const filteredServices = services.filter(s => 
+    s.service_name.toLowerCase().includes(searchQuery.toLowerCase())
+  );
+  
+  const groupedServices = filteredServices.reduce((acc, service) => {
+    const category = service.category || 'General';
+    if (!acc[category]) acc[category] = [];
+    acc[category].push(service);
+    return acc;
+  }, {});
 
   return (
-    <div className="min-h-screen bg-background">
+    <div className="min-h-screen bg-background pb-32">
       {/* Compact Header */}
       <div className="bg-card border-b border-border sticky top-0 z-20">
         <div className="max-w-2xl mx-auto flex items-center p-3 gap-3">
@@ -448,11 +531,11 @@ export default function SinglePageBooking() {
         </div>
       </div>
 
-      <form onSubmit={handleSubmit} className="max-w-2xl mx-auto p-4 space-y-6">
+      <form onSubmit={handleSubmit} className="max-w-2xl mx-auto p-4 space-y-5">
         
         {/* Section 1: Who & When */}
         <div className="space-y-4">
-          {/* Booking For - Chips */}
+          {/* Booking For */}
           <div>
             <p className="text-sm font-medium text-muted-foreground mb-2">Booking for</p>
             <div className="flex gap-2 flex-wrap">
@@ -480,20 +563,20 @@ export default function SinglePageBooking() {
                     value={otherPersonName}
                     onChange={(e) => setOtherPersonName(e.target.value)}
                     placeholder="Their name"
-                    className="w-full p-3 bg-background border border-border rounded-lg text-foreground"
+                    className="w-full p-3 bg-background border border-border rounded-lg text-foreground text-sm"
                   />
                   <div className="flex items-center gap-2">
-                    <span className="text-muted-foreground">+91</span>
+                    <span className="text-muted-foreground text-sm">+91</span>
                     <input
                       type="tel"
                       value={otherPersonPhone}
                       onChange={(e) => setOtherPersonPhone(e.target.value.replace(/\D/g, '').slice(0, 10))}
                       placeholder="Mobile number"
-                      className="flex-1 p-3 bg-background border border-border rounded-lg text-foreground"
+                      className="flex-1 p-3 bg-background border border-border rounded-lg text-foreground text-sm"
                     />
                   </div>
                   <div>
-                    <p className="text-sm text-muted-foreground mb-2">Gender</p>
+                    <p className="text-xs text-muted-foreground mb-2">Gender</p>
                     <div className="flex gap-2">
                       {['Men', 'Women'].map(g => (
                         <SelectChip key={g} selected={otherPersonGender === g} onClick={() => setOtherPersonGender(g)}>
@@ -528,26 +611,27 @@ export default function SinglePageBooking() {
             </div>
           </div>
 
-          {/* Shift Chips */}
+          {/* Time Slot Chips - Always visible, greyed if unavailable */}
           <div>
             <p className="text-sm font-medium text-muted-foreground mb-2">Time Slot</p>
-            {availableShifts.length > 0 ? (
-              <div className="flex gap-2 flex-wrap">
-                {availableShifts.map(shift => (
+            <div className="flex gap-2 flex-wrap">
+              {shifts.map(shift => {
+                const isAvailable = getShiftAvailability(shift.id);
+                return (
                   <SelectChip
                     key={shift.id}
                     selected={formData.shift === shift.id}
                     onClick={() => setFormData(prev => ({ ...prev, shift: shift.id }))}
                     icon={Clock}
+                    disabled={!isAvailable}
                   >
                     {shift.name}
                   </SelectChip>
-                ))}
-              </div>
-            ) : (
-              <p className="text-sm text-orange-500 bg-orange-500/10 p-3 rounded-lg">
-                No slots available for today. Try tomorrow!
-              </p>
+                );
+              })}
+            </div>
+            {formData.date === getTodayIST() && !shifts.some(s => getShiftAvailability(s.id)) && (
+              <p className="text-xs text-orange-500 mt-2">All slots passed for today. Select tomorrow.</p>
             )}
           </div>
         </div>
@@ -555,8 +639,7 @@ export default function SinglePageBooking() {
         {/* Section 2: Barber Selection */}
         <div className="space-y-3">
           <div className="flex items-center justify-between">
-            <p className="text-sm font-medium text-muted-foreground">Choose Barber</p>
-            {/* Fastest Available Toggle */}
+            <p className="text-sm font-medium text-muted-foreground">Barber</p>
             <button
               type="button"
               onClick={handleFastestAvailable}
@@ -568,14 +651,11 @@ export default function SinglePageBooking() {
             >
               <Zap className="w-4 h-4" />
               Fastest Available
-              {fastestAvailable && (
-                <span className="w-2 h-2 bg-gold rounded-full animate-pulse"></span>
-              )}
+              {fastestAvailable && <span className="w-2 h-2 bg-gold rounded-full animate-pulse"></span>}
             </button>
           </div>
 
-          {/* Barber Grid */}
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-2 gap-2">
             {barbers.map(barber => (
               <BarberChip
                 key={barber.id}
@@ -588,52 +668,74 @@ export default function SinglePageBooking() {
           </div>
         </div>
 
-        {/* Section 3: Services */}
+        {/* Section 3: Services with Filters and Categories */}
         <div className="space-y-3">
-          <p className="text-sm font-medium text-muted-foreground">Select Services</p>
-          <div className="grid gap-3">
-            {services.length > 0 ? (
-              services.map(service => (
-                <ServiceCard
-                  key={service.id}
-                  service={service}
-                  selected={formData.selectedServices.includes(service.id)}
-                  onToggle={() => handleServiceToggle(service.id)}
-                  price={(fastestAvailable || formData.barberId === 'any') 
-                    ? service.base_price 
-                    : (service.barber_price || service.base_price)}
+          <div className="flex items-center justify-between">
+            <p className="text-sm font-medium text-muted-foreground">Services</p>
+            {formData.selectedServices.length > 0 && (
+              <span className="text-xs bg-gold/20 text-gold px-2 py-1 rounded-full">
+                {formData.selectedServices.length} selected
+              </span>
+            )}
+          </div>
+          
+          {/* Search */}
+          <div className="relative">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+            <Input
+              placeholder="Search services..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="pl-10 h-10"
+            />
+          </div>
+
+          {/* Categorized Services */}
+          <div className="space-y-2">
+            {Object.keys(groupedServices).length > 0 ? (
+              Object.entries(groupedServices).map(([category, categoryServices]) => (
+                <CategorySection
+                  key={category}
+                  category={category}
+                  services={categoryServices}
+                  selectedServices={formData.selectedServices}
+                  onToggle={handleServiceToggle}
+                  priceGetter={getServicePrice}
+                  isOpen={openCategories[category] || false}
+                  onToggleOpen={() => setOpenCategories(prev => ({ ...prev, [category]: !prev[category] }))}
                 />
               ))
             ) : (
-              <p className="text-center text-muted-foreground py-6">Loading services...</p>
-            )}
-          </div>
-        </div>
-
-        {/* Sticky Footer with Total & Book Button */}
-        <div className="sticky bottom-0 left-0 right-0 bg-background border-t border-border -mx-4 px-4 py-4 mt-6">
-          <div className="max-w-2xl mx-auto">
-            {formData.selectedServices.length > 0 && (
-              <div className="flex items-center justify-between mb-3">
-                <span className="text-muted-foreground">{formData.selectedServices.length} service(s)</span>
-                <span className="text-2xl font-bold text-gold">₹{totalAmount}</span>
+              <div className="text-center py-8 bg-card border border-border rounded-xl">
+                <Scissors className="w-12 h-12 text-muted-foreground/30 mx-auto mb-2" />
+                <p className="text-muted-foreground text-sm">
+                  {searchQuery ? 'No services match your search' : 'No services available'}
+                </p>
               </div>
-            )}
-            <Button
-              type="submit"
-              disabled={loading || formData.selectedServices.length === 0 || !formData.shift}
-              className="w-full bg-gold text-black hover:bg-gold/90 py-5 text-base font-bold rounded-xl disabled:opacity-50"
-            >
-              {loading ? 'Booking...' : 'Confirm Booking'}
-            </Button>
-            {(fastestAvailable || formData.barberId === 'any') && formData.selectedServices.length > 0 && (
-              <p className="text-xs text-center text-muted-foreground mt-2">
-                * Price may vary based on assigned barber
-              </p>
             )}
           </div>
         </div>
       </form>
+
+      {/* Sticky Footer */}
+      <div className="fixed bottom-0 left-0 right-0 bg-background border-t border-border p-4 z-30">
+        <div className="max-w-2xl mx-auto">
+          {formData.selectedServices.length > 0 && (
+            <div className="flex items-center justify-between mb-3">
+              <span className="text-muted-foreground text-sm">{formData.selectedServices.length} service(s)</span>
+              <span className="text-2xl font-bold text-gold">₹{totalAmount}</span>
+            </div>
+          )}
+          <Button
+            type="submit"
+            onClick={handleSubmit}
+            disabled={loading || formData.selectedServices.length === 0 || !formData.shift}
+            className="w-full bg-gold text-black hover:bg-gold/90 py-5 text-base font-bold rounded-xl disabled:opacity-50"
+          >
+            {loading ? 'Booking...' : 'Confirm Booking'}
+          </Button>
+        </div>
+      </div>
     </div>
   );
 }

@@ -7,6 +7,7 @@ import { Label } from '@/components/ui/label';
 import { toast } from 'sonner';
 import { Scissors, User } from 'lucide-react';
 import { motion } from 'framer-motion';
+import SalonHubLogo from '@/components/SalonHubLogo';
 
 export default function UserLoginPage() {
   const navigate = useNavigate();
@@ -33,7 +34,7 @@ export default function UserLoginPage() {
     setLoading(false);
 
     if (result.success) {
-      toast.success('Welcome to The Looks!');
+      toast.success('Welcome to SalonHub!');
       navigate(from, { replace: true });
     } else {
       toast.error(result.error);
@@ -50,9 +51,13 @@ export default function UserLoginPage() {
           animate={{ opacity: 1, y: 0 }}
           className="text-center mb-8"
         >
-          <Scissors className="w-16 h-16 text-gold mx-auto mb-4" />
-          <h1 className="text-4xl font-playfair font-bold text-white mb-2">Welcome</h1>
-          <p className="text-zinc-400 uppercase tracking-wide text-sm">The Looks Unisex Salon</p>
+          <div className="flex justify-center mb-4">
+            <SalonHubLogo size={64} showText={false} />
+          </div>
+          <h1 className="text-4xl font-playfair font-bold text-white mb-2">
+            Salon<span className="text-gold">Hub</span>
+          </h1>
+          <p className="text-zinc-400 uppercase tracking-wide text-sm">Book Your Perfect Style</p>
         </motion.div>
 
         <motion.form

@@ -13,6 +13,7 @@ import { toast } from 'sonner';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import { motion } from 'framer-motion';
+import SalonHubLogo from '@/components/SalonHubLogo';
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
 const API = `${BACKEND_URL}/api`;
@@ -290,13 +291,7 @@ export default function SalonSelectionPage() {
       <div className="bg-card border-b border-border sticky top-0 z-30 shadow-sm">
         <div className="max-w-7xl mx-auto p-4">
           <div className="flex items-center justify-between mb-4 ml-14">
-            <div className="flex items-center space-x-3">
-              <Scissors className="w-8 h-8 text-gold" />
-              <div>
-                <h1 className="text-xl font-playfair font-bold text-foreground">Find Salons</h1>
-                <p className="text-xs text-muted-foreground">Discover the best near you</p>
-              </div>
-            </div>
+            <SalonHubLogo size={36} showText={true} />
             <div className="flex space-x-2">
               <Button
                 variant={view === 'grid' ? 'default' : 'outline'}

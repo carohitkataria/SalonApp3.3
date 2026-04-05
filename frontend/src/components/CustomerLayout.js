@@ -9,6 +9,7 @@ import {
 import { toast } from 'sonner';
 import { motion, AnimatePresence } from 'framer-motion';
 import axios from 'axios';
+import SalonHubLogo from './SalonHubLogo';
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
 const API = `${BACKEND_URL}/api`;
@@ -136,13 +137,7 @@ export default function CustomerLayout({ children }) {
             >
               <div className="p-6 h-full flex flex-col">
                 <div className="flex items-center justify-between mb-6">
-                  <div className="flex items-center space-x-3">
-                    <Scissors className="w-8 h-8 text-gold" />
-                    <div>
-                      <h2 className="font-bold text-foreground">Menu</h2>
-                      <p className="text-xs text-muted-foreground">{user?.name || user?.phone}</p>
-                    </div>
-                  </div>
+                  <SalonHubLogo size={32} showText={true} />
                   <div className="flex items-center space-x-2">
                     {/* Pin Button */}
                     <button 
@@ -159,6 +154,12 @@ export default function CustomerLayout({ children }) {
                       </button>
                     )}
                   </div>
+                </div>
+                
+                {/* User Info */}
+                <div className="mb-4 pb-4 border-b border-border">
+                  <p className="text-xs text-muted-foreground">Welcome,</p>
+                  <p className="font-medium text-foreground">{user?.name || user?.phone}</p>
                 </div>
 
                 <nav className="space-y-2 flex-1 overflow-y-auto">
