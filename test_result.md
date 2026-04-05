@@ -101,3 +101,126 @@
 #====================================================================================================
 # Testing Data - Main Agent and testing sub agent both should log testing data below this section
 #====================================================================================================
+
+user_problem_statement: "Salon booking app with 8 customer UI refinement requests: 1) Extract sidebar to persistent layout across pages, 2) Make salon search default route, 3) Increase nearby search radius to 5km, 4) Make salon cards smaller, 5) Move gender tag in brackets after name, 6) Remove ₹₹ sign, 7) Remove 'Book now via app' button, 8) Add image carousel with arrows and dots"
+
+frontend:
+  - task: "Persistent Sidebar Layout Component"
+    implemented: true
+    working: "NA"
+    file: "/app/frontend/src/components/CustomerLayout.js"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: true
+    status_history:
+        - working: "NA"
+          agent: "main"
+          comment: "Created CustomerLayout.js with hamburger menu sidebar that wraps customer routes. Sidebar has smooth animations and backdrop. Fixed position hamburger button on top-left."
+
+  - task: "Default Route to Salon Search"
+    implemented: true
+    working: "NA"
+    file: "/app/frontend/src/App.js"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: true
+    status_history:
+        - working: "NA"
+          agent: "main"
+          comment: "Updated App.js: Changed default route '/' to redirect to '/salons'. Removed HomePage import. Wrapped /salons, /history, /profile routes with CustomerLayout component."
+
+  - task: "5km Nearby Search Radius"
+    implemented: true
+    working: "NA"
+    file: "/app/frontend/src/pages/SalonSelectionPage.js"
+    stuck_count: 0
+    priority: "medium"
+    needs_retesting: true
+    status_history:
+        - working: "NA"
+          agent: "main"
+          comment: "Updated fetchNearbySalons to use radius=5 instead of radius=50 in API call."
+
+  - task: "Smaller Salon Cards"
+    implemented: true
+    working: "NA"
+    file: "/app/frontend/src/pages/SalonSelectionPage.js"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: true
+    status_history:
+        - working: "NA"
+          agent: "main"
+          comment: "Updated SalonCard component: Changed image height from h-48 to h-32, reduced padding from p-4 to p-3, font sizes adjusted."
+
+  - task: "Gender Tag in Brackets After Name"
+    implemented: true
+    working: "NA"
+    file: "/app/frontend/src/pages/SalonSelectionPage.js"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: true
+    status_history:
+        - working: "NA"
+          agent: "main"
+          comment: "Updated SalonCard to display: '{salon.salon_name} {salon.gender_tag && `(${salon.gender_tag})`}' in the heading. Removed gender tag from separate display area."
+
+  - task: "Remove ₹₹ Sign"
+    implemented: true
+    working: "NA"
+    file: "/app/frontend/src/pages/SalonSelectionPage.js"
+    stuck_count: 0
+    priority: "medium"
+    needs_retesting: true
+    status_history:
+        - working: "NA"
+          agent: "main"
+          comment: "Removed the entire div showing gender tag and ₹₹ in separate column. Gender now shows in heading with brackets."
+
+  - task: "Remove Book Now Button"
+    implemented: true
+    working: "NA"
+    file: "/app/frontend/src/pages/SalonSelectionPage.js"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: true
+    status_history:
+        - working: "NA"
+          agent: "main"
+          comment: "Removed the blue 'Book Now via App' banner div from salon card image section."
+
+  - task: "Image Carousel with Arrows and Dots"
+    implemented: true
+    working: "NA"
+    file: "/app/frontend/src/pages/SalonSelectionPage.js"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: true
+    status_history:
+        - working: "NA"
+          agent: "main"
+          comment: "Added useState for currentImageIndex, implemented nextImage/prevImage/goToImage handlers. Added ChevronLeft/ChevronRight buttons (visible on hover), and indicator dots at bottom. Carousel only shows controls if multiple images exist."
+
+metadata:
+  created_by: "main_agent"
+  version: "1.0"
+  test_sequence: 1
+  run_ui: true
+
+test_plan:
+  current_focus:
+    - "Persistent Sidebar Layout Component"
+    - "Default Route to Salon Search"
+    - "Image Carousel with Arrows and Dots"
+    - "Smaller Salon Cards"
+    - "Gender Tag in Brackets After Name"
+    - "Remove ₹₹ Sign"
+    - "Remove Book Now Button"
+    - "5km Nearby Search Radius"
+  stuck_tasks: []
+  test_all: true
+  test_priority: "sequential"
+
+agent_communication:
+    - agent: "main"
+      message: "Implemented all 8 customer UI refinement requests. Created CustomerLayout.js for persistent sidebar. Updated App.js routing. Updated SalonSelectionPage.js with all card UI changes including carousel. All files linted successfully. Need comprehensive frontend testing to verify: 1) Sidebar opens/closes smoothly across all customer pages (salons, history, profile), 2) Default route redirects to /salons after login, 3) Carousel arrows and dots work correctly, 4) All visual changes are correct (smaller cards, gender in brackets, no ₹₹, no booking button), 5) 5km radius is being used for nearby search."

@@ -7,13 +7,12 @@ import { MapContainer, TileLayer, Marker, Popup } from 'react-leaflet';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { 
-  MapPin, List, Navigation, Scissors, Search, Star, Clock, 
-  Menu, X, Home, History, User, HelpCircle, Bug, LogOut, Map as MapIcon
+  MapPin, List, Navigation, Scissors, Search, Star, ChevronLeft, ChevronRight, Map as MapIcon
 } from 'lucide-react';
 import { toast } from 'sonner';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
-import { motion, AnimatePresence } from 'framer-motion';
+import { motion } from 'framer-motion';
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
 const API = `${BACKEND_URL}/api`;
@@ -28,7 +27,7 @@ L.Icon.Default.mergeOptions({
 
 export default function SalonSelectionPage() {
   const navigate = useNavigate();
-  const { user, isUserLoggedIn, logoutUser } = useAuth();
+  const { isUserLoggedIn } = useAuth();
   
   const [salons, setSalons] = useState([]);
   const [cities, setCities] = useState([]);
@@ -37,7 +36,6 @@ export default function SalonSelectionPage() {
   const [view, setView] = useState('grid'); // 'grid' or 'map'
   const [userLocation, setUserLocation] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [sidebarOpen, setSidebarOpen] = useState(false);
   const [searchType, setSearchType] = useState('nearby'); // 'nearby', 'name', 'city'
 
   useEffect(() => {
@@ -83,7 +81,7 @@ export default function SalonSelectionPage() {
 
   const fetchNearbySalons = async (lat, lng) => {
     try {
-      const response = await axios.get(`${API}/salons?lat=${lat}&lng=${lng}&radius=50`);
+      const response = await axios.get(`${API}/salons?lat=${lat}&lng=${lng}&radius=5`);
       setSalons(response.data);
       setSearchType('nearby');
     } catch (error) {
@@ -158,15 +156,27 @@ export default function SalonSelectionPage() {
     navigate(`/book/${salon.id}`);
   };
 
-  const handleLogout = () => {
-    logoutUser();
-    navigate('/user/login');
-  };
-
   const SalonCard = ({ salon }) => {
-    const firstImage = salon.photo_gallery && salon.photo_gallery.length > 0 
-      ? salon.photo_gallery[0] 
-      : salon.logo_url || 'https://images.pexels.com/photos/3993293/pexels-photo-3993293.jpeg?auto=compress&cs=tinysrgb&w=400';
+    const [currentImageIndex, setCurrentImageIndex] = useState(0);
+    
+    const images = salon.photo_gallery && salon.photo_gallery.length > 0 
+      ? salon.photo_gallery 
+      : [salon.logo_url || 'https://images.pexels.com/photos/3993293/pexels-photo-3993293.jpeg?auto=compress&cs=tinysrgb&w=400'];
+
+    const nextImage = (e) => {
+      e.stopPropagation();
+      setCurrentImageIndex((prev) => (prev + 1) % images.length);
+    };
+
+    const prevImage = (e) => {
+      e.stopPropagation();
+      setCurrentImageIndex((prev) => (prev - 1 + images.length) % images.length);
+    };
+
+    const goToImage = (e, index) => {
+      e.stopPropagation();
+      setCurrentImageIndex(index);
+    };
       
     return (
       <motion.div
@@ -176,15 +186,15 @@ export default function SalonSelectionPage() {
         className="bg-card rounded-2xl overflow-hidden shadow-lg hover:shadow-2xl transition-all border border-border cursor-pointer"
         onClick={() => handleSelectSalon(salon)}
       >
-        {/* Image */}
-        <div className="relative h-48 overflow-hidden">
+        {/* Image Carousel */}
+        <div className="relative h-32 overflow-hidden group">
           <img 
-            src={firstImage}
+            src={images[currentImageIndex]}
             alt={salon.salon_name}
-            className="w-full h-full object-cover"
+            className="w-full h-full object-cover transition-opacity duration-300"
           />
           {salon.logo_url && (
-            <div className="absolute top-3 left-3 w-12 h-12 bg-white rounded-full p-1 shadow-lg">
+            <div className="absolute top-2 left-2 w-10 h-10 bg-white rounded-full p-1 shadow-lg">
               <img 
                 src={salon.logo_url}
                 alt="Logo"
@@ -192,27 +202,52 @@ export default function SalonSelectionPage() {
               />
             </div>
           )}
-          {/* Optional Offer Banner */}
-          <div className="absolute bottom-0 left-0 right-0 bg-blue-600 text-white text-center py-2 text-sm font-semibold">
-            Book Now via App
-          </div>
+          
+          {/* Carousel Controls - Show only if multiple images */}
+          {images.length > 1 && (
+            <>
+              <button
+                onClick={prevImage}
+                className="absolute left-2 top-1/2 -translate-y-1/2 bg-black/50 text-white p-1 rounded-full opacity-0 group-hover:opacity-100 transition-opacity"
+              >
+                <ChevronLeft className="w-4 h-4" />
+              </button>
+              <button
+                onClick={nextImage}
+                className="absolute right-2 top-1/2 -translate-y-1/2 bg-black/50 text-white p-1 rounded-full opacity-0 group-hover:opacity-100 transition-opacity"
+              >
+                <ChevronRight className="w-4 h-4" />
+              </button>
+              
+              {/* Indicator Dots */}
+              <div className="absolute bottom-2 left-1/2 -translate-x-1/2 flex space-x-1">
+                {images.map((_, index) => (
+                  <button
+                    key={index}
+                    onClick={(e) => goToImage(e, index)}
+                    className={`w-1.5 h-1.5 rounded-full transition-all ${
+                      index === currentImageIndex 
+                        ? 'bg-white w-3' 
+                        : 'bg-white/50'
+                    }`}
+                  />
+                ))}
+              </div>
+            </>
+          )}
         </div>
 
         {/* Content */}
-        <div className="p-4">
-          <div className="flex items-start justify-between mb-2">
-            <div className="flex-1">
-              <h3 className="font-bold text-lg text-foreground mb-1">{salon.salon_name}</h3>
-              <p className="text-xs text-muted-foreground flex items-center mb-2">
-                <MapPin className="w-3 h-3 mr-1" />
-                {salon.address}
-                {salon.distance && ` | ${salon.distance} Kms`}
-              </p>
-            </div>
-            <div className="flex items-center space-x-1 ml-2">
-              <span className="text-xs text-muted-foreground">{salon.gender_tag || 'Unisex'}</span>
-              <span className="text-xs text-muted-foreground">| ₹₹</span>
-            </div>
+        <div className="p-3">
+          <div className="mb-2">
+            <h3 className="font-bold text-base text-foreground mb-1">
+              {salon.salon_name} {salon.gender_tag && `(${salon.gender_tag})`}
+            </h3>
+            <p className="text-xs text-muted-foreground flex items-center">
+              <MapPin className="w-3 h-3 mr-1" />
+              {salon.address}
+              {salon.distance && ` | ${salon.distance} Kms`}
+            </p>
           </div>
 
           {/* Rating */}
@@ -227,14 +262,6 @@ export default function SalonSelectionPage() {
     );
   };
 
-  const menuItems = [
-    { icon: Home, label: 'Find My Salon', path: '/salons', action: () => {} },
-    { icon: History, label: 'My History', path: '/history', action: () => navigate('/history') },
-    { icon: User, label: 'My Profile', path: '/profile', action: () => toast.info('Profile coming soon') },
-    { icon: HelpCircle, label: 'Help', path: '/help', action: () => toast.info('Help section coming soon') },
-    { icon: Bug, label: 'Report Bug', path: '/report', action: () => toast.info('Bug report form coming soon') },
-  ];
-
   if (loading && salons.length === 0) {
     return (
       <div className="min-h-screen bg-background flex items-center justify-center">
@@ -248,82 +275,11 @@ export default function SalonSelectionPage() {
 
   return (
     <div className="min-h-screen bg-background">
-      {/* Sidebar */}
-      <AnimatePresence>
-        {sidebarOpen && (
-          <>
-            {/* Backdrop */}
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              onClick={() => setSidebarOpen(false)}
-              className="fixed inset-0 bg-black/50 z-40"
-            />
-            
-            {/* Sidebar */}
-            <motion.div
-              initial={{ x: -300 }}
-              animate={{ x: 0 }}
-              exit={{ x: -300 }}
-              className="fixed left-0 top-0 bottom-0 w-72 bg-card border-r border-border z-50 shadow-2xl"
-            >
-              <div className="p-6">
-                <div className="flex items-center justify-between mb-8">
-                  <div className="flex items-center space-x-3">
-                    <Scissors className="w-8 h-8 text-gold" />
-                    <div>
-                      <h2 className="font-bold text-foreground">Menu</h2>
-                      <p className="text-xs text-muted-foreground">{user?.name}</p>
-                    </div>
-                  </div>
-                  <button onClick={() => setSidebarOpen(false)}>
-                    <X className="w-6 h-6 text-foreground" />
-                  </button>
-                </div>
-
-                <nav className="space-y-2">
-                  {menuItems.map((item, idx) => {
-                    const Icon = item.icon;
-                    return (
-                      <button
-                        key={idx}
-                        onClick={() => {
-                          item.action();
-                          setSidebarOpen(false);
-                        }}
-                        className="w-full flex items-center space-x-3 px-4 py-3 rounded-lg hover:bg-gold/10 transition-colors text-left"
-                      >
-                        <Icon className="w-5 h-5 text-gold" />
-                        <span className="text-foreground">{item.label}</span>
-                      </button>
-                    );
-                  })}
-                </nav>
-
-                <div className="absolute bottom-6 left-6 right-6">
-                  <button
-                    onClick={handleLogout}
-                    className="w-full flex items-center space-x-3 px-4 py-3 rounded-lg bg-red-500/10 hover:bg-red-500/20 transition-colors"
-                  >
-                    <LogOut className="w-5 h-5 text-red-500" />
-                    <span className="text-red-500 font-semibold">Logout</span>
-                  </button>
-                </div>
-              </div>
-            </motion.div>
-          </>
-        )}
-      </AnimatePresence>
-
       {/* Header */}
       <div className="bg-card border-b border-border sticky top-0 z-30 shadow-sm">
         <div className="max-w-7xl mx-auto p-4">
-          <div className="flex items-center justify-between mb-4">
+          <div className="flex items-center justify-between mb-4 ml-14">
             <div className="flex items-center space-x-3">
-              <button onClick={() => setSidebarOpen(true)}>
-                <Menu className="w-6 h-6 text-foreground" />
-              </button>
               <Scissors className="w-8 h-8 text-gold" />
               <div>
                 <h1 className="text-xl font-playfair font-bold text-foreground">Find Salons</h1>

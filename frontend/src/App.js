@@ -4,9 +4,11 @@ import { WebSocketProvider } from '@/contexts/WebSocketContext';
 import { ThemeProvider } from '@/contexts/ThemeContext';
 import { Toaster } from '@/components/ui/sonner';
 
+// Layout
+import CustomerLayout from '@/components/CustomerLayout';
+
 // User Pages
 import UserLoginPage from '@/pages/UserLoginPage';
-import HomePage from '@/pages/HomePage';
 import SalonSelectionPage from '@/pages/SalonSelectionPage';
 import SinglePageBooking from '@/pages/SinglePageBooking';
 import HistoryPage from '@/pages/HistoryPage';
@@ -31,12 +33,17 @@ function App() {
               <Routes>
                 {/* User Routes */}
                 <Route path="/user/login" element={<UserLoginPage />} />
-                <Route path="/" element={<HomePage />} />
-                <Route path="/salons" element={<SalonSelectionPage />} />
+                <Route path="/" element={<Navigate to="/salons" replace />} />
+                
+                {/* Customer Routes with Layout */}
+                <Route path="/salons" element={<CustomerLayout><SalonSelectionPage /></CustomerLayout>} />
+                <Route path="/history" element={<CustomerLayout><HistoryPage /></CustomerLayout>} />
+                <Route path="/profile" element={<CustomerLayout><div className="p-8 text-center">Profile Page Coming Soon</div></CustomerLayout>} />
+                
+                {/* Booking Routes (without persistent sidebar) */}
                 <Route path="/book/:salonId" element={<SinglePageBooking />} />
                 <Route path="/salon/:salonId/queue" element={<TokenDashboard />} />
                 <Route path="/salon/:salonId/services" element={<ServicesBrowser />} />
-                <Route path="/history" element={<HistoryPage />} />
                 
                 {/* Salon Routes */}
                 <Route path="/salon/login" element={<OTPLoginPage />} />
