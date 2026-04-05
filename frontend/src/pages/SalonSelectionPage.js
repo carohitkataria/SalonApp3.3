@@ -332,17 +332,28 @@ export default function SalonSelectionPage() {
               </select>
             </div>
 
-            {userLocation && (
+            <div className="flex gap-2">
+              {userLocation && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => fetchNearbySalons(userLocation.lat, userLocation.lng)}
+                  className="border-gold/30"
+                >
+                  <Navigation className="w-4 h-4 mr-2" />
+                  Find Salons Near Me
+                </Button>
+              )}
               <Button
                 variant="outline"
                 size="sm"
-                onClick={() => fetchNearbySalons(userLocation.lat, userLocation.lng)}
+                onClick={fetchAllSalons}
                 className="border-gold/30"
               >
-                <Navigation className="w-4 h-4 mr-2" />
-                Find Salons Near Me
+                <List className="w-4 h-4 mr-2" />
+                All Salons
               </Button>
-            )}
+            </div>
           </div>
         </div>
       </div>

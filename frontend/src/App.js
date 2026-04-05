@@ -40,10 +40,10 @@ function App() {
                 <Route path="/history" element={<CustomerLayout><HistoryPage /></CustomerLayout>} />
                 <Route path="/profile" element={<CustomerLayout><div className="p-8 text-center">Profile Page Coming Soon</div></CustomerLayout>} />
                 
-                {/* Booking Routes (without persistent sidebar) */}
-                <Route path="/book/:salonId" element={<SinglePageBooking />} />
-                <Route path="/salon/:salonId/queue" element={<TokenDashboard />} />
-                <Route path="/salon/:salonId/services" element={<ServicesBrowser />} />
+                {/* Booking Routes (with persistent sidebar) */}
+                <Route path="/book/:salonId" element={<CustomerLayout><SinglePageBooking /></CustomerLayout>} />
+                <Route path="/salon/:salonId/queue" element={<CustomerLayout><TokenDashboard /></CustomerLayout>} />
+                <Route path="/salon/:salonId/services" element={<CustomerLayout><ServicesBrowser /></CustomerLayout>} />
                 
                 {/* Salon Routes */}
                 <Route path="/salon/login" element={<OTPLoginPage />} />
