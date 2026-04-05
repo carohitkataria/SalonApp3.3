@@ -48,6 +48,19 @@ export default function SalonMainPage() {
     fetchSalonData();
   }, [isUserLoggedIn, salonId]);
 
+  // Listen for tab change events from hamburger menu
+  useEffect(() => {
+    const handleTabChange = (event) => {
+      const tabId = event.detail;
+      if (tabId && tabId !== 'booking') {
+        setActiveTab(tabId);
+      }
+    };
+
+    window.addEventListener('setTab', handleTabChange);
+    return () => window.removeEventListener('setTab', handleTabChange);
+  }, []);
+
   const fetchSalonData = async () => {
     try {
       const response = await axios.get(`${API}/salons/${salonId}`);

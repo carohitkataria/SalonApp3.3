@@ -6,7 +6,7 @@ import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import { Checkbox } from '@/components/ui/checkbox';
 import { toast } from 'sonner';
-import { Scissors, Calendar, User, CheckCircle, Star, Users, Clock } from 'lucide-react';
+import { Scissors, Calendar, User, CheckCircle, Star, Users, Clock, ArrowLeft, Home } from 'lucide-react';
 import { motion } from 'framer-motion';
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
@@ -413,6 +413,45 @@ export default function SinglePageBooking() {
 
   return (
     <div className="min-h-screen bg-background">
+      {/* Header with Back Button */}
+      <div className="bg-card border-b border-border sticky top-0 z-20">
+        <div className="max-w-4xl mx-auto flex items-center p-4 gap-4">
+          <button 
+            onClick={() => navigate(`/salon/${salonId}`)}
+            className="p-2 rounded-full hover:bg-muted transition-colors"
+            title="Back to Salon"
+          >
+            <ArrowLeft className="w-5 h-5 text-foreground" />
+          </button>
+          
+          <div className="flex items-center gap-3 flex-1">
+            {salon?.logo_url ? (
+              <img 
+                src={salon.logo_url} 
+                alt={salon?.salon_name}
+                className="w-10 h-10 rounded-full object-cover border-2 border-gold"
+              />
+            ) : (
+              <div className="w-10 h-10 rounded-full bg-gold/20 flex items-center justify-center">
+                <Scissors className="w-5 h-5 text-gold" />
+              </div>
+            )}
+            <div>
+              <h2 className="font-bold text-foreground">{salon?.salon_name || 'Loading...'}</h2>
+              <p className="text-xs text-muted-foreground">Book Appointment</p>
+            </div>
+          </div>
+
+          <button 
+            onClick={() => navigate(`/salon/${salonId}`)}
+            className="p-2 rounded-full hover:bg-muted transition-colors"
+            title="Salon Homepage"
+          >
+            <Home className="w-5 h-5 text-gold" />
+          </button>
+        </div>
+      </div>
+
       <div className="max-w-4xl mx-auto p-4 py-8">
         {/* Header */}
         <div className="text-center mb-8">
