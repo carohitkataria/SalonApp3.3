@@ -157,7 +157,7 @@ export default function SalonMainPage() {
       case 'shop':
         return <SalonShopTab salonId={salonId} />;
       case 'gallery':
-        return <SalonGalleryTab salonId={salonId} />;
+        return <SalonGalleryTab salon={salon} />;
       case 'profile':
         return <SalonProfileTab salon={salon} />;
       default:
