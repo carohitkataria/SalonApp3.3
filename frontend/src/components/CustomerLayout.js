@@ -100,9 +100,9 @@ export default function CustomerLayout({ children }) {
       {/* Hamburger Menu Button - Fixed Position */}
       <button
         onClick={() => setSidebarOpen(true)}
-        className="fixed top-4 left-4 z-30 p-2 bg-card border border-border rounded-lg shadow-lg hover:bg-gold/10 transition-colors"
+        className="fixed top-4 left-4 z-50 p-2 bg-gold/90 border border-gold rounded-lg shadow-lg hover:bg-gold transition-colors"
       >
-        <Menu className="w-6 h-6 text-foreground" />
+        <Menu className="w-6 h-6 text-black" />
       </button>
 
       {/* Main Content */}
