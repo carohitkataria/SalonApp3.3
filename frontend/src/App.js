@@ -10,6 +10,7 @@ import CustomerLayout from '@/components/CustomerLayout';
 // User Pages
 import UserLoginPage from '@/pages/UserLoginPage';
 import SalonSelectionPage from '@/pages/SalonSelectionPage';
+import SalonMainPage from '@/pages/SalonMainPage';
 import SinglePageBooking from '@/pages/SinglePageBooking';
 import HistoryPage from '@/pages/HistoryPage';
 import TokenDashboard from '@/pages/TokenDashboard';
@@ -40,12 +41,15 @@ function App() {
                 <Route path="/history" element={<CustomerLayout><HistoryPage /></CustomerLayout>} />
                 <Route path="/profile" element={<CustomerLayout><div className="p-8 text-center">Profile Page Coming Soon</div></CustomerLayout>} />
                 
+                {/* Salon Main Page - New Hub after selecting a salon */}
+                <Route path="/salon/:salonId" element={<CustomerLayout><SalonMainPage /></CustomerLayout>} />
+                
                 {/* Booking Routes (with persistent sidebar) */}
                 <Route path="/book/:salonId" element={<CustomerLayout><SinglePageBooking /></CustomerLayout>} />
                 <Route path="/salon/:salonId/queue" element={<CustomerLayout><TokenDashboard /></CustomerLayout>} />
                 <Route path="/salon/:salonId/services" element={<CustomerLayout><ServicesBrowser /></CustomerLayout>} />
                 
-                {/* Salon Routes */}
+                {/* Salon Admin Routes */}
                 <Route path="/salon/login" element={<OTPLoginPage />} />
                 <Route path="/salon/signup" element={<SalonSignupPage />} />
                 <Route path="/salon/dashboard" element={<EnhancedSalonDashboard />} />

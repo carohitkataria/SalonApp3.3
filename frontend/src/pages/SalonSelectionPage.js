@@ -164,7 +164,7 @@ export default function SalonSelectionPage() {
   };
 
   const handleSelectSalon = (salon) => {
-    navigate(`/book/${salon.id}`);
+    navigate(`/salon/${salon.id}`);
   };
 
   const SalonCard = ({ salon }) => {

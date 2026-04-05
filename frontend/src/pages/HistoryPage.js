@@ -2,9 +2,11 @@ import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import axios from 'axios';
-import { Scissors, Calendar, Clock, User, CheckCircle, XCircle, AlertCircle } from 'lucide-react';
+import { Scissors, Calendar, Clock, User, CheckCircle, XCircle, AlertCircle, Star } from 'lucide-react';
 import { motion } from 'framer-motion';
 import ThemeToggle from '@/components/ThemeToggle';
+import RatingModal from '@/components/RatingModal';
+import { Button } from '@/components/ui/button';
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
 const API = `${BACKEND_URL}/api`;
@@ -14,6 +16,9 @@ export default function HistoryPage() {
   const { user, isUserLoggedIn } = useAuth();
   const [history, setHistory] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [ratedTokens, setRatedTokens] = useState(new Set());
+  const [selectedBooking, setSelectedBooking] = useState(null);
+  const [showRatingModal, setShowRatingModal] = useState(false);
 
   useEffect(() => {
     if (!isUserLoggedIn) {
@@ -30,6 +35,22 @@ export default function HistoryPage() {
     try {
       const response = await axios.get(`${API}/user/${user.id}/history`);
       setHistory(response.data);
+      
+      // Check which tokens are already rated
+      const rated = new Set();
+      for (const booking of response.data) {
+        if (booking.status === 'completed') {
+          try {
+            const canRateRes = await axios.get(`${API}/tokens/${booking.id}/can-rate`);
+            if (canRateRes.data.already_rated) {
+              rated.add(booking.id);
+            }
+          } catch (e) {
+            // Ignore errors
+          }
+        }
+      }
+      setRatedTokens(rated);
     } catch (error) {
       console.error('Error fetching history:', error);
     } finally {
@@ -37,11 +58,22 @@ export default function HistoryPage() {
     }
   };
 
+  const handleRateBooking = (booking) => {
+    setSelectedBooking(booking);
+    setShowRatingModal(true);
+  };
+
+  const handleRatingSubmitted = () => {
+    setRatedTokens(prev => new Set([...prev, selectedBooking.id]));
+    setShowRatingModal(false);
+    setSelectedBooking(null);
+  };
+
   const getStatusIcon = (status) => {
     switch (status) {
       case 'waiting':
         return <Clock className="w-5 h-5 text-yellow-500" />;
-      case 'in_progress':
+      case 'called':
         return <AlertCircle className="w-5 h-5 text-blue-500" />;
       case 'completed':
         return <CheckCircle className="w-5 h-5 text-green-500" />;
@@ -58,7 +90,7 @@ export default function HistoryPage() {
     switch (status) {
       case 'waiting':
         return 'border-yellow-500/30 bg-yellow-500/5';
-      case 'in_progress':
+      case 'called':
         return 'border-blue-500/30 bg-blue-500/5';
       case 'completed':
         return 'border-green-500/30 bg-green-500/5';
@@ -112,13 +144,13 @@ export default function HistoryPage() {
                 <div className="flex items-start justify-between mb-4">
                   <div className="flex items-center space-x-4">
                     <div className="text-4xl font-bebas text-gold">
-                      {booking.token_number > 0 ? booking.token_number.toString().padStart(2, '0') : 'TBA'}
+                      {booking.token_number || 'TBA'}
                     </div>
                     <div>
                       <p className="text-foreground font-bold">Token #{booking.token_number}</p>
                       <p className="text-muted-foreground text-sm flex items-center">
                         <Calendar className="w-3 h-3 mr-1" />
-                        {booking.date} - {booking.time_slot}
+                        {booking.date} - {booking.shift || booking.time_slot}
                       </p>
                     </div>
                   </div>
@@ -141,7 +173,7 @@ export default function HistoryPage() {
                   </div>
                   <div>
                     <p className="text-muted-foreground">Services</p>
-                    <p className="text-foreground font-bold">{booking.selected_services.length} services</p>
+                    <p className="text-foreground font-bold">{booking.selected_services?.length || 0} services</p>
                   </div>
                   <div>
                     <p className="text-muted-foreground">Payment</p>
@@ -152,6 +184,28 @@ export default function HistoryPage() {
                     </p>
                   </div>
                 </div>
+
+                {/* Rating Section for Completed Bookings */}
+                {booking.status === 'completed' && (
+                  <div className="mt-4 pt-4 border-t border-border">
+                    {ratedTokens.has(booking.id) ? (
+                      <div className="flex items-center text-green-500">
+                        <Star className="w-4 h-4 fill-green-500 mr-2" />
+                        <span className="text-sm font-medium">You've rated this visit</span>
+                      </div>
+                    ) : (
+                      <Button
+                        onClick={() => handleRateBooking(booking)}
+                        variant="outline"
+                        size="sm"
+                        className="border-gold text-gold hover:bg-gold/10"
+                      >
+                        <Star className="w-4 h-4 mr-2" />
+                        Rate Your Experience
+                      </Button>
+                    )}
+                  </div>
+                )}
               </motion.div>
             ))}
           </div>
@@ -163,6 +217,19 @@ export default function HistoryPage() {
           </div>
         )}
       </div>
+
+      {/* Rating Modal */}
+      {selectedBooking && (
+        <RatingModal
+          token={selectedBooking}
+          isOpen={showRatingModal}
+          onClose={() => {
+            setShowRatingModal(false);
+            setSelectedBooking(null);
+          }}
+          onRatingSubmitted={handleRatingSubmitted}
+        />
+      )}
     </div>
   );
 }

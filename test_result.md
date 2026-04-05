@@ -102,7 +102,7 @@
 # Testing Data - Main Agent and testing sub agent both should log testing data below this section
 #====================================================================================================
 
-user_problem_statement: "Salon booking app with customer UI refinements for booking page: 1) Fix slow loading on customer home page, 2) Remove Live Queue button from booking page, 3) Move Booking For section to Date & Time section, 4) Make barber selection using cards with live status, 5) Sync services with salon's enabled services, 6) Hide expired time slots for today, 7) Use India time (IST) for date calculations"
+user_problem_statement: "Build rating module for completed bookings with reviews, and create salon main page with Dashboard, Book Appointment, Services, Barber Profiles (with ratings), Shop (coming soon), Gallery, and About Us tabs."
 
 backend:
   - task: "Add total_tokens_today to live-status API"
@@ -113,12 +113,24 @@ backend:
     priority: "high"
     needs_retesting: false
     status_history:
-        - working: "NA"
-          agent: "main"
-          comment: "Updated live-status endpoint to include total_tokens_today count for each barber by counting all tokens for the barber on current date."
         - working: true
           agent: "testing"
-          comment: "✅ BACKEND TESTING COMPLETE: All 3 API endpoints working correctly. 1) GET /api/shifts returns shifts with id, name, time. 2) GET /api/salons/{salon_id}/live-status returns overall and barbers data with total_tokens_today field (created missing endpoint as alias to token-status). 3) GET /api/salons/{salon_id}/services/enabled returns array of enabled services (empty for fresh salon). The total_tokens_today field is present and correctly implemented as integer count of all tokens for each barber on current date."
+          comment: "API endpoint working correctly with total_tokens_today field."
+
+  - task: "Rating/Review API Endpoints"
+    implemented: true
+    working: true
+    file: "/app/backend/server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+        - working: "NA"
+          agent: "main"
+          comment: "Created Rating/Review models and 6 new API endpoints: POST /ratings (create rating for completed booking only), GET /barbers/{id}/ratings (get barber ratings summary), GET /salons/{salon_id}/barbers/{barber_id}/profile (detailed profile with reviews), GET /tokens/{id}/can-rate (check if can rate), GET /users/{id}/pending-ratings (get unrated completed bookings). Also updates barber's average rating automatically."
+        - working: true
+          agent: "testing"
+          comment: "✅ All rating/review API endpoints tested successfully. Verified: 1) All 5 endpoints exist and respond correctly, 2) GET /barbers/{id}/ratings returns proper rating summary with barber name, average rating, total reviews, and review list, 3) GET /salons/{salon_id}/barbers/{barber_id}/profile returns detailed barber profile including services, ratings, and recent reviews, 4) GET /tokens/{id}/can-rate correctly validates token status and rating eligibility, 5) GET /users/{id}/pending-ratings returns completed unrated bookings, 6) POST /ratings properly validates and rejects invalid requests. Error handling is appropriate for all endpoints."
 
 frontend:
   - task: "Persistent Sidebar Layout Component"
@@ -309,20 +321,16 @@ metadata:
 
 test_plan:
   current_focus:
-    - "Add total_tokens_today to live-status API"
-    - "Fix Slow Loading on Customer Home Page"
-    - "Remove Live Queue Button"
-    - "Move Booking For to Date & Time Section"
-    - "Barber Selection with Cards"
-    - "Sync Services with Salon Enabled Services"
-    - "Hide Expired Time Slots"
-    - "Use India Time (IST) for Dates"
+    - "Rating/Review API Endpoints"
+    - "SalonMainPage with Tabs"
+    - "Barber Profile with Ratings"
+    - "Rating Modal for History Page"
   stuck_tasks: []
   test_all: true
   test_priority: "high_first"
 
 agent_communication:
     - agent: "main"
-      message: "Implemented all customer booking page improvements: 1) Fixed slow loading by loading all salons first then getting location in background, 2) Removed Live Queue button completely, 3) Merged Booking For into Date & Time section, 4) Created modern barber cards with live status (currently serving, waiting count, total tokens), 5) Changed to use salon-specific enabled services, 6) Added IST-based time slot filtering to hide expired shifts, 7) All date calculations now use IST timezone. Backend updated to include total_tokens_today in live-status. Need testing to verify all changes work correctly."
+      message: "Implemented rating module and salon main page: 1) Created Rating/Review backend APIs for creating reviews on completed bookings only, getting barber ratings, checking if can rate, etc. 2) Created SalonMainPage with 7 tabs: Dashboard, Book Appointment, Services, Our Barbers, Shop, Gallery, About Us. 3) Dashboard shows live queue status, active barbers, quick links. 4) Our Barbers tab shows expandable barber cards with services and customer reviews. 5) Shop tab shows Coming Soon page. 6) About Us tab shows contact info with call/email buttons. 7) Updated HistoryPage to show 'Rate Your Experience' button for completed bookings. 8) Created RatingModal component for submitting ratings with star selection and review text."
     - agent: "testing"
-      message: "✅ BACKEND API TESTING COMPLETED: All 3 requested endpoints are working correctly. 1) GET /api/shifts returns proper shift data with id, name, time fields. 2) GET /api/salons/{salon_id}/live-status now exists and returns overall status + barbers array with total_tokens_today field (fixed missing endpoint by creating alias to token-status). 3) GET /api/salons/{salon_id}/services/enabled returns enabled services array. The critical total_tokens_today field is properly implemented and tested. Minor fix applied: created missing /live-status endpoint. All backend APIs ready for frontend integration."
+      message: "✅ RATING/REVIEW API TESTING COMPLETE: All 5 rating endpoints tested and working perfectly. Key findings: 1) All endpoints exist and respond correctly with proper error handling, 2) GET /barbers/{id}/ratings returns complete rating summary with reviews list, 3) GET /salons/{salon_id}/barbers/{barber_id}/profile includes all required fields (services, ratings, recent reviews), 4) GET /tokens/{id}/can-rate properly validates token eligibility, 5) GET /users/{id}/pending-ratings works for completed unrated bookings, 6) POST /ratings correctly rejects invalid requests. The rating system backend is fully functional and ready for frontend integration."

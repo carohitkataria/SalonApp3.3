@@ -362,6 +362,34 @@ class Invoice(BaseModel):
     pdf_base64: Optional[str] = None  # Base64 encoded PDF
     created_at: str
 
+# Rating/Review Models
+class RatingCreate(BaseModel):
+    token_id: str  # The completed booking token ID
+    barber_id: str
+    salon_id: str
+    rating: int = Field(..., ge=1, le=5)  # 1-5 stars
+    review: str = Field(..., min_length=1)  # Review comment is required
+
+class RatingResponse(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    id: str
+    token_id: str
+    user_id: str
+    user_name: str
+    barber_id: str
+    barber_name: str
+    salon_id: str
+    rating: int
+    review: str
+    created_at: str
+
+class BarberRatingSummary(BaseModel):
+    barber_id: str
+    barber_name: str
+    average_rating: float
+    total_reviews: int
+    reviews: List[RatingResponse]
+
 # ============ AUTH HELPERS ============
 
 def create_access_token(data: dict):
@@ -2308,6 +2336,194 @@ async def get_salon_token_status(salon_id: str, shift: Optional[str] = None):
 async def get_salon_live_status(salon_id: str, shift: Optional[str] = None):
     """Get current live status for salon (alias for token-status)"""
     return await get_salon_token_status(salon_id, shift)
+
+# ============ RATING/REVIEW ROUTES ============
+
+@api_router.post("/ratings", response_model=RatingResponse)
+async def create_rating(rating_data: RatingCreate):
+    """Create a rating/review for a completed booking"""
+    # Verify the token exists and is completed
+    token = await db.tokens.find_one({"id": rating_data.token_id}, {"_id": 0})
+    if not token:
+        raise HTTPException(status_code=404, detail="Booking not found")
+    
+    if token.get("status") != "completed":
+        raise HTTPException(status_code=400, detail="Can only rate completed bookings")
+    
+    # Check if rating already exists for this token
+    existing_rating = await db.ratings.find_one({"token_id": rating_data.token_id})
+    if existing_rating:
+        raise HTTPException(status_code=400, detail="You have already rated this booking")
+    
+    # Get barber name
+    barber = await db.barbers.find_one({"id": rating_data.barber_id}, {"_id": 0})
+    barber_name = barber.get("name", "Unknown") if barber else "Unknown"
+    
+    # Get user info from token
+    user_id = token.get("user_id", "")
+    user_name = token.get("customer_name", "Customer")
+    
+    # Create rating
+    rating_dict = {
+        "id": str(uuid.uuid4()),
+        "token_id": rating_data.token_id,
+        "user_id": user_id,
+        "user_name": user_name,
+        "barber_id": rating_data.barber_id,
+        "barber_name": barber_name,
+        "salon_id": rating_data.salon_id,
+        "rating": rating_data.rating,
+        "review": rating_data.review,
+        "created_at": datetime.now(timezone.utc).isoformat()
+    }
+    
+    await db.ratings.insert_one(rating_dict)
+    
+    # Update barber's average rating
+    await update_barber_average_rating(rating_data.barber_id)
+    
+    return RatingResponse(**rating_dict)
+
+async def update_barber_average_rating(barber_id: str):
+    """Update barber's average rating after a new review"""
+    pipeline = [
+        {"$match": {"barber_id": barber_id}},
+        {"$group": {
+            "_id": "$barber_id",
+            "average_rating": {"$avg": "$rating"},
+            "total_reviews": {"$sum": 1}
+        }}
+    ]
+    result = await db.ratings.aggregate(pipeline).to_list(1)
+    
+    if result:
+        avg_rating = round(result[0]["average_rating"], 1)
+        total_reviews = result[0]["total_reviews"]
+        await db.barbers.update_one(
+            {"id": barber_id},
+            {"$set": {"rating": avg_rating, "total_reviews": total_reviews}}
+        )
+
+@api_router.get("/barbers/{barber_id}/ratings", response_model=BarberRatingSummary)
+async def get_barber_ratings(barber_id: str, limit: int = 20, skip: int = 0):
+    """Get all ratings and reviews for a barber"""
+    barber = await db.barbers.find_one({"id": barber_id}, {"_id": 0})
+    if not barber:
+        raise HTTPException(status_code=404, detail="Barber not found")
+    
+    # Get ratings
+    reviews = await db.ratings.find(
+        {"barber_id": barber_id},
+        {"_id": 0}
+    ).sort("created_at", -1).skip(skip).limit(limit).to_list(limit)
+    
+    # Calculate average
+    pipeline = [
+        {"$match": {"barber_id": barber_id}},
+        {"$group": {
+            "_id": "$barber_id",
+            "average_rating": {"$avg": "$rating"},
+            "total_reviews": {"$sum": 1}
+        }}
+    ]
+    stats = await db.ratings.aggregate(pipeline).to_list(1)
+    
+    avg_rating = round(stats[0]["average_rating"], 1) if stats else 0
+    total_reviews = stats[0]["total_reviews"] if stats else 0
+    
+    return BarberRatingSummary(
+        barber_id=barber_id,
+        barber_name=barber.get("name", "Unknown"),
+        average_rating=avg_rating,
+        total_reviews=total_reviews,
+        reviews=[RatingResponse(**r) for r in reviews]
+    )
+
+@api_router.get("/salons/{salon_id}/barbers/{barber_id}/profile")
+async def get_barber_profile(salon_id: str, barber_id: str):
+    """Get detailed barber profile with ratings"""
+    barber = await db.barbers.find_one(
+        {"id": barber_id, "salon_id": salon_id},
+        {"_id": 0}
+    )
+    if not barber:
+        raise HTTPException(status_code=404, detail="Barber not found")
+    
+    # Get barber's services
+    barber_services = await db.barber_services.find(
+        {"barber_id": barber_id, "is_available": True},
+        {"_id": 0}
+    ).to_list(100)
+    
+    service_ids = [bs["service_id"] for bs in barber_services]
+    services = await db.services.find(
+        {"id": {"$in": service_ids}},
+        {"_id": 0}
+    ).to_list(100)
+    
+    # Add prices to services
+    price_map = {bs["service_id"]: bs["price"] for bs in barber_services}
+    for service in services:
+        service["barber_price"] = price_map.get(service["id"], service.get("base_price", 0))
+    
+    # Get ratings summary
+    pipeline = [
+        {"$match": {"barber_id": barber_id}},
+        {"$group": {
+            "_id": "$barber_id",
+            "average_rating": {"$avg": "$rating"},
+            "total_reviews": {"$sum": 1}
+        }}
+    ]
+    stats = await db.ratings.aggregate(pipeline).to_list(1)
+    
+    # Get recent reviews
+    reviews = await db.ratings.find(
+        {"barber_id": barber_id},
+        {"_id": 0}
+    ).sort("created_at", -1).limit(10).to_list(10)
+    
+    return {
+        **barber,
+        "services": services,
+        "average_rating": round(stats[0]["average_rating"], 1) if stats else barber.get("rating", 0),
+        "total_reviews": stats[0]["total_reviews"] if stats else 0,
+        "recent_reviews": reviews
+    }
+
+@api_router.get("/tokens/{token_id}/can-rate")
+async def check_can_rate_token(token_id: str):
+    """Check if a token can be rated"""
+    token = await db.tokens.find_one({"id": token_id}, {"_id": 0})
+    if not token:
+        raise HTTPException(status_code=404, detail="Token not found")
+    
+    # Check if already rated
+    existing_rating = await db.ratings.find_one({"token_id": token_id})
+    
+    return {
+        "can_rate": token.get("status") == "completed" and not existing_rating,
+        "is_completed": token.get("status") == "completed",
+        "already_rated": existing_rating is not None
+    }
+
+@api_router.get("/users/{user_id}/pending-ratings")
+async def get_user_pending_ratings(user_id: str):
+    """Get completed bookings that haven't been rated yet"""
+    # Get completed tokens for this user
+    completed_tokens = await db.tokens.find(
+        {"user_id": user_id, "status": "completed"},
+        {"_id": 0}
+    ).sort("completed_at", -1).limit(20).to_list(20)
+    
+    # Filter out already rated ones
+    pending_ratings = []
+    for token in completed_tokens:
+        existing_rating = await db.ratings.find_one({"token_id": token["id"]})
+        if not existing_rating:
+            pending_ratings.append(token)
+    
+    return pending_ratings
 
 # ============ ANALYTICS ROUTES ============
 
