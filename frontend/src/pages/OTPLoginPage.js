@@ -354,7 +354,13 @@ export default function OTPLoginPage() {
         </div>
 
         <p className="text-center text-sm text-muted-foreground mt-6">
-          Don't have an account? Contact support to register your salon
+          Don't have an account?{' '}
+          <button
+            onClick={() => navigate('/salon/signup')}
+            className="text-gold hover:underline font-semibold"
+          >
+            Register your salon
+          </button>
         </p>
       </motion.div>
     </div>

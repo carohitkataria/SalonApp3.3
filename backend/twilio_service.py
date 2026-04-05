@@ -16,11 +16,10 @@ logger = logging.getLogger(__name__)
 
 # Twilio Configuration
 ACCOUNT_SID = os.environ.get('TWILIO_ACCOUNT_SID')
-API_KEY_SID = os.environ.get('TWILIO_API_KEY_SID')
-API_KEY_SECRET = os.environ.get('TWILIO_API_KEY_SECRET')
+AUTH_TOKEN = os.environ.get('TWILIO_AUTH_TOKEN')
 WHATSAPP_NUMBER = os.environ.get('TWILIO_WHATSAPP_NUMBER', 'whatsapp:+14155238886')
 
-# Initialize Twilio client with API Key authentication (more secure)
+# Initialize Twilio client
 twilio_client = None
 
 def get_twilio_client():
@@ -29,16 +28,15 @@ def get_twilio_client():
     if twilio_client is None:
         logger.info(f"Initializing Twilio client...")
         logger.info(f"ACCOUNT_SID: {ACCOUNT_SID[:10] if ACCOUNT_SID else 'None'}...")
-        logger.info(f"API_KEY_SID: {API_KEY_SID[:10] if API_KEY_SID else 'None'}...")
-        logger.info(f"API_KEY_SECRET: {'*' * 10 if API_KEY_SECRET else 'None'}")
+        logger.info(f"AUTH_TOKEN: {'*' * 10 if AUTH_TOKEN else 'None'}")
         
-        if not all([ACCOUNT_SID, API_KEY_SID, API_KEY_SECRET]):
+        if not all([ACCOUNT_SID, AUTH_TOKEN]):
             logger.warning("Twilio credentials not configured. Using mock mode.")
             return None
         try:
-            # Use API Key SID and Secret for authentication (recommended for production)
-            twilio_client = Client(API_KEY_SID, API_KEY_SECRET, ACCOUNT_SID)
-            logger.info("Twilio client initialized successfully with API Key authentication")
+            # Use Account SID and Auth Token for authentication
+            twilio_client = Client(ACCOUNT_SID, AUTH_TOKEN)
+            logger.info("Twilio client initialized successfully with Auth Token authentication")
         except Exception as e:
             logger.error(f"Failed to initialize Twilio client: {e}")
             return None
