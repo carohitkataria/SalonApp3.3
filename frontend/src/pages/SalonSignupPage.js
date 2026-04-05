@@ -5,7 +5,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { toast } from 'sonner';
-import { Scissors, MapPin, Phone, Mail, User, Building, CreditCard } from 'lucide-react';
+import { Scissors, MapPin, Phone, Mail, User, Building, CreditCard, Lock, Eye, EyeOff, Users } from 'lucide-react';
 import { motion } from 'framer-motion';
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
@@ -17,6 +17,9 @@ export default function SalonSignupPage() {
   const phoneFromLogin = location.state?.phone || '';
 
   const [loading, setLoading] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
+  const [confirmPassword, setConfirmPassword] = useState('');
   const [formData, setFormData] = useState({
     salon_name: '',
     owner_name: '',
@@ -25,7 +28,9 @@ export default function SalonSignupPage() {
     address: '',
     latitude: 0,
     longitude: 0,
-    upi_id: ''
+    upi_id: '',
+    password: '',
+    gender_tag: 'Unisex'
   });
 
   const handleGetLocation = () => {
@@ -79,11 +84,21 @@ export default function SalonSignupPage() {
       return;
     }
 
+    if (!formData.password || formData.password.length < 6) {
+      toast.error('Password must be at least 6 characters');
+      return;
+    }
+
+    if (formData.password !== confirmPassword) {
+      toast.error('Passwords do not match');
+      return;
+    }
+
     setLoading(true);
     try {
       await axios.post(`${API}/salon/register`, formData);
       toast.success('Salon registered successfully!');
-      toast.info('Please login with OTP');
+      toast.info('You can now login with your password');
       navigate('/salon/login', { state: { phone: formData.phone } });
     } catch (error) {
       toast.error(error.response?.data?.detail || 'Registration failed');
@@ -173,6 +188,82 @@ export default function SalonSignupPage() {
                 onChange={(e) => setFormData({ ...formData, email: e.target.value })}
                 placeholder="salon@example.com"
               />
+            </div>
+
+            {/* Gender Tag / Salon Type */}
+            <div>
+              <Label>
+                <Users className="inline w-4 h-4 mr-1" />
+                Salon Type *
+              </Label>
+              <div className="grid grid-cols-3 gap-3 mt-2">
+                {['Unisex', 'Men', 'Women'].map((type) => (
+                  <button
+                    key={type}
+                    type="button"
+                    onClick={() => setFormData({ ...formData, gender_tag: type })}
+                    className={`py-3 px-4 rounded-lg border-2 font-semibold transition-all ${
+                      formData.gender_tag === type
+                        ? 'border-gold bg-gold/10 text-gold'
+                        : 'border-border text-muted-foreground hover:border-gold/50'
+                    }`}
+                  >
+                    {type}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+
+          {/* Password Section */}
+          <div className="space-y-4">
+            <h3 className="text-lg font-bold text-card-foreground flex items-center">
+              <Lock className="w-5 h-5 mr-2 text-gold" />
+              Set Password
+            </h3>
+
+            <div>
+              <Label htmlFor="password">Password *</Label>
+              <div className="relative">
+                <Input
+                  id="password"
+                  type={showPassword ? 'text' : 'password'}
+                  value={formData.password}
+                  onChange={(e) => setFormData({ ...formData, password: e.target.value })}
+                  placeholder="Min 6 characters"
+                  required
+                  className="pr-10"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword(!showPassword)}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground"
+                >
+                  {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                </button>
+              </div>
+            </div>
+
+            <div>
+              <Label htmlFor="confirmPassword">Confirm Password *</Label>
+              <div className="relative">
+                <Input
+                  id="confirmPassword"
+                  type={showConfirmPassword ? 'text' : 'password'}
+                  value={confirmPassword}
+                  onChange={(e) => setConfirmPassword(e.target.value)}
+                  placeholder="Re-enter password"
+                  required
+                  className="pr-10"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowConfirmPassword(!showConfirmPassword)}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground"
+                >
+                  {showConfirmPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                </button>
+              </div>
             </div>
           </div>
 

@@ -74,6 +74,7 @@ class SalonCreate(BaseModel):
     upi_id: Optional[str] = None
     payment_timing: str = "after"  # before/after
     password: Optional[str] = None  # Optional password for login
+    gender_tag: str = "Unisex"  # Unisex/Men/Women
 
 class SalonUpdate(BaseModel):
     salon_name: Optional[str] = None
@@ -244,7 +245,10 @@ class BarberUpdate(BaseModel):
     mobile: Optional[str] = None
     queue_status: Optional[str] = None
     profile_image: Optional[str] = None
+    photo_url: Optional[str] = None
     on_leave: Optional[bool] = None
+    intro: Optional[str] = None
+    gallery: Optional[List[str]] = None
 
 class Barber(BaseModel):
     model_config = ConfigDict(extra="ignore")
@@ -256,9 +260,14 @@ class Barber(BaseModel):
     specialization: Optional[str] = None
     mobile: str
     profile_image: Optional[str] = None
+    photo_url: Optional[str] = None  # Alias for profile_image
     queue_status: str = "available"  # available/busy/offline
     on_leave: bool = False  # True if barber is on leave
     is_active: bool = True
+    intro: Optional[str] = None  # Barber's story/about
+    gallery: List[str] = []  # Portfolio images
+    rating: float = 4.5  # Average rating
+    total_reviews: int = 0  # Total number of reviews
 
 class BarberServicePrice(BaseModel):
     barber_id: str
@@ -2524,6 +2533,62 @@ async def get_user_pending_ratings(user_id: str):
             pending_ratings.append(token)
     
     return pending_ratings
+
+# Direct barber review endpoint (for customers viewing barber profile)
+class DirectBarberReview(BaseModel):
+    user_id: Optional[str] = None
+    user_name: str
+    rating: int
+    review: str
+
+@api_router.post("/barbers/{barber_id}/reviews")
+async def create_barber_review(barber_id: str, review_data: DirectBarberReview):
+    """Create a direct review for a barber (without requiring a completed booking)"""
+    # Verify barber exists
+    barber = await db.barbers.find_one({"id": barber_id}, {"_id": 0})
+    if not barber:
+        raise HTTPException(status_code=404, detail="Barber not found")
+    
+    # Validate rating
+    if review_data.rating < 1 or review_data.rating > 5:
+        raise HTTPException(status_code=400, detail="Rating must be between 1 and 5")
+    
+    # Create review
+    review = {
+        "id": str(uuid.uuid4()),
+        "barber_id": barber_id,
+        "salon_id": barber.get("salon_id"),
+        "user_id": review_data.user_id,
+        "user_name": review_data.user_name,
+        "rating": review_data.rating,
+        "review": review_data.review,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "type": "direct"  # To distinguish from booking-based reviews
+    }
+    
+    await db.ratings.insert_one(review)
+    
+    # Update barber's average rating
+    pipeline = [
+        {"$match": {"barber_id": barber_id}},
+        {"$group": {
+            "_id": "$barber_id",
+            "average_rating": {"$avg": "$rating"},
+            "total_reviews": {"$sum": 1}
+        }}
+    ]
+    stats = await db.ratings.aggregate(pipeline).to_list(1)
+    
+    if stats:
+        await db.barbers.update_one(
+            {"id": barber_id},
+            {"$set": {
+                "rating": round(stats[0]["average_rating"], 1),
+                "total_reviews": stats[0]["total_reviews"]
+            }}
+        )
+    
+    return {"message": "Review submitted successfully", "review_id": review["id"]}
 
 # ============ ANALYTICS ROUTES ============
 

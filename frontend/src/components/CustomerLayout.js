@@ -88,7 +88,10 @@ export default function CustomerLayout({ children }) {
   };
 
   const menuItems = [
-    { icon: Home, label: 'Find My Salon', path: '/salons', action: () => navigate('/salons') },
+    { icon: Home, label: 'Find New Salon', path: '/salons', action: () => navigate('/salons') },
+  ];
+
+  const bottomMenuItems = [
     { icon: History, label: 'My History', path: '/history', action: () => navigate('/history') },
     { icon: User, label: 'My Profile', path: '/profile', action: () => navigate('/profile') },
     { icon: HelpCircle, label: 'Help', path: '/help', action: () => toast.info('Help section coming soon') },
@@ -159,7 +162,7 @@ export default function CustomerLayout({ children }) {
                 </div>
 
                 <nav className="space-y-2 flex-1 overflow-y-auto">
-                  {/* Main Menu Items */}
+                  {/* Find New Salon - Always at top */}
                   {menuItems.map((item, idx) => {
                     const Icon = item.icon;
                     return (
@@ -177,12 +180,12 @@ export default function CustomerLayout({ children }) {
                     );
                   })}
 
-                  {/* Salon Section - Collapsible */}
+                  {/* Salon Section - Right below Find New Salon */}
                   {currentSalon && (
-                    <div className="mt-4 pt-4 border-t border-border">
+                    <div className="mt-2">
                       <button
                         onClick={() => setSalonExpanded(!salonExpanded)}
-                        className="w-full flex items-center justify-between px-4 py-3 rounded-lg hover:bg-gold/10 transition-colors"
+                        className="w-full flex items-center justify-between px-4 py-3 rounded-lg hover:bg-gold/10 transition-colors bg-gold/5"
                       >
                         <div className="flex items-center space-x-3">
                           {currentSalon.logo_url ? (
@@ -238,6 +241,27 @@ export default function CustomerLayout({ children }) {
                       </AnimatePresence>
                     </div>
                   )}
+
+                  {/* Separator */}
+                  <div className="my-3 border-t border-border"></div>
+
+                  {/* Bottom Menu Items */}
+                  {bottomMenuItems.map((item, idx) => {
+                    const Icon = item.icon;
+                    return (
+                      <button
+                        key={idx}
+                        onClick={() => {
+                          item.action();
+                          closeSidebar();
+                        }}
+                        className="w-full flex items-center space-x-3 px-4 py-3 rounded-lg hover:bg-gold/10 transition-colors text-left"
+                      >
+                        <Icon className="w-5 h-5 text-gold" />
+                        <span className="text-foreground">{item.label}</span>
+                      </button>
+                    );
+                  })}
                 </nav>
 
                 <div className="pt-4 border-t border-border">
