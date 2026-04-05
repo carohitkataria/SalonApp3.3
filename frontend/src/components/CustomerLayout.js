@@ -20,7 +20,7 @@ export default function CustomerLayout({ children }) {
   const menuItems = [
     { icon: Home, label: 'Find My Salon', path: '/salons', action: () => navigate('/salons') },
     { icon: History, label: 'My History', path: '/history', action: () => navigate('/history') },
-    { icon: User, label: 'My Profile', path: '/profile', action: () => toast.info('Profile coming soon') },
+    { icon: User, label: 'My Profile', path: '/profile', action: () => navigate('/profile') },
     { icon: HelpCircle, label: 'Help', path: '/help', action: () => toast.info('Help section coming soon') },
     { icon: Bug, label: 'Report Bug', path: '/report', action: () => toast.info('Bug report form coming soon') },
   ];

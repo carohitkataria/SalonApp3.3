@@ -46,6 +46,7 @@ export default function SalonSelectionPage() {
 
     fetchCities();
     getUserLocation();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isUserLoggedIn]);
 
   const fetchCities = async () => {
