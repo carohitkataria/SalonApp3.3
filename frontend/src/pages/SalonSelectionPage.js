@@ -44,8 +44,11 @@ export default function SalonSelectionPage() {
       return;
     }
 
+    // Load all salons immediately for faster initial display
+    fetchAllSalons();
     fetchCities();
-    getUserLocation();
+    // Then try to get user location in background
+    getUserLocationInBackground();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isUserLoggedIn]);
 
@@ -58,25 +61,32 @@ export default function SalonSelectionPage() {
     }
   };
 
-  const getUserLocation = () => {
+  const getUserLocationInBackground = () => {
     if (navigator.geolocation) {
+      // Use a timeout to prevent long waits for location
+      const timeoutId = setTimeout(() => {
+        // If location takes too long, just keep showing all salons
+        console.log('Location request timed out, showing all salons');
+      }, 5000);
+
       navigator.geolocation.getCurrentPosition(
         (position) => {
+          clearTimeout(timeoutId);
           const location = {
             lat: position.coords.latitude,
             lng: position.coords.longitude
           };
           setUserLocation(location);
+          // Update with nearby salons after getting location
           fetchNearbySalons(location.lat, location.lng);
         },
         (error) => {
+          clearTimeout(timeoutId);
           console.error('Error getting location:', error);
-          toast.info('Showing all salons');
-          fetchAllSalons();
-        }
+          // Keep showing all salons, no need to fetch again
+        },
+        { timeout: 5000, enableHighAccuracy: false, maximumAge: 300000 }
       );
-    } else {
-      fetchAllSalons();
     }
   };
 

@@ -2283,6 +2283,14 @@ async def get_salon_token_status(salon_id: str, shift: Optional[str] = None):
             sort=[("called_at", -1)]
         )
         
+        # Count total tokens for today (all statuses)
+        total_tokens_query = {
+            "salon_id": salon_id,
+            "barber_id": barber["id"],
+            "date": today
+        }
+        total_tokens_today = await db.tokens.count_documents(total_tokens_query)
+        
         result["barbers"].append({
             "barber_id": barber["id"],
             "barber_name": barber["name"],
@@ -2290,10 +2298,16 @@ async def get_salon_token_status(salon_id: str, shift: Optional[str] = None):
             "specialization": barber.get("specialization"),
             "current_token": barber_called.get("token_number") if barber_called else None,
             "waiting_count": len(barber_waiting),
+            "total_tokens_today": total_tokens_today,
             "queue_status": barber.get("queue_status", "available")
         })
     
     return result
+
+@api_router.get("/salons/{salon_id}/live-status")
+async def get_salon_live_status(salon_id: str, shift: Optional[str] = None):
+    """Get current live status for salon (alias for token-status)"""
+    return await get_salon_token_status(salon_id, shift)
 
 # ============ ANALYTICS ROUTES ============
 

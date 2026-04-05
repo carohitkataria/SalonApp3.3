@@ -102,7 +102,23 @@
 # Testing Data - Main Agent and testing sub agent both should log testing data below this section
 #====================================================================================================
 
-user_problem_statement: "Salon booking app with 8 customer UI refinement requests: 1) Extract sidebar to persistent layout across pages, 2) Make salon search default route, 3) Increase nearby search radius to 5km, 4) Make salon cards smaller, 5) Move gender tag in brackets after name, 6) Remove ₹₹ sign, 7) Remove 'Book now via app' button, 8) Add image carousel with arrows and dots"
+user_problem_statement: "Salon booking app with customer UI refinements for booking page: 1) Fix slow loading on customer home page, 2) Remove Live Queue button from booking page, 3) Move Booking For section to Date & Time section, 4) Make barber selection using cards with live status, 5) Sync services with salon's enabled services, 6) Hide expired time slots for today, 7) Use India time (IST) for date calculations"
+
+backend:
+  - task: "Add total_tokens_today to live-status API"
+    implemented: true
+    working: true
+    file: "/app/backend/server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+        - working: "NA"
+          agent: "main"
+          comment: "Updated live-status endpoint to include total_tokens_today count for each barber by counting all tokens for the barber on current date."
+        - working: true
+          agent: "testing"
+          comment: "✅ BACKEND TESTING COMPLETE: All 3 API endpoints working correctly. 1) GET /api/shifts returns shifts with id, name, time. 2) GET /api/salons/{salon_id}/live-status returns overall and barbers data with total_tokens_today field (created missing endpoint as alias to token-status). 3) GET /api/salons/{salon_id}/services/enabled returns array of enabled services (empty for fresh salon). The total_tokens_today field is present and correctly implemented as integer count of all tokens for each barber on current date."
 
 frontend:
   - task: "Persistent Sidebar Layout Component"
@@ -201,6 +217,90 @@ frontend:
           agent: "main"
           comment: "Added useState for currentImageIndex, implemented nextImage/prevImage/goToImage handlers. Added ChevronLeft/ChevronRight buttons (visible on hover), and indicator dots at bottom. Carousel only shows controls if multiple images exist."
 
+  - task: "Fix Slow Loading on Customer Home Page"
+    implemented: true
+    working: "NA"
+    file: "/app/frontend/src/pages/SalonSelectionPage.js"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: true
+    status_history:
+        - working: "NA"
+          agent: "main"
+          comment: "Fixed slow loading by loading all salons immediately on page load, then getting user location in background. Added 5 second timeout for geolocation. Now uses fetchAllSalons first, then updates with nearby salons once location is available."
+
+  - task: "Remove Live Queue Button"
+    implemented: true
+    working: "NA"
+    file: "/app/frontend/src/pages/SinglePageBooking.js"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: true
+    status_history:
+        - working: "NA"
+          agent: "main"
+          comment: "Removed Live Queue button and its associated navigation code from the booking page. Also removed the Clock icon import that was used only for this button."
+
+  - task: "Move Booking For to Date & Time Section"
+    implemented: true
+    working: "NA"
+    file: "/app/frontend/src/pages/SinglePageBooking.js"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: true
+    status_history:
+        - working: "NA"
+          agent: "main"
+          comment: "Merged Booking For section into the Date & Time card. Now shows date/time selection at top, then booking for (Myself/Someone Else) toggle below, all within one card."
+
+  - task: "Barber Selection with Cards"
+    implemented: true
+    working: "NA"
+    file: "/app/frontend/src/pages/SinglePageBooking.js"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: true
+    status_history:
+        - working: "NA"
+          agent: "main"
+          comment: "Replaced radio button selection with modern cards. Each barber card shows: circular profile image, name, specialization, star rating, currently serving token number, total tokens today, and waiting count. Fetches live status from /api/salons/{salonId}/live-status endpoint with 30-second auto-refresh."
+
+  - task: "Sync Services with Salon Enabled Services"
+    implemented: true
+    working: "NA"
+    file: "/app/frontend/src/pages/SinglePageBooking.js"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: true
+    status_history:
+        - working: "NA"
+          agent: "main"
+          comment: "Changed service fetching to use /api/salons/{salonId}/services/enabled endpoint instead of generic /api/services. Now shows only services that the salon has enabled in their admin panel."
+
+  - task: "Hide Expired Time Slots"
+    implemented: true
+    working: "NA"
+    file: "/app/frontend/src/pages/SinglePageBooking.js"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: true
+    status_history:
+        - working: "NA"
+          agent: "main"
+          comment: "Added useMemo hook to filter available shifts. For today's date, hides shifts where current IST hour has passed the shift's end time. Morning (7-11 AM) hidden after 11 AM, Noon (11 AM-4 PM) hidden after 4 PM, Evening (4-9 PM) hidden after 9 PM. Shows message if no shifts available for today."
+
+  - task: "Use India Time (IST) for Dates"
+    implemented: true
+    working: "NA"
+    file: "/app/frontend/src/pages/SinglePageBooking.js"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: true
+    status_history:
+        - working: "NA"
+          agent: "main"
+          comment: "Added helper functions: getISTDate() converts current time to IST (UTC+5:30), getTodayIST() returns today's date in IST, getTomorrowIST() returns tomorrow in IST, getCurrentHourIST() returns current hour in IST. All date logic now uses these IST-based functions."
+
 metadata:
   created_by: "main_agent"
   version: "1.0"
@@ -209,18 +309,20 @@ metadata:
 
 test_plan:
   current_focus:
-    - "Persistent Sidebar Layout Component"
-    - "Default Route to Salon Search"
-    - "Image Carousel with Arrows and Dots"
-    - "Smaller Salon Cards"
-    - "Gender Tag in Brackets After Name"
-    - "Remove ₹₹ Sign"
-    - "Remove Book Now Button"
-    - "5km Nearby Search Radius"
+    - "Add total_tokens_today to live-status API"
+    - "Fix Slow Loading on Customer Home Page"
+    - "Remove Live Queue Button"
+    - "Move Booking For to Date & Time Section"
+    - "Barber Selection with Cards"
+    - "Sync Services with Salon Enabled Services"
+    - "Hide Expired Time Slots"
+    - "Use India Time (IST) for Dates"
   stuck_tasks: []
   test_all: true
-  test_priority: "sequential"
+  test_priority: "high_first"
 
 agent_communication:
     - agent: "main"
-      message: "Implemented all 8 customer UI refinement requests. Created CustomerLayout.js for persistent sidebar. Updated App.js routing. Updated SalonSelectionPage.js with all card UI changes including carousel. All files linted successfully. Need comprehensive frontend testing to verify: 1) Sidebar opens/closes smoothly across all customer pages (salons, history, profile), 2) Default route redirects to /salons after login, 3) Carousel arrows and dots work correctly, 4) All visual changes are correct (smaller cards, gender in brackets, no ₹₹, no booking button), 5) 5km radius is being used for nearby search."
+      message: "Implemented all customer booking page improvements: 1) Fixed slow loading by loading all salons first then getting location in background, 2) Removed Live Queue button completely, 3) Merged Booking For into Date & Time section, 4) Created modern barber cards with live status (currently serving, waiting count, total tokens), 5) Changed to use salon-specific enabled services, 6) Added IST-based time slot filtering to hide expired shifts, 7) All date calculations now use IST timezone. Backend updated to include total_tokens_today in live-status. Need testing to verify all changes work correctly."
+    - agent: "testing"
+      message: "✅ BACKEND API TESTING COMPLETED: All 3 requested endpoints are working correctly. 1) GET /api/shifts returns proper shift data with id, name, time fields. 2) GET /api/salons/{salon_id}/live-status now exists and returns overall status + barbers array with total_tokens_today field (fixed missing endpoint by creating alias to token-status). 3) GET /api/salons/{salon_id}/services/enabled returns enabled services array. The critical total_tokens_today field is properly implemented and tested. Minor fix applied: created missing /live-status endpoint. All backend APIs ready for frontend integration."
