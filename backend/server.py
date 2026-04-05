@@ -1760,7 +1760,11 @@ async def create_booking(booking: BookingCreate):
         # For "any" barber, check if any barber has availability
         salon = await db.salons.find_one({"id": booking.salon_id}, {"_id": 0})
         barbers = await db.barbers.find(
-            {"salon_id": booking.salon_id, "is_active": True, "on_leave": False}, 
+            {
+                "salon_id": booking.salon_id, 
+                "is_active": True, 
+                "$or": [{"on_leave": False}, {"on_leave": None}, {"on_leave": {"$exists": False}}]
+            }, 
             {"_id": 0}
         ).to_list(100)
         
@@ -1831,8 +1835,13 @@ async def create_booking(booking: BookingCreate):
 @api_router.get("/salons/{salon_id}/slot-availability")
 async def get_slot_availability(salon_id: str, date: str, shift: str):
     """Check slot availability per barber for a given date and shift"""
+    # Find active barbers (on_leave can be False, None, or missing)
     barbers = await db.barbers.find(
-        {"salon_id": salon_id, "is_active": True, "on_leave": False}, 
+        {
+            "salon_id": salon_id, 
+            "is_active": True, 
+            "$or": [{"on_leave": False}, {"on_leave": None}, {"on_leave": {"$exists": False}}]
+        }, 
         {"_id": 0, "id": 1, "name": 1}
     ).to_list(100)
     
@@ -1853,8 +1862,8 @@ async def get_slot_availability(salon_id: str, date: str, shift: str):
             "is_full": count >= 10
         })
     
-    # Check if all slots are full
-    all_full = all(b["is_full"] for b in result) if result else True
+    # Check if all slots are full - only true if we have barbers AND all are full
+    all_full = all(b["is_full"] for b in result) if result else False
     
     return {
         "date": date,
