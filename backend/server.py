@@ -106,6 +106,7 @@ class Salon(BaseModel):
     phone: str
     email: Optional[str] = None
     address: str
+    city: Optional[str] = None  # City for filtering
     latitude: float
     longitude: float
     upi_id: Optional[str] = None
@@ -115,6 +116,8 @@ class Salon(BaseModel):
     gstin: Optional[str] = None
     logo_url: Optional[str] = None
     photo_gallery: List[str] = []  # Array of image URLs
+    rating: float = 4.5  # Average rating out of 5
+    gender_tag: Optional[str] = "Unisex"  # Unisex/Men/Women
     tax_rate: float = 2.5  # Default GST rate (CGST + SGST = 5%)
     invoice_prefix: str = "INV"  # Invoice number prefix
     invoice_start_number: int = 1  # Starting invoice number
@@ -2175,6 +2178,28 @@ async def search_salons(name: str):
     ).limit(20).to_list(20)
     
     return {"salons": [Salon(**s) for s in salons]}
+
+@api_router.get("/salons/by-city")
+async def get_salons_by_city(city: str):
+    """Get salons by city"""
+    if not city or len(city) < 2:
+        raise HTTPException(status_code=400, detail="City name must be at least 2 characters")
+    
+    salons = await db.salons.find(
+        {
+            "is_active": True,
+            "city": {"$regex": city, "$options": "i"}
+        },
+        {"_id": 0}
+    ).limit(50).to_list(50)
+    
+    return {"salons": [Salon(**s) for s in salons]}
+
+@api_router.get("/cities")
+async def get_cities():
+    """Get list of unique cities with salons"""
+    cities = await db.salons.distinct("city", {"is_active": True})
+    return {"cities": [c for c in cities if c]}
 
 @api_router.get("/users/{user_id}/recent-services")
 async def get_user_recent_services(user_id: str):

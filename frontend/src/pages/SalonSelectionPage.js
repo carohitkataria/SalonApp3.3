@@ -3,13 +3,17 @@ import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import axios from 'axios';
-import { MapContainer, TileLayer, Marker, Popup, useMap } from 'react-leaflet';
+import { MapContainer, TileLayer, Marker, Popup } from 'react-leaflet';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { MapPin, List, Navigation, Scissors, Search, Star, Clock } from 'lucide-react';
+import { 
+  MapPin, List, Navigation, Scissors, Search, Star, Clock, 
+  Menu, X, Home, History, User, HelpCircle, Bug, LogOut, Map as MapIcon
+} from 'lucide-react';
 import { toast } from 'sonner';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
+import { motion, AnimatePresence } from 'framer-motion';
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
 const API = `${BACKEND_URL}/api`;
@@ -22,28 +26,19 @@ L.Icon.Default.mergeOptions({
   shadowUrl: require('leaflet/dist/images/marker-shadow.png'),
 });
 
-function LocationUpdater({ center }) {
-  const map = useMap();
-  useEffect(() => {
-    if (center) {
-      map.setView(center, 13);
-    }
-  }, [center, map]);
-  return null;
-}
-
 export default function SalonSelectionPage() {
   const navigate = useNavigate();
-  const { user, isUserLoggedIn } = useAuth();
+  const { user, isUserLoggedIn, logoutUser } = useAuth();
+  
   const [salons, setSalons] = useState([]);
-  const [lastVisitedSalon, setLastVisitedSalon] = useState(null);
+  const [cities, setCities] = useState([]);
   const [searchQuery, setSearchQuery] = useState('');
-  const [searchResults, setSearchResults] = useState([]);
-  const [view, setView] = useState('list'); // 'list' or 'map'
+  const [selectedCity, setSelectedCity] = useState('');
+  const [view, setView] = useState('grid'); // 'grid' or 'map'
   const [userLocation, setUserLocation] = useState(null);
-  const [radius, setRadius] = useState(2);
   const [loading, setLoading] = useState(true);
-  const [searching, setSearching] = useState(false);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [searchType, setSearchType] = useState('nearby'); // 'nearby', 'name', 'city'
 
   useEffect(() => {
     if (!isUserLoggedIn) {
@@ -51,20 +46,16 @@ export default function SalonSelectionPage() {
       return;
     }
 
-    fetchLastVisitedSalon();
+    fetchCities();
     getUserLocation();
   }, [isUserLoggedIn]);
 
-  const fetchLastVisitedSalon = async () => {
+  const fetchCities = async () => {
     try {
-      if (user && user.phone) {
-        const response = await axios.get(`${API}/users/last-salon?phone=${user.phone}`);
-        if (response.data.salon) {
-          setLastVisitedSalon(response.data.salon);
-        }
-      }
+      const response = await axios.get(`${API}/cities`);
+      setCities(response.data.cities || []);
     } catch (error) {
-      console.error('Error fetching last salon:', error);
+      console.error('Error fetching cities:', error);
     }
   };
 
@@ -92,8 +83,9 @@ export default function SalonSelectionPage() {
 
   const fetchNearbySalons = async (lat, lng) => {
     try {
-      const response = await axios.get(`${API}/salons?lat=${lat}&lng=${lng}&radius=${radius}`);
+      const response = await axios.get(`${API}/salons?lat=${lat}&lng=${lng}&radius=50`);
       setSalons(response.data);
+      setSearchType('nearby');
     } catch (error) {
       console.error('Error fetching salons:', error);
       toast.error('Failed to load salons');
@@ -114,30 +106,51 @@ export default function SalonSelectionPage() {
     }
   };
 
-  const handleSearch = async (query) => {
+  const handleSearchByName = async (query) => {
     setSearchQuery(query);
     if (query.length < 2) {
-      setSearchResults([]);
+      if (userLocation) {
+        fetchNearbySalons(userLocation.lat, userLocation.lng);
+      } else {
+        fetchAllSalons();
+      }
       return;
     }
 
-    setSearching(true);
+    setLoading(true);
+    setSearchType('name');
     try {
       const response = await axios.get(`${API}/salons/search?name=${query}`);
-      setSearchResults(response.data.salons || []);
+      setSalons(response.data.salons || []);
     } catch (error) {
       console.error('Error searching salons:', error);
       toast.error('Failed to search salons');
     } finally {
-      setSearching(false);
+      setLoading(false);
     }
   };
 
-  const handleRadiusChange = (newRadius) => {
-    setRadius(newRadius);
-    if (userLocation) {
-      setLoading(true);
-      fetchNearbySalons(userLocation.lat, userLocation.lng);
+  const handleCityFilter = async (city) => {
+    setSelectedCity(city);
+    if (!city) {
+      if (userLocation) {
+        fetchNearbySalons(userLocation.lat, userLocation.lng);
+      } else {
+        fetchAllSalons();
+      }
+      return;
+    }
+
+    setLoading(true);
+    setSearchType('city');
+    try {
+      const response = await axios.get(`${API}/salons/by-city?city=${city}`);
+      setSalons(response.data.salons || []);
+    } catch (error) {
+      console.error('Error filtering by city:', error);
+      toast.error('Failed to filter salons');
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -145,207 +158,257 @@ export default function SalonSelectionPage() {
     navigate(`/book/${salon.id}`);
   };
 
-  const SalonCard = ({ salon, isLastVisited = false }) => {
-    const galleryImage = salon.photo_gallery && salon.photo_gallery.length > 0 
+  const handleLogout = () => {
+    logoutUser();
+    navigate('/user/login');
+  };
+
+  const SalonCard = ({ salon }) => {
+    const firstImage = salon.photo_gallery && salon.photo_gallery.length > 0 
       ? salon.photo_gallery[0] 
-      : null;
+      : salon.logo_url || 'https://images.pexels.com/photos/3993293/pexels-photo-3993293.jpeg?auto=compress&cs=tinysrgb&w=400';
       
     return (
-      <div
-        className={`bg-card border ${isLastVisited ? 'border-gold border-2' : 'border-border'} rounded-lg overflow-hidden hover:shadow-lg transition-all cursor-pointer relative group`}
+      <motion.div
+        initial={{ opacity: 0, scale: 0.95 }}
+        animate={{ opacity: 1, scale: 1 }}
+        whileHover={{ scale: 1.02 }}
+        className="bg-card rounded-2xl overflow-hidden shadow-lg hover:shadow-2xl transition-all border border-border cursor-pointer"
         onClick={() => handleSelectSalon(salon)}
       >
-        {isLastVisited && (
-          <div className="absolute top-2 right-2 bg-gold text-black text-xs px-2 py-1 rounded flex items-center z-10">
-            <Clock className="w-3 h-3 mr-1" />
-            Last Visited
+        {/* Image */}
+        <div className="relative h-48 overflow-hidden">
+          <img 
+            src={firstImage}
+            alt={salon.salon_name}
+            className="w-full h-full object-cover"
+          />
+          {salon.logo_url && (
+            <div className="absolute top-3 left-3 w-12 h-12 bg-white rounded-full p-1 shadow-lg">
+              <img 
+                src={salon.logo_url}
+                alt="Logo"
+                className="w-full h-full object-contain"
+              />
+            </div>
+          )}
+          {/* Optional Offer Banner */}
+          <div className="absolute bottom-0 left-0 right-0 bg-blue-600 text-white text-center py-2 text-sm font-semibold">
+            Book Now via App
           </div>
-        )}
-        
-        {/* Salon Image/Gallery */}
-        {galleryImage && (
-          <div className="relative h-40 overflow-hidden">
-            <img 
-              src={galleryImage} 
-              alt={salon.salon_name}
-              className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-300"
-            />
-            <div className="absolute inset-0 bg-gradient-to-t from-black/60 to-transparent"></div>
-            
-            {/* Logo overlay */}
-            {salon.logo_url && (
-              <div className="absolute top-2 left-2 w-12 h-12 bg-white rounded-full p-1 shadow-lg">
-                <img 
-                  src={salon.logo_url} 
-                  alt={`${salon.salon_name} logo`}
-                  className="w-full h-full object-contain"
-                />
-              </div>
-            )}
-            
-            {/* Gallery indicator */}
-            {salon.photo_gallery && salon.photo_gallery.length > 1 && (
-              <div className="absolute bottom-2 right-2 bg-black/70 text-white text-xs px-2 py-1 rounded flex items-center">
-                <Star className="w-3 h-3 mr-1" />
-                {salon.photo_gallery.length} photos
-              </div>
-            )}
-          </div>
-        )}
-        
-        <div className="p-6">
-          <div className="flex items-start space-x-4">
-            {!galleryImage && (
-              <div className="w-16 h-16 rounded-full bg-gold/20 flex items-center justify-center overflow-hidden flex-shrink-0">
-                {salon.logo_url ? (
-                  <img 
-                    src={salon.logo_url} 
-                    alt={salon.salon_name}
-                    className="w-full h-full object-cover"
-                  />
-                ) : (
-                  <Scissors className="w-8 h-8 text-gold" />
-                )}
-              </div>
-            )}
+        </div>
+
+        {/* Content */}
+        <div className="p-4">
+          <div className="flex items-start justify-between mb-2">
             <div className="flex-1">
-              <h3 className="text-lg font-bold text-card-foreground mb-1">{salon.salon_name}</h3>
-              <p className="text-sm text-muted-foreground mb-2">{salon.address}</p>
-              {salon.distance && (
-                <div className="flex items-center text-xs text-gold">
-                  <Navigation className="w-3 h-3 mr-1" />
-                  {salon.distance} km away
-                </div>
-              )}
+              <h3 className="font-bold text-lg text-foreground mb-1">{salon.salon_name}</h3>
+              <p className="text-xs text-muted-foreground flex items-center mb-2">
+                <MapPin className="w-3 h-3 mr-1" />
+                {salon.address}
+                {salon.distance && ` | ${salon.distance} Kms`}
+              </p>
+            </div>
+            <div className="flex items-center space-x-1 ml-2">
+              <span className="text-xs text-muted-foreground">{salon.gender_tag || 'Unisex'}</span>
+              <span className="text-xs text-muted-foreground">| ₹₹</span>
             </div>
           </div>
-          <Button className="w-full mt-4 bg-gold text-black hover:bg-gold/90">
-            {isLastVisited ? 'Book Again' : 'Select Salon'}
-          </Button>
+
+          {/* Rating */}
+          <div className="flex items-center space-x-2">
+            <div className="flex items-center bg-green-600 text-white px-2 py-1 rounded">
+              <span className="w-2 h-2 bg-white rounded-full mr-1"></span>
+              <span className="text-sm font-bold">{salon.rating || 4.5}</span>
+            </div>
+          </div>
         </div>
-      </div>
+      </motion.div>
     );
   };
 
-  if (loading) {
+  const menuItems = [
+    { icon: Home, label: 'Find My Salon', path: '/salons', action: () => {} },
+    { icon: History, label: 'My History', path: '/history', action: () => navigate('/history') },
+    { icon: User, label: 'My Profile', path: '/profile', action: () => toast.info('Profile coming soon') },
+    { icon: HelpCircle, label: 'Help', path: '/help', action: () => toast.info('Help section coming soon') },
+    { icon: Bug, label: 'Report Bug', path: '/report', action: () => toast.info('Bug report form coming soon') },
+  ];
+
+  if (loading && salons.length === 0) {
     return (
       <div className="min-h-screen bg-background flex items-center justify-center">
         <div className="text-center">
           <Scissors className="w-16 h-16 text-gold animate-spin mx-auto mb-4" />
-          <p className="text-foreground">Finding salons near you...</p>
+          <p className="text-foreground">Finding salons...</p>
         </div>
       </div>
     );
   }
 
-  const displaySalons = searchQuery ? searchResults : salons;
-
   return (
     <div className="min-h-screen bg-background">
+      {/* Sidebar */}
+      <AnimatePresence>
+        {sidebarOpen && (
+          <>
+            {/* Backdrop */}
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setSidebarOpen(false)}
+              className="fixed inset-0 bg-black/50 z-40"
+            />
+            
+            {/* Sidebar */}
+            <motion.div
+              initial={{ x: -300 }}
+              animate={{ x: 0 }}
+              exit={{ x: -300 }}
+              className="fixed left-0 top-0 bottom-0 w-72 bg-card border-r border-border z-50 shadow-2xl"
+            >
+              <div className="p-6">
+                <div className="flex items-center justify-between mb-8">
+                  <div className="flex items-center space-x-3">
+                    <Scissors className="w-8 h-8 text-gold" />
+                    <div>
+                      <h2 className="font-bold text-foreground">Menu</h2>
+                      <p className="text-xs text-muted-foreground">{user?.name}</p>
+                    </div>
+                  </div>
+                  <button onClick={() => setSidebarOpen(false)}>
+                    <X className="w-6 h-6 text-foreground" />
+                  </button>
+                </div>
+
+                <nav className="space-y-2">
+                  {menuItems.map((item, idx) => {
+                    const Icon = item.icon;
+                    return (
+                      <button
+                        key={idx}
+                        onClick={() => {
+                          item.action();
+                          setSidebarOpen(false);
+                        }}
+                        className="w-full flex items-center space-x-3 px-4 py-3 rounded-lg hover:bg-gold/10 transition-colors text-left"
+                      >
+                        <Icon className="w-5 h-5 text-gold" />
+                        <span className="text-foreground">{item.label}</span>
+                      </button>
+                    );
+                  })}
+                </nav>
+
+                <div className="absolute bottom-6 left-6 right-6">
+                  <button
+                    onClick={handleLogout}
+                    className="w-full flex items-center space-x-3 px-4 py-3 rounded-lg bg-red-500/10 hover:bg-red-500/20 transition-colors"
+                  >
+                    <LogOut className="w-5 h-5 text-red-500" />
+                    <span className="text-red-500 font-semibold">Logout</span>
+                  </button>
+                </div>
+              </div>
+            </motion.div>
+          </>
+        )}
+      </AnimatePresence>
+
       {/* Header */}
-      <div className="border-b border-border p-4">
-        <div className="max-w-7xl mx-auto">
+      <div className="bg-card border-b border-border sticky top-0 z-30 shadow-sm">
+        <div className="max-w-7xl mx-auto p-4">
           <div className="flex items-center justify-between mb-4">
-            <div>
-              <h1 className="text-2xl font-playfair font-bold text-foreground">Select Salon</h1>
-              <p className="text-sm text-muted-foreground">Choose a salon near you</p>
+            <div className="flex items-center space-x-3">
+              <button onClick={() => setSidebarOpen(true)}>
+                <Menu className="w-6 h-6 text-foreground" />
+              </button>
+              <Scissors className="w-8 h-8 text-gold" />
+              <div>
+                <h1 className="text-xl font-playfair font-bold text-foreground">Find Salons</h1>
+                <p className="text-xs text-muted-foreground">Discover the best near you</p>
+              </div>
             </div>
             <div className="flex space-x-2">
               <Button
-                variant={view === 'list' ? 'default' : 'outline'}
+                variant={view === 'grid' ? 'default' : 'outline'}
                 size="sm"
-                onClick={() => setView('list')}
+                onClick={() => setView('grid')}
+                className={view === 'grid' ? 'bg-gold text-black' : ''}
               >
-                <List className="w-4 h-4 mr-2" /> List
+                <List className="w-4 h-4" />
               </Button>
               <Button
                 variant={view === 'map' ? 'default' : 'outline'}
                 size="sm"
                 onClick={() => setView('map')}
+                className={view === 'map' ? 'bg-gold text-black' : ''}
               >
-                <MapPin className="w-4 h-4 mr-2" /> Map
+                <MapIcon className="w-4 h-4" />
               </Button>
             </div>
           </div>
 
-          {/* Search Bar */}
-          <div className="mb-4">
-            <div className="relative">
-              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-muted-foreground w-4 h-4" />
-              <Input
-                type="text"
-                placeholder="Search salon by name..."
-                value={searchQuery}
-                onChange={(e) => handleSearch(e.target.value)}
-                className="pl-10"
-              />
-              {searching && (
-                <div className="absolute right-3 top-1/2 transform -translate-y-1/2">
-                  <Scissors className="w-4 h-4 text-gold animate-spin" />
-                </div>
-              )}
+          {/* Search Bar & Filters */}
+          <div className="space-y-3">
+            <div className="flex gap-2">
+              <div className="relative flex-1">
+                <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-muted-foreground w-4 h-4" />
+                <Input
+                  type="text"
+                  placeholder="Search salon by name..."
+                  value={searchQuery}
+                  onChange={(e) => handleSearchByName(e.target.value)}
+                  className="pl-10"
+                />
+              </div>
+              <select
+                value={selectedCity}
+                onChange={(e) => handleCityFilter(e.target.value)}
+                className="px-4 py-2 bg-background border border-border rounded-md text-foreground"
+              >
+                <option value="">All Cities</option>
+                {cities.map(city => (
+                  <option key={city} value={city}>{city}</option>
+                ))}
+              </select>
             </div>
-          </div>
 
-          {/* Radius Filter - only show when not searching */}
-          {userLocation && !searchQuery && (
-            <div className="flex items-center space-x-4">
-              <label className="text-sm text-foreground">Radius: {radius} km</label>
-              <Input
-                type="range"
-                min="1"
-                max="10"
-                value={radius}
-                onChange={(e) => handleRadiusChange(parseInt(e.target.value))}
-                className="w-48"
-              />
-            </div>
-          )}
+            {userLocation && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => fetchNearbySalons(userLocation.lat, userLocation.lng)}
+                className="border-gold/30"
+              >
+                <Navigation className="w-4 h-4 mr-2" />
+                Find Salons Near Me
+              </Button>
+            )}
+          </div>
         </div>
       </div>
 
+      {/* Content */}
       <div className="max-w-7xl mx-auto p-4">
-        {/* Last Visited Salon */}
-        {lastVisitedSalon && !searchQuery && (
-          <div className="mb-6">
-            <h2 className="text-lg font-semibold text-foreground mb-3 flex items-center">
-              <Star className="w-5 h-5 text-gold mr-2" />
-              Your Last Visit
-            </h2>
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-              <SalonCard salon={lastVisitedSalon} isLastVisited={true} />
-            </div>
-          </div>
-        )}
-
-        {/* Salons List/Map */}
-        {view === 'list' ? (
+        {view === 'grid' ? (
           <>
-            {!searchQuery && lastVisitedSalon && (
-              <h2 className="text-lg font-semibold text-foreground mb-3 mt-6">
-                {userLocation ? 'Nearby Salons' : 'All Salons'}
-              </h2>
-            )}
-            {searchQuery && (
-              <h2 className="text-lg font-semibold text-foreground mb-3">
-                Search Results ({displaySalons.length})
-              </h2>
-            )}
+            <p className="text-sm text-muted-foreground mb-4">
+              {searchType === 'nearby' && 'Salons near you'}
+              {searchType === 'name' && `Search results for "${searchQuery}"`}
+              {searchType === 'city' && `Salons in ${selectedCity}`}
+              {' '}({salons.length} found)
+            </p>
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-              {displaySalons.map((salon) => (
-                <SalonCard 
-                  key={salon.id} 
-                  salon={salon} 
-                  isLastVisited={false}
-                />
+              {salons.map((salon) => (
+                <SalonCard key={salon.id} salon={salon} />
               ))}
             </div>
-            {displaySalons.length === 0 && (
+            {salons.length === 0 && (
               <div className="text-center py-12">
-                <Scissors className="w-16 h-16 text-muted-foreground mx-auto mb-4" />
-                <p className="text-muted-foreground">
-                  {searchQuery ? 'No salons found matching your search' : 'No salons available'}
-                </p>
+                <Scissors className="w-16 h-16 text-muted-foreground mx-auto mb-4 opacity-30" />
+                <p className="text-muted-foreground">No salons found</p>
               </div>
             )}
           </>
@@ -361,15 +424,12 @@ export default function SalonSelectionPage() {
                   attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
                   url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
                 />
-                <LocationUpdater center={[userLocation.lat, userLocation.lng]} />
                 
-                {/* User location marker */}
                 <Marker position={[userLocation.lat, userLocation.lng]}>
                   <Popup>Your Location</Popup>
                 </Marker>
 
-                {/* Salon markers */}
-                {displaySalons.map((salon) => (
+                {salons.map((salon) => (
                   <Marker
                     key={salon.id}
                     position={[salon.latitude, salon.longitude]}
