@@ -200,8 +200,11 @@ export default function HistoryPage() {
                 transition={{ delay: index * 0.03 }}
                 className={`bg-card border-2 rounded-xl overflow-hidden ${getStatusColor(booking.status)}`}
               >
-                {/* Header with Token and Status */}
-                <div className="flex items-center justify-between p-4 border-b border-border/50">
+                {/* Header with Token and Status - Clickable */}
+                <div 
+                  className="flex items-center justify-between p-4 border-b border-border/50 cursor-pointer hover:bg-muted/30 transition-colors"
+                  onClick={() => navigate(`/token/${booking.id}`)}
+                >
                   <div className="flex items-center gap-3">
                     <div className="text-3xl font-bebas text-gold">
                       #{booking.token_number || 'TBA'}

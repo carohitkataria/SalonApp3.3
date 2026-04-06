@@ -362,6 +362,22 @@ export default function OTPLoginPage() {
             Register your salon
           </button>
         </p>
+
+        <div className="flex items-center justify-center gap-4 mt-4">
+          <button
+            onClick={() => toast.info('Please contact support to reset your password')}
+            className="text-sm text-muted-foreground hover:text-gold transition-colors"
+          >
+            Forgot Password?
+          </button>
+          <span className="text-border">|</span>
+          <button
+            onClick={() => navigate('/user/login')}
+            className="text-sm text-muted-foreground hover:text-gold transition-colors"
+          >
+            Login as Customer
+          </button>
+        </div>
       </motion.div>
     </div>
   );

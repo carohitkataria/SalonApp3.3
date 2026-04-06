@@ -2583,6 +2583,14 @@ async def get_barber_profile(salon_id: str, barber_id: str):
         "recent_reviews": reviews
     }
 
+@api_router.get("/tokens/{token_id}")
+async def get_token_details(token_id: str):
+    """Get details of a specific token"""
+    token = await db.tokens.find_one({"id": token_id}, {"_id": 0})
+    if not token:
+        raise HTTPException(status_code=404, detail="Token not found")
+    return token
+
 @api_router.get("/tokens/{token_id}/can-rate")
 async def check_can_rate_token(token_id: str):
     """Check if a token can be rated"""

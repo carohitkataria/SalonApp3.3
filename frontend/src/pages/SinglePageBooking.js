@@ -217,6 +217,8 @@ export default function SinglePageBooking() {
   const source = searchParams.get('source') || 'online';
   const forSelf = searchParams.get('for') === 'self';
   const whenParam = searchParams.get('when');
+  const preselectedBarber = searchParams.get('barber');
+  const preselectedServices = searchParams.get('services');
 
   const [salon, setSalon] = useState(null);
   const [barbers, setBarbers] = useState([]);
@@ -233,15 +235,15 @@ export default function SinglePageBooking() {
   const [otherPersonName, setOtherPersonName] = useState('');
   const [otherPersonPhone, setOtherPersonPhone] = useState('');
   const [otherPersonGender, setOtherPersonGender] = useState('');
-  const [fastestAvailable, setFastestAvailable] = useState(true);
+  const [fastestAvailable, setFastestAvailable] = useState(!preselectedBarber);
   const [searchQuery, setSearchQuery] = useState('');
   const [openCategories, setOpenCategories] = useState({});
 
   const [formData, setFormData] = useState({
     date: whenParam === 'today' ? getTodayIST() : getTodayIST(),
     shift: '',
-    barberId: 'any',
-    selectedServices: [],
+    barberId: preselectedBarber || 'any',
+    selectedServices: preselectedServices ? preselectedServices.split(',') : [],
     bookingType: whenParam === 'today' ? 'instant' : 'instant'
   });
 

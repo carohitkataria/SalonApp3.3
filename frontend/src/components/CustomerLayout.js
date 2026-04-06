@@ -100,7 +100,7 @@ export default function CustomerLayout({ children }) {
   ];
 
   const salonMenuItems = currentSalonId ? [
-    { icon: Home, label: 'Dashboard', action: () => navigate(`/salon/${currentSalonId}`) },
+    { icon: Home, label: 'Dashboard', action: () => { navigate(`/salon/${currentSalonId}`); setTimeout(() => window.dispatchEvent(new CustomEvent('setTab', { detail: 'dashboard' })), 100); } },
     { icon: Calendar, label: 'Book Appointment', action: () => navigate(`/book/${currentSalonId}`) },
     { icon: Scissors, label: 'Services', action: () => { navigate(`/salon/${currentSalonId}`); setTimeout(() => window.dispatchEvent(new CustomEvent('setTab', { detail: 'services' })), 100); } },
     { icon: User, label: 'Our Barbers', action: () => { navigate(`/salon/${currentSalonId}`); setTimeout(() => window.dispatchEvent(new CustomEvent('setTab', { detail: 'barbers' })), 100); } },

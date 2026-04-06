@@ -15,6 +15,8 @@ import SinglePageBooking from '@/pages/SinglePageBooking';
 import HistoryPage from '@/pages/HistoryPage';
 import TokenDashboard from '@/pages/TokenDashboard';
 import ServicesBrowser from '@/pages/ServicesBrowser';
+import BarberProfilePage from '@/pages/BarberProfilePage';
+import TokenDetailPage from '@/pages/TokenDetailPage';
 
 // Salon Pages
 import OTPLoginPage from '@/pages/OTPLoginPage';
@@ -48,6 +50,8 @@ function App() {
                 <Route path="/book/:salonId" element={<CustomerLayout><SinglePageBooking /></CustomerLayout>} />
                 <Route path="/salon/:salonId/queue" element={<CustomerLayout><TokenDashboard /></CustomerLayout>} />
                 <Route path="/salon/:salonId/services" element={<CustomerLayout><ServicesBrowser /></CustomerLayout>} />
+                <Route path="/salon/:salonId/barber/:barberId" element={<CustomerLayout><BarberProfilePage /></CustomerLayout>} />
+                <Route path="/token/:tokenId" element={<CustomerLayout><TokenDetailPage /></CustomerLayout>} />
                 
                 {/* Salon Admin Routes */}
                 <Route path="/salon/login" element={<OTPLoginPage />} />
