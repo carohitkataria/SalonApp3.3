@@ -10,7 +10,7 @@ import sys
 from datetime import datetime, timezone
 
 # Backend URL from environment
-BACKEND_URL = "https://pin-menu-salon.preview.emergentagent.com/api"
+BACKEND_URL = "https://recallflow-dashboard.preview.emergentagent.com/api"
 
 # Test credentials
 TEST_USER = {
