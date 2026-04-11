@@ -1,4 +1,4 @@
-import { createContext, useContext, useState, useEffect } from 'react';
+import React, { createContext, useContext, useState, useEffect } from 'react';
 import axios from 'axios';
 
 const AuthContext = createContext();
@@ -9,6 +9,7 @@ const API = `${BACKEND_URL}/api`;
 export const AuthProvider = ({ children }) => {
   const [user, setUser] = useState(null);
   const [admin, setAdmin] = useState(null);
+  const [salonUser, setSalonUser] = useState(null); // New: multi-user salon auth
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -18,10 +19,16 @@ export const AuthProvider = ({ children }) => {
       setUser(JSON.parse(storedUser));
     }
 
-    // Load admin token from localStorage
+    // Load admin token from localStorage (legacy)
     const adminToken = localStorage.getItem('salon_admin_token');
     if (adminToken) {
       setAdmin({ token: adminToken });
+    }
+
+    // Load salon user (multi-user auth)
+    const storedSalonUser = localStorage.getItem('salon_user_auth');
+    if (storedSalonUser) {
+      setSalonUser(JSON.parse(storedSalonUser));
     }
 
     setLoading(false);
@@ -162,10 +169,6 @@ export const AuthProvider = ({ children }) => {
 export const useAuth = () => {
   const context = useContext(AuthContext);
   if (!context) {
-    throw new Error('useAuth must be used within AuthProvider');
-  }
-  return context;
-};xt) {
     throw new Error('useAuth must be used within AuthProvider');
   }
   return context;

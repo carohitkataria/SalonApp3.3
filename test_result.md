@@ -102,7 +102,7 @@
 # Testing Data - Main Agent and testing sub agent both should log testing data below this section
 #====================================================================================================
 
-user_problem_statement: "Build rating module for completed bookings with reviews, and create salon main page with Dashboard, Book Appointment, Services, Barber Profiles (with ratings), Shop (coming soon), Gallery, and About Us tabs."
+user_problem_statement: "Implement multi-user role-based access system for salon with Admin and Staff roles. Add staff management with employee fields (department, designation, emergency contact, Aadhar, DOJ, DOB, compensation, documents). Create hamburger menu navigation with role-based access control. Add 'Manage Staff Access' section, Financials and Customer Master placeholders."
 
 backend:
   - task: "Add total_tokens_today to live-status API"
