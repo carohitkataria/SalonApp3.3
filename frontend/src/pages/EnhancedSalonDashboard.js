@@ -12,6 +12,7 @@ import { toast } from 'sonner';
 import ThemeToggle from '@/components/ThemeToggle';
 import BarberManagement from '@/components/BarberManagement';
 import StaffAccessManagement from '@/components/StaffAccessManagement';
+import CustomerMaster from '@/components/CustomerMaster';
 import OfferingsModule from '@/components/OfferingsModule';
 import MyProfile from '@/components/MyProfile';
 import Analytics from '@/components/Analytics';
@@ -274,17 +275,38 @@ export default function EnhancedSalonDashboard() {
     navigate('/salon/login');
   };
 
+  // Check if user is admin (supports both new multi-user and legacy login)
+  const checkIsAdmin = () => {
+    // If using multi-user auth
+    if (salonUser) {
+      return salonUser.role === 'admin';
+    }
+    // If using legacy salon login, treat as admin
+    const legacyToken = localStorage.getItem('salon_admin_token');
+    return !!legacyToken;
+  };
+
+  const checkHasPermission = (permission) => {
+    // Legacy login has all permissions
+    const legacyToken = localStorage.getItem('salon_admin_token');
+    if (legacyToken && !salonUser) return true;
+    
+    // Multi-user auth
+    if (salonUser?.role === 'admin') return true;
+    return salonUser?.permissions?.[permission] || false;
+  };
+
   // Define menu items with role-based visibility
   const menuItems = [
     { id: 'queue', label: 'Token Queue', icon: Calendar, show: true },
     { id: 'staff', label: 'Staff Management', icon: Users, show: true },
-    { id: 'staff-access', label: 'Manage Staff Access', icon: Shield, show: isAdmin() },
+    { id: 'staff-access', label: 'Manage Staff Access', icon: Shield, show: checkIsAdmin() },
     { id: 'services', label: 'Services & Offerings', icon: Scissors, show: true },
-    { id: 'financials', label: 'Financials', icon: DollarSign, show: isAdmin() },
+    { id: 'financials', label: 'Financials', icon: DollarSign, show: checkIsAdmin() },
     { id: 'customer-master', label: 'Customer Master', icon: Database, show: true },
-    { id: 'analytics', label: 'Analytics', icon: TrendingUp, show: isAdmin() || hasPermission('can_access_analytics') },
+    { id: 'analytics', label: 'Analytics', icon: TrendingUp, show: checkIsAdmin() || checkHasPermission('can_access_analytics') },
     { id: 'gallery', label: 'Gallery', icon: FileText, show: true },
-    { id: 'salon', label: 'Salon Settings', icon: Settings, show: isAdmin() || hasPermission('can_edit_salon') }
+    { id: 'salon', label: 'Salon Settings', icon: Settings, show: checkIsAdmin() || checkHasPermission('can_edit_salon') }
   ].filter(item => item.show);
 
   const getStatusIcon = (status) => {
@@ -690,6 +712,10 @@ export default function EnhancedSalonDashboard() {
 
         {activeTab === 'staff-access' && salonId && (
           <StaffAccessManagement />
+        )}
+
+        {activeTab === 'customer-master' && (
+          <CustomerMaster salonId={salonId} getAuthHeaders={getAuthHeaders} />
         )}
 
         {activeTab === 'financials' && (

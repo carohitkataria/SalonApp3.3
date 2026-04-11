@@ -1540,6 +1540,27 @@ async def get_salon_packages(salon_id: str, gender: Optional[str] = None):
     packages = await db.salon_packages.find(query, {"_id": 0}).to_list(100)
     return packages
 
+@api_router.get("/salons/{salon_id}/packages/with-services")
+async def get_salon_packages_with_services(salon_id: str, gender: Optional[str] = None):
+    """Get all active packages for a salon with service details"""
+    query = {"salon_id": salon_id, "is_active": True}
+    if gender and gender != "all":
+        query["$or"] = [{"gender_tag": gender}, {"gender_tag": "Unisex"}]
+    
+    packages = await db.salon_packages.find(query, {"_id": 0}).to_list(100)
+    
+    # Populate service details for each package
+    for package in packages:
+        if package.get('service_ids'):
+            services = []
+            for service_id in package['service_ids']:
+                service = await db.services.find_one({"id": service_id}, {"_id": 0})
+                if service:
+                    services.append(service)
+            package['services'] = services
+    
+    return {"packages": packages}
+
 @api_router.post("/salons/{salon_id}/packages", response_model=SalonPackage)
 async def create_salon_package(
     salon_id: str,
@@ -1662,8 +1683,27 @@ async def delete_barber(barber_id: str, current_salon=Depends(get_current_salon)
 
 @api_router.get("/barbers/{barber_id}/services")
 async def get_barber_services(barber_id: str):
-    """Get services with barber-specific pricing"""
-    services = await db.services.find({"is_active": True}, {"_id": 0}).to_list(100)
+    """Get salon-enabled services with barber-specific pricing"""
+    # Get barber to find salon_id
+    barber = await db.barbers.find_one({"id": barber_id}, {"_id": 0, "salon_id": 1})
+    if not barber:
+        raise HTTPException(status_code=404, detail="Barber not found")
+    
+    salon_id = barber["salon_id"]
+    
+    # Get only services enabled for this salon
+    salon_services = await db.salon_services.find(
+        {"salon_id": salon_id, "is_enabled": True},
+        {"_id": 0}
+    ).to_list(1000)
+    
+    enabled_service_ids = [ss["service_id"] for ss in salon_services]
+    
+    # Get service details for enabled services only
+    services = await db.services.find(
+        {"id": {"$in": enabled_service_ids}, "is_active": True},
+        {"_id": 0}
+    ).to_list(100)
     
     result = []
     for service in services:
@@ -2159,6 +2199,106 @@ async def user_login(credentials: UserLogin):
         }
         await db.users.insert_one(new_user)
         return User(**new_user)
+
+# ============ CUSTOMER MASTER ROUTES ============
+
+@api_router.get("/salons/{salon_id}/customers")
+async def get_salon_customers(salon_id: str, current_user=Depends(get_current_salon_user)):
+    """Get all customers who have booked at this salon"""
+    # Get unique customers from tokens
+    tokens = await db.tokens.find(
+        {"salon_id": salon_id},
+        {"_id": 0, "user_id": 1, "customer_name": 1, "phone": 1}
+    ).to_list(10000)
+    
+    # Group by phone to get unique customers
+    customers_map = {}
+    for token in tokens:
+        phone = token.get('phone')
+        if phone and phone not in customers_map:
+            # Get user details if user_id exists
+            user_data = None
+            if token.get('user_id'):
+                user_data = await db.users.find_one({"id": token['user_id']}, {"_id": 0})
+            
+            customers_map[phone] = {
+                "phone": phone,
+                "name": token.get('customer_name'),
+                "user_id": token.get('user_id'),
+                "gender": user_data.get('gender') if user_data else None
+            }
+    
+    return {"customers": list(customers_map.values())}
+
+@api_router.get("/salons/{salon_id}/customers/{phone}/bookings")
+async def get_customer_bookings(salon_id: str, phone: str, current_user=Depends(get_current_salon_user)):
+    """Get all bookings for a specific customer"""
+    if not phone.startswith("+91"):
+        phone = f"+91{phone}"
+    
+    bookings = await db.tokens.find(
+        {"salon_id": salon_id, "phone": phone},
+        {"_id": 0}
+    ).sort("created_at", -1).to_list(100)
+    
+    return {"bookings": bookings}
+
+# Custom Package Models
+class CustomerPackageService(BaseModel):
+    service_id: str
+    service_name: str
+    original_price: float
+    discounted_price: float
+
+class CustomerPackageCreate(BaseModel):
+    salon_id: str
+    customer_phone: str
+    customer_name: str
+    package_name: str
+    services: List[CustomerPackageService]
+    total_original: float
+    discount_percentage: float
+    total_discounted: float
+    notes: Optional[str] = None
+
+class CustomerPackage(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    id: str
+    salon_id: str
+    customer_phone: str
+    customer_name: str
+    package_name: str
+    services: List[CustomerPackageService]
+    total_original: float
+    discount_percentage: float
+    total_discounted: float
+    notes: Optional[str] = None
+    is_active: bool = True
+    created_at: str
+
+@api_router.post("/salons/{salon_id}/customer-packages", response_model=CustomerPackage)
+async def create_customer_package(salon_id: str, package: CustomerPackageCreate, current_user=Depends(get_current_salon_user)):
+    """Create a custom package for a specific customer"""
+    package_dict = package.model_dump()
+    package_dict["id"] = str(uuid.uuid4())
+    package_dict["is_active"] = True
+    package_dict["created_at"] = datetime.now(timezone.utc).isoformat()
+    
+    await db.customer_packages.insert_one(package_dict)
+    return CustomerPackage(**package_dict)
+
+@api_router.get("/salons/{salon_id}/customer-packages/{phone}")
+async def get_customer_packages(salon_id: str, phone: str, current_user=Depends(get_current_salon_user)):
+    """Get all custom packages for a customer"""
+    if not phone.startswith("+91"):
+        phone = f"+91{phone}"
+    
+    packages = await db.customer_packages.find(
+        {"salon_id": salon_id, "customer_phone": phone, "is_active": True},
+        {"_id": 0}
+    ).to_list(100)
+    
+    return {"packages": packages}
 
 # ============ BOOKING/TOKEN ROUTES ============
 
