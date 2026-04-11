@@ -23,6 +23,7 @@ import SalonRatingsPage from '@/pages/SalonRatingsPage';
 import OTPLoginPage from '@/pages/OTPLoginPage';
 import SalonSignupPage from '@/pages/SalonSignupPage';
 import EnhancedSalonDashboard from '@/pages/EnhancedSalonDashboard';
+import StaffProfilePage from '@/pages/StaffProfilePage';
 
 import '@/App.css';
 
