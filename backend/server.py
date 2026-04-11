@@ -1022,6 +1022,52 @@ async def get_salons(lat: Optional[float] = None, lng: Optional[float] = None, r
     
     return salons
 
+@api_router.get("/salons/search")
+async def search_salons(name: Optional[str] = None, city: Optional[str] = None):
+    """Search salons by name and/or city (case-insensitive partial match)"""
+    if not name and not city:
+        raise HTTPException(status_code=400, detail="Please provide a search query (name or city)")
+    
+    query = {"is_active": True}
+    
+    # Build combined search query
+    conditions = []
+    if name and len(name) >= 1:
+        conditions.append({"salon_name": {"$regex": name, "$options": "i"}})
+    if city and len(city) >= 1:
+        conditions.append({"city": {"$regex": city, "$options": "i"}})
+    
+    if len(conditions) == 1:
+        query.update(conditions[0])
+    elif len(conditions) > 1:
+        query["$and"] = conditions
+    
+    salons = await db.salons.find(query, {"_id": 0}).limit(50).to_list(50)
+    
+    return {"salons": [Salon(**s) for s in salons]}
+
+@api_router.get("/salons/by-city")
+async def get_salons_by_city(city: str):
+    """Get salons by city"""
+    if not city or len(city) < 2:
+        raise HTTPException(status_code=400, detail="City name must be at least 2 characters")
+    
+    salons = await db.salons.find(
+        {
+            "is_active": True,
+            "city": {"$regex": city, "$options": "i"}
+        },
+        {"_id": 0}
+    ).limit(50).to_list(50)
+    
+    return {"salons": [Salon(**s) for s in salons]}
+
+@api_router.get("/cities")
+async def get_cities():
+    """Get list of unique cities with salons"""
+    cities = await db.salons.distinct("city", {"is_active": True})
+    return {"cities": [c for c in cities if c]}
+
 @api_router.get("/salons/{salon_id}", response_model=Salon)
 async def get_salon(salon_id: str):
     salon = await db.salons.find_one({"id": salon_id}, {"_id": 0})
@@ -2352,52 +2398,6 @@ async def get_last_salon_by_phone(phone: str):
         return {"salon": Salon(**salon)}
     
     return {"salon": None}
-
-@api_router.get("/salons/search")
-async def search_salons(name: Optional[str] = None, city: Optional[str] = None):
-    """Search salons by name and/or city (case-insensitive partial match)"""
-    if not name and not city:
-        raise HTTPException(status_code=400, detail="Please provide a search query (name or city)")
-    
-    query = {"is_active": True}
-    
-    # Build combined search query
-    conditions = []
-    if name and len(name) >= 1:
-        conditions.append({"salon_name": {"$regex": name, "$options": "i"}})
-    if city and len(city) >= 1:
-        conditions.append({"city": {"$regex": city, "$options": "i"}})
-    
-    if len(conditions) == 1:
-        query.update(conditions[0])
-    elif len(conditions) > 1:
-        query["$and"] = conditions
-    
-    salons = await db.salons.find(query, {"_id": 0}).limit(50).to_list(50)
-    
-    return {"salons": [Salon(**s) for s in salons]}
-
-@api_router.get("/salons/by-city")
-async def get_salons_by_city(city: str):
-    """Get salons by city"""
-    if not city or len(city) < 2:
-        raise HTTPException(status_code=400, detail="City name must be at least 2 characters")
-    
-    salons = await db.salons.find(
-        {
-            "is_active": True,
-            "city": {"$regex": city, "$options": "i"}
-        },
-        {"_id": 0}
-    ).limit(50).to_list(50)
-    
-    return {"salons": [Salon(**s) for s in salons]}
-
-@api_router.get("/cities")
-async def get_cities():
-    """Get list of unique cities with salons"""
-    cities = await db.salons.distinct("city", {"is_active": True})
-    return {"cities": [c for c in cities if c]}
 
 @api_router.get("/users/{user_id}/recent-services")
 async def get_user_recent_services(user_id: str):

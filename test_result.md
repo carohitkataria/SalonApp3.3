@@ -146,7 +146,7 @@ backend:
 
   - task: "Search Salons API - Combined Name + City"
     implemented: true
-    working: false
+    working: true
     file: "/app/backend/server.py"
     stuck_count: 1
     priority: "high"
@@ -155,6 +155,9 @@ backend:
         - working: false
           agent: "testing"
           comment: "❌ CRITICAL ROUTING BUG: GET /api/salons/search endpoint has route ordering issue. The search endpoint (line 2356) is defined AFTER /salons/{salon_id} route (line 1025), causing FastAPI to match 'search' as a salon_id parameter instead of the search endpoint. All search requests return 404 'Salon not found' because it tries to find salon with ID 'search'. FIX REQUIRED: Move @api_router.get('/salons/search') route definition BEFORE @api_router.get('/salons/{salon_id}') route in server.py to resolve route conflict."
+        - working: true
+          agent: "testing"
+          comment: "✅ ROUTE ORDERING BUG FIXED: All search endpoints now working correctly after route ordering fix. Verified: 1) GET /api/salons/search?name=Looks returns salon matching 'Looks' (The Looks Unisex Salon), 2) GET /api/salons/search?city=Bangalore returns salons in Bangalore, 3) GET /api/salons/search?name=Looks&city=Bangalore returns salons matching both criteria, 4) All search requests return proper JSON response with salons array containing complete salon data including city field, 5) No more 404 'Salon not found' errors - search endpoint is now properly recognized by FastAPI router. Search functionality is fully operational."
 
   - task: "City Field in SalonCreate/SalonUpdate Models"
     implemented: true
@@ -405,9 +408,9 @@ metadata:
 
 test_plan:
   current_focus:
-    - "Search Salons API - Combined Name + City"
+    []
   stuck_tasks:
-    - "Search Salons API - Combined Name + City"
+    []
   test_all: false
   test_priority: "high_first"
 
@@ -430,3 +433,5 @@ agent_communication:
       message: "✅ NEW FEATURES TESTING COMPLETE (Customer Login, Salon Login, Hamburger Menu, Barber Profile): Comprehensive testing of all requested features completed. RESULTS: 1) CUSTOMER LOGIN PAGE (/user/login) - ALL FEATURES WORKING: SalonHub logo with spinning border animation visible and animating, Dark/Light mode toggle button (top right) working correctly (theme changes from dark to light on click), Styled input fields for Name and Phone present and functional, Gender selection buttons (Men/Women) present and working, Continue button with arrow icon present, Salon Login link at bottom present and navigates to /salon/login. 2) SALON LOGIN PAGE (/salon/login) - ALL FEATURES WORKING: Forgot Password link visible at bottom, Login as Customer link visible at bottom and navigates to /user/login. 3) HAMBURGER MENU NAVIGATION - ALL FEATURES WORKING: Login as customer successful (Test User/9876543210), Navigation to salon successful, Hamburger menu opens/closes correctly, Services tab navigation working (shows services page with search bar and category filters), Dashboard navigation working (navigates back to dashboard with quick action cards), Our Barbers tab navigation working (shows barber cards with Book Now buttons - 2 barbers found: Imran and Abdul). 4) BARBER PROFILE PAGE - ALL FEATURES WORKING: View Profile button present and clickable, Opens FULL PAGE (not modal) - confirmed by URL pattern /salon/{salonId}/barber/{barberId}, Barber details displayed (name, specialization, rating, experience, reviews section), Book Now button at bottom visible (Book Appointment with Imran). DATA ISSUE FOUND: Services page shows 'No services available' - salon has no enabled services in database, therefore cannot test service selection and Book Now bar appearance (requires services to be enabled in salon admin panel first). This is NOT a UI bug - the UI is correctly implemented and would work when services are available."
     - agent: "testing"
       message: "✅ NEW BACKEND ENDPOINTS TESTING COMPLETE: Tested 5 new backend endpoints with mixed results. PASSED (4/5): 1) GET /api/salons/{salon_id}/ratings - Working perfectly, returns proper structure with salon_id, salon_name, average_rating, total_reviews, and reviews array. Correctly handles no ratings case (returns 0 and empty array). 2) GET /api/cities - Working correctly, returns cities array (currently empty because salon has null city value). 3) City field in salon model - Present and accessible, current salon has null city value as expected for test data. 4) DELETE /api/salons/{salon_id} - Endpoint exists and properly requires authentication (returns 403 Forbidden without auth). FAILED (1/5): 5) GET /api/salons/search - CRITICAL ROUTING BUG: Search endpoint defined after /salons/{salon_id} route, causing FastAPI to match 'search' as salon_id parameter. All search requests return 404 'Salon not found'. FIX REQUIRED: Move search route definition before parameterized route in server.py."
+    - agent: "testing"
+      message: "✅ SEARCH ENDPOINTS TESTING COMPLETE AFTER ROUTE FIX: All search endpoints now working perfectly after route ordering bug fix. Verified: 1) GET /api/salons/search?name=Looks - Returns 1 salon matching 'Looks' (The Looks Unisex Salon), 2) GET /api/salons/search?city=Bangalore - Returns 1 salon in Bangalore, 3) GET /api/salons/search?name=Looks&city=Bangalore - Returns 1 salon matching both criteria, 4) GET /api/cities - Returns ['Bangalore'] as expected after data update, 5) GET /api/salons - Verified city field is present and contains 'Bangalore'. All search functionality is now operational - the route ordering fix resolved the 404 'Salon not found' errors. Search by name, city, and combined name+city all work correctly."
