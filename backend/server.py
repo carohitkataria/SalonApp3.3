@@ -513,7 +513,8 @@ async def get_current_salon_user(credentials: HTTPAuthorizationCredentials = Dep
     """Get current authenticated salon user (admin or staff)"""
     token = credentials.credentials
     payload = verify_token(token)
-    if not payload or payload.get("role") not in ["salon_admin", "salon_staff"]:
+    # Accept legacy "salon" role as well as new "salon_admin" and "salon_staff" roles
+    if not payload or payload.get("role") not in ["salon_admin", "salon_staff", "salon"]:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid authentication credentials"
@@ -524,7 +525,8 @@ async def get_current_salon_admin(credentials: HTTPAuthorizationCredentials = De
     """Get current authenticated salon user - admin only"""
     token = credentials.credentials
     payload = verify_token(token)
-    if not payload or payload.get("role") != "salon_admin":
+    # Accept legacy "salon" role as admin (backward compatibility)
+    if not payload or payload.get("role") not in ["salon_admin", "salon"]:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Admin access required"
@@ -580,7 +582,7 @@ def extract_token_sequence(token_number: str) -> int:
     """Extract numeric sequence from token (e.g., M001 -> 1)"""
     try:
         return int(token_number[1:])  # Skip first character (prefix)
-    except:
+    except (ValueError, IndexError):
         return 0
 
 async def get_next_token_number(salon_id: str, barber_id: str, date: str, shift: str) -> str:
@@ -616,6 +618,68 @@ def generate_2hour_slots():
         slots.append(slot)
     
     return slots
+
+async def check_and_apply_loyalty_reward(salon_id: str, customer_phone: str, booking_amount: float):
+    """Check if customer qualifies for loyalty reward and auto top-up wallet"""
+    # Get loyalty program settings
+    loyalty_program = await db.loyalty_programs.find_one({"salon_id": salon_id, "enabled": True}, {"_id": 0})
+    if not loyalty_program:
+        return None
+    
+    # Calculate date range
+    cutoff_date = datetime.now(timezone.utc) - timedelta(days=loyalty_program["period_months"] * 30)
+    
+    # Get customer's completed bookings in the period
+    completed_bookings = await db.tokens.find({
+        "salon_id": salon_id,
+        "phone": customer_phone,
+        "status": "completed",
+        "completed_at": {"$gte": cutoff_date.isoformat()}
+    }, {"_id": 0, "total_amount": 1}).to_list(1000)
+    
+    # Calculate total spend
+    total_spend = sum([b.get("total_amount", 0) for b in completed_bookings])
+    
+    # Check if threshold is met
+    if total_spend >= loyalty_program["spend_amount"]:
+        # Calculate top-up amount
+        topup_amount = (loyalty_program["spend_amount"] * loyalty_program["topup_percentage"]) / 100
+        
+        # Check if customer already has membership
+        membership = await db.customer_memberships.find_one({
+            "salon_id": salon_id,
+            "customer_phone": customer_phone,
+            "is_active": True
+        }, {"_id": 0})
+        
+        if membership:
+            # Top up existing wallet
+            new_balance = membership["wallet_balance"] + topup_amount
+            await db.customer_memberships.update_one(
+                {"id": membership["id"]},
+                {"$set": {"wallet_balance": new_balance}}
+            )
+            
+            # Record transaction
+            await db.wallet_transactions.insert_one({
+                "id": str(uuid.uuid4()),
+                "customer_phone": customer_phone,
+                "salon_id": salon_id,
+                "transaction_type": "credit",
+                "amount": topup_amount,
+                "balance_after": new_balance,
+                "description": f"Loyalty reward: Spent ₹{total_spend:.2f} in {loyalty_program['period_months']} months",
+                "created_at": datetime.now(timezone.utc).isoformat()
+            })
+            
+            return {
+                "rewarded": True,
+                "topup_amount": topup_amount,
+                "new_balance": new_balance,
+                "total_spend": total_spend
+            }
+    
+    return None
 
 async def calculate_booking_total(service_ids: List[str], barber_id: str) -> float:
     """Calculate total amount for selected services"""
@@ -2639,7 +2703,6 @@ async def create_booking(booking: BookingCreate):
         barber_name = "Any Available"
         
         # For "any" barber, check if any barber has availability
-        salon = await db.salons.find_one({"id": booking.salon_id}, {"_id": 0})
         barbers = await db.barbers.find(
             {
                 "salon_id": booking.salon_id, 
@@ -2831,20 +2894,38 @@ async def complete_token(token_id: str, current_salon=Depends(get_current_salon)
         {"$set": {"status": "completed", "completed_at": datetime.now(timezone.utc).isoformat()}}
     )
     
+    # Check and apply loyalty reward
+    loyalty_reward = None
+    try:
+        loyalty_reward = await check_and_apply_loyalty_reward(
+            token["salon_id"], 
+            token["phone"], 
+            token.get("total_amount", 0)
+        )
+    except Exception as e:
+        logger.error(f"Error checking loyalty reward: {e}")
+    
     # Generate and send invoice
     try:
         invoice_sent = await generate_and_send_invoice(token_id)
         await broadcast_update("token_completed", {"token_id": token_id})
         
-        return {
+        response = {
             "message": "Token marked as completed",
             "invoice_sent": invoice_sent
         }
+        
+        if loyalty_reward:
+            response["loyalty_reward"] = loyalty_reward
+            response["message"] += f" - Loyalty reward of ₹{loyalty_reward['topup_amount']:.2f} added to wallet!"
+        
+        return response
     except Exception as e:
         logger.error(f"Error generating invoice: {e}")
         return {
             "message": "Token marked as completed but invoice generation failed",
-            "error": str(e)
+            "error": str(e),
+            "loyalty_reward": loyalty_reward
         }
 
 @api_router.post("/tokens/{token_id}/recall")
@@ -2937,31 +3018,6 @@ async def call_token(token_id: str, current_salon=Depends(get_current_salon)):
     await send_booking_notification(token, 'token_called')
     
     return {"message": "Token called"}
-
-@api_router.post("/tokens/{token_id}/skip")
-async def skip_token(token_id: str, current_salon=Depends(get_current_salon)):
-    """Skip token (final)"""
-    token = await db.tokens.find_one({"id": token_id}, {"_id": 0})
-    if not token:
-        raise HTTPException(status_code=404, detail="Token not found")
-    
-    await db.tokens.update_one({"id": token_id}, {"$set": {"status": "skipped"}})
-    await broadcast_update("token_skipped", {"token_id": token_id})
-    return {"message": "Token skipped"}
-
-@api_router.post("/tokens/{token_id}/recall")
-async def recall_token(token_id: str, current_salon=Depends(get_current_salon)):
-    """Recall skipped token"""
-    token = await db.tokens.find_one({"id": token_id}, {"_id": 0})
-    if not token:
-        raise HTTPException(status_code=404, detail="Token not found")
-    
-    if token["status"] != "skipped":
-        raise HTTPException(status_code=400, detail="Can only recall skipped tokens")
-    
-    await db.tokens.update_one({"id": token_id}, {"$set": {"status": "waiting"}})
-    await broadcast_update("token_recalled", {"token_id": token_id})
-    return {"message": "Token recalled"}
 
 @api_router.post("/tokens/{token_id}/cancel")
 async def cancel_token(token_id: str, current_salon=Depends(get_current_salon)):

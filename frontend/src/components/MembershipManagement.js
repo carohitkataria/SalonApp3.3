@@ -7,6 +7,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { toast } from 'sonner';
 import { Crown, Plus, Edit2, Trash2, Save, X, DollarSign, Calendar, FileText } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
+import LoyaltyProgramSettings from './LoyaltyProgramSettings';
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
 const API = `${BACKEND_URL}/api`;
@@ -334,6 +335,8 @@ export default function MembershipManagement({ salonId, getAuthHeaders }) {
           ))
         )}
       </div>
+      {/* Loyalty Program Settings */}
+      <LoyaltyProgramSettings salonId={salonId} getAuthHeaders={getAuthHeaders} />
     </div>
   );
 }

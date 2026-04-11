@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import React from 'react';
+import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -14,7 +15,24 @@ import { motion, AnimatePresence } from 'framer-motion';
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
 const API = `${BACKEND_URL}/api`;
 
-// Services by Category View Component
+// Constants for categories and specializations
+const CATEGORY_OPTIONS = [
+  { value: 'Junior', label: 'Junior' },
+  { value: 'Senior', label: 'Senior' },
+  { value: 'Master', label: 'Master' },
+  { value: 'Trainee', label: 'Trainee' },
+  { value: 'custom', label: 'Custom' }
+];
+
+const SPECIALIZATION_OPTIONS = [
+  { value: 'Haircut Specialist', label: 'Haircut Specialist' },
+  { value: 'Color Expert', label: 'Color Expert' },
+  { value: 'Beard Specialist', label: 'Beard Specialist' },
+  { value: 'Spa Therapist', label: 'Spa Therapist' },
+  { value: 'Makeup Artist', label: 'Makeup Artist' },
+  { value: 'All-Rounder', label: 'All-Rounder' },
+  { value: 'custom', label: 'Custom' }
+];
 
 export default function BarberManagement({ salonId, getAuthHeaders }) {
   const navigate = useNavigate();
@@ -47,7 +65,6 @@ export default function BarberManagement({ salonId, getAuthHeaders }) {
   useEffect(() => {
     if (salonId) {
       fetchBarbers();
-      fetchServices();
     }
   }, [salonId]);
 
@@ -60,15 +77,6 @@ export default function BarberManagement({ salonId, getAuthHeaders }) {
       toast.error('Failed to load barbers');
     } finally {
       setLoading(false);
-    }
-  };
-
-  const fetchServices = async () => {
-    try {
-      const response = await axios.get(`${API}/services`);
-      setServices(response.data);
-    } catch (error) {
-      console.error('Error fetching services:', error);
     }
   };
 
@@ -147,7 +155,6 @@ export default function BarberManagement({ salonId, getAuthHeaders }) {
       );
       
       setBarbers(barbers.map(b => b.id === barberId ? response.data : b));
-      setEditingBarber(null);
       toast.success('Barber updated successfully');
     } catch (error) {
       toast.error(error.response?.data?.detail || 'Failed to update barber');
