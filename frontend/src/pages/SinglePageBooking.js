@@ -223,8 +223,10 @@ export default function SinglePageBooking() {
   const [salon, setSalon] = useState(null);
   const [barbers, setBarbers] = useState([]);
   const [salonServices, setSalonServices] = useState([]);
-  const [packages, setPackages] = useState([]); // New: salon packages
+  const [packages, setPackages] = []); // New: salon packages
   const [selectedPackage, setSelectedPackage] = useState(null); // New: selected package
+  const [customerMembership, setCustomerMembership] = useState(null); // New: customer wallet
+  const [useWallet, setUseWallet] = useState(false); // New: use wallet checkbox
   const [barberServices, setBarberServices] = useState([]);
   const [shifts, setShifts] = useState([]);
   const [liveStatus, setLiveStatus] = useState(null);
@@ -360,6 +362,17 @@ export default function SinglePageBooking() {
       setPackages(response.data.packages || []);
     } catch (error) {
       console.error('Error fetching packages:', error);
+    }
+  };
+
+  const fetchCustomerMembership = async () => {
+    try {
+      const response = await axios.get(`${API}/salons/${salonId}/customer-membership/${user.phone}`);
+      if (response.data.has_membership) {
+        setCustomerMembership(response.data);
+      }
+    } catch (error) {
+      console.error('Error fetching membership:', error);
     }
   };
 
