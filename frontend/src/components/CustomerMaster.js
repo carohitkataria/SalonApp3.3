@@ -10,6 +10,7 @@ import {
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import MembershipManagement from './MembershipManagement';
+import SellMembershipModal from './SellMembershipModal';
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
 const API = `${BACKEND_URL}/api`;
@@ -45,6 +46,7 @@ export default function CustomerMaster({ salonId, getAuthHeaders }) {
     if (selectedCustomer) {
       fetchCustomerBookings(selectedCustomer.phone);
       fetchCustomerPackages(selectedCustomer.phone);
+      fetchCustomerMembership(selectedCustomer.phone);
     }
   }, [selectedCustomer]);
 
@@ -82,6 +84,20 @@ export default function CustomerMaster({ salonId, getAuthHeaders }) {
       setCustomerPackages(response.data.packages || []);
     } catch (error) {
       console.error('Error fetching packages:', error);
+    }
+  };
+
+  const fetchCustomerMembership = async (phone) => {
+    try {
+      const response = await axios.get(`${API}/salons/${salonId}/customer-membership/${phone}`);
+      if (response.data.has_membership) {
+        setCustomerMembership(response.data);
+      } else {
+        setCustomerMembership(null);
+      }
+    } catch (error) {
+      console.error('Error fetching membership:', error);
+      setCustomerMembership(null);
     }
   };
 
@@ -236,6 +252,58 @@ export default function CustomerMaster({ salonId, getAuthHeaders }) {
             </Button>
           </div>
         </div>
+
+        {/* Sell Membership Modal */}
+        <SellMembershipModal
+          isOpen={showMembershipModal}
+          onClose={() => setShowMembershipModal(false)}
+          customer={selectedCustomer}
+          salonId={salonId}
+          getAuthHeaders={getAuthHeaders}
+          onSuccess={() => {
+            fetchCustomerMembership(selectedCustomer.phone);
+            toast.success('Membership updated');
+          }}
+        />
+
+        {/* Customer Membership Display */}
+        {customerMembership && (
+          <div className="bg-gradient-to-br from-gold/10 to-gold/5 border-2 border-gold/30 rounded-xl p-6">
+            <div className="flex items-start justify-between mb-4">
+              <div className="flex items-center gap-3">
+                <div className="p-3 bg-gold/20 rounded-full">
+                  <Crown className="w-6 h-6 text-gold" />
+                </div>
+                <div>
+                  <h3 className="text-lg font-bold">{customerMembership.membership_name} Member</h3>
+                  <p className="text-sm text-muted-foreground">
+                    Expires: {new Date(customerMembership.expiry_date).toLocaleDateString()}
+                  </p>
+                </div>
+              </div>
+              <div className="text-right">
+                <p className="text-sm text-muted-foreground">Wallet Balance</p>
+                <p className="text-3xl font-bold text-gold">₹{customerMembership.wallet_balance}</p>
+              </div>
+            </div>
+            <div className="grid grid-cols-3 gap-4 pt-4 border-t border-gold/20">
+              <div>
+                <p className="text-xs text-muted-foreground">Purchased</p>
+                <p className="text-sm font-semibold">
+                  {new Date(customerMembership.purchased_at).toLocaleDateString()}
+                </p>
+              </div>
+              <div>
+                <p className="text-xs text-muted-foreground">Payment Mode</p>
+                <p className="text-sm font-semibold capitalize">{customerMembership.payment_mode}</p>
+              </div>
+              <div>
+                <p className="text-xs text-muted-foreground">Amount Paid</p>
+                <p className="text-sm font-semibold">₹{customerMembership.paid_amount}</p>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* Custom Package Form */}
         <AnimatePresence>
