@@ -66,6 +66,29 @@ export const AuthProvider = ({ children }) => {
     }
   };
 
+  const loginSalonUser = async (identifier, password) => {
+    try {
+      const response = await axios.post(`${API}/salon/users/login`, {
+        identifier,
+        password
+      });
+
+      const authData = {
+        token: response.data.access_token,
+        salonId: response.data.salon_id,
+        userId: response.data.user_id,
+        role: response.data.role,
+        permissions: response.data.permissions
+      };
+      
+      setSalonUser(authData);
+      localStorage.setItem('salon_user_auth', JSON.stringify(authData));
+      return { success: true, data: authData };
+    } catch (error) {
+      return { success: false, error: error.response?.data?.detail || 'Login failed' };
+    }
+  };
+
   const logoutUser = () => {
     setUser(null);
     localStorage.removeItem('salon_user');
@@ -76,6 +99,11 @@ export const AuthProvider = ({ children }) => {
     localStorage.removeItem('salon_admin_token');
   };
 
+  const logoutSalonUser = () => {
+    setSalonUser(null);
+    localStorage.removeItem('salon_user_auth');
+  };
+
   const getAdminHeaders = () => {
     if (admin?.token) {
       return { Authorization: `Bearer ${admin.token}` };
@@ -83,19 +111,47 @@ export const AuthProvider = ({ children }) => {
     return {};
   };
 
+  const getSalonUserHeaders = () => {
+    if (salonUser?.token) {
+      return { Authorization: `Bearer ${salonUser.token}` };
+    }
+    return {};
+  };
+
+  const isAdmin = () => {
+    return salonUser?.role === 'admin';
+  };
+
+  const isStaff = () => {
+    return salonUser?.role === 'staff';
+  };
+
+  const hasPermission = (permission) => {
+    if (salonUser?.role === 'admin') return true;
+    return salonUser?.permissions?.[permission] || false;
+  };
+
   return (
     <AuthContext.Provider
       value={{
         user,
         admin,
+        salonUser,
         loading,
         loginUser,
         loginAdmin,
+        loginSalonUser,
         logoutUser,
         logoutAdmin,
+        logoutSalonUser,
         getAdminHeaders,
+        getSalonUserHeaders,
+        isAdmin,
+        isStaff,
+        hasPermission,
         isUserLoggedIn: !!user,
-        isAdminLoggedIn: !!admin
+        isAdminLoggedIn: !!admin,
+        isSalonUserLoggedIn: !!salonUser
       }}
     >
       {children}
@@ -106,6 +162,10 @@ export const AuthProvider = ({ children }) => {
 export const useAuth = () => {
   const context = useContext(AuthContext);
   if (!context) {
+    throw new Error('useAuth must be used within AuthProvider');
+  }
+  return context;
+};xt) {
     throw new Error('useAuth must be used within AuthProvider');
   }
   return context;

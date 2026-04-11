@@ -38,8 +38,8 @@ export default function OTPLoginPage() {
   const handlePasswordLogin = async (e) => {
     e.preventDefault();
     
-    if (phone.length < 10) {
-      toast.error('Please enter a valid 10-digit phone number');
+    if (!phone) {
+      toast.error('Please enter your Mobile Number or Login ID');
       return;
     }
 
@@ -50,18 +50,46 @@ export default function OTPLoginPage() {
 
     setLoading(true);
     try {
-      const response = await axios.post(`${API}/salon/password-login`, {
-        phone,
+      const response = await axios.post(`${API}/salon/users/login`, {
+        identifier: phone,  // Can be mobile number or login_id
         password
       });
 
-      // Store token and salon ID
-      localStorage.setItem('salon_admin_token', response.data.access_token);
+      // Store auth data
+      const authData = {
+        token: response.data.access_token,
+        salonId: response.data.salon_id,
+        userId: response.data.user_id,
+        role: response.data.role,
+        permissions: response.data.permissions
+      };
+      
+      localStorage.setItem('salon_user_auth', JSON.stringify(authData));
       localStorage.setItem('salon_id', response.data.salon_id);
       
       toast.success('Login successful!');
       navigate('/salon/dashboard');
     } catch (error) {
+      // Fallback to legacy salon login if multi-user login fails
+      if (error.response?.status === 404) {
+        try {
+          // Try legacy salon password login
+          const legacyResponse = await axios.post(`${API}/salon/password-login`, {
+            phone,
+            password
+          });
+          
+          localStorage.setItem('salon_admin_token', legacyResponse.data.access_token);
+          localStorage.setItem('salon_id', legacyResponse.data.salon_id);
+          
+          toast.success('Login successful!');
+          navigate('/salon/dashboard');
+          return;
+        } catch (legacyError) {
+          // Ignore and show original error
+        }
+      }
+      
       if (error.response?.status === 400 && error.response?.data?.detail?.includes('Password not set')) {
         toast.error('Password not set for this salon. Please use OTP login.');
       } else {
@@ -209,19 +237,21 @@ export default function OTPLoginPage() {
               /* Password Login Form */
               <form onSubmit={handlePasswordLogin} className="space-y-6">
                 <div>
-                  <Label htmlFor="phone" className="mb-2 block">Mobile Number</Label>
+                  <Label htmlFor="phone" className="mb-2 block">Mobile Number/ID</Label>
                   <div className="flex items-center">
-                    <span className="text-foreground mr-2">+91</span>
                     <Input
                       id="phone"
-                      type="tel"
+                      type="text"
                       value={phone}
-                      onChange={(e) => setPhone(e.target.value.replace(/\D/g, '').slice(0, 10))}
-                      placeholder="10-digit mobile number"
+                      onChange={(e) => setPhone(e.target.value)}
+                      placeholder="Mobile number or Login ID"
                       required
                       className="flex-1"
                     />
                   </div>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    Enter your mobile number or login ID
+                  </p>
                 </div>
 
                 <div>

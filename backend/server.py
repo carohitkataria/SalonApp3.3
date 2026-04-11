@@ -230,7 +230,7 @@ class SalonPackage(BaseModel):
     is_active: bool = True
     created_at: str
 
-# Barber Models
+# Staff Models (formerly Barber - keeping backward compatibility)
 class BarberCreate(BaseModel):
     name: str
     salon_id: str
@@ -239,6 +239,7 @@ class BarberCreate(BaseModel):
     specialization: Optional[str] = None
     mobile: str
     profile_image: Optional[str] = None
+    is_barber: bool = True  # True if staff is a barber (visible to customers)
 
 class BarberUpdate(BaseModel):
     name: Optional[str] = None
@@ -252,6 +253,7 @@ class BarberUpdate(BaseModel):
     on_leave: Optional[bool] = None
     intro: Optional[str] = None
     gallery: Optional[List[str]] = None
+    is_barber: Optional[bool] = None  # Can update barber visibility
 
 class Barber(BaseModel):
     model_config = ConfigDict(extra="ignore")
@@ -265,9 +267,10 @@ class Barber(BaseModel):
     profile_image: Optional[str] = None
     photo_url: Optional[str] = None  # Alias for profile_image
     queue_status: str = "available"  # available/busy/offline
-    on_leave: bool = False  # True if barber is on leave
+    on_leave: bool = False  # True if staff is on leave
     is_active: bool = True
-    intro: Optional[str] = None  # Barber's story/about
+    is_barber: bool = True  # True if staff is a barber (visible to customers)
+    intro: Optional[str] = None  # Staff's story/about
     gallery: List[str] = []  # Portfolio images
     rating: float = 4.5  # Average rating
     total_reviews: int = 0  # Total number of reviews
@@ -402,6 +405,58 @@ class BarberRatingSummary(BaseModel):
     total_reviews: int
     reviews: List[RatingResponse]
 
+# ============ SALON USER MODELS (Multi-User Access) ============
+
+class SalonUserPermissions(BaseModel):
+    can_edit_salon: bool = False
+    can_access_analytics: bool = False
+    can_delete_salon: bool = False
+
+class SalonUserCreate(BaseModel):
+    salon_id: str
+    name: str
+    mobile: str
+    login_id: str  # Free text login ID
+    password: str
+    role: str = "staff"  # "admin" or "staff"
+    staff_id: Optional[str] = None  # Link to staff member in barbers collection
+    permissions: Optional[SalonUserPermissions] = None
+
+class SalonUserUpdate(BaseModel):
+    name: Optional[str] = None
+    mobile: Optional[str] = None
+    login_id: Optional[str] = None
+    password: Optional[str] = None
+    staff_id: Optional[str] = None
+    permissions: Optional[SalonUserPermissions] = None
+    status: Optional[str] = None  # active/inactive
+
+class SalonUser(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    id: str
+    salon_id: str
+    name: str
+    mobile: str
+    login_id: str
+    password_hash: str
+    role: str  # "admin" or "staff"
+    staff_id: Optional[str] = None  # Link to staff member
+    permissions: SalonUserPermissions
+    status: str = "active"  # active/inactive
+    created_at: str
+
+class SalonUserLogin(BaseModel):
+    identifier: str  # Can be mobile number or login_id
+    password: str
+
+class SalonUserToken(BaseModel):
+    access_token: str
+    token_type: str = "bearer"
+    salon_id: str
+    user_id: str
+    role: str
+    permissions: SalonUserPermissions
+
 # ============ AUTH HELPERS ============
 
 def create_access_token(data: dict):
@@ -417,6 +472,7 @@ def verify_token(token: str):
         return None
 
 async def get_current_salon(credentials: HTTPAuthorizationCredentials = Depends(security)):
+    """Legacy salon auth - for backward compatibility"""
     token = credentials.credentials
     payload = verify_token(token)
     if not payload or payload.get("role") != "salon":
@@ -425,6 +481,36 @@ async def get_current_salon(credentials: HTTPAuthorizationCredentials = Depends(
             detail="Invalid authentication credentials"
         )
     return payload
+
+async def get_current_salon_user(credentials: HTTPAuthorizationCredentials = Depends(security)):
+    """Get current authenticated salon user (admin or staff)"""
+    token = credentials.credentials
+    payload = verify_token(token)
+    if not payload or payload.get("role") not in ["salon_admin", "salon_staff"]:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid authentication credentials"
+        )
+    return payload
+
+async def get_current_salon_admin(credentials: HTTPAuthorizationCredentials = Depends(security)):
+    """Get current authenticated salon user - admin only"""
+    token = credentials.credentials
+    payload = verify_token(token)
+    if not payload or payload.get("role") != "salon_admin":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Admin access required"
+        )
+    return payload
+
+def check_permission(user_payload: dict, permission: str) -> bool:
+    """Check if user has specific permission"""
+    if user_payload.get("role") == "salon_admin":
+        return True  # Admin has all permissions
+    
+    permissions = user_payload.get("permissions", {})
+    return permissions.get(permission, False)
 
 # ============ HELPER FUNCTIONS ============
 
@@ -826,7 +912,8 @@ async def initialize_data():
                 "category": "master",
                 "mobile": "+919876543211",
                 "queue_status": "available",
-                "is_active": True
+                "is_active": True,
+                "is_barber": True  # Visible to customers
             },
             {
                 "id": str(uuid.uuid4()),
@@ -836,7 +923,8 @@ async def initialize_data():
                 "category": "star",
                 "mobile": "+919876543212",
                 "queue_status": "available",
-                "is_active": True
+                "is_active": True,
+                "is_barber": True  # Visible to customers
             }
         ]
         await db.barbers.insert_many(barbers)
@@ -1494,15 +1582,18 @@ async def delete_salon_package(
 # ============ BARBER ROUTES ============
 
 @api_router.get("/salons/{salon_id}/barbers", response_model=List[Barber])
-async def get_salon_barbers(salon_id: str, available_only: bool = False):
+async def get_salon_barbers(salon_id: str, available_only: bool = False, customer_view: bool = False):
     """
     Get barbers for a salon
     available_only=True: Only return barbers not on leave (for customer booking)
-    available_only=False: Return all active barbers (for admin)
+    customer_view=True: Only return staff marked as barbers (is_barber=True)
+    available_only=False & customer_view=False: Return all active staff (for admin)
     """
     query = {"salon_id": salon_id, "is_active": True}
     if available_only:
         query["on_leave"] = {"$ne": True}  # Exclude barbers on leave
+    if customer_view:
+        query["is_barber"] = True  # Only show staff visible to customers
     
     barbers = await db.barbers.find(query, {"_id": 0}).to_list(100)
     return barbers
@@ -1781,6 +1872,226 @@ async def set_salon_password(salon_id: str, new_password: str, current_salon=Dep
     )
     
     return {"message": "Password updated successfully"}
+
+# ============ SALON USER MULTI-USER AUTH ROUTES ============
+
+@api_router.post("/salon/users/login", response_model=SalonUserToken)
+async def salon_user_login(credentials: SalonUserLogin):
+    """Multi-user salon login (staff/admin) - accepts mobile number or login ID"""
+    identifier = credentials.identifier.strip()
+    
+    # Format phone if it looks like a phone number
+    if identifier.isdigit():
+        if not identifier.startswith("+91"):
+            identifier = f"+91{identifier}"
+    
+    # Find user by login_id or mobile
+    salon_user = await db.salon_users.find_one({
+        "$or": [
+            {"login_id": credentials.identifier},
+            {"mobile": identifier}
+        ],
+        "status": "active"
+    }, {"_id": 0})
+    
+    if not salon_user:
+        raise HTTPException(status_code=404, detail="User not found or inactive")
+    
+    # Verify password
+    if not pwd_context.verify(credentials.password, salon_user["password_hash"]):
+        raise HTTPException(status_code=401, detail="Incorrect password")
+    
+    # Generate token with role and permissions
+    permissions = salon_user.get("permissions", {
+        "can_edit_salon": False,
+        "can_access_analytics": False,
+        "can_delete_salon": False
+    })
+    
+    token = create_access_token({
+        "sub": salon_user["id"],
+        "role": f"salon_{salon_user['role']}",  # salon_admin or salon_staff
+        "salon_id": salon_user["salon_id"],
+        "permissions": permissions
+    })
+    
+    return SalonUserToken(
+        access_token=token,
+        salon_id=salon_user["salon_id"],
+        user_id=salon_user["id"],
+        role=salon_user["role"],
+        permissions=SalonUserPermissions(**permissions)
+    )
+
+@api_router.post("/salon/users", response_model=SalonUser)
+async def create_salon_user(user_data: SalonUserCreate, current_user=Depends(get_current_salon_admin)):
+    """Create new salon user (admin only)"""
+    # Validate salon_id matches current user's salon
+    if user_data.salon_id != current_user.get("salon_id"):
+        raise HTTPException(status_code=403, detail="Cannot create user for different salon")
+    
+    # Format mobile
+    mobile = user_data.mobile
+    if not mobile.startswith("+91"):
+        mobile = f"+91{mobile}"
+    
+    # Check if login_id already exists
+    existing_login = await db.salon_users.find_one({"login_id": user_data.login_id}, {"_id": 0})
+    if existing_login:
+        raise HTTPException(status_code=400, detail="Login ID already exists")
+    
+    # Check if mobile already exists
+    existing_mobile = await db.salon_users.find_one({"mobile": mobile}, {"_id": 0})
+    if existing_mobile:
+        raise HTTPException(status_code=400, detail="Mobile number already exists")
+    
+    # Check that staff mobile != salon phone
+    salon = await db.salons.find_one({"id": user_data.salon_id}, {"_id": 0, "phone": 1})
+    if salon and salon.get("phone") == mobile:
+        raise HTTPException(status_code=400, detail="Staff mobile cannot be same as salon phone")
+    
+    # Validate staff_id if provided
+    if user_data.staff_id:
+        staff = await db.barbers.find_one({"id": user_data.staff_id, "salon_id": user_data.salon_id}, {"_id": 0})
+        if not staff:
+            raise HTTPException(status_code=404, detail="Staff member not found")
+    
+    # Hash password
+    if len(user_data.password) < 6:
+        raise HTTPException(status_code=400, detail="Password must be at least 6 characters")
+    password_hash = pwd_context.hash(user_data.password)
+    
+    # Set default permissions for staff
+    if user_data.role == "staff" and not user_data.permissions:
+        permissions = {
+            "can_edit_salon": False,
+            "can_access_analytics": False,
+            "can_delete_salon": False
+        }
+    else:
+        permissions = user_data.permissions.dict() if user_data.permissions else {
+            "can_edit_salon": False,
+            "can_access_analytics": False,
+            "can_delete_salon": False
+        }
+    
+    # Create user
+    new_user = {
+        "id": str(uuid.uuid4()),
+        "salon_id": user_data.salon_id,
+        "name": user_data.name,
+        "mobile": mobile,
+        "login_id": user_data.login_id,
+        "password_hash": password_hash,
+        "role": user_data.role,
+        "staff_id": user_data.staff_id,
+        "permissions": permissions,
+        "status": "active",
+        "created_at": datetime.now(timezone.utc).isoformat()
+    }
+    
+    await db.salon_users.insert_one(new_user)
+    
+    # Remove password_hash from response
+    response_user = new_user.copy()
+    response_user["permissions"] = SalonUserPermissions(**permissions)
+    
+    return SalonUser(**response_user)
+
+@api_router.get("/salon/users")
+async def get_salon_users(current_user=Depends(get_current_salon_admin)):
+    """Get all users for a salon (admin only)"""
+    salon_id = current_user.get("salon_id")
+    
+    users = await db.salon_users.find(
+        {"salon_id": salon_id},
+        {"_id": 0, "password_hash": 0}
+    ).to_list(100)
+    
+    return {"users": users}
+
+@api_router.put("/salon/users/{user_id}")
+async def update_salon_user(user_id: str, update_data: SalonUserUpdate, current_user=Depends(get_current_salon_admin)):
+    """Update salon user (admin only)"""
+    salon_id = current_user.get("salon_id")
+    
+    # Check user exists and belongs to same salon
+    user = await db.salon_users.find_one({"id": user_id, "salon_id": salon_id}, {"_id": 0})
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    update_fields = {}
+    
+    if update_data.name:
+        update_fields["name"] = update_data.name
+    
+    if update_data.mobile:
+        mobile = update_data.mobile
+        if not mobile.startswith("+91"):
+            mobile = f"+91{mobile}"
+        
+        # Check mobile doesn't exist for other users
+        existing = await db.salon_users.find_one({"mobile": mobile, "id": {"$ne": user_id}}, {"_id": 0})
+        if existing:
+            raise HTTPException(status_code=400, detail="Mobile number already exists")
+        
+        # Check against salon phone
+        salon = await db.salons.find_one({"id": salon_id}, {"_id": 0, "phone": 1})
+        if salon and salon.get("phone") == mobile:
+            raise HTTPException(status_code=400, detail="Staff mobile cannot be same as salon phone")
+        
+        update_fields["mobile"] = mobile
+    
+    if update_data.login_id:
+        # Check login_id doesn't exist for other users
+        existing = await db.salon_users.find_one({"login_id": update_data.login_id, "id": {"$ne": user_id}}, {"_id": 0})
+        if existing:
+            raise HTTPException(status_code=400, detail="Login ID already exists")
+        update_fields["login_id"] = update_data.login_id
+    
+    if update_data.password:
+        if len(update_data.password) < 6:
+            raise HTTPException(status_code=400, detail="Password must be at least 6 characters")
+        update_fields["password_hash"] = pwd_context.hash(update_data.password)
+    
+    if update_data.staff_id:
+        # Validate staff exists
+        staff = await db.barbers.find_one({"id": update_data.staff_id, "salon_id": salon_id}, {"_id": 0})
+        if not staff:
+            raise HTTPException(status_code=404, detail="Staff member not found")
+        update_fields["staff_id"] = update_data.staff_id
+    
+    if update_data.permissions:
+        update_fields["permissions"] = update_data.permissions.dict()
+    
+    if update_data.status:
+        update_fields["status"] = update_data.status
+    
+    if update_fields:
+        await db.salon_users.update_one(
+            {"id": user_id},
+            {"$set": update_fields}
+        )
+    
+    return {"message": "User updated successfully"}
+
+@api_router.delete("/salon/users/{user_id}")
+async def delete_salon_user(user_id: str, current_user=Depends(get_current_salon_admin)):
+    """Deactivate salon user (admin only)"""
+    salon_id = current_user.get("salon_id")
+    
+    # Check user exists and belongs to same salon
+    user = await db.salon_users.find_one({"id": user_id, "salon_id": salon_id}, {"_id": 0})
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    # Deactivate instead of delete
+    await db.salon_users.update_one(
+        {"id": user_id},
+        {"$set": {"status": "inactive"}}
+    )
+    
+    return {"message": "User deactivated successfully"}
 
 @api_router.post("/user/login", response_model=User)
 async def user_login(credentials: UserLogin):
