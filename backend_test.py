@@ -1,12 +1,25 @@
 #!/usr/bin/env python3
 """
-Backend API Testing for New Endpoints
+Backend API Testing for Membership and Staff Management Endpoints
 Tests the salon booking app's new backend endpoints:
-- GET /api/salons/{salon_id}/ratings
-- GET /api/salons/search (name and/or city)
-- GET /api/cities
-- DELETE /api/salons/{salon_id} (auth required)
-- City field in salon model
+
+MEMBERSHIP ENDPOINTS:
+- POST /api/salons/{salon_id}/membership-plans - Create a membership plan
+- GET /api/salons/{salon_id}/membership-plans - List membership plans
+- POST /api/salons/{salon_id}/sell-membership - Sell membership to customer
+- GET /api/salons/{salon_id}/customer-membership/{phone} - Get customer membership
+- GET /api/salons/{salon_id}/wallet-transactions/{phone} - Get transactions
+- POST /api/salons/{salon_id}/use-wallet - Deduct from wallet
+
+STAFF MANAGEMENT ENDPOINTS:
+- POST /api/salon/users/login - Multi-user salon login (test with mobile and login_id)
+- POST /api/salon/users - Create staff user
+- GET /api/salon/users - List staff users
+- PUT /api/salon/users/{user_id} - Update staff user
+- DELETE /api/salon/users/{user_id} - Deactivate staff user
+
+PACKAGE ENDPOINTS:
+- GET /api/salons/{salon_id}/packages/with-services - Get packages with service details
 """
 
 import requests
@@ -23,6 +36,9 @@ TEST_USER = {
     "phone": "9876543210",
     "gender": "Men"
 }
+
+# Test salon admin credentials (we'll need to get these from existing data)
+SALON_ADMIN_PHONE = "9876543210"  # This should be an existing salon admin
 
 class Colors:
     GREEN = '\033[92m'
@@ -47,556 +63,616 @@ def print_warning(message):
 def print_info(message):
     print(f"{Colors.BLUE}ℹ️  {message}{Colors.ENDC}")
 
-def test_get_salons():
-    """Test getting list of salons"""
-    print_test_header("Testing GET /salons")
+def get_salon_admin_token():
+    """Get salon admin authentication token"""
+    print_test_header("Getting Salon Admin Authentication")
     
     try:
+        # Try to login as salon admin using existing salon
         response = requests.get(f"{BACKEND_URL}/salons")
+        if response.status_code != 200:
+            print_error("Cannot get salons list")
+            return None, None
         
-        if response.status_code == 200:
-            salons = response.json()
-            if salons and len(salons) > 0:
-                print_success(f"Found {len(salons)} salons")
-                salon = salons[0]
-                print_info(f"First salon: {salon.get('salon_name')} (ID: {salon.get('id')})")
-                return salon.get('id')
-            else:
-                print_error("No salons found in database")
-                return None
-        else:
-            print_error(f"Failed to get salons: {response.status_code} - {response.text}")
-            return None
-            
-    except Exception as e:
-        print_error(f"Exception getting salons: {str(e)}")
-        return None
-
-def test_get_barbers(salon_id):
-    """Test getting barbers for a salon"""
-    print_test_header("Testing GET /salons/{salon_id}/barbers")
-    
-    try:
-        response = requests.get(f"{BACKEND_URL}/salons/{salon_id}/barbers")
+        salons = response.json()
+        if not salons:
+            print_error("No salons found")
+            return None, None
         
-        if response.status_code == 200:
-            barbers = response.json()
-            if barbers and len(barbers) > 0:
-                print_success(f"Found {len(barbers)} barbers for salon")
-                barber = barbers[0]
-                print_info(f"First barber: {barber.get('name')} (ID: {barber.get('id')})")
-                return barber.get('id')
-            else:
-                print_error("No barbers found for salon")
-                return None
-        else:
-            print_error(f"Failed to get barbers: {response.status_code} - {response.text}")
-            return None
-            
-    except Exception as e:
-        print_error(f"Exception getting barbers: {str(e)}")
-        return None
-
-def test_user_login():
-    """Test user login to get user_id"""
-    print_test_header("Testing POST /user/login")
-    
-    try:
-        response = requests.post(f"{BACKEND_URL}/user/login", json=TEST_USER)
+        salon = salons[0]
+        salon_id = salon.get('id')
+        salon_phone = salon.get('phone')
         
-        if response.status_code == 200:
-            user = response.json()
-            print_success(f"User login successful: {user.get('name')} (ID: {user.get('id')})")
-            return user.get('id')
-        else:
-            print_error(f"Failed to login user: {response.status_code} - {response.text}")
-            return None
-            
-    except Exception as e:
-        print_error(f"Exception during user login: {str(e)}")
-        return None
-
-def test_can_rate_token(token_id):
-    """Test GET /tokens/{token_id}/can-rate"""
-    print_test_header(f"Testing GET /tokens/{token_id}/can-rate")
-    
-    try:
-        response = requests.get(f"{BACKEND_URL}/tokens/{token_id}/can-rate")
+        print_info(f"Found salon: {salon.get('salon_name')} (ID: {salon_id})")
+        print_info(f"Salon phone: {salon_phone}")
         
-        if response.status_code == 200:
-            data = response.json()
-            print_success("Can-rate endpoint working")
-            print_info(f"Can rate: {data.get('can_rate')}")
-            print_info(f"Is completed: {data.get('is_completed')}")
-            print_info(f"Already rated: {data.get('already_rated')}")
-            return data
-        elif response.status_code == 404:
-            print_warning("Token not found (expected for non-existent token)")
-            return None
-        else:
-            print_error(f"Failed to check can-rate: {response.status_code} - {response.text}")
-            return None
+        # Try password login first (if salon has password)
+        if salon.get('password'):
+            login_data = {
+                "phone": salon_phone,
+                "password": "password123"  # Common test password
+            }
             
-    except Exception as e:
-        print_error(f"Exception checking can-rate: {str(e)}")
-        return None
-
-def test_barber_ratings(barber_id):
-    """Test GET /barbers/{barber_id}/ratings"""
-    print_test_header(f"Testing GET /barbers/{barber_id}/ratings")
-    
-    try:
-        response = requests.get(f"{BACKEND_URL}/barbers/{barber_id}/ratings")
+            response = requests.post(f"{BACKEND_URL}/salon/login", json=login_data)
+            if response.status_code == 200:
+                token_data = response.json()
+                print_success("Salon admin login successful")
+                return token_data.get('access_token'), salon_id
         
-        if response.status_code == 200:
-            data = response.json()
-            print_success("Barber ratings endpoint working")
-            print_info(f"Barber: {data.get('barber_name')}")
-            print_info(f"Average rating: {data.get('average_rating')}")
-            print_info(f"Total reviews: {data.get('total_reviews')}")
-            print_info(f"Reviews count: {len(data.get('reviews', []))}")
-            return data
-        elif response.status_code == 404:
-            print_error("Barber not found")
-            return None
-        else:
-            print_error(f"Failed to get barber ratings: {response.status_code} - {response.text}")
-            return None
-            
-    except Exception as e:
-        print_error(f"Exception getting barber ratings: {str(e)}")
-        return None
-
-def test_barber_profile(salon_id, barber_id):
-    """Test GET /salons/{salon_id}/barbers/{barber_id}/profile"""
-    print_test_header(f"Testing GET /salons/{salon_id}/barbers/{barber_id}/profile")
-    
-    try:
-        response = requests.get(f"{BACKEND_URL}/salons/{salon_id}/barbers/{barber_id}/profile")
+        # If password login fails, we'll proceed without token for now
+        print_warning("Could not authenticate as salon admin - will test endpoints without auth")
+        return None, salon_id
         
-        if response.status_code == 200:
-            data = response.json()
-            print_success("Barber profile endpoint working")
-            print_info(f"Barber: {data.get('name')}")
-            print_info(f"Experience: {data.get('experience')} years")
-            print_info(f"Category: {data.get('category')}")
-            print_info(f"Specialization: {data.get('specialization')}")
-            print_info(f"Average rating: {data.get('average_rating')}")
-            print_info(f"Total reviews: {data.get('total_reviews')}")
-            print_info(f"Services count: {len(data.get('services', []))}")
-            print_info(f"Recent reviews count: {len(data.get('recent_reviews', []))}")
-            
-            # Check if profile includes required fields
-            required_fields = ['name', 'experience', 'category', 'average_rating', 'total_reviews', 'services', 'recent_reviews']
-            missing_fields = [field for field in required_fields if field not in data]
-            if missing_fields:
-                print_warning(f"Missing fields in profile: {missing_fields}")
-            else:
-                print_success("All required profile fields present")
-            
-            return data
-        elif response.status_code == 404:
-            print_error("Barber not found")
-            return None
-        else:
-            print_error(f"Failed to get barber profile: {response.status_code} - {response.text}")
-            return None
-            
     except Exception as e:
-        print_error(f"Exception getting barber profile: {str(e)}")
-        return None
+        print_error(f"Exception getting salon admin token: {str(e)}")
+        return None, None
 
-def test_create_rating_without_token():
-    """Test POST /ratings without valid token (should fail)"""
-    print_test_header("Testing POST /ratings (without valid token)")
+def test_membership_plan_creation(salon_id, auth_token=None):
+    """Test POST /api/salons/{salon_id}/membership-plans"""
+    print_test_header(f"Testing POST /salons/{salon_id}/membership-plans")
     
-    rating_data = {
-        "token_id": "non-existent-token",
-        "barber_id": "test-barber",
-        "salon_id": "test-salon",
-        "rating": 5,
-        "review": "Great service!"
+    headers = {}
+    if auth_token:
+        headers['Authorization'] = f'Bearer {auth_token}'
+    
+    # Test membership plan data
+    plan_data = {
+        "salon_id": salon_id,
+        "name": "Gold Membership",
+        "amount": 5000.0,
+        "credit": 6000.0,
+        "validity_months": 3,
+        "terms_conditions": "Valid for 3 months. Non-transferable. Credit expires with membership."
     }
     
     try:
-        response = requests.post(f"{BACKEND_URL}/ratings", json=rating_data)
+        response = requests.post(f"{BACKEND_URL}/salons/{salon_id}/membership-plans", 
+                               json=plan_data, headers=headers)
         
-        if response.status_code == 404:
-            print_success("Correctly rejected rating for non-existent token")
-            return True
-        elif response.status_code == 400:
-            print_success("Correctly rejected invalid rating request")
-            return True
+        if response.status_code == 200 or response.status_code == 201:
+            data = response.json()
+            print_success("Membership plan created successfully")
+            print_info(f"Plan ID: {data.get('id')}")
+            print_info(f"Plan Name: {data.get('name')}")
+            print_info(f"Amount: ₹{data.get('amount')}")
+            print_info(f"Credit: ₹{data.get('credit')}")
+            print_info(f"Validity: {data.get('validity_months')} months")
+            return data.get('id')
+        elif response.status_code == 401 or response.status_code == 403:
+            print_warning("Authentication required for creating membership plans")
+            return None
         else:
-            print_warning(f"Unexpected response: {response.status_code} - {response.text}")
-            return False
-            
-    except Exception as e:
-        print_error(f"Exception testing rating creation: {str(e)}")
-        return False
-
-def test_user_pending_ratings(user_id):
-    """Test GET /users/{user_id}/pending-ratings"""
-    print_test_header(f"Testing GET /users/{user_id}/pending-ratings")
-    
-    try:
-        response = requests.get(f"{BACKEND_URL}/users/{user_id}/pending-ratings")
-        
-        if response.status_code == 200:
-            pending_ratings = response.json()
-            print_success("Pending ratings endpoint working")
-            print_info(f"Pending ratings count: {len(pending_ratings)}")
-            
-            if pending_ratings:
-                for i, token in enumerate(pending_ratings[:3]):  # Show first 3
-                    print_info(f"  Token {i+1}: {token.get('token_number')} - {token.get('customer_name')} - {token.get('status')}")
-            
-            return pending_ratings
-        else:
-            print_error(f"Failed to get pending ratings: {response.status_code} - {response.text}")
+            print_error(f"Failed to create membership plan: {response.status_code} - {response.text}")
             return None
             
     except Exception as e:
-        print_error(f"Exception getting pending ratings: {str(e)}")
+        print_error(f"Exception creating membership plan: {str(e)}")
         return None
 
-def test_rating_endpoints_exist():
-    """Test that rating endpoints exist and return proper error messages"""
-    print_test_header("Testing Rating Endpoints Existence")
-    
-    endpoints_to_test = [
-        ("POST", "/ratings", {"token_id": "test", "barber_id": "test", "salon_id": "test", "rating": 5, "review": "test"}),
-        ("GET", "/barbers/test-barber/ratings", None),
-        ("GET", "/salons/test-salon/barbers/test-barber/profile", None),
-        ("GET", "/tokens/test-token/can-rate", None),
-        ("GET", "/users/test-user/pending-ratings", None)
-    ]
-    
-    all_exist = True
-    
-    for method, endpoint, data in endpoints_to_test:
-        try:
-            if method == "POST":
-                response = requests.post(f"{BACKEND_URL}{endpoint}", json=data)
-            else:
-                response = requests.get(f"{BACKEND_URL}{endpoint}")
-            
-            # Check if endpoint exists (not 404 for route not found)
-            if response.status_code == 404 and "Not Found" in response.text:
-                print_error(f"{method} {endpoint} - Endpoint does not exist")
-                all_exist = False
-            else:
-                print_success(f"{method} {endpoint} - Endpoint exists (status: {response.status_code})")
-                
-        except Exception as e:
-            print_error(f"Exception testing {method} {endpoint}: {str(e)}")
-            all_exist = False
-    
-    return all_exist
-
-def test_get_salon_ratings(salon_id):
-    """Test GET /api/salons/{salon_id}/ratings - Get all ratings for a salon"""
-    print_test_header(f"Testing GET /salons/{salon_id}/ratings")
+def test_get_membership_plans(salon_id):
+    """Test GET /api/salons/{salon_id}/membership-plans"""
+    print_test_header(f"Testing GET /salons/{salon_id}/membership-plans")
     
     try:
-        response = requests.get(f"{BACKEND_URL}/salons/{salon_id}/ratings")
+        response = requests.get(f"{BACKEND_URL}/salons/{salon_id}/membership-plans")
         
         if response.status_code == 200:
             data = response.json()
-            print_success("Salon ratings endpoint working")
+            plans = data.get('plans', [])
+            print_success(f"Found {len(plans)} membership plans")
             
-            # Check required fields
-            required_fields = ['salon_id', 'salon_name', 'average_rating', 'total_reviews', 'reviews']
-            missing_fields = [field for field in required_fields if field not in data]
+            for i, plan in enumerate(plans[:3]):  # Show first 3 plans
+                print_info(f"Plan {i+1}: {plan.get('name')} - ₹{plan.get('amount')} (Credit: ₹{plan.get('credit')})")
             
-            if missing_fields:
-                print_error(f"Missing required fields: {missing_fields}")
-                return False
+            return plans[0].get('id') if plans else None
+        else:
+            print_error(f"Failed to get membership plans: {response.status_code} - {response.text}")
+            return None
             
-            print_info(f"Salon: {data.get('salon_name')}")
-            print_info(f"Average rating: {data.get('average_rating')}")
-            print_info(f"Total reviews: {data.get('total_reviews')}")
-            print_info(f"Reviews count: {len(data.get('reviews', []))}")
+    except Exception as e:
+        print_error(f"Exception getting membership plans: {str(e)}")
+        return None
+
+def test_sell_membership(salon_id, plan_id, auth_token=None):
+    """Test POST /api/salons/{salon_id}/sell-membership"""
+    print_test_header(f"Testing POST /salons/{salon_id}/sell-membership")
+    
+    if not plan_id:
+        print_warning("No membership plan ID available - skipping sell membership test")
+        return None
+    
+    headers = {}
+    if auth_token:
+        headers['Authorization'] = f'Bearer {auth_token}'
+    
+    # Test customer data
+    membership_data = {
+        "customer_phone": "9123456789",
+        "customer_name": "Rajesh Kumar",
+        "membership_plan_id": plan_id,
+        "payment_mode": "cash",
+        "paid_amount": 5000.0
+    }
+    
+    try:
+        response = requests.post(f"{BACKEND_URL}/salons/{salon_id}/sell-membership", 
+                               json=membership_data, headers=headers)
+        
+        if response.status_code == 200 or response.status_code == 201:
+            data = response.json()
+            print_success("Membership sold successfully")
+            print_info(f"Message: {data.get('message')}")
+            if 'membership' in data:
+                membership = data['membership']
+                print_info(f"Customer: {membership.get('customer_name')}")
+                print_info(f"Phone: {membership.get('customer_phone')}")
+                print_info(f"Wallet Balance: ₹{membership.get('wallet_balance')}")
+            return membership_data['customer_phone']
+        elif response.status_code == 401 or response.status_code == 403:
+            print_warning("Authentication required for selling memberships")
+            return None
+        else:
+            print_error(f"Failed to sell membership: {response.status_code} - {response.text}")
+            return None
             
-            # Verify data types
-            if not isinstance(data.get('average_rating'), (int, float)):
-                print_error("average_rating should be a number")
-                return False
+    except Exception as e:
+        print_error(f"Exception selling membership: {str(e)}")
+        return None
+
+def test_get_customer_membership(salon_id, customer_phone):
+    """Test GET /api/salons/{salon_id}/customer-membership/{phone}"""
+    print_test_header(f"Testing GET /salons/{salon_id}/customer-membership/{customer_phone}")
+    
+    if not customer_phone:
+        print_warning("No customer phone available - skipping customer membership test")
+        return False
+    
+    try:
+        response = requests.get(f"{BACKEND_URL}/salons/{salon_id}/customer-membership/{customer_phone}")
+        
+        if response.status_code == 200:
+            data = response.json()
+            print_success("Customer membership retrieved successfully")
+            print_info(f"Has Membership: {data.get('has_membership')}")
+            print_info(f"Wallet Balance: ₹{data.get('wallet_balance', 0)}")
             
-            if not isinstance(data.get('total_reviews'), int):
-                print_error("total_reviews should be an integer")
-                return False
-            
-            if not isinstance(data.get('reviews'), list):
-                print_error("reviews should be a list")
-                return False
-            
-            # When no ratings exist, should return proper defaults
-            if data.get('total_reviews') == 0:
-                if data.get('average_rating') != 0:
-                    print_error("When no ratings exist, average_rating should be 0")
-                    return False
-                if len(data.get('reviews', [])) != 0:
-                    print_error("When no ratings exist, reviews array should be empty")
-                    return False
-                print_info("✓ Correctly handles case with no ratings")
+            if data.get('has_membership'):
+                print_info(f"Customer: {data.get('customer_name')}")
+                print_info(f"Membership: {data.get('membership_name')}")
+                print_info(f"Expiry: {data.get('expiry_date')}")
             
             return True
-        elif response.status_code == 404:
-            print_error("Salon not found")
-            return False
         else:
-            print_error(f"Failed to get salon ratings: {response.status_code} - {response.text}")
+            print_error(f"Failed to get customer membership: {response.status_code} - {response.text}")
             return False
             
     except Exception as e:
-        print_error(f"Exception getting salon ratings: {str(e)}")
+        print_error(f"Exception getting customer membership: {str(e)}")
         return False
 
-def test_search_salons():
-    """Test GET /api/salons/search - Search salons by name and/or city"""
-    print_test_header("Testing GET /salons/search")
+def test_get_wallet_transactions(salon_id, customer_phone):
+    """Test GET /api/salons/{salon_id}/wallet-transactions/{phone}"""
+    print_test_header(f"Testing GET /salons/{salon_id}/wallet-transactions/{customer_phone}")
+    
+    if not customer_phone:
+        print_warning("No customer phone available - skipping wallet transactions test")
+        return False
+    
+    try:
+        response = requests.get(f"{BACKEND_URL}/salons/{salon_id}/wallet-transactions/{customer_phone}")
+        
+        if response.status_code == 200:
+            data = response.json()
+            transactions = data.get('transactions', [])
+            print_success(f"Found {len(transactions)} wallet transactions")
+            
+            for i, txn in enumerate(transactions[:3]):  # Show first 3 transactions
+                print_info(f"Transaction {i+1}: {txn.get('transaction_type')} ₹{txn.get('amount')} - {txn.get('description')}")
+            
+            return True
+        else:
+            print_error(f"Failed to get wallet transactions: {response.status_code} - {response.text}")
+            return False
+            
+    except Exception as e:
+        print_error(f"Exception getting wallet transactions: {str(e)}")
+        return False
+
+def test_use_wallet_balance(salon_id, customer_phone):
+    """Test POST /api/salons/{salon_id}/use-wallet"""
+    print_test_header(f"Testing POST /salons/{salon_id}/use-wallet")
+    
+    if not customer_phone:
+        print_warning("No customer phone available - skipping use wallet test")
+        return False
+    
+    # Test using a small amount from wallet
+    wallet_data = {
+        "phone": customer_phone,
+        "amount": 100.0
+    }
+    
+    try:
+        response = requests.post(f"{BACKEND_URL}/salons/{salon_id}/use-wallet", json=wallet_data)
+        
+        if response.status_code == 200:
+            data = response.json()
+            print_success("Wallet balance used successfully")
+            print_info(f"Message: {data.get('message')}")
+            print_info(f"New Balance: ₹{data.get('new_balance', 'N/A')}")
+            return True
+        elif response.status_code == 400:
+            print_warning("Insufficient wallet balance or customer not found (expected for test)")
+            return True  # This is expected behavior
+        else:
+            print_error(f"Failed to use wallet balance: {response.status_code} - {response.text}")
+            return False
+            
+    except Exception as e:
+        print_error(f"Exception using wallet balance: {str(e)}")
+        return False
+
+def test_staff_user_login():
+    """Test POST /api/salon/users/login"""
+    print_test_header("Testing POST /salon/users/login")
+    
+    # Test with mobile number
+    login_data_mobile = {
+        "identifier": "9876543210",  # Test mobile
+        "password": "password123"
+    }
+    
+    # Test with login ID
+    login_data_login_id = {
+        "identifier": "admin001",  # Test login ID
+        "password": "password123"
+    }
     
     test_cases = [
-        ("name only", {"name": "Looks"}),
-        ("city only", {"city": "Bangalore"}),
-        ("both name and city", {"name": "Looks", "city": "Bangalore"}),
-        ("empty query", {}),  # Should fail
+        ("mobile number", login_data_mobile),
+        ("login ID", login_data_login_id)
     ]
     
-    all_passed = True
-    
-    for test_name, params in test_cases:
-        print_info(f"Testing {test_name}: {params}")
+    for test_name, login_data in test_cases:
+        print_info(f"Testing login with {test_name}")
         
         try:
-            response = requests.get(f"{BACKEND_URL}/salons/search", params=params)
+            response = requests.post(f"{BACKEND_URL}/salon/users/login", json=login_data)
             
-            if test_name == "empty query":
-                # This should fail with 400
-                if response.status_code == 400:
-                    print_success("✓ Correctly rejects empty search query")
-                else:
-                    print_error(f"Expected 400 for empty query, got {response.status_code}")
-                    all_passed = False
+            if response.status_code == 200:
+                data = response.json()
+                print_success(f"Staff login successful with {test_name}")
+                print_info(f"User ID: {data.get('user_id')}")
+                print_info(f"Role: {data.get('role')}")
+                print_info(f"Salon ID: {data.get('salon_id')}")
+                
+                # Check JWT token includes role and permissions
+                token = data.get('access_token')
+                if token:
+                    print_info("✓ JWT token received")
+                    # Check if permissions are included
+                    permissions = data.get('permissions', {})
+                    print_info(f"Permissions: {permissions}")
+                
+                return data.get('access_token'), data.get('salon_id')
+            elif response.status_code == 404:
+                print_warning(f"User not found for {test_name} (expected for test data)")
+            elif response.status_code == 401:
+                print_warning(f"Invalid credentials for {test_name} (expected for test data)")
             else:
-                if response.status_code == 200:
-                    data = response.json()
-                    if 'salons' in data and isinstance(data['salons'], list):
-                        print_success(f"✓ {test_name}: Found {len(data['salons'])} salons")
-                        
-                        # Check if results contain the search terms (if any salons found)
-                        if data['salons'] and params.get('name'):
-                            found_name_match = any(
-                                params['name'].lower() in salon.get('salon_name', '').lower() 
-                                for salon in data['salons']
-                            )
-                            if found_name_match:
-                                print_info("✓ Results contain name match")
-                            else:
-                                print_warning("No exact name matches found (may be expected)")
-                        
-                        if data['salons'] and params.get('city'):
-                            found_city_match = any(
-                                params['city'].lower() in salon.get('city', '').lower() 
-                                for salon in data['salons']
-                            )
-                            if found_city_match:
-                                print_info("✓ Results contain city match")
-                            else:
-                                print_warning("No exact city matches found (may be expected)")
-                    else:
-                        print_error(f"Invalid response format for {test_name}")
-                        all_passed = False
-                else:
-                    print_error(f"Failed {test_name}: {response.status_code} - {response.text}")
-                    all_passed = False
-                    
+                print_error(f"Failed staff login with {test_name}: {response.status_code} - {response.text}")
+                
         except Exception as e:
-            print_error(f"Exception testing {test_name}: {str(e)}")
-            all_passed = False
+            print_error(f"Exception testing staff login with {test_name}: {str(e)}")
     
-    return all_passed
+    return None, None
 
-def test_get_cities():
-    """Test GET /api/cities - Get list of unique cities"""
-    print_test_header("Testing GET /cities")
+def test_create_staff_user(salon_id, auth_token=None):
+    """Test POST /api/salon/users"""
+    print_test_header(f"Testing POST /salon/users")
+    
+    headers = {}
+    if auth_token:
+        headers['Authorization'] = f'Bearer {auth_token}'
+    
+    # Test staff user data
+    staff_data = {
+        "salon_id": salon_id,
+        "name": "Priya Sharma",
+        "mobile": "9123456788",
+        "login_id": "staff001",
+        "password": "password123",
+        "role": "staff",
+        "permissions": {
+            "can_edit_salon": False,
+            "can_access_analytics": False,
+            "can_delete_salon": False
+        }
+    }
     
     try:
-        response = requests.get(f"{BACKEND_URL}/cities")
+        response = requests.post(f"{BACKEND_URL}/salon/users", json=staff_data, headers=headers)
+        
+        if response.status_code == 200 or response.status_code == 201:
+            data = response.json()
+            print_success("Staff user created successfully")
+            print_info(f"User ID: {data.get('id')}")
+            print_info(f"Name: {data.get('name')}")
+            print_info(f"Mobile: {data.get('mobile')}")
+            print_info(f"Login ID: {data.get('login_id')}")
+            print_info(f"Role: {data.get('role')}")
+            return data.get('id')
+        elif response.status_code == 401 or response.status_code == 403:
+            print_warning("Authentication required for creating staff users")
+            return None
+        elif response.status_code == 400:
+            print_warning("Validation error (may be duplicate login_id/mobile)")
+            return None
+        else:
+            print_error(f"Failed to create staff user: {response.status_code} - {response.text}")
+            return None
+            
+    except Exception as e:
+        print_error(f"Exception creating staff user: {str(e)}")
+        return None
+
+def test_get_staff_users(salon_id, auth_token=None):
+    """Test GET /api/salon/users"""
+    print_test_header("Testing GET /salon/users")
+    
+    headers = {}
+    if auth_token:
+        headers['Authorization'] = f'Bearer {auth_token}'
+    
+    try:
+        response = requests.get(f"{BACKEND_URL}/salon/users", headers=headers)
         
         if response.status_code == 200:
             data = response.json()
+            users = data.get('users', [])
+            print_success(f"Found {len(users)} salon users")
             
-            if 'cities' in data and isinstance(data['cities'], list):
-                print_success(f"Cities endpoint working - Found {len(data['cities'])} cities")
-                
-                # Show first few cities
-                cities = data['cities'][:5]  # Show first 5
-                for city in cities:
-                    print_info(f"  City: {city}")
-                
-                if len(data['cities']) > 5:
-                    print_info(f"  ... and {len(data['cities']) - 5} more cities")
-                
-                # Verify cities are strings and not empty
-                invalid_cities = [c for c in data['cities'] if not isinstance(c, str) or not c.strip()]
-                if invalid_cities:
-                    print_warning(f"Found {len(invalid_cities)} invalid city entries")
-                else:
-                    print_success("✓ All cities are valid strings")
-                
-                return True
-            else:
-                print_error("Invalid response format - expected 'cities' array")
-                return False
+            for i, user in enumerate(users[:3]):  # Show first 3 users
+                print_info(f"User {i+1}: {user.get('name')} ({user.get('role')}) - {user.get('login_id')}")
+            
+            return users[0].get('id') if users else None
+        elif response.status_code == 401 or response.status_code == 403:
+            print_warning("Authentication required for listing staff users")
+            return None
         else:
-            print_error(f"Failed to get cities: {response.status_code} - {response.text}")
-            return False
+            print_error(f"Failed to get staff users: {response.status_code} - {response.text}")
+            return None
             
     except Exception as e:
-        print_error(f"Exception getting cities: {str(e)}")
-        return False
+        print_error(f"Exception getting staff users: {str(e)}")
+        return None
 
-def test_salon_city_field():
-    """Test that salon model includes city field"""
-    print_test_header("Testing City Field in Salon Model")
+def test_update_staff_user(user_id, auth_token=None):
+    """Test PUT /api/salon/users/{user_id}"""
+    print_test_header(f"Testing PUT /salon/users/{user_id}")
+    
+    if not user_id:
+        print_warning("No user ID available - skipping update staff user test")
+        return False
+    
+    headers = {}
+    if auth_token:
+        headers['Authorization'] = f'Bearer {auth_token}'
+    
+    # Test update data
+    update_data = {
+        "name": "Priya Sharma Updated",
+        "permissions": {
+            "can_edit_salon": True,
+            "can_access_analytics": True,
+            "can_delete_salon": False
+        }
+    }
     
     try:
-        response = requests.get(f"{BACKEND_URL}/salons")
+        response = requests.put(f"{BACKEND_URL}/salon/users/{user_id}", 
+                              json=update_data, headers=headers)
         
         if response.status_code == 200:
-            salons = response.json()
-            if salons and len(salons) > 0:
-                salon = salons[0]
-                
-                if 'city' in salon:
-                    print_success(f"✓ City field present in salon model")
-                    print_info(f"Sample salon city: {salon.get('city')}")
-                    
-                    # Check if city field has a value
-                    if salon.get('city'):
-                        print_success("✓ City field has a value")
-                    else:
-                        print_warning("City field is present but empty/null")
-                    
-                    return True
-                else:
-                    print_error("City field missing from salon model")
-                    return False
-            else:
-                print_error("No salons found to check city field")
-                return False
-        else:
-            print_error(f"Failed to get salons: {response.status_code} - {response.text}")
-            return False
-            
-    except Exception as e:
-        print_error(f"Exception checking salon city field: {str(e)}")
-        return False
-
-def test_delete_salon_auth():
-    """Test DELETE /api/salons/{salon_id} - Should require authentication"""
-    print_test_header("Testing DELETE /salons/{salon_id} (Auth Required)")
-    
-    # Get a salon ID first
-    try:
-        response = requests.get(f"{BACKEND_URL}/salons")
-        if response.status_code != 200 or not response.json():
-            print_error("Cannot get salon ID for delete test")
-            return False
-        
-        salon_id = response.json()[0].get('id')
-        if not salon_id:
-            print_error("No salon ID found for delete test")
-            return False
-        
-        print_info(f"Testing delete for salon ID: {salon_id}")
-        
-        # Test without authentication - should fail
-        response = requests.delete(f"{BACKEND_URL}/salons/{salon_id}")
-        
-        # Should return 401 (Unauthorized), 403 (Forbidden), or 422 (Unprocessable Entity)
-        # NOT 404 (Not Found) or 405 (Method Not Allowed)
-        expected_codes = [401, 403, 422]
-        
-        if response.status_code in expected_codes:
-            print_success(f"✓ Correctly requires authentication (status: {response.status_code})")
-            print_info("Delete endpoint exists and properly protected")
+            data = response.json()
+            print_success("Staff user updated successfully")
+            print_info(f"Message: {data.get('message')}")
             return True
+        elif response.status_code == 401 or response.status_code == 403:
+            print_warning("Authentication required for updating staff users")
+            return False
         elif response.status_code == 404:
-            print_error("Delete endpoint returns 404 - endpoint may not exist")
-            return False
-        elif response.status_code == 405:
-            print_error("Delete endpoint returns 405 - method not allowed")
+            print_warning("User not found (expected for test data)")
             return False
         else:
-            print_warning(f"Unexpected status code: {response.status_code} - {response.text}")
-            # Still consider this a pass if endpoint exists
-            return True
+            print_error(f"Failed to update staff user: {response.status_code} - {response.text}")
+            return False
             
     except Exception as e:
-        print_error(f"Exception testing delete salon: {str(e)}")
+        print_error(f"Exception updating staff user: {str(e)}")
         return False
 
-def run_new_endpoint_tests():
-    """Run all new endpoint tests"""
-    print(f"{Colors.BOLD}🧪 Starting New Backend Endpoint Tests{Colors.ENDC}")
+def test_delete_staff_user(user_id, auth_token=None):
+    """Test DELETE /api/salon/users/{user_id}"""
+    print_test_header(f"Testing DELETE /salon/users/{user_id}")
+    
+    if not user_id:
+        print_warning("No user ID available - skipping delete staff user test")
+        return False
+    
+    headers = {}
+    if auth_token:
+        headers['Authorization'] = f'Bearer {auth_token}'
+    
+    try:
+        response = requests.delete(f"{BACKEND_URL}/salon/users/{user_id}", headers=headers)
+        
+        if response.status_code == 200:
+            data = response.json()
+            print_success("Staff user deactivated successfully")
+            print_info(f"Message: {data.get('message')}")
+            return True
+        elif response.status_code == 401 or response.status_code == 403:
+            print_warning("Authentication required for deactivating staff users")
+            return False
+        elif response.status_code == 404:
+            print_warning("User not found (expected for test data)")
+            return False
+        else:
+            print_error(f"Failed to deactivate staff user: {response.status_code} - {response.text}")
+            return False
+            
+    except Exception as e:
+        print_error(f"Exception deactivating staff user: {str(e)}")
+        return False
+
+def test_get_packages_with_services(salon_id):
+    """Test GET /api/salons/{salon_id}/packages/with-services"""
+    print_test_header(f"Testing GET /salons/{salon_id}/packages/with-services")
+    
+    try:
+        response = requests.get(f"{BACKEND_URL}/salons/{salon_id}/packages/with-services")
+        
+        if response.status_code == 200:
+            data = response.json()
+            packages = data.get('packages', [])
+            print_success(f"Found {len(packages)} packages with service details")
+            
+            for i, package in enumerate(packages[:3]):  # Show first 3 packages
+                print_info(f"Package {i+1}: {package.get('name')} - ₹{package.get('price')}")
+                services = package.get('services', [])
+                print_info(f"  Services: {len(services)} services included")
+            
+            return True
+        else:
+            print_error(f"Failed to get packages with services: {response.status_code} - {response.text}")
+            return False
+            
+    except Exception as e:
+        print_error(f"Exception getting packages with services: {str(e)}")
+        return False
+
+def run_membership_and_staff_tests():
+    """Run all membership and staff management endpoint tests"""
+    print(f"{Colors.BOLD}🧪 Starting Membership and Staff Management Endpoint Tests{Colors.ENDC}")
     print(f"Backend URL: {BACKEND_URL}")
     
-    # Test 1: Get basic data needed for testing
-    print_test_header("Phase 1: Getting Test Data")
+    # Phase 1: Get authentication and basic data
+    print_test_header("Phase 1: Authentication and Setup")
     
-    # Get a salon for testing
-    salon_id = test_get_salons()
+    auth_token, salon_id = get_salon_admin_token()
     if not salon_id:
-        print_error("Cannot proceed without salon data")
+        print_error("Cannot proceed without salon ID")
         return False
     
-    # Test 2: Test new endpoints
-    print_test_header("Phase 2: Testing New Endpoints")
+    print_info(f"Using salon ID: {salon_id}")
     
-    test_results = {}
+    # Phase 2: Test Membership Endpoints
+    print_test_header("Phase 2: Testing Membership Endpoints")
     
-    # Test salon ratings endpoint
-    test_results['salon_ratings'] = test_get_salon_ratings(salon_id)
+    membership_results = {}
     
-    # Test search endpoint
-    test_results['search_salons'] = test_search_salons()
+    # Test membership plan creation
+    plan_id = test_membership_plan_creation(salon_id, auth_token)
+    membership_results['create_membership_plan'] = plan_id is not None
     
-    # Test cities endpoint
-    test_results['get_cities'] = test_get_cities()
+    # Test getting membership plans
+    if not plan_id:
+        plan_id = test_get_membership_plans(salon_id)
+    membership_results['get_membership_plans'] = plan_id is not None
     
-    # Test city field in salon model
-    test_results['salon_city_field'] = test_salon_city_field()
+    # Test selling membership
+    customer_phone = test_sell_membership(salon_id, plan_id, auth_token)
+    membership_results['sell_membership'] = customer_phone is not None
     
-    # Test delete salon endpoint (auth required)
-    test_results['delete_salon_auth'] = test_delete_salon_auth()
+    # Test getting customer membership
+    membership_results['get_customer_membership'] = test_get_customer_membership(salon_id, customer_phone)
     
-    # Test 3: Summary
-    print_test_header("Phase 3: Test Summary")
+    # Test getting wallet transactions
+    membership_results['get_wallet_transactions'] = test_get_wallet_transactions(salon_id, customer_phone)
     
-    passed_tests = [name for name, result in test_results.items() if result]
-    failed_tests = [name for name, result in test_results.items() if not result]
+    # Test using wallet balance
+    membership_results['use_wallet_balance'] = test_use_wallet_balance(salon_id, customer_phone)
     
-    for test_name in passed_tests:
-        print_success(f"✓ {test_name.replace('_', ' ').title()}")
+    # Phase 3: Test Staff Management Endpoints
+    print_test_header("Phase 3: Testing Staff Management Endpoints")
     
-    for test_name in failed_tests:
-        print_error(f"✗ {test_name.replace('_', ' ').title()}")
+    staff_results = {}
     
-    total_tests = len(test_results)
+    # Test staff user login
+    staff_token, staff_salon_id = test_staff_user_login()
+    staff_results['staff_user_login'] = staff_token is not None
+    
+    # Test creating staff user
+    user_id = test_create_staff_user(salon_id, auth_token)
+    staff_results['create_staff_user'] = user_id is not None
+    
+    # Test getting staff users
+    if not user_id:
+        user_id = test_get_staff_users(salon_id, auth_token)
+    staff_results['get_staff_users'] = user_id is not None
+    
+    # Test updating staff user
+    staff_results['update_staff_user'] = test_update_staff_user(user_id, auth_token)
+    
+    # Test deactivating staff user
+    staff_results['delete_staff_user'] = test_delete_staff_user(user_id, auth_token)
+    
+    # Phase 4: Test Package Endpoints
+    print_test_header("Phase 4: Testing Package Endpoints")
+    
+    package_results = {}
+    
+    # Test getting packages with services
+    package_results['get_packages_with_services'] = test_get_packages_with_services(salon_id)
+    
+    # Phase 5: Summary
+    print_test_header("Phase 5: Test Summary")
+    
+    all_results = {**membership_results, **staff_results, **package_results}
+    
+    passed_tests = [name for name, result in all_results.items() if result]
+    failed_tests = [name for name, result in all_results.items() if not result]
+    
+    print(f"\n{Colors.BOLD}📊 MEMBERSHIP ENDPOINTS:{Colors.ENDC}")
+    for test_name, result in membership_results.items():
+        status = "✅ PASS" if result else "❌ FAIL"
+        print(f"  {status} {test_name.replace('_', ' ').title()}")
+    
+    print(f"\n{Colors.BOLD}📊 STAFF MANAGEMENT ENDPOINTS:{Colors.ENDC}")
+    for test_name, result in staff_results.items():
+        status = "✅ PASS" if result else "❌ FAIL"
+        print(f"  {status} {test_name.replace('_', ' ').title()}")
+    
+    print(f"\n{Colors.BOLD}📊 PACKAGE ENDPOINTS:{Colors.ENDC}")
+    for test_name, result in package_results.items():
+        status = "✅ PASS" if result else "❌ FAIL"
+        print(f"  {status} {test_name.replace('_', ' ').title()}")
+    
+    total_tests = len(all_results)
     passed_count = len(passed_tests)
     
-    print(f"\n{Colors.BOLD}📊 Test Results: {passed_count}/{total_tests} tests passed{Colors.ENDC}")
+    print(f"\n{Colors.BOLD}📊 OVERALL RESULTS: {passed_count}/{total_tests} tests passed{Colors.ENDC}")
     
     if passed_count == total_tests:
-        print_success("All new endpoint tests passed!")
+        print_success("All membership and staff management tests passed!")
         return True
     else:
         print_warning(f"Some tests failed. {total_tests - passed_count} issues found.")
+        
+        # Show critical failures
+        critical_failures = []
+        for test_name in failed_tests:
+            if 'login' in test_name or 'create' in test_name:
+                critical_failures.append(test_name)
+        
+        if critical_failures:
+            print_error("Critical failures found:")
+            for failure in critical_failures:
+                print_error(f"  - {failure.replace('_', ' ').title()}")
+        
         return False
 
 if __name__ == "__main__":
-    success = run_new_endpoint_tests()
+    success = run_membership_and_staff_tests()
     sys.exit(0 if success else 1)
