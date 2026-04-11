@@ -240,6 +240,15 @@ class BarberCreate(BaseModel):
     mobile: str
     profile_image: Optional[str] = None
     is_barber: bool = True  # True if staff is a barber (visible to customers)
+    # New employee fields
+    department: Optional[str] = None  # e.g., "Hairstyling", "Spa", "Reception"
+    designation: Optional[str] = None  # e.g., "Senior Stylist", "Receptionist"
+    emergency_contact: Optional[str] = None
+    aadhar_number: Optional[str] = None
+    doj: Optional[str] = None  # Date of Joining
+    dob: Optional[str] = None  # Date of Birth
+    compensation: Optional[float] = None
+    documents: Optional[List[str]] = None  # URLs to uploaded documents
 
 class BarberUpdate(BaseModel):
     name: Optional[str] = None
@@ -254,6 +263,15 @@ class BarberUpdate(BaseModel):
     intro: Optional[str] = None
     gallery: Optional[List[str]] = None
     is_barber: Optional[bool] = None  # Can update barber visibility
+    # New employee fields
+    department: Optional[str] = None
+    designation: Optional[str] = None
+    emergency_contact: Optional[str] = None
+    aadhar_number: Optional[str] = None
+    doj: Optional[str] = None
+    dob: Optional[str] = None
+    compensation: Optional[float] = None
+    documents: Optional[List[str]] = None
 
 class Barber(BaseModel):
     model_config = ConfigDict(extra="ignore")
@@ -274,6 +292,15 @@ class Barber(BaseModel):
     gallery: List[str] = []  # Portfolio images
     rating: float = 4.5  # Average rating
     total_reviews: int = 0  # Total number of reviews
+    # New employee fields
+    department: Optional[str] = None
+    designation: Optional[str] = None
+    emergency_contact: Optional[str] = None
+    aadhar_number: Optional[str] = None
+    doj: Optional[str] = None  # Date of Joining
+    dob: Optional[str] = None  # Date of Birth
+    compensation: Optional[float] = None
+    documents: List[str] = []  # URLs to uploaded documents
 
 class BarberServicePrice(BaseModel):
     barber_id: str

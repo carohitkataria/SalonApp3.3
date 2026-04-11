@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useWebSocket } from '@/contexts/WebSocketContext';
+import { useAuth } from '@/contexts/AuthContext';
 import axios from 'axios';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
@@ -10,15 +11,17 @@ import { Input } from '@/components/ui/input';
 import { toast } from 'sonner';
 import ThemeToggle from '@/components/ThemeToggle';
 import BarberManagement from '@/components/BarberManagement';
+import StaffAccessManagement from '@/components/StaffAccessManagement';
 import OfferingsModule from '@/components/OfferingsModule';
 import MyProfile from '@/components/MyProfile';
 import Analytics from '@/components/Analytics';
 import { 
   Scissors, LogOut, ChevronRight, SkipForward, RotateCcw, XCircle,
   Clock, User, Phone, Bell, MapPin, Settings, CheckCircle, Calendar,
-  Users, ArrowLeft, FileText, Download, Plus, X, TrendingUp
+  Users, ArrowLeft, FileText, Download, Plus, X, TrendingUp, Menu,
+  Shield, DollarSign, Database
 } from 'lucide-react';
-import { motion } from 'framer-motion';
+import { motion, AnimatePresence } from 'framer-motion';
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
 const API = `${BACKEND_URL}/api`;
@@ -26,6 +29,7 @@ const API = `${BACKEND_URL}/api`;
 export default function EnhancedSalonDashboard() {
   const navigate = useNavigate();
   const { subscribe, unsubscribe } = useWebSocket();
+  const { salonUser, isAdmin, hasPermission } = useAuth();
   
   const [activeTab, setActiveTab] = useState('queue');
   const [salonId, setSalonId] = useState(null);
@@ -35,6 +39,7 @@ export default function EnhancedSalonDashboard() {
   const [selectedBarber, setSelectedBarber] = useState('all');
   const [filter, setFilter] = useState('all');
   const [date] = useState(new Date().toISOString().split('T')[0]);
+  const [menuOpen, setMenuOpen] = useState(false);
   
   // Add Services Dialog State
   const [addServicesDialog, setAddServicesDialog] = useState(false);
@@ -264,9 +269,23 @@ export default function EnhancedSalonDashboard() {
 
   const handleLogout = () => {
     localStorage.removeItem('salon_admin_token');
+    localStorage.removeItem('salon_user_auth');
     localStorage.removeItem('salon_id');
     navigate('/salon/login');
   };
+
+  // Define menu items with role-based visibility
+  const menuItems = [
+    { id: 'queue', label: 'Token Queue', icon: Calendar, show: true },
+    { id: 'staff', label: 'Staff Management', icon: Users, show: true },
+    { id: 'staff-access', label: 'Manage Staff Access', icon: Shield, show: isAdmin() },
+    { id: 'services', label: 'Services & Offerings', icon: Scissors, show: true },
+    { id: 'financials', label: 'Financials', icon: DollarSign, show: isAdmin() },
+    { id: 'customer-master', label: 'Customer Master', icon: Database, show: true },
+    { id: 'analytics', label: 'Analytics', icon: TrendingUp, show: isAdmin() || hasPermission('can_access_analytics') },
+    { id: 'gallery', label: 'Gallery', icon: FileText, show: true },
+    { id: 'salon', label: 'Salon Settings', icon: Settings, show: isAdmin() || hasPermission('can_edit_salon') }
+  ].filter(item => item.show);
 
   const getStatusIcon = (status) => {
     switch (status) {
@@ -309,6 +328,14 @@ export default function EnhancedSalonDashboard() {
         <div className="backdrop-blur-xl bg-background/80 border-b border-gold/20 p-4 shadow-lg">
           <div className="max-w-7xl mx-auto flex items-center justify-between">
             <div className="flex items-center space-x-4">
+              {/* Hamburger Menu Button */}
+              <button
+                onClick={() => setMenuOpen(!menuOpen)}
+                className="p-2 hover:bg-gold/10 rounded-lg transition-colors"
+              >
+                <Menu className="w-6 h-6 text-gold" />
+              </button>
+              
               <div className="p-3 bg-gradient-to-br from-gold/20 to-gold/5 rounded-xl border border-gold/30">
                 <Scissors className="w-8 h-8 text-gold" />
               </div>
@@ -331,36 +358,68 @@ export default function EnhancedSalonDashboard() {
           </div>
         </div>
 
-        {/* Tabs */}
-        <div className="border-b border-gold/20 backdrop-blur-lg bg-background/60">
-          <div className="max-w-7xl mx-auto flex overflow-x-auto">
-            {[
-              { id: 'queue', label: 'Token Queue', icon: Calendar },
-              { id: 'barbers', label: 'Barbers', icon: Users },
-              { id: 'services', label: 'Offerings', icon: Scissors },
-              { id: 'analytics', label: 'Analytics', icon: TrendingUp },
-              { id: 'gallery', label: 'Gallery', icon: FileText },
-              { id: 'salon', label: 'My Profile', icon: MapPin }
-            ].map((tab) => {
-              const Icon = tab.icon;
-              return (
-                <button
-                  key={tab.id}
-                  onClick={() => setActiveTab(tab.id)}
-                  data-testid={`tab-${tab.id}`}
-                  className={`flex items-center space-x-2 px-6 py-4 border-b-2 transition-all whitespace-nowrap ${
-                    activeTab === tab.id
-                      ? 'border-gold text-gold bg-gold/10'
-                      : 'border-transparent text-muted-foreground hover:text-gold hover:bg-gold/5'
-                  }`}
-                >
-                  <Icon className="w-4 h-4" />
-                  <span className="font-semibold">{tab.label}</span>
-                </button>
-              );
-            })}
-          </div>
-        </div>
+        {/* Hamburger Menu Sidebar */}
+        <AnimatePresence>
+          {menuOpen && (
+            <>
+              {/* Backdrop */}
+              <motion.div
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                onClick={() => setMenuOpen(false)}
+                className="fixed inset-0 bg-black/50 z-40"
+              />
+              
+              {/* Sidebar */}
+              <motion.div
+                initial={{ x: -300 }}
+                animate={{ x: 0 }}
+                exit={{ x: -300 }}
+                transition={{ type: 'spring', damping: 20 }}
+                className="fixed left-0 top-0 bottom-0 w-72 bg-card border-r border-border shadow-2xl z-50 overflow-y-auto"
+              >
+                <div className="p-4 border-b border-border">
+                  <div className="flex items-center justify-between">
+                    <h2 className="text-lg font-semibold">Menu</h2>
+                    <button
+                      onClick={() => setMenuOpen(false)}
+                      className="p-2 hover:bg-muted rounded-lg"
+                    >
+                      <X className="w-5 h-5" />
+                    </button>
+                  </div>
+                  <p className="text-sm text-muted-foreground mt-1">
+                    {salonUser?.role === 'admin' ? 'Admin Access' : 'Staff Access'}
+                  </p>
+                </div>
+
+                <div className="p-2">
+                  {menuItems.map((item) => {
+                    const Icon = item.icon;
+                    return (
+                      <button
+                        key={item.id}
+                        onClick={() => {
+                          setActiveTab(item.id);
+                          setMenuOpen(false);
+                        }}
+                        className={`w-full flex items-center space-x-3 px-4 py-3 rounded-lg transition-all ${
+                          activeTab === item.id
+                            ? 'bg-gold text-black font-semibold'
+                            : 'text-foreground hover:bg-muted'
+                        }`}
+                      >
+                        <Icon className="w-5 h-5" />
+                        <span>{item.label}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </motion.div>
+            </>
+          )}
+        </AnimatePresence>
 
         <div className="max-w-7xl mx-auto p-4">
         {activeTab === 'queue' && (
@@ -625,8 +684,32 @@ export default function EnhancedSalonDashboard() {
           </div>
         )}
 
-        {activeTab === 'barbers' && salonId && (
+        {activeTab === 'staff' && salonId && (
           <BarberManagement salonId={salonId} getAuthHeaders={getAuthHeaders} />
+        )}
+
+        {activeTab === 'staff-access' && salonId && (
+          <StaffAccessManagement />
+        )}
+
+        {activeTab === 'financials' && (
+          <div className="bg-card border border-border rounded-lg p-8 text-center">
+            <DollarSign className="w-16 h-16 text-gold mx-auto mb-4" />
+            <h3 className="text-2xl font-bold mb-2">Financials</h3>
+            <p className="text-muted-foreground">
+              Financial reports, revenue tracking, and expense management coming soon.
+            </p>
+          </div>
+        )}
+
+        {activeTab === 'customer-master' && (
+          <div className="bg-card border border-border rounded-lg p-8 text-center">
+            <Database className="w-16 h-16 text-gold mx-auto mb-4" />
+            <h3 className="text-2xl font-bold mb-2">Customer Master</h3>
+            <p className="text-muted-foreground">
+              Customer database, history, and preferences management coming soon.
+            </p>
+          </div>
         )}
 
         {activeTab === 'services' && (

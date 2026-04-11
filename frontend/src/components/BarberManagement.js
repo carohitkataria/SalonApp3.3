@@ -182,7 +182,17 @@ export default function BarberManagement({ salonId, getAuthHeaders }) {
     customSpecialization: '',
     mobile: '',
     profile_image: '',
-    on_leave: false
+    on_leave: false,
+    is_barber: true,
+    // New employee fields
+    department: '',
+    designation: '',
+    emergency_contact: '',
+    aadhar_number: '',
+    doj: '',
+    dob: '',
+    compensation: '',
+    documents: []
   });
 
   useEffect(() => {
@@ -236,7 +246,17 @@ export default function BarberManagement({ salonId, getAuthHeaders }) {
           category: finalCategory,
           specialization: finalSpecialization,
           profile_image: newBarber.profile_image || null,
-          on_leave: newBarber.on_leave || false
+          on_leave: newBarber.on_leave || false,
+          is_barber: newBarber.is_barber,
+          // New employee fields
+          department: newBarber.department || null,
+          designation: newBarber.designation || null,
+          emergency_contact: newBarber.emergency_contact || null,
+          aadhar_number: newBarber.aadhar_number || null,
+          doj: newBarber.doj || null,
+          dob: newBarber.dob || null,
+          compensation: parseFloat(newBarber.compensation) || null,
+          documents: newBarber.documents || []
         },
         { headers: getAuthHeaders() }
       );
@@ -251,7 +271,16 @@ export default function BarberManagement({ salonId, getAuthHeaders }) {
         customSpecialization: '',
         mobile: '',
         profile_image: '',
-        on_leave: false
+        on_leave: false,
+        is_barber: true,
+        department: '',
+        designation: '',
+        emergency_contact: '',
+        aadhar_number: '',
+        doj: '',
+        dob: '',
+        compensation: '',
+        documents: []
       });
       setShowAddForm(false);
       toast.success('Barber added successfully');
@@ -302,7 +331,7 @@ export default function BarberManagement({ salonId, getAuthHeaders }) {
       <div className="flex items-center justify-between">
         <h2 className="text-xl font-bold text-foreground flex items-center">
           <User className="w-5 h-5 mr-2 text-gold" />
-          Barber Management
+          Staff Management
         </h2>
         <Button 
           onClick={() => setShowAddForm(!showAddForm)}
@@ -310,11 +339,11 @@ export default function BarberManagement({ salonId, getAuthHeaders }) {
           data-testid="add-barber-btn"
         >
           <Plus className="w-4 h-4 mr-2" />
-          Add Barber
+          Add Staff
         </Button>
       </div>
 
-      {/* Add New Barber Form */}
+      {/* Add New Staff Form */}
       <AnimatePresence>
         {showAddForm && (
           <motion.form
@@ -324,7 +353,7 @@ export default function BarberManagement({ salonId, getAuthHeaders }) {
             onSubmit={handleAddBarber}
             className="bg-card border border-border rounded-lg p-6 space-y-4"
           >
-            <h3 className="font-bold text-card-foreground">Add New Barber</h3>
+            <h3 className="font-bold text-card-foreground">Add New Staff</h3>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
                 <Label htmlFor="name">Name *</Label>
@@ -333,7 +362,7 @@ export default function BarberManagement({ salonId, getAuthHeaders }) {
                   data-testid="barber-name-input"
                   value={newBarber.name}
                   onChange={(e) => setNewBarber({ ...newBarber, name: e.target.value })}
-                  placeholder="Barber name"
+                  placeholder="Staff member name"
                   required
                 />
               </div>
@@ -418,7 +447,96 @@ export default function BarberManagement({ salonId, getAuthHeaders }) {
                 onChange={(e) => setNewBarber({ ...newBarber, profile_image: e.target.value })}
                 placeholder="https://example.com/image.jpg"
               />
-              <p className="text-xs text-muted-foreground mt-1">Enter a URL for the barber's profile photo</p>
+              <p className="text-xs text-muted-foreground mt-1">Enter a URL for the staff's profile photo</p>
+            </div>
+
+            {/* New Employee Fields */}
+            <div className="border-t border-border pt-4">
+              <h4 className="font-semibold mb-3 text-foreground">Employee Details</h4>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <Label htmlFor="department">Department</Label>
+                  <Input
+                    id="department"
+                    value={newBarber.department}
+                    onChange={(e) => setNewBarber({ ...newBarber, department: e.target.value })}
+                    placeholder="e.g., Hairstyling, Spa, Reception"
+                  />
+                </div>
+                <div>
+                  <Label htmlFor="designation">Designation</Label>
+                  <Input
+                    id="designation"
+                    value={newBarber.designation}
+                    onChange={(e) => setNewBarber({ ...newBarber, designation: e.target.value })}
+                    placeholder="e.g., Senior Stylist, Receptionist"
+                  />
+                </div>
+                <div>
+                  <Label htmlFor="emergency_contact">Emergency Contact Number</Label>
+                  <Input
+                    id="emergency_contact"
+                    value={newBarber.emergency_contact}
+                    onChange={(e) => setNewBarber({ ...newBarber, emergency_contact: e.target.value.replace(/\D/g, '').slice(0, 10) })}
+                    placeholder="10-digit mobile"
+                  />
+                </div>
+                <div>
+                  <Label htmlFor="aadhar_number">Aadhar Number</Label>
+                  <Input
+                    id="aadhar_number"
+                    value={newBarber.aadhar_number}
+                    onChange={(e) => setNewBarber({ ...newBarber, aadhar_number: e.target.value.replace(/\D/g, '').slice(0, 12) })}
+                    placeholder="12-digit Aadhar"
+                  />
+                </div>
+                <div>
+                  <Label htmlFor="doj">Date of Joining</Label>
+                  <Input
+                    id="doj"
+                    type="date"
+                    value={newBarber.doj}
+                    onChange={(e) => setNewBarber({ ...newBarber, doj: e.target.value })}
+                  />
+                </div>
+                <div>
+                  <Label htmlFor="dob">Date of Birth</Label>
+                  <Input
+                    id="dob"
+                    type="date"
+                    value={newBarber.dob}
+                    onChange={(e) => setNewBarber({ ...newBarber, dob: e.target.value })}
+                  />
+                </div>
+                <div>
+                  <Label htmlFor="compensation">Compensation (Monthly)</Label>
+                  <div className="flex items-center">
+                    <span className="text-sm mr-2">₹</span>
+                    <Input
+                      id="compensation"
+                      type="number"
+                      value={newBarber.compensation}
+                      onChange={(e) => setNewBarber({ ...newBarber, compensation: e.target.value })}
+                      placeholder="Enter monthly salary"
+                      min="0"
+                    />
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Visibility Checkbox */}
+            <div className="flex items-center space-x-2 bg-muted/50 p-3 rounded-lg">
+              <Checkbox
+                id="is_barber"
+                checked={newBarber.is_barber}
+                onCheckedChange={(checked) => setNewBarber({ ...newBarber, is_barber: checked })}
+                className="data-[state=checked]:bg-gold data-[state=checked]:border-gold"
+              />
+              <Label htmlFor="is_barber" className="cursor-pointer">
+                <span className="font-semibold">Mark as Barber</span>
+                <p className="text-xs text-muted-foreground">Only staff marked as barbers will be visible to customers for booking</p>
+              </Label>
             </div>
 
             {/* On Leave Checkbox */}
@@ -429,7 +547,7 @@ export default function BarberManagement({ salonId, getAuthHeaders }) {
                 onCheckedChange={(checked) => setNewBarber({ ...newBarber, on_leave: checked })}
               />
               <Label htmlFor="on_leave" className="cursor-pointer">
-                Barber is on leave (won't be shown to customers for booking)
+                Staff is on leave (won't be shown to customers for booking)
               </Label>
             </div>
 
@@ -439,7 +557,7 @@ export default function BarberManagement({ salonId, getAuthHeaders }) {
               </Button>
               <Button type="submit" className="bg-gold text-black hover:bg-gold/90" data-testid="save-barber-btn">
                 <Save className="w-4 h-4 mr-2" />
-                Save Barber
+                Save Staff
               </Button>
             </div>
           </motion.form>
@@ -467,8 +585,8 @@ export default function BarberManagement({ salonId, getAuthHeaders }) {
         {barbers.length === 0 && (
           <div className="text-center py-12 bg-card border border-border rounded-lg">
             <User className="w-16 h-16 text-muted-foreground mx-auto mb-4" />
-            <p className="text-muted-foreground">No barbers added yet</p>
-            <p className="text-sm text-muted-foreground mt-2">Click "Add Barber" to get started</p>
+            <p className="text-muted-foreground">No staff members added yet</p>
+            <p className="text-sm text-muted-foreground mt-2">Click "Add Staff" to get started</p>
           </div>
         )}
       </div>
