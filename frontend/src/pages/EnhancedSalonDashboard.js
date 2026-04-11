@@ -11,7 +11,6 @@ import { Input } from '@/components/ui/input';
 import { toast } from 'sonner';
 import ThemeToggle from '@/components/ThemeToggle';
 import BarberManagement from '@/components/BarberManagement';
-import StaffAccessManagement from '@/components/StaffAccessManagement';
 import CustomerMaster from '@/components/CustomerMaster';
 import OfferingsModule from '@/components/OfferingsModule';
 import MyProfile from '@/components/MyProfile';
@@ -303,7 +302,6 @@ export default function EnhancedSalonDashboard() {
   const menuItems = [
     { id: 'queue', label: 'Token Queue', icon: Calendar, show: true },
     { id: 'staff', label: 'Staff Management', icon: Users, show: true },
-    { id: 'staff-access', label: 'Manage Staff Access', icon: Shield, show: checkIsAdmin() },
     { id: 'services', label: 'Services & Offerings', icon: Scissors, show: true },
     { id: 'financials', label: 'Financials', icon: DollarSign, show: checkIsAdmin() },
     { id: 'customer-master', label: 'Customer Master', icon: Database, show: true },
@@ -735,10 +733,6 @@ export default function EnhancedSalonDashboard() {
 
         {activeTab === 'staff' && salonId && (
           <BarberManagement salonId={salonId} getAuthHeaders={getAuthHeaders} />
-        )}
-
-        {activeTab === 'staff-access' && salonId && (
-          <StaffAccessManagement />
         )}
 
         {activeTab === 'customer-master' && (
