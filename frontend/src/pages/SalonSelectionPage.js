@@ -3,11 +3,11 @@ import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import axios from 'axios';
-import { MapContainer, TileLayer, Marker, Popup } from 'react-leaflet';
+import { MapContainer, TileLayer, Marker, Popup, Tooltip, useMap } from 'react-leaflet';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { 
-  MapPin, List, Navigation, Scissors, Search, Star, ChevronLeft, ChevronRight, Map as MapIcon
+  MapPin, List, Navigation, Scissors, Search, Star, ChevronLeft, ChevronRight, Map as MapIcon, Crosshair
 } from 'lucide-react';
 import { toast } from 'sonner';
 import L from 'leaflet';
@@ -25,6 +25,103 @@ L.Icon.Default.mergeOptions({
   iconUrl: require('leaflet/dist/images/marker-icon.png'),
   shadowUrl: require('leaflet/dist/images/marker-shadow.png'),
 });
+
+// Custom user location icon (blue pulsing dot)
+const userLocationIcon = L.divIcon({
+  className: 'custom-user-marker',
+  html: `<div style="
+    width: 20px; height: 20px; 
+    background: #3b82f6; 
+    border: 3px solid white; 
+    border-radius: 50%; 
+    box-shadow: 0 0 0 8px rgba(59,130,246,0.25), 0 2px 6px rgba(0,0,0,0.3);
+  "></div>`,
+  iconSize: [20, 20],
+  iconAnchor: [10, 10],
+  popupAnchor: [0, -12],
+});
+
+// Custom salon marker icon (gold with label)
+const createSalonIcon = (name) => L.divIcon({
+  className: 'custom-salon-marker',
+  html: `<div style="display:flex;flex-direction:column;align-items:center;min-width:max-content;">
+    <div style="
+      background: #b8860b; 
+      color: white; 
+      font-size: 10px; 
+      font-weight: 700; 
+      padding: 2px 6px; 
+      border-radius: 4px; 
+      white-space: nowrap; 
+      box-shadow: 0 2px 6px rgba(0,0,0,0.3);
+      max-width: 140px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    ">${name}</div>
+    <div style="
+      width: 0; height: 0; 
+      border-left: 6px solid transparent; 
+      border-right: 6px solid transparent; 
+      border-top: 6px solid #b8860b;
+    "></div>
+    <div style="
+      width: 10px; height: 10px; 
+      background: #b8860b; 
+      border: 2px solid white; 
+      border-radius: 50%; 
+      box-shadow: 0 1px 4px rgba(0,0,0,0.3);
+      margin-top: -2px;
+    "></div>
+  </div>`,
+  iconSize: [120, 40],
+  iconAnchor: [60, 40],
+  popupAnchor: [0, -42],
+});
+
+// Component to fly to user location
+function FlyToMyLocation({ userLocation }) {
+  const map = useMap();
+  
+  const handleClick = () => {
+    if (userLocation) {
+      map.flyTo([userLocation.lat, userLocation.lng], 14, { duration: 1.5 });
+    }
+  };
+
+  return (
+    <div className="leaflet-top leaflet-right" style={{ top: '10px', right: '10px' }}>
+      <div className="leaflet-control">
+        <button
+          onClick={handleClick}
+          style={{
+            background: 'white',
+            border: '2px solid rgba(0,0,0,0.2)',
+            borderRadius: '6px',
+            padding: '6px 10px',
+            cursor: 'pointer',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '4px',
+            fontSize: '12px',
+            fontWeight: '600',
+            color: '#3b82f6',
+            boxShadow: '0 2px 6px rgba(0,0,0,0.15)',
+          }}
+          title="Go to my location"
+        >
+          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#3b82f6" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+            <circle cx="12" cy="12" r="4"/>
+            <line x1="12" y1="2" x2="12" y2="6"/>
+            <line x1="12" y1="18" x2="12" y2="22"/>
+            <line x1="2" y1="12" x2="6" y2="12"/>
+            <line x1="18" y1="12" x2="22" y2="12"/>
+          </svg>
+          My Location
+        </button>
+      </div>
+    </div>
+  );
+}
 
 export default function SalonSelectionPage() {
   const navigate = useNavigate();
@@ -562,10 +659,15 @@ export default function SalonSelectionPage() {
             )}
           </>
         ) : (
-          <div className="h-[600px] rounded-lg overflow-hidden">
-            {userLocation && (
+          <div className="h-[600px] rounded-lg overflow-hidden relative">
+            {(userLocation || salons.length > 0) ? (
               <MapContainer
-                center={[userLocation.lat, userLocation.lng]}
+                center={userLocation 
+                  ? [userLocation.lat, userLocation.lng] 
+                  : salons.length > 0 
+                    ? [salons[0].latitude, salons[0].longitude]
+                    : [12.9716, 77.5946]
+                }
                 zoom={13}
                 style={{ height: '100%', width: '100%' }}
               >
@@ -574,28 +676,48 @@ export default function SalonSelectionPage() {
                   url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
                 />
                 
-                <Marker position={[userLocation.lat, userLocation.lng]}>
-                  <Popup>Your Location</Popup>
-                </Marker>
+                {userLocation && <FlyToMyLocation userLocation={userLocation} />}
+                
+                {/* User location marker - blue dot */}
+                {userLocation && (
+                  <Marker position={[userLocation.lat, userLocation.lng]} icon={userLocationIcon}>
+                    <Popup>
+                      <div style={{textAlign:'center', fontWeight:'600', color:'#3b82f6'}}>
+                        📍 You are here
+                      </div>
+                    </Popup>
+                  </Marker>
+                )}
 
+                {/* Salon markers - gold with name label */}
                 {salons.map((salon) => (
                   <Marker
                     key={salon.id}
                     position={[salon.latitude, salon.longitude]}
+                    icon={createSalonIcon(salon.salon_name)}
                     eventHandlers={{
                       click: () => handleSelectSalon(salon)
                     }}
                   >
                     <Popup>
-                      <div className="text-center">
-                        <strong>{salon.salon_name}</strong>
-                        <p className="text-sm">{salon.address}</p>
-                        {salon.distance && <p className="text-xs text-gold">{salon.distance} km away</p>}
+                      <div className="text-center" style={{minWidth:'120px'}}>
+                        <strong style={{fontSize:'14px'}}>{salon.salon_name}</strong>
+                        {salon.gender_tag && <span style={{fontSize:'10px', color:'#888'}}> ({salon.gender_tag})</span>}
+                        <p style={{fontSize:'12px', color:'#666', margin:'4px 0'}}>{salon.address}</p>
+                        {salon.distance && <p style={{fontSize:'11px', color:'#b8860b', fontWeight:'600'}}>{salon.distance} km away</p>}
+                        <p style={{fontSize:'11px', color:'#3b82f6', marginTop:'4px', cursor:'pointer'}}>Tap to view →</p>
                       </div>
                     </Popup>
                   </Marker>
                 ))}
               </MapContainer>
+            ) : (
+              <div className="h-full flex items-center justify-center bg-muted/30 rounded-lg">
+                <div className="text-center">
+                  <MapPin className="w-12 h-12 text-muted-foreground mx-auto mb-3 opacity-40" />
+                  <p className="text-muted-foreground font-medium">No salons to display on map</p>
+                </div>
+              </div>
             )}
           </div>
         )}
