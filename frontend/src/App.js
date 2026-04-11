@@ -59,6 +59,7 @@ function App() {
                 <Route path="/salon/login" element={<OTPLoginPage />} />
                 <Route path="/salon/signup" element={<SalonSignupPage />} />
                 <Route path="/salon/dashboard" element={<EnhancedSalonDashboard />} />
+                <Route path="/salon/staff/:staffId" element={<StaffProfilePage />} />
                 
                 {/* Redirect old routes */}
                 <Route path="/admin/login" element={<Navigate to="/salon/login" replace />} />

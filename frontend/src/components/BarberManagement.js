@@ -166,6 +166,7 @@ const SPECIALIZATION_OPTIONS = [
 ];
 
 export default function BarberManagement({ salonId, getAuthHeaders }) {
+  const navigate = useNavigate();
   const [barbers, setBarbers] = useState([]);
   const [services, setServices] = useState([]);
   const [loading, setLoading] = useState(true);
