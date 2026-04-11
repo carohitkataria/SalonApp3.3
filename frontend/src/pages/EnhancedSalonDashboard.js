@@ -20,7 +20,7 @@ import {
   Scissors, LogOut, ChevronRight, SkipForward, RotateCcw, XCircle,
   Clock, User, Phone, Bell, MapPin, Settings, CheckCircle, Calendar,
   Users, ArrowLeft, FileText, Download, Plus, X, TrendingUp, Menu,
-  Shield, DollarSign, Database
+  Shield, DollarSign, Database, Pin, PinOff
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
@@ -41,6 +41,9 @@ export default function EnhancedSalonDashboard() {
   const [filter, setFilter] = useState('all');
   const [date] = useState(new Date().toISOString().split('T')[0]);
   const [menuOpen, setMenuOpen] = useState(false);
+  const [menuPinned, setMenuPinned] = useState(() => {
+    return localStorage.getItem('menu_pinned') === 'true';
+  });
   
   // Add Services Dialog State
   const [addServicesDialog, setAddServicesDialog] = useState(false);
@@ -382,16 +385,18 @@ export default function EnhancedSalonDashboard() {
 
         {/* Hamburger Menu Sidebar */}
         <AnimatePresence>
-          {menuOpen && (
+          {(menuOpen || menuPinned) && (
             <>
-              {/* Backdrop */}
-              <motion.div
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                exit={{ opacity: 0 }}
-                onClick={() => setMenuOpen(false)}
-                className="fixed inset-0 bg-black/50 z-40"
-              />
+              {/* Backdrop - only show if not pinned */}
+              {!menuPinned && (
+                <motion.div
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  exit={{ opacity: 0 }}
+                  onClick={() => setMenuOpen(false)}
+                  className="fixed inset-0 bg-black/50 z-40"
+                />
+              )}
               
               {/* Sidebar */}
               <motion.div
@@ -399,17 +404,39 @@ export default function EnhancedSalonDashboard() {
                 animate={{ x: 0 }}
                 exit={{ x: -300 }}
                 transition={{ type: 'spring', damping: 20 }}
-                className="fixed left-0 top-0 bottom-0 w-72 bg-card border-r border-border shadow-2xl z-50 overflow-y-auto"
+                className={`fixed left-0 top-0 bottom-0 w-72 bg-card border-r border-border shadow-2xl z-50 overflow-y-auto ${
+                  menuPinned ? 'sticky' : ''
+                }`}
               >
                 <div className="p-4 border-b border-border">
                   <div className="flex items-center justify-between">
                     <h2 className="text-lg font-semibold">Menu</h2>
-                    <button
-                      onClick={() => setMenuOpen(false)}
-                      className="p-2 hover:bg-muted rounded-lg"
-                    >
-                      <X className="w-5 h-5" />
-                    </button>
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={() => {
+                          const newPinned = !menuPinned;
+                          setMenuPinned(newPinned);
+                          localStorage.setItem('menu_pinned', newPinned);
+                          if (newPinned) setMenuOpen(true);
+                        }}
+                        className={`p-2 rounded-lg transition-colors ${
+                          menuPinned 
+                            ? 'bg-gold/20 text-gold hover:bg-gold/30' 
+                            : 'hover:bg-muted'
+                        }`}
+                        title={menuPinned ? 'Unpin menu' : 'Pin menu'}
+                      >
+                        {menuPinned ? <Pin className="w-5 h-5" /> : <PinOff className="w-5 h-5" />}
+                      </button>
+                      {!menuPinned && (
+                        <button
+                          onClick={() => setMenuOpen(false)}
+                          className="p-2 hover:bg-muted rounded-lg"
+                        >
+                          <X className="w-5 h-5" />
+                        </button>
+                      )}
+                    </div>
                   </div>
                   <p className="text-sm text-muted-foreground mt-1">
                     {salonUser?.role === 'admin' ? 'Admin Access' : 'Staff Access'}
@@ -424,7 +451,7 @@ export default function EnhancedSalonDashboard() {
                         key={item.id}
                         onClick={() => {
                           setActiveTab(item.id);
-                          setMenuOpen(false);
+                          if (!menuPinned) setMenuOpen(false);
                         }}
                         className={`w-full flex items-center space-x-3 px-4 py-3 rounded-lg transition-all ${
                           activeTab === item.id

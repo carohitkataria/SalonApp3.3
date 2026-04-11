@@ -6,9 +6,10 @@ import { Label } from '@/components/ui/label';
 import { Checkbox } from '@/components/ui/checkbox';
 import { toast } from 'sonner';
 import {
-  Users, Search, ArrowLeft, Plus, Calendar, Package, Percent, IndianRupee, Save
+  Users, Search, ArrowLeft, Plus, Calendar, Package, Percent, IndianRupee, Save, Crown, Wallet, CreditCard
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
+import MembershipManagement from './MembershipManagement';
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
 const API = `${BACKEND_URL}/api`;
@@ -18,9 +19,12 @@ export default function CustomerMaster({ salonId, getAuthHeaders }) {
   const [selectedCustomer, setSelectedCustomer] = useState(null);
   const [customerBookings, setCustomerBookings] = useState([]);
   const [customerPackages, setCustomerPackages] = useState([]);
+  const [customerMembership, setCustomerMembership] = useState(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [loading, setLoading] = useState(false);
   const [showPackageForm, setShowPackageForm] = useState(false);
+  const [showMembershipModal, setShowMembershipModal] = useState(false);
+  const [showMembershipManagement, setShowMembershipManagement] = useState(false);
   const [services, setServices] = useState([]);
   
   const [packageForm, setPackageForm] = useState({
@@ -173,6 +177,28 @@ export default function CustomerMaster({ salonId, getAuthHeaders }) {
     c.phone?.includes(searchQuery)
   );
 
+  // Show membership management view
+  if (showMembershipManagement) {
+    return (
+      <div className="space-y-6">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center space-x-3">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setShowMembershipManagement(false)}
+            >
+              <ArrowLeft className="w-4 h-4 mr-2" />
+              Back to Customers
+            </Button>
+            <h2 className="text-2xl font-bold">Membership Plans</h2>
+          </div>
+        </div>
+        <MembershipManagement salonId={salonId} getAuthHeaders={getAuthHeaders} />
+      </div>
+    );
+  }
+
   if (selectedCustomer) {
     return (
       <div className="space-y-6">
@@ -192,13 +218,23 @@ export default function CustomerMaster({ salonId, getAuthHeaders }) {
               <p className="text-muted-foreground">{selectedCustomer.phone}</p>
             </div>
           </div>
-          <Button
-            onClick={() => setShowPackageForm(!showPackageForm)}
-            className="bg-gold text-black hover:bg-gold/90"
-          >
-            <Package className="w-4 h-4 mr-2" />
-            {showPackageForm ? 'Cancel' : 'Create Custom Package'}
-          </Button>
+          <div className="flex gap-2">
+            <Button
+              onClick={() => setShowMembershipModal(true)}
+              variant="outline"
+              className="border-gold text-gold hover:bg-gold/10"
+            >
+              <Crown className="w-4 h-4 mr-2" />
+              Sell Membership
+            </Button>
+            <Button
+              onClick={() => setShowPackageForm(!showPackageForm)}
+              className="bg-gold text-black hover:bg-gold/90"
+            >
+              <Package className="w-4 h-4 mr-2" />
+              {showPackageForm ? 'Cancel' : 'Create Custom Package'}
+            </Button>
+          </div>
         </div>
 
         {/* Custom Package Form */}
@@ -390,6 +426,14 @@ export default function CustomerMaster({ salonId, getAuthHeaders }) {
           <Users className="w-6 h-6 text-gold" />
           <h2 className="text-2xl font-bold">Customer Master</h2>
         </div>
+        <Button
+          onClick={() => setShowMembershipManagement(true)}
+          variant="outline"
+          className="border-gold text-gold hover:bg-gold/10"
+        >
+          <Crown className="w-4 h-4 mr-2" />
+          Manage Memberships
+        </Button>
       </div>
 
       {/* Search */}
