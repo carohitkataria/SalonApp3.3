@@ -31,13 +31,16 @@ export default function SalonSelectionPage() {
   const { isUserLoggedIn } = useAuth();
   
   const [salons, setSalons] = useState([]);
+  const [allSalons, setAllSalons] = useState([]);
   const [cities, setCities] = useState([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCity, setSelectedCity] = useState('');
-  const [view, setView] = useState('grid'); // 'grid' or 'map'
+  const [view, setView] = useState('list'); // 'list', 'chips', or 'map'
   const [userLocation, setUserLocation] = useState(null);
   const [loading, setLoading] = useState(true);
   const [searchType, setSearchType] = useState('nearby'); // 'nearby', 'name', 'city'
+  const [citySearchQuery, setCitySearchQuery] = useState('');
+  const [showCityDropdown, setShowCityDropdown] = useState(false);
 
   useEffect(() => {
     if (!isUserLoggedIn) {
@@ -108,6 +111,7 @@ export default function SalonSelectionPage() {
     try {
       const response = await axios.get(`${API}/salons`);
       setSalons(response.data);
+      setAllSalons(response.data);
     } catch (error) {
       console.error('Error fetching salons:', error);
       toast.error('Failed to load salons');
@@ -118,51 +122,104 @@ export default function SalonSelectionPage() {
 
   const handleSearchByName = async (query) => {
     setSearchQuery(query);
-    if (query.length < 2) {
-      if (userLocation) {
+    // Client-side filtering for instant results
+    if (!query || query.length < 1) {
+      // Reset to all/nearby salons with city filter applied
+      if (selectedCity) {
+        const filtered = allSalons.filter(s => 
+          s.city && s.city.toLowerCase().includes(selectedCity.toLowerCase())
+        );
+        setSalons(filtered);
+        setSearchType('city');
+      } else if (userLocation) {
         fetchNearbySalons(userLocation.lat, userLocation.lng);
       } else {
-        fetchAllSalons();
+        setSalons(allSalons);
+        setSearchType('nearby');
       }
       return;
     }
 
-    setLoading(true);
     setSearchType('name');
-    try {
-      const response = await axios.get(`${API}/salons/search?name=${query}`);
-      setSalons(response.data.salons || []);
-    } catch (error) {
-      console.error('Error searching salons:', error);
-      toast.error('Failed to search salons');
-    } finally {
-      setLoading(false);
+    // Filter from allSalons for instant response, plus apply city filter if active
+    let filtered = allSalons.filter(s => 
+      s.salon_name.toLowerCase().includes(query.toLowerCase())
+    );
+    if (selectedCity) {
+      filtered = filtered.filter(s => 
+        s.city && s.city.toLowerCase().includes(selectedCity.toLowerCase())
+      );
+    }
+    setSalons(filtered);
+
+    // Also fire server search for comprehensive results
+    if (query.length >= 2) {
+      try {
+        let url = `${API}/salons/search?name=${encodeURIComponent(query)}`;
+        if (selectedCity) {
+          url += `&city=${encodeURIComponent(selectedCity)}`;
+        }
+        const response = await axios.get(url);
+        setSalons(response.data.salons || []);
+      } catch (error) {
+        // Client-side results are already shown
+      }
     }
   };
 
   const handleCityFilter = async (city) => {
     setSelectedCity(city);
+    setShowCityDropdown(false);
+    setCitySearchQuery('');
+    
     if (!city) {
-      if (userLocation) {
+      if (searchQuery) {
+        // Re-apply name search without city filter
+        const filtered = allSalons.filter(s => 
+          s.salon_name.toLowerCase().includes(searchQuery.toLowerCase())
+        );
+        setSalons(filtered);
+        setSearchType('name');
+      } else if (userLocation) {
         fetchNearbySalons(userLocation.lat, userLocation.lng);
       } else {
-        fetchAllSalons();
+        setSalons(allSalons);
+        setSearchType('nearby');
       }
       return;
     }
 
-    setLoading(true);
     setSearchType('city');
+    // Client-side first
+    let filtered = allSalons.filter(s => 
+      s.city && s.city.toLowerCase().includes(city.toLowerCase())
+    );
+    if (searchQuery) {
+      filtered = filtered.filter(s => 
+        s.salon_name.toLowerCase().includes(searchQuery.toLowerCase())
+      );
+    }
+    setSalons(filtered);
+
+    // Also server-side
     try {
-      const response = await axios.get(`${API}/salons/by-city?city=${city}`);
-      setSalons(response.data.salons || []);
+      let url = `${API}/salons/by-city?city=${encodeURIComponent(city)}`;
+      const response = await axios.get(url);
+      let results = response.data.salons || [];
+      if (searchQuery) {
+        results = results.filter(s => 
+          s.salon_name.toLowerCase().includes(searchQuery.toLowerCase())
+        );
+      }
+      setSalons(results);
     } catch (error) {
-      console.error('Error filtering by city:', error);
-      toast.error('Failed to filter salons');
-    } finally {
-      setLoading(false);
+      // Client-side results are already shown  
     }
   };
+
+  const filteredCities = cities.filter(city => 
+    city.toLowerCase().includes(citySearchQuery.toLowerCase())
+  );
 
   const handleSelectSalon = (salon) => {
     navigate(`/salon/${salon.id}`);
@@ -189,58 +246,56 @@ export default function SalonSelectionPage() {
       e.stopPropagation();
       setCurrentImageIndex(index);
     };
+
+    const hasRating = salon.rating && salon.rating > 0 && salon.total_reviews > 0;
       
     return (
       <motion.div
         initial={{ opacity: 0, scale: 0.95 }}
         animate={{ opacity: 1, scale: 1 }}
         whileHover={{ scale: 1.02 }}
-        className="bg-card rounded-2xl overflow-hidden shadow-lg hover:shadow-2xl transition-all border border-border cursor-pointer"
+        className="bg-card rounded-xl overflow-hidden shadow-md hover:shadow-xl transition-all border border-border cursor-pointer"
         onClick={() => handleSelectSalon(salon)}
       >
         {/* Image Carousel */}
-        <div className="relative h-32 overflow-hidden group">
+        <div className="relative h-24 sm:h-28 overflow-hidden group">
           <img 
             src={images[currentImageIndex]}
             alt={salon.salon_name}
             className="w-full h-full object-cover transition-opacity duration-300"
           />
           {salon.logo_url && (
-            <div className="absolute top-2 left-2 w-10 h-10 bg-white rounded-full p-1 shadow-lg">
+            <div className="absolute top-1.5 left-1.5 w-8 h-8 bg-white rounded-full p-0.5 shadow-lg">
               <img 
                 src={salon.logo_url}
                 alt="Logo"
-                className="w-full h-full object-contain"
+                className="w-full h-full object-contain rounded-full"
               />
             </div>
           )}
           
-          {/* Carousel Controls - Show only if multiple images */}
+          {/* Carousel Controls */}
           {images.length > 1 && (
             <>
               <button
                 onClick={prevImage}
-                className="absolute left-2 top-1/2 -translate-y-1/2 bg-black/50 text-white p-1 rounded-full opacity-0 group-hover:opacity-100 transition-opacity"
+                className="absolute left-1 top-1/2 -translate-y-1/2 bg-black/50 text-white p-0.5 rounded-full opacity-0 group-hover:opacity-100 transition-opacity"
               >
-                <ChevronLeft className="w-4 h-4" />
+                <ChevronLeft className="w-3 h-3" />
               </button>
               <button
                 onClick={nextImage}
-                className="absolute right-2 top-1/2 -translate-y-1/2 bg-black/50 text-white p-1 rounded-full opacity-0 group-hover:opacity-100 transition-opacity"
+                className="absolute right-1 top-1/2 -translate-y-1/2 bg-black/50 text-white p-0.5 rounded-full opacity-0 group-hover:opacity-100 transition-opacity"
               >
-                <ChevronRight className="w-4 h-4" />
+                <ChevronRight className="w-3 h-3" />
               </button>
-              
-              {/* Indicator Dots */}
-              <div className="absolute bottom-2 left-1/2 -translate-x-1/2 flex space-x-1">
+              <div className="absolute bottom-1 left-1/2 -translate-x-1/2 flex space-x-1">
                 {images.map((_, index) => (
                   <button
                     key={index}
                     onClick={(e) => goToImage(e, index)}
-                    className={`w-1.5 h-1.5 rounded-full transition-all ${
-                      index === currentImageIndex 
-                        ? 'bg-white w-3' 
-                        : 'bg-white/50'
+                    className={`w-1 h-1 rounded-full transition-all ${
+                      index === currentImageIndex ? 'bg-white w-2' : 'bg-white/50'
                     }`}
                   />
                 ))}
@@ -250,25 +305,78 @@ export default function SalonSelectionPage() {
         </div>
 
         {/* Content */}
-        <div className="p-3">
-          <div className="mb-2">
-            <h3 className="font-bold text-base text-foreground mb-1">
+        <div className="p-2.5">
+          <h3 className="font-bold text-sm text-foreground mb-0.5 truncate">
+            {salon.salon_name} {salon.gender_tag && `(${salon.gender_tag})`}
+          </h3>
+          <p className="text-[10px] text-muted-foreground flex items-center mb-1.5 truncate">
+            <MapPin className="w-2.5 h-2.5 mr-0.5 flex-shrink-0" />
+            {salon.address}
+            {salon.distance && ` | ${salon.distance} Kms`}
+          </p>
+          <div className="flex items-center space-x-1">
+            {hasRating ? (
+              <div className="flex items-center bg-green-600 text-white px-1.5 py-0.5 rounded text-xs">
+                <Star className="w-2.5 h-2.5 mr-0.5 fill-white" />
+                <span className="font-bold">{salon.rating}</span>
+              </div>
+            ) : (
+              <span className="text-[10px] text-muted-foreground">No ratings yet</span>
+            )}
+            {salon.city && (
+              <span className="text-[10px] text-muted-foreground bg-muted px-1.5 py-0.5 rounded">{salon.city}</span>
+            )}
+          </div>
+        </div>
+      </motion.div>
+    );
+  };
+
+  const SalonListItem = ({ salon }) => {
+    const image = salon.logo_url || 
+      (salon.photo_gallery && salon.photo_gallery.length > 0 ? salon.photo_gallery[0] : null) ||
+      'https://images.pexels.com/photos/3993293/pexels-photo-3993293.jpeg?auto=compress&cs=tinysrgb&w=400';
+    const hasRating = salon.rating && salon.rating > 0 && salon.total_reviews > 0;
+
+    return (
+      <motion.div
+        initial={{ opacity: 0, x: -10 }}
+        animate={{ opacity: 1, x: 0 }}
+        className="bg-card rounded-xl overflow-hidden border border-border cursor-pointer hover:border-gold/50 hover:shadow-md transition-all"
+        onClick={() => handleSelectSalon(salon)}
+      >
+        <div className="flex items-center p-3 gap-3">
+          <div className="w-14 h-14 flex-shrink-0 rounded-lg overflow-hidden">
+            <img 
+              src={image}
+              alt={salon.salon_name}
+              className="w-full h-full object-cover"
+            />
+          </div>
+          <div className="flex-1 min-w-0">
+            <h3 className="font-bold text-sm text-foreground truncate">
               {salon.salon_name} {salon.gender_tag && `(${salon.gender_tag})`}
             </h3>
-            <p className="text-xs text-muted-foreground flex items-center">
-              <MapPin className="w-3 h-3 mr-1" />
+            <p className="text-xs text-muted-foreground flex items-center truncate">
+              <MapPin className="w-3 h-3 mr-0.5 flex-shrink-0" />
               {salon.address}
               {salon.distance && ` | ${salon.distance} Kms`}
             </p>
-          </div>
-
-          {/* Rating */}
-          <div className="flex items-center space-x-2">
-            <div className="flex items-center bg-green-600 text-white px-2 py-1 rounded">
-              <span className="w-2 h-2 bg-white rounded-full mr-1"></span>
-              <span className="text-sm font-bold">{salon.rating || 4.5}</span>
+            <div className="flex items-center gap-2 mt-1">
+              {hasRating ? (
+                <div className="flex items-center bg-green-600 text-white px-1.5 py-0.5 rounded text-xs">
+                  <Star className="w-2.5 h-2.5 mr-0.5 fill-white" />
+                  <span className="font-bold">{salon.rating}</span>
+                </div>
+              ) : (
+                <span className="text-[10px] text-muted-foreground">No ratings yet</span>
+              )}
+              {salon.city && (
+                <span className="text-[10px] text-muted-foreground bg-muted px-1.5 py-0.5 rounded">{salon.city}</span>
+              )}
             </div>
           </div>
+          <ChevronRight className="w-4 h-4 text-muted-foreground flex-shrink-0" />
         </div>
       </motion.div>
     );
@@ -292,14 +400,22 @@ export default function SalonSelectionPage() {
         <div className="max-w-7xl mx-auto p-4">
           <div className="flex items-center justify-between mb-4 ml-14">
             <SalonHubLogo size={36} showText={true} />
-            <div className="flex space-x-2">
+            <div className="flex space-x-1">
               <Button
-                variant={view === 'grid' ? 'default' : 'outline'}
+                variant={view === 'list' ? 'default' : 'outline'}
                 size="sm"
-                onClick={() => setView('grid')}
-                className={view === 'grid' ? 'bg-gold text-black' : ''}
+                onClick={() => setView('list')}
+                className={view === 'list' ? 'bg-gold text-black' : ''}
               >
                 <List className="w-4 h-4" />
+              </Button>
+              <Button
+                variant={view === 'chips' ? 'default' : 'outline'}
+                size="sm"
+                onClick={() => setView('chips')}
+                className={view === 'chips' ? 'bg-gold text-black' : ''}
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>
               </Button>
               <Button
                 variant={view === 'map' ? 'default' : 'outline'}
@@ -325,16 +441,51 @@ export default function SalonSelectionPage() {
                   className="pl-10"
                 />
               </div>
-              <select
-                value={selectedCity}
-                onChange={(e) => handleCityFilter(e.target.value)}
-                className="px-4 py-2 bg-background border border-border rounded-md text-foreground"
-              >
-                <option value="">All Cities</option>
-                {cities.map(city => (
-                  <option key={city} value={city}>{city}</option>
-                ))}
-              </select>
+              {/* Searchable City Dropdown */}
+              <div className="relative">
+                <button
+                  onClick={() => setShowCityDropdown(!showCityDropdown)}
+                  className="px-3 py-2 bg-background border border-border rounded-md text-foreground text-sm flex items-center gap-1 min-w-[120px] whitespace-nowrap"
+                >
+                  <MapPin className="w-3 h-3 flex-shrink-0" />
+                  {selectedCity || 'All Cities'}
+                  <ChevronRight className={`w-3 h-3 transition-transform ${showCityDropdown ? 'rotate-90' : ''}`} />
+                </button>
+                {showCityDropdown && (
+                  <div className="absolute right-0 top-full mt-1 bg-card border border-border rounded-lg shadow-xl z-50 w-56 max-h-64 overflow-hidden">
+                    <div className="p-2 border-b border-border">
+                      <Input
+                        type="text"
+                        placeholder="Search city..."
+                        value={citySearchQuery}
+                        onChange={(e) => setCitySearchQuery(e.target.value)}
+                        className="h-8 text-sm"
+                        autoFocus
+                      />
+                    </div>
+                    <div className="max-h-48 overflow-y-auto">
+                      <button
+                        onClick={() => handleCityFilter('')}
+                        className={`w-full text-left px-3 py-2 text-sm hover:bg-muted transition-colors ${!selectedCity ? 'bg-gold/10 text-gold font-bold' : 'text-foreground'}`}
+                      >
+                        All Cities
+                      </button>
+                      {filteredCities.map(city => (
+                        <button
+                          key={city}
+                          onClick={() => handleCityFilter(city)}
+                          className={`w-full text-left px-3 py-2 text-sm hover:bg-muted transition-colors ${selectedCity === city ? 'bg-gold/10 text-gold font-bold' : 'text-foreground'}`}
+                        >
+                          {city}
+                        </button>
+                      ))}
+                      {filteredCities.length === 0 && citySearchQuery && (
+                        <p className="text-sm text-muted-foreground text-center py-3">No cities found</p>
+                      )}
+                    </div>
+                  </div>
+                )}
+              </div>
             </div>
 
             <div className="flex gap-2">
@@ -342,17 +493,17 @@ export default function SalonSelectionPage() {
                 <Button
                   variant="outline"
                   size="sm"
-                  onClick={() => fetchNearbySalons(userLocation.lat, userLocation.lng)}
+                  onClick={() => { setSearchQuery(''); setSelectedCity(''); fetchNearbySalons(userLocation.lat, userLocation.lng); }}
                   className="border-gold/30"
                 >
                   <Navigation className="w-4 h-4 mr-2" />
-                  Find Salons Near Me
+                  Near Me
                 </Button>
               )}
               <Button
                 variant="outline"
                 size="sm"
-                onClick={fetchAllSalons}
+                onClick={() => { setSearchQuery(''); setSelectedCity(''); setSalons(allSalons); setSearchType('nearby'); }}
                 className="border-gold/30"
               >
                 <List className="w-4 h-4 mr-2" />
@@ -363,17 +514,42 @@ export default function SalonSelectionPage() {
         </div>
       </div>
 
+      {/* Close city dropdown on outside click */}
+      {showCityDropdown && (
+        <div className="fixed inset-0 z-20" onClick={() => setShowCityDropdown(false)} />
+      )}
+
       {/* Content */}
       <div className="max-w-7xl mx-auto p-4">
-        {view === 'grid' ? (
+        {view === 'list' ? (
           <>
-            <p className="text-sm text-muted-foreground mb-4">
+            <p className="text-sm text-muted-foreground mb-3">
               {searchType === 'nearby' && 'Salons near you'}
               {searchType === 'name' && `Search results for "${searchQuery}"`}
               {searchType === 'city' && `Salons in ${selectedCity}`}
               {' '}({salons.length} found)
             </p>
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            <div className="space-y-2">
+              {salons.map((salon) => (
+                <SalonListItem key={salon.id} salon={salon} />
+              ))}
+            </div>
+            {salons.length === 0 && (
+              <div className="text-center py-12">
+                <Scissors className="w-16 h-16 text-muted-foreground mx-auto mb-4 opacity-30" />
+                <p className="text-muted-foreground">No salons found</p>
+              </div>
+            )}
+          </>
+        ) : view === 'chips' ? (
+          <>
+            <p className="text-sm text-muted-foreground mb-3">
+              {searchType === 'nearby' && 'Salons near you'}
+              {searchType === 'name' && `Search results for "${searchQuery}"`}
+              {searchType === 'city' && `Salons in ${selectedCity}`}
+              {' '}({salons.length} found)
+            </p>
+            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
               {salons.map((salon) => (
                 <SalonCard key={salon.id} salon={salon} />
               ))}

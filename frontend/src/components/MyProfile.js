@@ -5,18 +5,21 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Checkbox } from '@/components/ui/checkbox';
 import { toast } from 'sonner';
-import { MapPin, Edit2, Save, X, QrCode, Download, Copy } from 'lucide-react';
+import { MapPin, Edit2, Save, X, QrCode, Download, Copy, Trash2, Navigation } from 'lucide-react';
 import { QRCodeSVG } from 'qrcode.react';
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
 const API = `${BACKEND_URL}/api`;
 const FRONTEND_URL = window.location.origin;
 
-export default function MyProfile({ salon, onUpdate, getAuthHeaders }) {
+export default function MyProfile({ salon, onUpdate, getAuthHeaders, onDeleteSalon }) {
   const [isEditing, setIsEditing] = useState(false);
   const [editData, setEditData] = useState(salon || {});
   const [saving, setSaving] = useState(false);
   const [showQRModal, setShowQRModal] = useState(false);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [deleteConfirmText, setDeleteConfirmText] = useState('');
   const qrRef = useRef(null);
 
   // QR Code URL - direct to booking page with defaults
@@ -84,6 +87,49 @@ export default function MyProfile({ salon, onUpdate, getAuthHeaders }) {
   const handleCancel = () => {
     setEditData(salon);
     setIsEditing(false);
+  };
+
+  const handleDeleteSalon = async () => {
+    if (deleteConfirmText !== 'DELETE') {
+      toast.error('Please type DELETE to confirm');
+      return;
+    }
+    setDeleting(true);
+    try {
+      await axios.delete(`${API}/salons/${salon.id}`, { headers: getAuthHeaders() });
+      toast.success('Salon profile deleted successfully');
+      setShowDeleteConfirm(false);
+      if (onDeleteSalon) {
+        onDeleteSalon();
+      }
+    } catch (error) {
+      console.error('Error deleting salon:', error);
+      toast.error(error.response?.data?.detail || 'Failed to delete salon profile');
+    } finally {
+      setDeleting(false);
+    }
+  };
+
+  const handleUseCurrentLocation = () => {
+    if (!navigator.geolocation) {
+      toast.error('Geolocation is not supported by your browser');
+      return;
+    }
+    toast.info('Getting your location...');
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        setEditData(prev => ({
+          ...prev,
+          latitude: position.coords.latitude,
+          longitude: position.coords.longitude
+        }));
+        toast.success('Location updated!');
+      },
+      (error) => {
+        toast.error('Failed to get location. Please enter manually.');
+      },
+      { timeout: 10000, enableHighAccuracy: true }
+    );
   };
 
   const getTaxRateLabel = (rate) => {
@@ -370,6 +416,50 @@ export default function MyProfile({ salon, onUpdate, getAuthHeaders }) {
               />
             </div>
             <div>
+              <Label htmlFor="city">City *</Label>
+              <Input
+                id="city"
+                value={editData.city || ''}
+                onChange={(e) => setEditData({ ...editData, city: e.target.value })}
+                placeholder="Enter city name"
+              />
+            </div>
+            <div>
+              <Label>Location</Label>
+              <Button
+                type="button"
+                onClick={handleUseCurrentLocation}
+                variant="outline"
+                size="sm"
+                className="w-full border-gold/30 hover:bg-gold/10"
+              >
+                <Navigation className="w-4 h-4 mr-2" />
+                Use My Current Location
+              </Button>
+            </div>
+            <div>
+              <Label htmlFor="latitude">Latitude</Label>
+              <Input
+                id="latitude"
+                type="number"
+                step="any"
+                value={editData.latitude || ''}
+                onChange={(e) => setEditData({ ...editData, latitude: parseFloat(e.target.value) || 0 })}
+                placeholder="e.g., 12.9716"
+              />
+            </div>
+            <div>
+              <Label htmlFor="longitude">Longitude</Label>
+              <Input
+                id="longitude"
+                type="number"
+                step="any"
+                value={editData.longitude || ''}
+                onChange={(e) => setEditData({ ...editData, longitude: parseFloat(e.target.value) || 0 })}
+                placeholder="e.g., 77.5946"
+              />
+            </div>
+            <div>
               <Label htmlFor="upi_id">UPI ID</Label>
               <Input
                 id="upi_id"
@@ -514,6 +604,18 @@ export default function MyProfile({ salon, onUpdate, getAuthHeaders }) {
             <p className="text-foreground font-bold">{salon.address}</p>
           </div>
           <div>
+            <p className="text-sm text-muted-foreground mb-1">City</p>
+            <p className="text-foreground font-bold">{salon.city || 'Not set'}</p>
+          </div>
+          <div>
+            <p className="text-sm text-muted-foreground mb-1">Location</p>
+            <p className="text-foreground font-bold">
+              {salon.latitude && salon.longitude 
+                ? `${salon.latitude.toFixed(4)}, ${salon.longitude.toFixed(4)}`
+                : 'Not set'}
+            </p>
+          </div>
+          <div>
             <p className="text-sm text-muted-foreground mb-1">UPI ID</p>
             <p className="text-foreground font-bold">{salon.upi_id || 'Not configured'}</p>
           </div>
@@ -569,6 +671,75 @@ export default function MyProfile({ salon, onUpdate, getAuthHeaders }) {
                   {salon.invoice_prefix || 'INV'}{String(salon.current_invoice_number || salon.invoice_start_number || 1).padStart(4, '0')}
                 </p>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Delete Profile Section */}
+      <div className="mt-8 border-t border-red-500/20 pt-6">
+        <h4 className="font-bold text-red-500 mb-2">Danger Zone</h4>
+        <p className="text-sm text-muted-foreground mb-4">
+          Deleting your salon profile will permanently remove all data including barbers, services, bookings, and ratings. This action cannot be undone.
+        </p>
+        <Button
+          onClick={() => setShowDeleteConfirm(true)}
+          variant="outline"
+          className="border-red-500 text-red-500 hover:bg-red-500/10"
+        >
+          <Trash2 className="w-4 h-4 mr-2" />
+          Delete Salon Profile
+        </Button>
+      </div>
+
+      {/* Delete Confirmation Modal */}
+      {showDeleteConfirm && (
+        <div className="fixed inset-0 bg-black/70 z-50 flex items-center justify-center p-4" onClick={() => setShowDeleteConfirm(false)}>
+          <div className="bg-card rounded-2xl p-6 max-w-md w-full" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-xl font-bold text-red-500">Delete Salon Profile</h3>
+              <button onClick={() => setShowDeleteConfirm(false)} className="p-2 hover:bg-muted rounded-full">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            
+            <div className="mb-4">
+              <p className="text-foreground mb-2">
+                This will permanently delete <strong>{salon.salon_name}</strong> and all associated data:
+              </p>
+              <ul className="text-sm text-muted-foreground list-disc list-inside space-y-1">
+                <li>All barber profiles</li>
+                <li>All service configurations</li>
+                <li>All booking/token history</li>
+                <li>All customer ratings & reviews</li>
+              </ul>
+            </div>
+
+            <div className="mb-4">
+              <Label className="text-sm text-foreground">Type <strong>DELETE</strong> to confirm:</Label>
+              <Input
+                value={deleteConfirmText}
+                onChange={(e) => setDeleteConfirmText(e.target.value)}
+                placeholder="Type DELETE"
+                className="mt-1"
+              />
+            </div>
+
+            <div className="flex gap-3">
+              <Button
+                onClick={() => { setShowDeleteConfirm(false); setDeleteConfirmText(''); }}
+                variant="outline"
+                className="flex-1"
+              >
+                Cancel
+              </Button>
+              <Button
+                onClick={handleDeleteSalon}
+                disabled={deleteConfirmText !== 'DELETE' || deleting}
+                className="flex-1 bg-red-500 text-white hover:bg-red-600 disabled:opacity-50"
+              >
+                {deleting ? 'Deleting...' : 'Delete Permanently'}
+              </Button>
             </div>
           </div>
         </div>

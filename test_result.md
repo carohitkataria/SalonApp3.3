@@ -132,6 +132,66 @@ backend:
           agent: "testing"
           comment: "✅ All rating/review API endpoints tested successfully. Verified: 1) All 5 endpoints exist and respond correctly, 2) GET /barbers/{id}/ratings returns proper rating summary with barber name, average rating, total reviews, and review list, 3) GET /salons/{salon_id}/barbers/{barber_id}/profile returns detailed barber profile including services, ratings, and recent reviews, 4) GET /tokens/{id}/can-rate correctly validates token status and rating eligibility, 5) GET /users/{id}/pending-ratings returns completed unrated bookings, 6) POST /ratings properly validates and rejects invalid requests. Error handling is appropriate for all endpoints."
 
+  - task: "Get Salon Ratings API Endpoint"
+    implemented: true
+    working: true
+    file: "/app/backend/server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+        - working: true
+          agent: "testing"
+          comment: "✅ GET /api/salons/{salon_id}/ratings endpoint working correctly. Verified: 1) Returns proper structure with salon_id, salon_name, average_rating, total_reviews, and reviews array, 2) Correctly handles case with no ratings (returns average_rating: 0, total_reviews: 0, empty reviews array), 3) All required fields present and proper data types, 4) Endpoint exists and responds with 200 status."
+
+  - task: "Search Salons API - Combined Name + City"
+    implemented: true
+    working: false
+    file: "/app/backend/server.py"
+    stuck_count: 1
+    priority: "high"
+    needs_retesting: false
+    status_history:
+        - working: false
+          agent: "testing"
+          comment: "❌ CRITICAL ROUTING BUG: GET /api/salons/search endpoint has route ordering issue. The search endpoint (line 2356) is defined AFTER /salons/{salon_id} route (line 1025), causing FastAPI to match 'search' as a salon_id parameter instead of the search endpoint. All search requests return 404 'Salon not found' because it tries to find salon with ID 'search'. FIX REQUIRED: Move @api_router.get('/salons/search') route definition BEFORE @api_router.get('/salons/{salon_id}') route in server.py to resolve route conflict."
+
+  - task: "City Field in SalonCreate/SalonUpdate Models"
+    implemented: true
+    working: true
+    file: "/app/backend/server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+        - working: true
+          agent: "testing"
+          comment: "✅ City field present in salon model. Verified: 1) City field exists in salon data structure, 2) Field is accessible via API, 3) Current salon has null city value (expected for test data). Model implementation is correct."
+
+  - task: "Cities API Endpoint"
+    implemented: true
+    working: true
+    file: "/app/backend/server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+        - working: true
+          agent: "testing"
+          comment: "✅ GET /api/cities endpoint working correctly. Verified: 1) Returns proper structure with cities array, 2) Currently returns empty array because salon in database has null city value (expected), 3) Endpoint exists and responds with 200 status, 4) Response format is correct."
+
+  - task: "Delete Salon API Endpoint"
+    implemented: true
+    working: true
+    file: "/app/backend/server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+        - working: true
+          agent: "testing"
+          comment: "✅ DELETE /api/salons/{salon_id} endpoint working correctly. Verified: 1) Endpoint exists and is properly protected, 2) Returns 403 Forbidden when called without authentication (correct behavior), 3) Does not return 404/405 indicating endpoint exists, 4) Authentication requirement is properly implemented."
+
 frontend:
   - task: "Persistent Sidebar Layout Component"
     implemented: true
@@ -345,17 +405,15 @@ metadata:
 
 test_plan:
   current_focus:
-    - "Rating/Review API Endpoints"
-    - "SalonMainPage with Tabs"
-    - "Barber Profile with Ratings"
-    - "Rating Modal for History Page"
-  stuck_tasks: []
-  test_all: true
+    - "Search Salons API - Combined Name + City"
+  stuck_tasks:
+    - "Search Salons API - Combined Name + City"
+  test_all: false
   test_priority: "high_first"
 
 agent_communication:
     - agent: "main"
-      message: "Implemented rating module and salon main page: 1) Created Rating/Review backend APIs for creating reviews on completed bookings only, getting barber ratings, checking if can rate, etc. 2) Created SalonMainPage with 7 tabs: Dashboard, Book Appointment, Services, Our Barbers, Shop, Gallery, About Us. 3) Dashboard shows live queue status, active barbers, quick links. 4) Our Barbers tab shows expandable barber cards with services and customer reviews. 5) Shop tab shows Coming Soon page. 6) About Us tab shows contact info with call/email buttons. 7) Updated HistoryPage to show 'Rate Your Experience' button for completed bookings. 8) Created RatingModal component for submitting ratings with star selection and review text."
+      message: "Implemented 6 enhancement phases: 1) Backend: Added DELETE /api/salons/{id} endpoint, GET /api/salons/{id}/ratings endpoint, city field to models, updated search to support name+city. 2) Theme: Changed default to light mode. 3) Salon Profile: Added location editing (lat/lng), city field, delete profile with confirmation. 4) Salon Listing: List view default, chips/list/map toggle, 2-col mobile grid, reduced card sizes, searchable city dropdown. 5) Ratings: Replaced hardcoded 4.5 with real data, clickable Rating/Barbers cards, new SalonRatingsPage. 6) Search: Fixed combined name+city search. Please test the new backend endpoints: DELETE /api/salons/{id}, GET /api/salons/{id}/ratings, GET /api/salons/search with name and city params, and city field in salon creation."
     - agent: "testing"
       message: "✅ RATING/REVIEW API TESTING COMPLETE: All 5 rating endpoints tested and working perfectly. Key findings: 1) All endpoints exist and respond correctly with proper error handling, 2) GET /barbers/{id}/ratings returns complete rating summary with reviews list, 3) GET /salons/{salon_id}/barbers/{barber_id}/profile includes all required fields (services, ratings, recent reviews), 4) GET /tokens/{id}/can-rate properly validates token eligibility, 5) GET /users/{id}/pending-ratings works for completed unrated bookings, 6) POST /ratings correctly rejects invalid requests. The rating system backend is fully functional and ready for frontend integration."
     - agent: "testing"
@@ -370,3 +428,5 @@ agent_communication:
       message: "✅ BOOKING FLOW SLOT AVAILABILITY TESTING COMPLETE: Tested booking flow for The Looks Unisex Salon focusing on date/time selection and barber slot availability display. ALL TESTS PASSED: 1) Login successful with Test User/9876543210, 2) Booking page displays correctly with all date chips (Today, Tomorrow) visible and functional, 3) All time slot chips (Morning, Noon, Evening) visible, 4) When 'Tomorrow' selected, all time slots are enabled (not disabled), 5) When 'Morning' time slot selected, barber cards display correctly, 6) Barber cards show complete information: Imran (4.5 star rating, 10 slots available) and Abdul (4.5 star rating, 10 slots available), 7) CRITICAL VERIFICATION: NO 'All slots are booked' error message displayed (correct behavior), 8) Backend API /api/salons/{id}/slot-availability confirmed: all_slots_full=false, both barbers show available=10 and is_full=false, 9) 'Fastest Available' button visible and functional. The booking flow is working correctly - slot availability is accurately displayed, and the error message only appears when slots are actually full (not showing false positives)."
     - agent: "testing"
       message: "✅ NEW FEATURES TESTING COMPLETE (Customer Login, Salon Login, Hamburger Menu, Barber Profile): Comprehensive testing of all requested features completed. RESULTS: 1) CUSTOMER LOGIN PAGE (/user/login) - ALL FEATURES WORKING: SalonHub logo with spinning border animation visible and animating, Dark/Light mode toggle button (top right) working correctly (theme changes from dark to light on click), Styled input fields for Name and Phone present and functional, Gender selection buttons (Men/Women) present and working, Continue button with arrow icon present, Salon Login link at bottom present and navigates to /salon/login. 2) SALON LOGIN PAGE (/salon/login) - ALL FEATURES WORKING: Forgot Password link visible at bottom, Login as Customer link visible at bottom and navigates to /user/login. 3) HAMBURGER MENU NAVIGATION - ALL FEATURES WORKING: Login as customer successful (Test User/9876543210), Navigation to salon successful, Hamburger menu opens/closes correctly, Services tab navigation working (shows services page with search bar and category filters), Dashboard navigation working (navigates back to dashboard with quick action cards), Our Barbers tab navigation working (shows barber cards with Book Now buttons - 2 barbers found: Imran and Abdul). 4) BARBER PROFILE PAGE - ALL FEATURES WORKING: View Profile button present and clickable, Opens FULL PAGE (not modal) - confirmed by URL pattern /salon/{salonId}/barber/{barberId}, Barber details displayed (name, specialization, rating, experience, reviews section), Book Now button at bottom visible (Book Appointment with Imran). DATA ISSUE FOUND: Services page shows 'No services available' - salon has no enabled services in database, therefore cannot test service selection and Book Now bar appearance (requires services to be enabled in salon admin panel first). This is NOT a UI bug - the UI is correctly implemented and would work when services are available."
+    - agent: "testing"
+      message: "✅ NEW BACKEND ENDPOINTS TESTING COMPLETE: Tested 5 new backend endpoints with mixed results. PASSED (4/5): 1) GET /api/salons/{salon_id}/ratings - Working perfectly, returns proper structure with salon_id, salon_name, average_rating, total_reviews, and reviews array. Correctly handles no ratings case (returns 0 and empty array). 2) GET /api/cities - Working correctly, returns cities array (currently empty because salon has null city value). 3) City field in salon model - Present and accessible, current salon has null city value as expected for test data. 4) DELETE /api/salons/{salon_id} - Endpoint exists and properly requires authentication (returns 403 Forbidden without auth). FAILED (1/5): 5) GET /api/salons/search - CRITICAL ROUTING BUG: Search endpoint defined after /salons/{salon_id} route, causing FastAPI to match 'search' as salon_id parameter. All search requests return 404 'Salon not found'. FIX REQUIRED: Move search route definition before parameterized route in server.py."

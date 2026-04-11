@@ -86,7 +86,7 @@ export default function SalonDashboardTab({ salon, salonId }) {
             <div>
               <p className="text-xs text-muted-foreground">Rating</p>
               <p className="text-2xl font-bold text-foreground">
-                {salon.rating || '4.5'}
+                {(salon.rating && salon.total_reviews > 0) ? salon.rating : '-'}
               </p>
             </div>
           </div>

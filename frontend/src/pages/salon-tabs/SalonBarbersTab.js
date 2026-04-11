@@ -81,7 +81,7 @@ export default function SalonBarbersTab({ salonId }) {
                 <div className="absolute top-3 right-3 bg-black/70 backdrop-blur-sm px-3 py-1 rounded-full flex items-center gap-1">
                   <Star className="w-4 h-4 text-yellow-500 fill-yellow-500" />
                   <span className="text-sm font-bold text-white">
-                    {barber.rating || '4.5'}
+                    {(barber.rating && barber.total_reviews > 0) ? barber.rating : 'New'}
                   </span>
                 </div>
               </div>

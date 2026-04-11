@@ -69,6 +69,7 @@ class SalonCreate(BaseModel):
     phone: str
     email: Optional[str] = None
     address: str
+    city: Optional[str] = None  # City for filtering
     latitude: float
     longitude: float
     upi_id: Optional[str] = None
@@ -82,6 +83,7 @@ class SalonUpdate(BaseModel):
     phone: Optional[str] = None
     email: Optional[str] = None
     address: Optional[str] = None
+    city: Optional[str] = None  # City for filtering
     latitude: Optional[float] = None
     longitude: Optional[float] = None
     upi_id: Optional[str] = None
@@ -117,7 +119,8 @@ class Salon(BaseModel):
     gstin: Optional[str] = None
     logo_url: Optional[str] = None
     photo_gallery: List[str] = []  # Array of image URLs
-    rating: float = 4.5  # Average rating out of 5
+    rating: float = 0  # Average rating out of 5
+    total_reviews: int = 0  # Total number of reviews
     gender_tag: Optional[str] = "Unisex"  # Unisex/Men/Women
     tax_rate: float = 2.5  # Default GST rate (CGST + SGST = 5%)
     invoice_prefix: str = "INV"  # Invoice number prefix
@@ -1055,6 +1058,74 @@ async def update_salon(salon_id: str, salon: SalonUpdate, current_salon=Depends(
     
     updated = await db.salons.find_one({"id": salon_id}, {"_id": 0})
     return Salon(**updated)
+
+@api_router.delete("/salons/{salon_id}")
+async def delete_salon(salon_id: str, current_salon=Depends(get_current_salon)):
+    """Delete a salon and all associated data"""
+    # Verify the salon exists
+    salon = await db.salons.find_one({"id": salon_id}, {"_id": 0})
+    if not salon:
+        raise HTTPException(status_code=404, detail="Salon not found")
+    
+    # Verify the requesting salon is deleting its own profile
+    if current_salon.get("id") != salon_id:
+        raise HTTPException(status_code=403, detail="You can only delete your own salon profile")
+    
+    # Delete all associated data
+    await db.barbers.delete_many({"salon_id": salon_id})
+    await db.barber_services.delete_many({"salon_id": salon_id})
+    await db.salon_services.delete_many({"salon_id": salon_id})
+    await db.tokens.delete_many({"salon_id": salon_id})
+    await db.ratings.delete_many({"salon_id": salon_id})
+    await db.salon_initialized.delete_many({"salon_id": salon_id})
+    await db.salon_packages.delete_many({"salon_id": salon_id})
+    
+    # Delete the salon itself
+    await db.salons.delete_one({"id": salon_id})
+    
+    return {"message": "Salon and all associated data deleted successfully"}
+
+@api_router.get("/salons/{salon_id}/ratings")
+async def get_salon_ratings(salon_id: str, limit: int = 50, skip: int = 0):
+    """Get all ratings for a salon (across all barbers), sorted by latest"""
+    salon = await db.salons.find_one({"id": salon_id}, {"_id": 0})
+    if not salon:
+        raise HTTPException(status_code=404, detail="Salon not found")
+    
+    # Get all ratings for this salon sorted by latest
+    reviews = await db.ratings.find(
+        {"salon_id": salon_id},
+        {"_id": 0}
+    ).sort("created_at", -1).skip(skip).limit(limit).to_list(limit)
+    
+    # Calculate salon average rating from all reviews
+    pipeline = [
+        {"$match": {"salon_id": salon_id}},
+        {"$group": {
+            "_id": "$salon_id",
+            "average_rating": {"$avg": "$rating"},
+            "total_reviews": {"$sum": 1}
+        }}
+    ]
+    stats = await db.ratings.aggregate(pipeline).to_list(1)
+    
+    avg_rating = round(stats[0]["average_rating"], 1) if stats else 0
+    total_reviews = stats[0]["total_reviews"] if stats else 0
+    
+    # Also update the salon's rating field
+    if stats:
+        await db.salons.update_one(
+            {"id": salon_id},
+            {"$set": {"rating": avg_rating, "total_reviews": total_reviews}}
+        )
+    
+    return {
+        "salon_id": salon_id,
+        "salon_name": salon.get("salon_name", ""),
+        "average_rating": avg_rating,
+        "total_reviews": total_reviews,
+        "reviews": [RatingResponse(**r) for r in reviews]
+    }
 
 @api_router.post("/salons/{salon_id}/initialize")
 async def initialize_salon_services(salon_id: str, current_salon=Depends(get_current_salon)):
@@ -2283,19 +2354,26 @@ async def get_last_salon_by_phone(phone: str):
     return {"salon": None}
 
 @api_router.get("/salons/search")
-async def search_salons(name: str):
-    """Search salons by name (case-insensitive partial match)"""
-    if not name or len(name) < 2:
-        raise HTTPException(status_code=400, detail="Search query must be at least 2 characters")
+async def search_salons(name: Optional[str] = None, city: Optional[str] = None):
+    """Search salons by name and/or city (case-insensitive partial match)"""
+    if not name and not city:
+        raise HTTPException(status_code=400, detail="Please provide a search query (name or city)")
     
-    # Search using case-insensitive regex
-    salons = await db.salons.find(
-        {
-            "is_active": True,
-            "salon_name": {"$regex": name, "$options": "i"}
-        },
-        {"_id": 0}
-    ).limit(20).to_list(20)
+    query = {"is_active": True}
+    
+    # Build combined search query
+    conditions = []
+    if name and len(name) >= 1:
+        conditions.append({"salon_name": {"$regex": name, "$options": "i"}})
+    if city and len(city) >= 1:
+        conditions.append({"city": {"$regex": city, "$options": "i"}})
+    
+    if len(conditions) == 1:
+        query.update(conditions[0])
+    elif len(conditions) > 1:
+        query["$and"] = conditions
+    
+    salons = await db.salons.find(query, {"_id": 0}).limit(50).to_list(50)
     
     return {"salons": [Salon(**s) for s in salons]}
 
@@ -2980,7 +3058,6 @@ async def get_invoice(invoice_id: str):
 @api_router.get("/invoices/{invoice_id}/view")
 async def view_invoice(invoice_id: str):
     """View invoice PDF in browser"""
-    from fastapi.responses import Response
     
     invoice = await db.invoices.find_one({"id": invoice_id}, {"_id": 0})
     if not invoice:
@@ -3004,7 +3081,6 @@ async def view_invoice(invoice_id: str):
 @api_router.get("/invoices/{invoice_id}/download")
 async def download_invoice(invoice_id: str):
     """Download invoice PDF"""
-    from fastapi.responses import Response
     
     invoice = await db.invoices.find_one({"id": invoice_id}, {"_id": 0})
     if not invoice:

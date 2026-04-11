@@ -281,7 +281,9 @@ export default function SalonMainPage() {
           </div>
         </div>
 
-        <div className="bg-card rounded-xl p-4 border border-border">
+        <div className="bg-card rounded-xl p-4 border border-border cursor-pointer hover:border-gold/50 transition-colors"
+          onClick={() => navigate(`/salon/${salonId}/ratings`)}
+        >
           <div className="flex items-center gap-3">
             <div className="p-2 bg-gold/10 rounded-lg">
               <Star className="w-5 h-5 text-gold" />
@@ -289,13 +291,15 @@ export default function SalonMainPage() {
             <div>
               <p className="text-xs text-muted-foreground">Rating</p>
               <p className="text-2xl font-bold text-foreground">
-                {salon.rating || '4.5'}
+                {(salon.rating && salon.total_reviews > 0) ? salon.rating : '-'}
               </p>
             </div>
           </div>
         </div>
 
-        <div className="bg-card rounded-xl p-4 border border-border">
+        <div className="bg-card rounded-xl p-4 border border-border cursor-pointer hover:border-gold/50 transition-colors"
+          onClick={() => setActiveTab('barbers')}
+        >
           <div className="flex items-center gap-3">
             <div className="p-2 bg-purple-500/10 rounded-lg">
               <User className="w-5 h-5 text-purple-500" />

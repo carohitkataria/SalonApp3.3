@@ -781,6 +781,7 @@ export default function EnhancedSalonDashboard() {
             salon={salon}
             onUpdate={(updatedSalon) => setSalon(updatedSalon)}
             getAuthHeaders={getAuthHeaders}
+            onDeleteSalon={handleLogout}
           />
         )}
       </div>

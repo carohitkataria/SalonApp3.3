@@ -26,6 +26,7 @@ export default function SalonSignupPage() {
     phone: phoneFromLogin,
     email: '',
     address: '',
+    city: '',
     latitude: 0,
     longitude: 0,
     upi_id: '',
@@ -282,6 +283,18 @@ export default function SalonSignupPage() {
                 value={formData.address}
                 onChange={(e) => setFormData({ ...formData, address: e.target.value })}
                 placeholder="123 Main Street, City, State, PIN"
+                required
+              />
+            </div>
+
+            <div>
+              <Label htmlFor="city">City *</Label>
+              <Input
+                id="city"
+                type="text"
+                value={formData.city}
+                onChange={(e) => setFormData({ ...formData, city: e.target.value })}
+                placeholder="e.g., Bangalore, Mumbai, Delhi"
                 required
               />
             </div>
