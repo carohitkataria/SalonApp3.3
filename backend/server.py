@@ -2276,6 +2276,79 @@ class CustomerPackage(BaseModel):
     is_active: bool = True
     created_at: str
 
+# ============ MEMBERSHIP & WALLET MODELS ============
+
+class MembershipPlanCreate(BaseModel):
+    salon_id: str
+    name: str  # e.g., "Gold", "Diamond", "Platinum"
+    amount: float  # Amount customer pays
+    credit: float  # Credit added to wallet
+    validity_months: int  # Validity in months
+    terms_conditions: str  # T&C text
+
+class MembershipPlan(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    id: str
+    salon_id: str
+    name: str
+    amount: float
+    credit: float
+    validity_months: int
+    terms_conditions: str
+    is_active: bool = True
+    created_at: str
+
+class CustomerMembershipCreate(BaseModel):
+    customer_phone: str
+    customer_name: str
+    membership_plan_id: str
+    payment_mode: str  # "cash", "card", "upi", "wallet"
+    paid_amount: float
+
+class CustomerMembership(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    id: str
+    salon_id: str
+    customer_phone: str
+    customer_name: str
+    membership_plan_id: str
+    membership_name: str
+    payment_mode: str
+    paid_amount: float
+    credit_added: float
+    wallet_balance: float
+    expiry_date: str
+    is_active: bool = True
+    purchased_at: str
+
+class WalletTransaction(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    id: str
+    customer_phone: str
+    salon_id: str
+    transaction_type: str  # "credit", "debit", "expiry"
+    amount: float
+    balance_after: float
+    description: str
+    created_at: str
+
+class LoyaltyProgramSettings(BaseModel):
+    salon_id: str
+    enabled: bool = False
+    spend_amount: float  # e.g., 10000
+    period_months: int  # e.g., 6
+    topup_percentage: float  # e.g., 10 (means 10% of spend_amount)
+
+class LoyaltyProgram(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    id: str
+    salon_id: str
+    enabled: bool
+    spend_amount: float
+    period_months: int
+    topup_percentage: float
+    updated_at: str
+
 @api_router.post("/salons/{salon_id}/customer-packages", response_model=CustomerPackage)
 async def create_customer_package(salon_id: str, package: CustomerPackageCreate, current_user=Depends(get_current_salon_user)):
     """Create a custom package for a specific customer"""
@@ -2299,6 +2372,219 @@ async def get_customer_packages(salon_id: str, phone: str, current_user=Depends(
     ).to_list(100)
     
     return {"packages": packages}
+
+
+# ============ MEMBERSHIP & WALLET ROUTES ============
+
+@api_router.post("/salons/{salon_id}/membership-plans", response_model=MembershipPlan)
+async def create_membership_plan(salon_id: str, plan: MembershipPlanCreate, current_user=Depends(get_current_salon_admin)):
+    """Create a new membership plan"""
+    plan_dict = plan.model_dump()
+    plan_dict["id"] = str(uuid.uuid4())
+    plan_dict["is_active"] = True
+    plan_dict["created_at"] = datetime.now(timezone.utc).isoformat()
+    
+    await db.membership_plans.insert_one(plan_dict)
+    return MembershipPlan(**plan_dict)
+
+@api_router.get("/salons/{salon_id}/membership-plans")
+async def get_membership_plans(salon_id: str):
+    """Get all active membership plans for a salon"""
+    plans = await db.membership_plans.find(
+        {"salon_id": salon_id, "is_active": True},
+        {"_id": 0}
+    ).to_list(100)
+    return {"plans": plans}
+
+@api_router.post("/salons/{salon_id}/sell-membership")
+async def sell_membership(salon_id: str, membership: CustomerMembershipCreate, current_user=Depends(get_current_salon_user)):
+    """Sell membership to a customer"""
+    # Get membership plan
+    plan = await db.membership_plans.find_one({"id": membership.membership_plan_id}, {"_id": 0})
+    if not plan:
+        raise HTTPException(status_code=404, detail="Membership plan not found")
+    
+    # Format phone
+    phone = membership.customer_phone
+    if not phone.startswith("+91"):
+        phone = f"+91{phone}"
+    
+    # Calculate expiry date
+    expiry_date = datetime.now(timezone.utc) + timedelta(days=plan["validity_months"] * 30)
+    
+    # Check if customer already has active membership
+    existing = await db.customer_memberships.find_one({
+        "salon_id": salon_id,
+        "customer_phone": phone,
+        "is_active": True
+    }, {"_id": 0})
+    
+    if existing:
+        # Add credit to existing wallet
+        new_balance = existing["wallet_balance"] + plan["credit"]
+        await db.customer_memberships.update_one(
+            {"id": existing["id"]},
+            {"$set": {
+                "wallet_balance": new_balance,
+                "expiry_date": expiry_date.isoformat()
+            }}
+        )
+        
+        # Record transaction
+        await db.wallet_transactions.insert_one({
+            "id": str(uuid.uuid4()),
+            "customer_phone": phone,
+            "salon_id": salon_id,
+            "transaction_type": "credit",
+            "amount": plan["credit"],
+            "balance_after": new_balance,
+            "description": f"Membership renewal: {plan['name']}",
+            "created_at": datetime.now(timezone.utc).isoformat()
+        })
+        
+        return {"message": "Membership renewed", "new_balance": new_balance}
+    else:
+        # Create new membership
+        membership_data = {
+            "id": str(uuid.uuid4()),
+            "salon_id": salon_id,
+            "customer_phone": phone,
+            "customer_name": membership.customer_name,
+            "membership_plan_id": plan["id"],
+            "membership_name": plan["name"],
+            "payment_mode": membership.payment_mode,
+            "paid_amount": membership.paid_amount,
+            "credit_added": plan["credit"],
+            "wallet_balance": plan["credit"],
+            "expiry_date": expiry_date.isoformat(),
+            "is_active": True,
+            "purchased_at": datetime.now(timezone.utc).isoformat()
+        }
+        
+        await db.customer_memberships.insert_one(membership_data)
+        
+        # Record transaction
+        await db.wallet_transactions.insert_one({
+            "id": str(uuid.uuid4()),
+            "customer_phone": phone,
+            "salon_id": salon_id,
+            "transaction_type": "credit",
+            "amount": plan["credit"],
+            "balance_after": plan["credit"],
+            "description": f"Membership purchased: {plan['name']}",
+            "created_at": datetime.now(timezone.utc).isoformat()
+        })
+        
+        return {"message": "Membership created", "membership": membership_data}
+
+@api_router.get("/salons/{salon_id}/customer-membership/{phone}")
+async def get_customer_membership(salon_id: str, phone: str):
+    """Get customer's membership and wallet details"""
+    if not phone.startswith("+91"):
+        phone = f"+91{phone}"
+    
+    membership = await db.customer_memberships.find_one({
+        "salon_id": salon_id,
+        "customer_phone": phone,
+        "is_active": True
+    }, {"_id": 0})
+    
+    if not membership:
+        return {"has_membership": False, "wallet_balance": 0}
+    
+    # Check if expired
+    expiry_date = datetime.fromisoformat(membership["expiry_date"])
+    if expiry_date < datetime.now(timezone.utc):
+        # Mark as inactive
+        await db.customer_memberships.update_one(
+            {"id": membership["id"]},
+            {"$set": {"is_active": False, "wallet_balance": 0}}
+        )
+        return {"has_membership": False, "wallet_balance": 0, "expired": True}
+    
+    return {"has_membership": True, **membership}
+
+@api_router.get("/salons/{salon_id}/wallet-transactions/{phone}")
+async def get_wallet_transactions(salon_id: str, phone: str):
+    """Get customer's wallet transaction history"""
+    if not phone.startswith("+91"):
+        phone = f"+91{phone}"
+    
+    transactions = await db.wallet_transactions.find({
+        "salon_id": salon_id,
+        "customer_phone": phone
+    }, {"_id": 0}).sort("created_at", -1).to_list(100)
+    
+    return {"transactions": transactions}
+
+@api_router.post("/salons/{salon_id}/use-wallet")
+async def use_wallet_balance(salon_id: str, phone: str, amount: float):
+    """Deduct amount from customer's wallet"""
+    if not phone.startswith("+91"):
+        phone = f"+91{phone}"
+    
+    membership = await db.customer_memberships.find_one({
+        "salon_id": salon_id,
+        "customer_phone": phone,
+        "is_active": True
+    }, {"_id": 0})
+    
+    if not membership or membership["wallet_balance"] < amount:
+        raise HTTPException(status_code=400, detail="Insufficient wallet balance")
+    
+    new_balance = membership["wallet_balance"] - amount
+    
+    await db.customer_memberships.update_one(
+        {"id": membership["id"]},
+        {"$set": {"wallet_balance": new_balance}}
+    )
+    
+    # Record transaction
+    await db.wallet_transactions.insert_one({
+        "id": str(uuid.uuid4()),
+        "customer_phone": phone,
+        "salon_id": salon_id,
+        "transaction_type": "debit",
+        "amount": amount,
+        "balance_after": new_balance,
+        "description": "Used for booking",
+        "created_at": datetime.now(timezone.utc).isoformat()
+    })
+    
+    return {"new_balance": new_balance}
+
+@api_router.post("/salons/{salon_id}/loyalty-program", response_model=LoyaltyProgram)
+async def update_loyalty_program(salon_id: str, settings: LoyaltyProgramSettings, current_user=Depends(get_current_salon_admin)):
+    """Update loyalty program settings"""
+    existing = await db.loyalty_programs.find_one({"salon_id": salon_id}, {"_id": 0})
+    
+    settings_dict = settings.model_dump()
+    settings_dict["updated_at"] = datetime.now(timezone.utc).isoformat()
+    
+    if existing:
+        settings_dict["id"] = existing["id"]
+        await db.loyalty_programs.update_one(
+            {"salon_id": salon_id},
+            {"$set": settings_dict}
+        )
+    else:
+        settings_dict["id"] = str(uuid.uuid4())
+        await db.loyalty_programs.insert_one(settings_dict)
+    
+    return LoyaltyProgram(**settings_dict)
+
+@api_router.get("/salons/{salon_id}/loyalty-program")
+async def get_loyalty_program(salon_id: str, current_user=Depends(get_current_salon_user)):
+    """Get loyalty program settings"""
+    program = await db.loyalty_programs.find_one({"salon_id": salon_id}, {"_id": 0})
+    if not program:
+        return {
+            "enabled": False,
+            "spend_amount": 0,
+            "period_months": 0,
+            "topup_percentage": 0
+        }
+    return program
 
 # ============ BOOKING/TOKEN ROUTES ============
 

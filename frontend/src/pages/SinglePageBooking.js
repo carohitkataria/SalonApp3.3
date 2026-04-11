@@ -4,7 +4,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import axios from 'axios';
 import { Button } from '@/components/ui/button';
 import { toast } from 'sonner';
-import { Scissors, Calendar, User, CheckCircle, Star, Clock, ArrowLeft, Home, Zap, Check, ChevronDown, ChevronRight, Search } from 'lucide-react';
+import { Scissors, Calendar, User, CheckCircle, Star, Clock, ArrowLeft, Home, Zap, Check, ChevronDown, ChevronRight, Search, Package } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Input } from '@/components/ui/input';
 
@@ -223,6 +223,8 @@ export default function SinglePageBooking() {
   const [salon, setSalon] = useState(null);
   const [barbers, setBarbers] = useState([]);
   const [salonServices, setSalonServices] = useState([]);
+  const [packages, setPackages] = useState([]); // New: salon packages
+  const [selectedPackage, setSelectedPackage] = useState(null); // New: selected package
   const [barberServices, setBarberServices] = useState([]);
   const [shifts, setShifts] = useState([]);
   const [liveStatus, setLiveStatus] = useState(null);
@@ -346,6 +348,32 @@ export default function SinglePageBooking() {
       setBarberServices(response.data.filter(s => s.is_available));
     } catch (error) {
       setBarberServices([]);
+    }
+  };
+
+  const fetchPackages = async () => {
+    try {
+      const gender = user?.gender || 'all';
+      const response = await axios.get(`${API}/salons/${salonId}/packages/with-services`, {
+        params: { gender }
+      });
+      setPackages(response.data.packages || []);
+    } catch (error) {
+      console.error('Error fetching packages:', error);
+    }
+  };
+
+  const handlePackageSelect = (pkg) => {
+    if (selectedPackage?.id === pkg.id) {
+      // Deselect package
+      setSelectedPackage(null);
+      setFormData(prev => ({ ...prev, selectedServices: [] }));
+    } else {
+      // Select package and auto-select all its services
+      setSelectedPackage(pkg);
+      const serviceIds = pkg.services?.map(s => s.id) || [];
+      setFormData(prev => ({ ...prev, selectedServices: serviceIds }));
+      toast.success(`Package "${pkg.package_name}" selected`);
     }
   };
 
@@ -717,6 +745,86 @@ export default function SinglePageBooking() {
             </div>
           )}
         </div>
+
+        {/* Section 2.5: Packages */}
+        {packages.length > 0 && (
+          <div className="space-y-3">
+            <div className="flex items-center justify-between">
+              <p className="text-sm font-medium text-muted-foreground flex items-center gap-2">
+                <Package className="w-4 h-4" />
+                Packages
+              </p>
+              {selectedPackage && (
+                <span className="text-xs bg-gold/20 text-gold px-2 py-1 rounded-full">
+                  Package Selected
+                </span>
+              )}
+            </div>
+            
+            <div className="space-y-2">
+              {packages.map(pkg => (
+                <motion.div
+                  key={pkg.id}
+                  whileHover={{ scale: 1.01 }}
+                  whileTap={{ scale: 0.99 }}
+                  onClick={() => handlePackageSelect(pkg)}
+                  className={`relative p-4 rounded-xl cursor-pointer transition-all border-2 ${
+                    selectedPackage?.id === pkg.id
+                      ? 'bg-gold/10 border-gold shadow-md'
+                      : 'bg-card border-border hover:border-gold/40'
+                  }`}
+                >
+                  <div className="flex justify-between items-start mb-2">
+                    <div className="flex-1">
+                      <h4 className="font-bold text-foreground">{pkg.package_name}</h4>
+                      <p className="text-xs text-muted-foreground mt-1">
+                        {pkg.services?.length || 0} services • {pkg.gender_tag || 'Unisex'}
+                      </p>
+                    </div>
+                    <div className="text-right">
+                      <p className="text-xl font-bold text-gold">₹{pkg.package_price}</p>
+                      {pkg.original_price && pkg.original_price > pkg.package_price && (
+                        <p className="text-xs line-through text-muted-foreground">₹{pkg.original_price}</p>
+                      )}
+                    </div>
+                  </div>
+                  
+                  {pkg.description && (
+                    <p className="text-sm text-muted-foreground mb-2">{pkg.description}</p>
+                  )}
+                  
+                  {/* Package Services */}
+                  {pkg.services && pkg.services.length > 0 && (
+                    <div className="mt-3 pt-3 border-t border-border">
+                      <p className="text-xs font-semibold text-muted-foreground mb-2">Includes:</p>
+                      <div className="flex flex-wrap gap-1">
+                        {pkg.services.map((service, idx) => (
+                          <span key={idx} className="text-xs bg-muted px-2 py-1 rounded">
+                            {service.service_name}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  
+                  {selectedPackage?.id === pkg.id && (
+                    <motion.div
+                      initial={{ scale: 0 }}
+                      animate={{ scale: 1 }}
+                      className="absolute top-3 right-3 w-6 h-6 bg-gold rounded-full flex items-center justify-center"
+                    >
+                      <Check className="w-4 h-4 text-black" />
+                    </motion.div>
+                  )}
+                </motion.div>
+              ))}
+            </div>
+            
+            <p className="text-xs text-muted-foreground text-center">
+              Select a package or choose individual services below
+            </p>
+          </div>
+        )}
 
         {/* Section 3: Services with Filters and Categories */}
         <div className="space-y-3">
