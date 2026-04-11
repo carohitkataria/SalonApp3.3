@@ -15,7 +15,7 @@ import sys
 from datetime import datetime, timezone
 
 # Backend URL from environment
-BACKEND_URL = "https://light-mode-default.preview.emergentagent.com/api"
+BACKEND_URL = "https://salon-access-ctrl.preview.emergentagent.com/api"
 
 # Test credentials
 TEST_USER = {
