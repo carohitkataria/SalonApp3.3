@@ -89,6 +89,52 @@ export default function MembershipManagement({ salonId, getAuthHeaders }) {
     return ((credit - amount) / amount * 100).toFixed(1);
   };
 
+  const handleDelete = async (plan) => {
+    if (!window.confirm(`Are you sure you want to delete "${plan.name}" membership plan?`)) {
+      return;
+    }
+    
+    try {
+      await axios.delete(`${API}/salons/${salonId}/membership-plans/${plan.id}`, {
+        headers: getAuthHeaders()
+      });
+      toast.success('Membership plan deleted successfully');
+      fetchPlans();
+    } catch (error) {
+      toast.error(error.response?.data?.detail || 'Failed to delete plan');
+    }
+  };
+
+  const handleUpdate = async (e) => {
+    e.preventDefault();
+    
+    if (!formData.name || !formData.credit || !formData.validity_months) {
+      toast.error('Please fill all required fields');
+      return;
+    }
+
+    try {
+      const payload = {
+        salon_id: salonId,
+        name: formData.name,
+        amount: parseFloat(formData.amount),
+        credit: parseFloat(formData.credit),
+        validity_months: parseInt(formData.validity_months),
+        terms_conditions: formData.terms_conditions || 'Standard terms and conditions apply.'
+      };
+
+      await axios.put(`${API}/salons/${salonId}/membership-plans/${editingPlan.id}`, payload, {
+        headers: getAuthHeaders()
+      });
+
+      toast.success('Membership plan updated successfully');
+      resetForm();
+      fetchPlans();
+    } catch (error) {
+      toast.error(error.response?.data?.detail || 'Failed to update plan');
+    }
+  };
+
   return (
     <div className="space-y-6">
       {/* Header */}
@@ -127,7 +173,7 @@ export default function MembershipManagement({ salonId, getAuthHeaders }) {
             <h3 className="text-lg font-semibold mb-4">
               {editingPlan ? 'Edit Membership Plan' : 'Create New Membership Plan'}
             </h3>
-            <form onSubmit={handleSubmit} className="space-y-4">
+            <form onSubmit={editingPlan ? handleUpdate : handleSubmit} className="space-y-4">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
                   <Label htmlFor="name">Membership Name *</Label>
@@ -313,38 +359,6 @@ export default function MembershipManagement({ salonId, getAuthHeaders }) {
                   className="flex-1"
                   onClick={() => {
                     setEditingPlan(plan);
-                    setFormData({
-                      name: plan.name,
-                      amount: plan.amount,
-                      credit: plan.credit,
-                      validity_months: plan.validity_months,
-                      terms_conditions: plan.terms_conditions || ''
-                    });
-                    setShowForm(true);
-                  }}
-                >
-                  <Edit2 className="w-3 h-3 mr-1" />
-                  Edit
-                </Button>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  className="text-red-500 hover:text-red-600"
-                  onClick={() => handleDelete(plan)}
-                >
-                  <Trash2 className="w-3 h-3" />
-                </Button>
-              </div>
-            </motion.div>
-          ))
-        )}
-      </div>
-      {/* Loyalty Program Settings */}
-      <LoyaltyProgramSettings salonId={salonId} getAuthHeaders={getAuthHeaders} />
-    </div>
-  );
-}
-                 setEditingPlan(plan);
                     setFormData({
                       name: plan.name,
                       amount: plan.amount,
