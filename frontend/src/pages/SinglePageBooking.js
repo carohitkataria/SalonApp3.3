@@ -3,8 +3,9 @@ import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import axios from 'axios';
 import { Button } from '@/components/ui/button';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { toast } from 'sonner';
-import { Scissors, Calendar, User, CheckCircle, Star, Clock, ArrowLeft, Home, Zap, Check, ChevronDown, ChevronRight, Search, Package, Crown } from 'lucide-react';
+import { Scissors, Calendar, User, CheckCircle, Star, Clock, ArrowLeft, Home, Zap, Check, ChevronDown, ChevronRight, Search, Package, Crown, History } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Input } from '@/components/ui/input';
 import CustomerWalletCard from '@/components/CustomerWalletCard';
@@ -229,7 +230,10 @@ export default function SinglePageBooking() {
   const [selectedPackage, setSelectedPackage] = useState(null); // New: selected package
   const [customerMembership, setCustomerMembership] = useState(null);
   const [showMembershipShop, setShowMembershipShop] = useState(false);
-  const [membershipPlans, setMembershipPlans] = useState([]); // New: customer wallet
+  const [membershipPlans, setMembershipPlans] = useState([]);
+  const [activeTab, setActiveTab] = useState('services');
+  const [customerBookings, setCustomerBookings] = useState([]);
+  const [availablePackages, setAvailablePackages] = useState({ public: [], customer: [] }); // New: customer wallet
   const [useWallet, setUseWallet] = useState(false); // New: use wallet checkbox
   const [barberServices, setBarberServices] = useState([]);
   const [shifts, setShifts] = useState([]);
@@ -377,15 +381,47 @@ export default function SinglePageBooking() {
         }
       }
       
-      // Combine both package types
-      const allPackages = [
-        ...(publicResponse.data.packages || []),
-        ...customerPackages
-      ];
-      
-      setPackages(allPackages);
+      setAvailablePackages({
+        public: publicResponse.data.packages || [],
+        customer: customerPackages
+      });
+      setPackages([...(publicResponse.data.packages || []), ...customerPackages]);
     } catch (error) {
       console.error('Error fetching packages:', error);
+    }
+  };
+
+  const fetchCustomerBookings = async () => {
+    if (!user || !user.phone) return;
+
+    try {
+      const phone = user.phone.replace('+91', '');
+      const response = await axios.get(`${API}/salons/${salonId}/customers/${phone}/bookings`);
+      setCustomerBookings(response.data.bookings || []);
+    } catch (error) {
+      console.log('No booking history found');
+    }
+  };
+
+
+  const fetchCustomerBookings = async () => {
+    if (!user || !user.phone) return;
+
+    try {
+      const phone = user.phone.replace('+91', '');
+      const response = await axios.get(`${API}/salons/${salonId}/customers/${phone}/bookings`);
+      setCustomerBookings(response.data.bookings || []);
+    } catch (error) {
+      console.log('No booking history found');
+    }
+  };
+
+  const fetchMembershipPlans = async () => {
+    try {
+      const response = await axios.get(`${API}/salons/${salonId}/membership-plans`);
+      setMembershipPlans(response.data.plans || []);
+    } catch (error) {
+      console.error('Error fetching plans:', error);
     }
   };
 
