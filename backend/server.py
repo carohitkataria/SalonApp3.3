@@ -2598,20 +2598,6 @@ async def get_sold_memberships(salon_id: str, current_user=Depends(get_current_s
 async def update_customer_membership(
     salon_id: str,
     membership_id: str,
-
-@api_router.get("/salons/{salon_id}/customers/{phone}/bookings")
-async def get_customer_bookings(salon_id: str, phone: str):
-    """Get customer's booking history (no auth required)"""
-    if not phone.startswith("+91"):
-        phone = f"+91{phone}"
-    
-    bookings = await db.tokens.find({
-        "salon_id": salon_id,
-        "phone": phone
-    }, {"_id": 0}).sort("created_at", -1).limit(20).to_list(20)
-    
-    return {"bookings": bookings}
-
     updates: dict,
     current_user=Depends(get_current_salon_user)
 ):
@@ -2639,6 +2625,19 @@ async def get_customer_membership_info(salon_id: str, phone: str):
         raise HTTPException(status_code=404, detail="No active membership found")
     
     return membership
+
+@api_router.get("/salons/{salon_id}/customers/{phone}/bookings")
+async def get_customer_bookings(salon_id: str, phone: str):
+    """Get customer's booking history (no auth required)"""
+    if not phone.startswith("+91"):
+        phone = f"+91{phone}"
+    
+    bookings = await db.tokens.find({
+        "salon_id": salon_id,
+        "phone": phone
+    }, {"_id": 0}).sort("created_at", -1).limit(20).to_list(20)
+    
+    return {"bookings": bookings}
 
     return updated
 
