@@ -531,6 +531,11 @@ async def get_current_salon_admin(credentials: HTTPAuthorizationCredentials = De
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Admin access required"
         )
+    
+    # For legacy salon tokens, salon_id is in 'sub' field
+    if payload.get("role") == "salon" and "salon_id" not in payload:
+        payload["salon_id"] = payload.get("sub")
+    
     return payload
 
 def check_permission(user_payload: dict, permission: str) -> bool:
