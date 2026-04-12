@@ -1413,14 +1413,20 @@ async def toggle_service_for_salon(
     salon_id: str, 
     service_id: str, 
     is_enabled: bool,
-    current_salon=Depends(get_current_salon)
+    credentials: HTTPAuthorizationCredentials = Depends(security)
 ):
     """Enable or disable a service for a specific salon"""
+    # Verify token (supports both legacy and multi-user auth)
+    token = credentials.credentials
+    payload = verify_token(token)
+    if not payload:
+        raise HTTPException(status_code=401, detail="Invalid authentication")
+    
     # Check if salon_service entry exists
     salon_service = await db.salon_services.find_one({
         "salon_id": salon_id,
         "service_id": service_id
-    })
+    }, {"_id": 0})
     
     if salon_service:
         # Update existing

@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
@@ -8,6 +8,7 @@ import { Label } from '@/components/ui/label';
 import { toast } from 'sonner';
 import { Scissors, Lock, Smartphone, Eye, EyeOff } from 'lucide-react';
 import { motion } from 'framer-motion';
+import { saveSession, getSession, isSessionValid } from '@/utils/sessionManager';
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
 const API = `${BACKEND_URL}/api`;
@@ -24,6 +25,13 @@ export default function OTPLoginPage() {
   const [sentOtp, setSentOtp] = useState('');
   const [countdown, setCountdown] = useState(0);
   const [canResend, setCanResend] = useState(false);
+
+  // Check for existing session on mount
+  useEffect(() => {
+    if (isSessionValid()) {
+      navigate('/salon/dashboard');
+    }
+  }, [navigate]);
 
   // Countdown timer for resend
   React.useEffect(() => {
@@ -78,6 +86,14 @@ export default function OTPLoginPage() {
             phone,
             password
           });
+          
+          // Store legacy session
+          saveSession(
+            legacyResponse.data.access_token,
+            legacyResponse.data.salon_id,
+            'salon',
+            legacyResponse.data.salon_id
+          );
           
           localStorage.setItem('salon_admin_token', legacyResponse.data.access_token);
           localStorage.setItem('salon_id', legacyResponse.data.salon_id);
@@ -410,5 +426,8 @@ export default function OTPLoginPage() {
         </div>
       </motion.div>
     </div>
+  );
+}
+ </div>
   );
 }

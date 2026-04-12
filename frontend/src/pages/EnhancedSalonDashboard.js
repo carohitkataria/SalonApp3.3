@@ -15,6 +15,7 @@ import CustomerMaster from '@/components/CustomerMaster';
 import OfferingsModule from '@/components/OfferingsModule';
 import MyProfile from '@/components/MyProfile';
 import Analytics from '@/components/Analytics';
+import { getSession, clearSession } from '@/utils/sessionManager';
 import { 
   Scissors, LogOut, ChevronRight, SkipForward, RotateCcw, XCircle,
   Clock, User, Phone, Bell, MapPin, Settings, CheckCircle, Calendar,
@@ -271,10 +272,9 @@ export default function EnhancedSalonDashboard() {
   };
 
   const handleLogout = () => {
-    localStorage.removeItem('salon_admin_token');
-    localStorage.removeItem('salon_user_auth');
-    localStorage.removeItem('salon_id');
+    clearSession();  // Clear all session data using session manager
     navigate('/salon/login');
+    toast.success('Logged out successfully');
   };
 
   // Check if user is admin (supports both new multi-user and legacy login)
