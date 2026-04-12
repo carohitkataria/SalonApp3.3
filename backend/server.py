@@ -620,32 +620,36 @@ def generate_2hour_slots():
     return slots
 
 async def check_and_apply_loyalty_reward(salon_id: str, customer_phone: str, booking_amount: float):
-    """Check if customer qualifies for loyalty reward and auto top-up wallet (Multi-Tier)"""
+    """Check if customer qualifies for loyalty reward and auto top-up wallet (Multi-Tier with individual periods)"""
     # Get loyalty program settings
     loyalty_program = await db.loyalty_programs.find_one({"salon_id": salon_id, "enabled": True}, {"_id": 0})
     if not loyalty_program or not loyalty_program.get("tiers"):
         return None
     
-    # Calculate date range
-    cutoff_date = datetime.now(timezone.utc) - timedelta(days=loyalty_program["period_months"] * 30)
-    
-    # Get customer's completed bookings in the period
-    completed_bookings = await db.tokens.find({
-        "salon_id": salon_id,
-        "phone": customer_phone,
-        "status": "completed",
-        "completed_at": {"$gte": cutoff_date.isoformat()}
-    }, {"_id": 0, "total_amount": 1}).to_list(1000)
-    
-    # Calculate total spend
-    total_spend = sum([b.get("total_amount", 0) for b in completed_bookings])
-    
-    # Find highest qualifying tier
+    # Find highest qualifying tier (each tier has its own period)
     qualifying_tier = None
+    total_spend_for_tier = 0
+    
     for tier in sorted(loyalty_program["tiers"], key=lambda x: x["spend_amount"], reverse=True):
+        # Calculate date range for THIS tier's period
+        cutoff_date = datetime.now(timezone.utc) - timedelta(days=tier["period_months"] * 30)
+        
+        # Get customer's completed bookings in THIS tier's period
+        completed_bookings = await db.tokens.find({
+            "salon_id": salon_id,
+            "phone": customer_phone,
+            "status": "completed",
+            "completed_at": {"$gte": cutoff_date.isoformat()}
+        }, {"_id": 0, "total_amount": 1}).to_list(1000)
+        
+        # Calculate total spend in this period
+        total_spend = sum([b.get("total_amount", 0) for b in completed_bookings])
+        
+        # Check if threshold is met for this tier
         if total_spend >= tier["spend_amount"]:
             qualifying_tier = tier
-            break
+            total_spend_for_tier = total_spend
+            break  # Found highest qualifying tier
     
     if not qualifying_tier:
         return None
@@ -676,7 +680,7 @@ async def check_and_apply_loyalty_reward(salon_id: str, customer_phone: str, boo
             "transaction_type": "credit",
             "amount": topup_amount,
             "balance_after": new_balance,
-            "description": f"Loyalty reward ({qualifying_tier['name']} tier): Spent ₹{total_spend:.2f} in {loyalty_program['period_months']} months",
+            "description": f"Loyalty reward ({qualifying_tier['name']} tier): Spent ₹{total_spend_for_tier:.2f} in {qualifying_tier['period_months']} months",
             "created_at": datetime.now(timezone.utc).isoformat()
         })
         
@@ -685,7 +689,7 @@ async def check_and_apply_loyalty_reward(salon_id: str, customer_phone: str, boo
             "tier": qualifying_tier["name"],
             "topup_amount": topup_amount,
             "new_balance": new_balance,
-            "total_spend": total_spend
+            "total_spend": total_spend_for_tier
         }
     
     return None
@@ -2463,20 +2467,19 @@ class WalletTransaction(BaseModel):
 class LoyaltyTier(BaseModel):
     name: str  # e.g., "Bronze", "Silver", "Gold"
     spend_amount: float  # Threshold
+    period_months: int  # Individual period for this tier
     topup_percentage: float  # Reward percentage
 
 class LoyaltyProgramSettings(BaseModel):
     salon_id: str
     enabled: bool = False
-    period_months: int  # e.g., 6 (applies to all tiers)
-    tiers: List[Dict[str, Any]] = []  # Multiple tiers
+    tiers: List[Dict[str, Any]] = []  # Multiple tiers with individual periods
 
 class LoyaltyProgram(BaseModel):
     model_config = ConfigDict(extra="ignore")
     id: str
     salon_id: str
     enabled: bool
-    period_months: int
     tiers: List[Dict[str, Any]]
     updated_at: str
 
@@ -2554,6 +2557,48 @@ async def update_membership_plan(
     )
     
     updated = await db.membership_plans.find_one({"id": plan_id}, {"_id": 0})
+
+@api_router.get("/salons/{salon_id}/sold-memberships")
+async def get_sold_memberships(salon_id: str, current_user=Depends(get_current_salon_user)):
+    """Get all sold memberships for a salon"""
+    memberships = await db.customer_memberships.find({
+        "salon_id": salon_id
+    }, {"_id": 0}).sort("purchased_at", -1).to_list(1000)
+    
+    return {"memberships": memberships}
+
+@api_router.put("/salons/{salon_id}/customer-memberships/{membership_id}")
+async def update_customer_membership(
+    salon_id: str,
+    membership_id: str,
+    updates: dict,
+    current_user=Depends(get_current_salon_user)
+):
+    """Update a sold membership (wallet balance, expiry, status)"""
+    await db.customer_memberships.update_one(
+        {"id": membership_id, "salon_id": salon_id},
+        {"$set": updates}
+    )
+    
+    return {"message": "Membership updated successfully"}
+
+@api_router.get("/salons/{salon_id}/customers/{phone}/membership")
+async def get_customer_membership_info(salon_id: str, phone: str):
+    """Get customer's active membership info (no auth required for customer view)"""
+    if not phone.startswith("+91"):
+        phone = f"+91{phone}"
+    
+    membership = await db.customer_memberships.find_one({
+        "salon_id": salon_id,
+        "customer_phone": phone,
+        "is_active": True
+    }, {"_id": 0})
+    
+    if not membership:
+        raise HTTPException(status_code=404, detail="No active membership found")
+    
+    return membership
+
     return updated
 
 @api_router.delete("/salons/{salon_id}/membership-plans/{plan_id}")

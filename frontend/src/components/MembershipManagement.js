@@ -8,6 +8,7 @@ import { toast } from 'sonner';
 import { Crown, Plus, Edit2, Trash2, Save, X, DollarSign, Calendar, FileText } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import LoyaltyProgramSettings from './LoyaltyProgramSettings';
+import SoldMembershipManagement from './SoldMembershipManagement';
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
 const API = `${BACKEND_URL}/api`;
@@ -212,13 +213,11 @@ export default function MembershipManagement({ salonId, getAuthHeaders }) {
                       onChange={(e) => setFormData({ ...formData, amount: e.target.value })}
                       placeholder="e.g., 5000"
                       required
-                      disabled={!!editingPlan}
-                      className={editingPlan ? 'bg-muted cursor-not-allowed' : ''}
                     />
                   </div>
                   {editingPlan && (
                     <p className="text-xs text-orange-600 mt-1">
-                      ⚠️ Price cannot be changed (financial impact)
+                      ⚠️ Changing price affects NEW purchases only
                     </p>
                   )}
                 </div>
@@ -385,6 +384,9 @@ export default function MembershipManagement({ salonId, getAuthHeaders }) {
           ))
         )}
       </div>
+      {/* Sold Memberships */}
+      <SoldMembershipManagement salonId={salonId} getAuthHeaders={getAuthHeaders} />
+
       {/* Loyalty Program Settings */}
       <LoyaltyProgramSettings salonId={salonId} getAuthHeaders={getAuthHeaders} />
     </div>

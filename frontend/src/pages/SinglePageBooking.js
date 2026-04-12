@@ -227,7 +227,9 @@ export default function SinglePageBooking() {
   const [salonServices, setSalonServices] = useState([]);
   const [packages, setPackages] = useState([]); // New: salon packages
   const [selectedPackage, setSelectedPackage] = useState(null); // New: selected package
-  const [customerMembership, setCustomerMembership] = useState(null); // New: customer wallet
+  const [customerMembership, setCustomerMembership] = useState(null);
+  const [showMembershipShop, setShowMembershipShop] = useState(false);
+  const [membershipPlans, setMembershipPlans] = useState([]); // New: customer wallet
   const [useWallet, setUseWallet] = useState(false); // New: use wallet checkbox
   const [barberServices, setBarberServices] = useState([]);
   const [shifts, setShifts] = useState([]);

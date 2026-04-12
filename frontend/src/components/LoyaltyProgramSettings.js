@@ -12,9 +12,9 @@ const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
 const API = `${BACKEND_URL}/api`;
 
 const DEFAULT_TIERS = [
-  { name: 'Bronze', spend_amount: 5000, topup_percentage: 5 },
-  { name: 'Silver', spend_amount: 10000, topup_percentage: 10 },
-  { name: 'Gold', spend_amount: 20000, topup_percentage: 15 }
+  { name: 'Bronze', spend_amount: 5000, period_months: 6, topup_percentage: 5 },
+  { name: 'Silver', spend_amount: 10000, period_months: 12, topup_percentage: 10 },
+  { name: 'Gold', spend_amount: 20000, period_months: 12, topup_percentage: 15 }
 ];
 
 export default function LoyaltyProgramSettings({ salonId, getAuthHeaders }) {
@@ -22,7 +22,6 @@ export default function LoyaltyProgramSettings({ salonId, getAuthHeaders }) {
   const [saving, setSaving] = useState(false);
   const [settings, setSettings] = useState({
     enabled: false,
-    period_months: 6,
     tiers: DEFAULT_TIERS
   });
 
@@ -41,7 +40,6 @@ export default function LoyaltyProgramSettings({ salonId, getAuthHeaders }) {
       if (response.data.enabled !== undefined) {
         setSettings({
           enabled: response.data.enabled,
-          period_months: response.data.period_months || 6,
           tiers: response.data.tiers && response.data.tiers.length > 0 ? response.data.tiers : DEFAULT_TIERS
         });
       }
@@ -60,7 +58,7 @@ export default function LoyaltyProgramSettings({ salonId, getAuthHeaders }) {
 
     // Validate tiers
     for (const tier of settings.tiers) {
-      if (!tier.name || tier.spend_amount <= 0 || tier.topup_percentage <= 0) {
+      if (!tier.name || tier.spend_amount <= 0 || tier.period_months <= 0 || tier.topup_percentage <= 0) {
         toast.error('All tier fields must be valid');
         return;
       }
@@ -73,7 +71,6 @@ export default function LoyaltyProgramSettings({ salonId, getAuthHeaders }) {
         {
           salon_id: salonId,
           enabled: settings.enabled,
-          period_months: parseInt(settings.period_months),
           tiers: settings.tiers
         },
         { headers: getAuthHeaders() }
@@ -90,7 +87,7 @@ export default function LoyaltyProgramSettings({ salonId, getAuthHeaders }) {
   const addTier = () => {
     setSettings({
       ...settings,
-      tiers: [...settings.tiers, { name: '', spend_amount: 0, topup_percentage: 0 }]
+      tiers: [...settings.tiers, { name: '', spend_amount: 0, period_months: 6, topup_percentage: 0 }]
     });
   };
 
