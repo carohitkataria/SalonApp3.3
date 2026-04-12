@@ -314,7 +314,7 @@ export default function EnhancedSalonDashboard() {
   // Define menu items with role-based visibility
   const menuItems = [
     { id: 'queue', label: 'Token Queue', icon: Calendar, show: true },
-    { id: 'staff', label: 'Staff Management', icon: Users, show: true },
+    { id: 'staff', label: 'Staff Management', icon: Users, show: checkIsAdmin() }, // Admin only
     { id: 'services', label: 'Services & Offerings', icon: Scissors, show: true },
     { id: 'financials', label: 'Financials', icon: DollarSign, show: checkIsAdmin() },
     { id: 'customer-master', label: 'Customer Master', icon: Database, show: true },
