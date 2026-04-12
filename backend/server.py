@@ -2519,6 +2519,33 @@ async def create_membership_plan(salon_id: str, plan: MembershipPlanCreate, curr
     plan_dict["created_at"] = datetime.now(timezone.utc).isoformat()
     
     await db.membership_plans.insert_one(plan_dict)
+
+@api_router.put("/salons/{salon_id}/customer-packages/{package_id}")
+async def update_customer_package(
+    salon_id: str,
+    package_id: str,
+    package_data: dict,
+    current_user=Depends(get_current_salon_user)
+):
+    """Update a custom customer package"""
+    await db.customer_packages.update_one(
+        {"id": package_id, "salon_id": salon_id},
+        {"$set": package_data}
+    )
+    return {"message": "Package updated successfully"}
+
+@api_router.delete("/salons/{salon_id}/customer-packages/{package_id}")
+async def delete_customer_package(
+    salon_id: str,
+    package_id: str,
+    current_user=Depends(get_current_salon_user)
+):
+    """Delete a custom customer package"""
+    result = await db.customer_packages.delete_one({"id": package_id, "salon_id": salon_id})
+    if result.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Package not found")
+    return {"message": "Package deleted successfully"}
+
     return MembershipPlan(**plan_dict)
 
 @api_router.get("/salons/{salon_id}/membership-plans")

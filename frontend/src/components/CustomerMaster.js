@@ -27,6 +27,8 @@ export default function CustomerMaster({ salonId, getAuthHeaders }) {
   const [showMembershipModal, setShowMembershipModal] = useState(false);
   const [showMembershipManagement, setShowMembershipManagement] = useState(false);
   const [services, setServices] = useState([]);
+  const [editingPackage, setEditingPackage] = useState(null);
+
   
   const [packageForm, setPackageForm] = useState({
     package_name: '',
@@ -189,14 +191,24 @@ export default function CustomerMaster({ salonId, getAuthHeaders }) {
         notes: packageForm.notes
       };
 
-      await axios.post(
-        `${API}/salons/${salonId}/customer-packages`,
-        packageData,
-        { headers: getAuthHeaders() }
-      );
+      if (editingPackage) {
+        await axios.put(
+          `${API}/salons/${salonId}/customer-packages/${editingPackage.id}`,
+          packageData,
+          { headers: getAuthHeaders() }
+        );
+        toast.success('Package updated successfully');
+      } else {
+        await axios.post(
+          `${API}/salons/${salonId}/customer-packages`,
+          packageData,
+          { headers: getAuthHeaders() }
+        );
+        toast.success('Custom package created successfully');
+      }
 
-      toast.success('Custom package created successfully');
       setShowPackageForm(false);
+      setEditingPackage(null);
       setPackageForm({
         package_name: '',
         services: [],
@@ -209,6 +221,34 @@ export default function CustomerMaster({ salonId, getAuthHeaders }) {
     } catch (error) {
       toast.error('Failed to create package');
     }
+
+  const handleEditPackage = (pkg) => {
+    setEditingPackage(pkg);
+    setPackageForm({
+      package_name: pkg.package_name,
+      services: pkg.services.map(s => s.service_id),
+      discount_percentage: pkg.discount_percentage || 0,
+      final_amount: pkg.pricing_mode === 'manual' ? pkg.total_discounted : null,
+      pricing_mode: pkg.pricing_mode || 'discount',
+      notes: pkg.notes || ''
+    });
+    setShowPackageForm(true);
+  };
+
+  const handleDeletePackage = async (packageId) => {
+    if (!window.confirm('Delete this custom package?')) return;
+
+    try {
+      await axios.delete(`${API}/salons/${salonId}/customer-packages/${packageId}`, {
+        headers: getAuthHeaders()
+      });
+      toast.success('Package deleted');
+      fetchCustomerPackages(selectedCustomer.phone);
+    } catch (error) {
+      toast.error('Failed to delete package');
+    }
+  };
+
   };
 
   const filteredCustomers = customers.filter(c =>
@@ -502,10 +542,28 @@ export default function CustomerMaster({ salonId, getAuthHeaders }) {
                       <h4 className="font-semibold">{pkg.package_name}</h4>
                       <p className="text-sm text-muted-foreground">{pkg.services.length} services</p>
                     </div>
-                    <div className="text-right">
-                      <p className="text-sm line-through text-muted-foreground">₹{pkg.total_original}</p>
-                      <p className="text-lg font-bold text-gold">₹{pkg.total_discounted}</p>
-                      <p className="text-xs text-green-600">{pkg.discount_percentage}% off</p>
+                    <div className="flex items-center gap-2">
+                      <div className="text-right mr-3">
+                        <p className="text-sm line-through text-muted-foreground">₹{pkg.total_original}</p>
+                        <p className="text-lg font-bold text-gold">₹{pkg.total_discounted}</p>
+                        <p className="text-xs text-green-600">{pkg.discount_percentage.toFixed(1)}% off</p>
+                      </div>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => handleEditPackage(pkg)}
+                        className="text-blue-500 border-blue-500"
+                      >
+                        Edit
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => handleDeletePackage(pkg.id)}
+                        className="text-red-500 border-red-500"
+                      >
+                        Delete
+                      </Button>
                     </div>
                   </div>
                   {pkg.notes && (
