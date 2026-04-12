@@ -75,6 +75,15 @@ export default function OTPLoginPage() {
       localStorage.setItem('salon_user_auth', JSON.stringify(authData));
       localStorage.setItem('salon_id', response.data.salon_id);
       
+      // Also save to session manager for consistency
+      saveSession(
+        response.data.access_token,
+        response.data.salon_id,
+        response.data.role,
+        response.data.user_id,
+        response.data.permissions
+      );
+      
       toast.success('Login successful!');
       navigate('/salon/dashboard');
     } catch (error) {

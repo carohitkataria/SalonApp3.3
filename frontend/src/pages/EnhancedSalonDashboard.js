@@ -54,9 +54,11 @@ export default function EnhancedSalonDashboard() {
 
   useEffect(() => {
     const storedSalonId = localStorage.getItem('salon_id');
-    const token = localStorage.getItem('salon_admin_token');
+    const legacyToken = localStorage.getItem('salon_admin_token');
+    const salonUserAuth = localStorage.getItem('salon_user_auth');
     
-    if (!storedSalonId || !token) {
+    // Check for either legacy token or new multi-user auth
+    if (!storedSalonId || (!legacyToken && !salonUserAuth)) {
       navigate('/salon/login');
       return;
     }
@@ -91,8 +93,19 @@ export default function EnhancedSalonDashboard() {
   }, [filter, selectedBarber]);
 
   const getAuthHeaders = () => {
-    const token = localStorage.getItem('salon_admin_token');
-    return { Authorization: `Bearer ${token}` };
+    // Try new multi-user auth first, fall back to legacy
+    const salonUserAuth = localStorage.getItem('salon_user_auth');
+    if (salonUserAuth) {
+      try {
+        const authData = JSON.parse(salonUserAuth);
+        return { Authorization: `Bearer ${authData.token}` };
+      } catch (e) {
+        // Fall through to legacy token
+      }
+    }
+    
+    const legacyToken = localStorage.getItem('salon_admin_token');
+    return { Authorization: `Bearer ${legacyToken}` };
   };
 
   const fetchSalonData = async (id) => {
