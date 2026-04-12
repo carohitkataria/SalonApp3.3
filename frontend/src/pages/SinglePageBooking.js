@@ -403,19 +403,6 @@ export default function SinglePageBooking() {
     }
   };
 
-
-  const fetchCustomerBookings = async () => {
-    if (!user || !user.phone) return;
-
-    try {
-      const phone = user.phone.replace('+91', '');
-      const response = await axios.get(`${API}/salons/${salonId}/customers/${phone}/bookings`);
-      setCustomerBookings(response.data.bookings || []);
-    } catch (error) {
-      console.log('No booking history found');
-    }
-  };
-
   const fetchMembershipPlans = async () => {
     try {
       const response = await axios.get(`${API}/salons/${salonId}/membership-plans`);
