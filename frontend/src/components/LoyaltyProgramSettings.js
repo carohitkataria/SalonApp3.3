@@ -5,20 +5,25 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Checkbox } from '@/components/ui/checkbox';
 import { toast } from 'sonner';
-import { Gift, Percent, Calendar, IndianRupee, Save } from 'lucide-react';
+import { Gift, Percent, Calendar, IndianRupee, Save, Plus, X, Trash2 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
 const API = `${BACKEND_URL}/api`;
+
+const DEFAULT_TIERS = [
+  { name: 'Bronze', spend_amount: 5000, topup_percentage: 5 },
+  { name: 'Silver', spend_amount: 10000, topup_percentage: 10 },
+  { name: 'Gold', spend_amount: 20000, topup_percentage: 15 }
+];
 
 export default function LoyaltyProgramSettings({ salonId, getAuthHeaders }) {
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [settings, setSettings] = useState({
     enabled: false,
-    spend_amount: 10000,
     period_months: 6,
-    topup_percentage: 10
+    tiers: DEFAULT_TIERS
   });
 
   useEffect(() => {
@@ -34,7 +39,11 @@ export default function LoyaltyProgramSettings({ salonId, getAuthHeaders }) {
         headers: getAuthHeaders()
       });
       if (response.data.enabled !== undefined) {
-        setSettings(response.data);
+        setSettings({
+          enabled: response.data.enabled,
+          period_months: response.data.period_months || 6,
+          tiers: response.data.tiers && response.data.tiers.length > 0 ? response.data.tiers : DEFAULT_TIERS
+        });
       }
     } catch (error) {
       console.error('Error fetching loyalty settings:', error);
@@ -44,9 +53,17 @@ export default function LoyaltyProgramSettings({ salonId, getAuthHeaders }) {
   };
 
   const handleSave = async () => {
-    if (settings.enabled && (settings.spend_amount <= 0 || settings.period_months <= 0 || settings.topup_percentage <= 0)) {
-      toast.error('Please enter valid values for all fields');
+    if (settings.enabled && settings.tiers.length === 0) {
+      toast.error('Please add at least one loyalty tier');
       return;
+    }
+
+    // Validate tiers
+    for (const tier of settings.tiers) {
+      if (!tier.name || tier.spend_amount <= 0 || tier.topup_percentage <= 0) {
+        toast.error('All tier fields must be valid');
+        return;
+      }
     }
 
     setSaving(true);
@@ -56,9 +73,8 @@ export default function LoyaltyProgramSettings({ salonId, getAuthHeaders }) {
         {
           salon_id: salonId,
           enabled: settings.enabled,
-          spend_amount: parseFloat(settings.spend_amount),
           period_months: parseInt(settings.period_months),
-          topup_percentage: parseFloat(settings.topup_percentage)
+          tiers: settings.tiers
         },
         { headers: getAuthHeaders() }
       );
@@ -69,6 +85,26 @@ export default function LoyaltyProgramSettings({ salonId, getAuthHeaders }) {
     } finally {
       setSaving(false);
     }
+  };
+
+  const addTier = () => {
+    setSettings({
+      ...settings,
+      tiers: [...settings.tiers, { name: '', spend_amount: 0, topup_percentage: 0 }]
+    });
+  };
+
+  const removeTier = (index) => {
+    setSettings({
+      ...settings,
+      tiers: settings.tiers.filter((_, i) => i !== index)
+    });
+  };
+
+  const updateTier = (index, field, value) => {
+    const newTiers = [...settings.tiers];
+    newTiers[index][field] = value;
+    setSettings({ ...settings, tiers: newTiers });
   };
 
   if (loading) {
@@ -88,9 +124,9 @@ export default function LoyaltyProgramSettings({ salonId, getAuthHeaders }) {
             <Gift className="w-6 h-6 text-gold" />
           </div>
           <div>
-            <h3 className="text-xl font-bold">Loyalty Program</h3>
+            <h3 className="text-xl font-bold">Multi-Tier Loyalty Program</h3>
             <p className="text-sm text-muted-foreground">
-              Auto reward customers who reach spending milestones
+              Reward customers based on spending thresholds with multiple tiers
             </p>
           </div>
         </div>
@@ -107,12 +143,12 @@ export default function LoyaltyProgramSettings({ salonId, getAuthHeaders }) {
         <Label htmlFor="loyalty_enabled" className="cursor-pointer flex-1">
           <span className="font-semibold">Enable Loyalty Program</span>
           <p className="text-xs text-muted-foreground mt-1">
-            Automatically top up customer wallets when they reach spending thresholds
+            Auto-reward customers when they reach tier thresholds
           </p>
         </Label>
       </div>
 
-      {/* Configuration Form */}
+      {/* Configuration */}
       <AnimatePresence>
         {settings.enabled && (
           <motion.div
@@ -121,97 +157,125 @@ export default function LoyaltyProgramSettings({ salonId, getAuthHeaders }) {
             exit={{ opacity: 0, height: 0 }}
             className="space-y-4 border-t border-border pt-4"
           >
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              {/* Spending Threshold */}
-              <div>
-                <Label htmlFor="spend_amount" className="flex items-center gap-2">
-                  <IndianRupee className="w-4 h-4 text-gold" />
-                  Spending Threshold
-                </Label>
-                <div className="flex items-center mt-2">
-                  <span className="text-sm mr-2">₹</span>
-                  <Input
-                    id="spend_amount"
-                    type="number"
-                    value={settings.spend_amount}
-                    onChange={(e) => setSettings({ ...settings, spend_amount: e.target.value })}
-                    placeholder="e.g., 10000"
-                    min="1"
-                  />
-                </div>
-                <p className="text-xs text-muted-foreground mt-1">
-                  Minimum spend to qualify for reward
-                </p>
-              </div>
-
-              {/* Time Period */}
-              <div>
-                <Label htmlFor="period_months" className="flex items-center gap-2">
-                  <Calendar className="w-4 h-4 text-gold" />
-                  Time Period
-                </Label>
-                <div className="flex items-center mt-2">
-                  <Input
-                    id="period_months"
-                    type="number"
-                    value={settings.period_months}
-                    onChange={(e) => setSettings({ ...settings, period_months: e.target.value })}
-                    placeholder="e.g., 6"
-                    min="1"
-                    max="24"
-                  />
-                  <span className="text-sm ml-2">months</span>
-                </div>
-                <p className="text-xs text-muted-foreground mt-1">
-                  Spending period to track
-                </p>
-              </div>
-
-              {/* Reward Percentage */}
-              <div>
-                <Label htmlFor="topup_percentage" className="flex items-center gap-2">
-                  <Percent className="w-4 h-4 text-gold" />
-                  Wallet Top-Up %
-                </Label>
-                <div className="flex items-center mt-2">
-                  <Input
-                    id="topup_percentage"
-                    type="number"
-                    value={settings.topup_percentage}
-                    onChange={(e) => setSettings({ ...settings, topup_percentage: e.target.value })}
-                    placeholder="e.g., 10"
-                    min="1"
-                    max="100"
-                    step="0.5"
-                  />
-                  <Percent className="w-4 h-4 ml-2 text-muted-foreground" />
-                </div>
-                <p className="text-xs text-muted-foreground mt-1">
-                  Percentage of threshold to reward
-                </p>
-              </div>
-
-              {/* Calculated Reward Display */}
-              <div className="bg-gold/10 border border-gold/30 rounded-lg p-4">
-                <p className="text-xs text-muted-foreground mb-1">Reward Amount</p>
-                <p className="text-2xl font-bold text-gold">
-                  ₹{((settings.spend_amount * settings.topup_percentage) / 100).toFixed(2)}
-                </p>
-                <p className="text-xs text-muted-foreground mt-2">
-                  Will be added to customer's wallet
-                </p>
-              </div>
-            </div>
-
-            {/* Example Explanation */}
-            <div className="bg-muted/50 p-4 rounded-lg border border-border">
-              <p className="text-sm font-semibold mb-2">How it works:</p>
-              <p className="text-sm text-muted-foreground">
-                When a customer spends <span className="font-semibold text-foreground">₹{settings.spend_amount}</span> or more 
-                within <span className="font-semibold text-foreground">{settings.period_months} months</span>, their wallet will automatically 
-                be topped up with <span className="font-semibold text-gold">₹{((settings.spend_amount * settings.topup_percentage) / 100).toFixed(2)}</span> ({settings.topup_percentage}% of ₹{settings.spend_amount}).
+            {/* Global Period */}
+            <div className="max-w-xs">
+              <Label htmlFor="period_months" className="flex items-center gap-2">
+                <Calendar className="w-4 h-4 text-gold" />
+                Tracking Period (Months)
+              </Label>
+              <Input
+                id="period_months"
+                type="number"
+                value={settings.period_months}
+                onChange={(e) => setSettings({ ...settings, period_months: e.target.value })}
+                min="1"
+                max="24"
+                className="mt-2"
+              />
+              <p className="text-xs text-muted-foreground mt-1">
+                Time period to track customer spending
               </p>
             </div>
+
+            {/* Tiers */}
+            <div>
+              <div className="flex items-center justify-between mb-3">
+                <Label className="text-base">Loyalty Tiers</Label>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  onClick={addTier}
+                  className="text-gold border-gold hover:bg-gold/10"
+                >
+                  <Plus className="w-3 h-3 mr-1" />
+                  Add Tier
+                </Button>
+              </div>
+
+              <div className="space-y-3">
+                {settings.tiers.map((tier, index) => (
+                  <motion.div
+                    key={index}
+                    initial={{ opacity: 0, y: -10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    className="grid grid-cols-1 md:grid-cols-4 gap-3 p-4 bg-muted/50 rounded-lg border border-border"
+                  >
+                    <div>
+                      <Label className="text-xs">Tier Name</Label>
+                      <Input
+                        value={tier.name}
+                        onChange={(e) => updateTier(index, 'name', e.target.value)}
+                        placeholder="e.g., Bronze"
+                        className="mt-1"
+                      />
+                    </div>
+                    <div>
+                      <Label className="text-xs">Spend Threshold (₹)</Label>
+                      <Input
+                        type="number"
+                        value={tier.spend_amount}
+                        onChange={(e) => updateTier(index, 'spend_amount', parseFloat(e.target.value) || 0)}
+                        placeholder="5000"
+                        className="mt-1"
+                      />
+                    </div>
+                    <div>
+                      <Label className="text-xs">Reward %</Label>
+                      <div className="flex items-center mt-1">
+                        <Input
+                          type="number"
+                          value={tier.topup_percentage}
+                          onChange={(e) => updateTier(index, 'topup_percentage', parseFloat(e.target.value) || 0)}
+                          placeholder="5"
+                          className="flex-1"
+                        />
+                        <Percent className="w-3 h-3 ml-1 text-muted-foreground" />
+                      </div>
+                    </div>
+                    <div className="flex items-end">
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="ghost"
+                        onClick={() => removeTier(index)}
+                        className="text-red-500 hover:text-red-600 w-full"
+                      >
+                        <Trash2 className="w-3 h-3 mr-1" />
+                        Remove
+                      </Button>
+                    </div>
+                  </motion.div>
+                ))}
+              </div>
+
+              {settings.tiers.length === 0 && (
+                <p className="text-sm text-muted-foreground text-center py-4">
+                  No tiers added. Click "Add Tier" to create your first tier.
+                </p>
+              )}
+            </div>
+
+            {/* Example */}
+            {settings.tiers.length > 0 && (
+              <div className="bg-muted/50 p-4 rounded-lg border border-border">
+                <p className="text-sm font-semibold mb-2">How it works:</p>
+                <ul className="space-y-1 text-sm text-muted-foreground">
+                  {settings.tiers
+                    .sort((a, b) => a.spend_amount - b.spend_amount)
+                    .map((tier, i) => (
+                      <li key={i}>
+                        <span className="font-semibold text-gold">{tier.name}:</span> Spend ₹
+                        {tier.spend_amount} in {settings.period_months} months → Get ₹
+                        {((tier.spend_amount * tier.topup_percentage) / 100).toFixed(2)} wallet credit
+                      </li>
+                    ))}
+                </ul>
+                <p className="text-xs text-muted-foreground mt-3">
+                  💡 Customer qualifies for the highest tier they reach. Rewards apply automatically on booking completion.
+                </p>
+              </div>
+            )}
           </motion.div>
         )}
       </AnimatePresence>

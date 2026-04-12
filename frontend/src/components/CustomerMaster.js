@@ -32,6 +32,8 @@ export default function CustomerMaster({ salonId, getAuthHeaders }) {
     package_name: '',
     services: [],
     discount_percentage: 0,
+    final_amount: null,  // New: manual final amount override
+    pricing_mode: 'discount', // 'discount' or 'manual'
     notes: ''
   });
 
@@ -156,6 +158,19 @@ export default function CustomerMaster({ salonId, getAuthHeaders }) {
       const selectedServices = services.filter(s => packageForm.services.includes(s.id));
       const totals = calculatePackageTotal();
       
+      // Calculate final price based on pricing mode
+      let finalPrice;
+      if (packageForm.pricing_mode === 'manual' && packageForm.final_amount !== null) {
+        finalPrice = packageForm.final_amount;
+      } else {
+        finalPrice = totals.final;
+      }
+      
+      // Calculate discount percentage for display
+      const discountPercentage = packageForm.pricing_mode === 'manual' && packageForm.final_amount !== null
+        ? ((totals.original - packageForm.final_amount) / totals.original * 100)
+        : packageForm.discount_percentage;
+      
       const packageData = {
         salon_id: salonId,
         customer_phone: selectedCustomer.phone,
@@ -165,11 +180,12 @@ export default function CustomerMaster({ salonId, getAuthHeaders }) {
           service_id: s.id,
           service_name: s.service_name,
           original_price: s.price || s.base_price || 0,
-          discounted_price: (s.price || s.base_price || 0) * (1 - packageForm.discount_percentage / 100)
+          discounted_price: (s.price || s.base_price || 0) * (1 - discountPercentage / 100)
         })),
         total_original: totals.original,
-        discount_percentage: packageForm.discount_percentage,
-        total_discounted: totals.final,
+        discount_percentage: discountPercentage,
+        total_discounted: finalPrice,
+        pricing_mode: packageForm.pricing_mode,
         notes: packageForm.notes
       };
 
@@ -181,7 +197,14 @@ export default function CustomerMaster({ salonId, getAuthHeaders }) {
 
       toast.success('Custom package created successfully');
       setShowPackageForm(false);
-      setPackageForm({ package_name: '', services: [], discount_percentage: 0, notes: '' });
+      setPackageForm({
+        package_name: '',
+        services: [],
+        discount_percentage: 0,
+        final_amount: null,
+        pricing_mode: 'discount',
+        notes: ''
+      });
       fetchCustomerPackages(selectedCustomer.phone);
     } catch (error) {
       toast.error('Failed to create package');
@@ -349,36 +372,92 @@ export default function CustomerMaster({ salonId, getAuthHeaders }) {
                 </div>
               </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div>
-                  <Label htmlFor="discount">Discount Percentage</Label>
-                  <div className="flex items-center">
-                    <Input
-                      id="discount"
-                      type="number"
-                      min="0"
-                      max="100"
-                      value={packageForm.discount_percentage}
-                      onChange={(e) => setPackageForm({ ...packageForm, discount_percentage: parseFloat(e.target.value) || 0 })}
-                    />
-                    <Percent className="w-4 h-4 ml-2 text-muted-foreground" />
+              {/* Pricing Mode Selector */}
+              <div className="border border-border rounded-lg p-4 space-y-4">
+                <div className="flex items-center gap-4">
+                  <Label className="font-semibold">Pricing Method:</Label>
+                  <div className="flex gap-4">
+                    <label className="flex items-center gap-2 cursor-pointer">
+                      <input
+                        type="radio"
+                        checked={packageForm.pricing_mode === 'discount'}
+                        onChange={() => setPackageForm({ ...packageForm, pricing_mode: 'discount', final_amount: null })}
+                        className="text-gold"
+                      />
+                      <span className="text-sm">Discount %</span>
+                    </label>
+                    <label className="flex items-center gap-2 cursor-pointer">
+                      <input
+                        type="radio"
+                        checked={packageForm.pricing_mode === 'manual'}
+                        onChange={() => setPackageForm({ ...packageForm, pricing_mode: 'manual', discount_percentage: 0 })}
+                        className="text-gold"
+                      />
+                      <span className="text-sm">Manual Amount</span>
+                    </label>
                   </div>
                 </div>
 
-                <div>
-                  <Label>Package Summary</Label>
-                  <div className="p-3 bg-muted rounded-lg space-y-1">
-                    <div className="flex justify-between text-sm">
-                      <span>Original Total:</span>
-                      <span>₹{calculatePackageTotal().original.toFixed(2)}</span>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {packageForm.pricing_mode === 'discount' ? (
+                    <div>
+                      <Label htmlFor="discount">Discount Percentage</Label>
+                      <div className="flex items-center">
+                        <Input
+                          id="discount"
+                          type="number"
+                          min="0"
+                          max="100"
+                          value={packageForm.discount_percentage}
+                          onChange={(e) => setPackageForm({ ...packageForm, discount_percentage: parseFloat(e.target.value) || 0 })}
+                        />
+                        <Percent className="w-4 h-4 ml-2 text-muted-foreground" />
+                      </div>
                     </div>
-                    <div className="flex justify-between text-sm text-green-600">
-                      <span>Discount ({packageForm.discount_percentage}%):</span>
-                      <span>- ₹{calculatePackageTotal().discount.toFixed(2)}</span>
+                  ) : (
+                    <div>
+                      <Label htmlFor="final_amount">Final Amount (₹)</Label>
+                      <Input
+                        id="final_amount"
+                        type="number"
+                        min="0"
+                        value={packageForm.final_amount || ''}
+                        onChange={(e) => setPackageForm({ ...packageForm, final_amount: parseFloat(e.target.value) || null })}
+                        placeholder="Enter custom price"
+                      />
+                      <p className="text-xs text-muted-foreground mt-1">
+                        Original total: ₹{calculatePackageTotal().original.toFixed(2)}
+                      </p>
                     </div>
-                    <div className="flex justify-between font-bold text-gold border-t pt-1">
-                      <span>Final Total:</span>
-                      <span>₹{calculatePackageTotal().final.toFixed(2)}</span>
+                  )}
+
+                  <div>
+                    <Label>Package Summary</Label>
+                    <div className="p-3 bg-muted rounded-lg space-y-1">
+                      <div className="flex justify-between text-sm">
+                        <span>Original Total:</span>
+                        <span>₹{calculatePackageTotal().original.toFixed(2)}</span>
+                      </div>
+                      {packageForm.pricing_mode === 'discount' && (
+                        <div className="flex justify-between text-sm text-green-600">
+                          <span>Discount ({packageForm.discount_percentage}%):</span>
+                          <span>- ₹{calculatePackageTotal().discount.toFixed(2)}</span>
+                        </div>
+                      )}
+                      {packageForm.pricing_mode === 'manual' && packageForm.final_amount !== null && (
+                        <div className="flex justify-between text-sm text-green-600">
+                          <span>Discount:</span>
+                          <span>- ₹{(calculatePackageTotal().original - packageForm.final_amount).toFixed(2)}</span>
+                        </div>
+                      )}
+                      <div className="flex justify-between font-bold text-gold border-t pt-1">
+                        <span>Final Total:</span>
+                        <span>₹{
+                          packageForm.pricing_mode === 'manual' && packageForm.final_amount !== null
+                            ? packageForm.final_amount.toFixed(2)
+                            : calculatePackageTotal().final.toFixed(2)
+                        }</span>
+                      </div>
                     </div>
                   </div>
                 </div>

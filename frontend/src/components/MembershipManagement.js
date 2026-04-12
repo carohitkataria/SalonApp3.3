@@ -166,8 +166,15 @@ export default function MembershipManagement({ salonId, getAuthHeaders }) {
                       onChange={(e) => setFormData({ ...formData, amount: e.target.value })}
                       placeholder="e.g., 5000"
                       required
+                      disabled={!!editingPlan}
+                      className={editingPlan ? 'bg-muted cursor-not-allowed' : ''}
                     />
                   </div>
+                  {editingPlan && (
+                    <p className="text-xs text-orange-600 mt-1">
+                      ⚠️ Price cannot be changed (financial impact)
+                    </p>
+                  )}
                 </div>
 
                 <div>
@@ -323,10 +330,39 @@ export default function MembershipManagement({ salonId, getAuthHeaders }) {
                   size="sm"
                   variant="outline"
                   className="text-red-500 hover:text-red-600"
-                  onClick={() => {
-                    // TODO: Implement delete
-                    toast.info('Delete functionality coming soon');
+                  onClick={() => handleDelete(plan)}
+                >
+                  <Trash2 className="w-3 h-3" />
+                </Button>
+              </div>
+            </motion.div>
+          ))
+        )}
+      </div>
+      {/* Loyalty Program Settings */}
+      <LoyaltyProgramSettings salonId={salonId} getAuthHeaders={getAuthHeaders} />
+    </div>
+  );
+}
+                 setEditingPlan(plan);
+                    setFormData({
+                      name: plan.name,
+                      amount: plan.amount,
+                      credit: plan.credit,
+                      validity_months: plan.validity_months,
+                      terms_conditions: plan.terms_conditions || ''
+                    });
+                    setShowForm(true);
                   }}
+                >
+                  <Edit2 className="w-3 h-3 mr-1" />
+                  Edit
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="text-red-500 hover:text-red-600"
+                  onClick={() => handleDelete(plan)}
                 >
                   <Trash2 className="w-3 h-3" />
                 </Button>

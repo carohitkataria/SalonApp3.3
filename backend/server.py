@@ -9,7 +9,7 @@ import os
 import logging
 from pathlib import Path
 from pydantic import BaseModel, Field, ConfigDict
-from typing import List, Optional
+from typing import List, Optional, Dict, Any
 import uuid
 from datetime import datetime, timezone, time, timedelta
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
@@ -620,10 +620,10 @@ def generate_2hour_slots():
     return slots
 
 async def check_and_apply_loyalty_reward(salon_id: str, customer_phone: str, booking_amount: float):
-    """Check if customer qualifies for loyalty reward and auto top-up wallet"""
+    """Check if customer qualifies for loyalty reward and auto top-up wallet (Multi-Tier)"""
     # Get loyalty program settings
     loyalty_program = await db.loyalty_programs.find_one({"salon_id": salon_id, "enabled": True}, {"_id": 0})
-    if not loyalty_program:
+    if not loyalty_program or not loyalty_program.get("tiers"):
         return None
     
     # Calculate date range
@@ -640,44 +640,53 @@ async def check_and_apply_loyalty_reward(salon_id: str, customer_phone: str, boo
     # Calculate total spend
     total_spend = sum([b.get("total_amount", 0) for b in completed_bookings])
     
-    # Check if threshold is met
-    if total_spend >= loyalty_program["spend_amount"]:
-        # Calculate top-up amount
-        topup_amount = (loyalty_program["spend_amount"] * loyalty_program["topup_percentage"]) / 100
+    # Find highest qualifying tier
+    qualifying_tier = None
+    for tier in sorted(loyalty_program["tiers"], key=lambda x: x["spend_amount"], reverse=True):
+        if total_spend >= tier["spend_amount"]:
+            qualifying_tier = tier
+            break
+    
+    if not qualifying_tier:
+        return None
+    
+    # Calculate top-up amount based on tier
+    topup_amount = (qualifying_tier["spend_amount"] * qualifying_tier["topup_percentage"]) / 100
+    
+    # Check if customer already has membership
+    membership = await db.customer_memberships.find_one({
+        "salon_id": salon_id,
+        "customer_phone": customer_phone,
+        "is_active": True
+    }, {"_id": 0})
+    
+    if membership:
+        # Top up existing wallet
+        new_balance = membership["wallet_balance"] + topup_amount
+        await db.customer_memberships.update_one(
+            {"id": membership["id"]},
+            {"$set": {"wallet_balance": new_balance}}
+        )
         
-        # Check if customer already has membership
-        membership = await db.customer_memberships.find_one({
-            "salon_id": salon_id,
+        # Record transaction
+        await db.wallet_transactions.insert_one({
+            "id": str(uuid.uuid4()),
             "customer_phone": customer_phone,
-            "is_active": True
-        }, {"_id": 0})
+            "salon_id": salon_id,
+            "transaction_type": "credit",
+            "amount": topup_amount,
+            "balance_after": new_balance,
+            "description": f"Loyalty reward ({qualifying_tier['name']} tier): Spent ₹{total_spend:.2f} in {loyalty_program['period_months']} months",
+            "created_at": datetime.now(timezone.utc).isoformat()
+        })
         
-        if membership:
-            # Top up existing wallet
-            new_balance = membership["wallet_balance"] + topup_amount
-            await db.customer_memberships.update_one(
-                {"id": membership["id"]},
-                {"$set": {"wallet_balance": new_balance}}
-            )
-            
-            # Record transaction
-            await db.wallet_transactions.insert_one({
-                "id": str(uuid.uuid4()),
-                "customer_phone": customer_phone,
-                "salon_id": salon_id,
-                "transaction_type": "credit",
-                "amount": topup_amount,
-                "balance_after": new_balance,
-                "description": f"Loyalty reward: Spent ₹{total_spend:.2f} in {loyalty_program['period_months']} months",
-                "created_at": datetime.now(timezone.utc).isoformat()
-            })
-            
-            return {
-                "rewarded": True,
-                "topup_amount": topup_amount,
-                "new_balance": new_balance,
-                "total_spend": total_spend
-            }
+        return {
+            "rewarded": True,
+            "tier": qualifying_tier["name"],
+            "topup_amount": topup_amount,
+            "new_balance": new_balance,
+            "total_spend": total_spend
+        }
     
     return None
 
@@ -2451,21 +2460,24 @@ class WalletTransaction(BaseModel):
     description: str
     created_at: str
 
+class LoyaltyTier(BaseModel):
+    name: str  # e.g., "Bronze", "Silver", "Gold"
+    spend_amount: float  # Threshold
+    topup_percentage: float  # Reward percentage
+
 class LoyaltyProgramSettings(BaseModel):
     salon_id: str
     enabled: bool = False
-    spend_amount: float  # e.g., 10000
-    period_months: int  # e.g., 6
-    topup_percentage: float  # e.g., 10 (means 10% of spend_amount)
+    period_months: int  # e.g., 6 (applies to all tiers)
+    tiers: List[Dict[str, Any]] = []  # Multiple tiers
 
 class LoyaltyProgram(BaseModel):
     model_config = ConfigDict(extra="ignore")
     id: str
     salon_id: str
     enabled: bool
-    spend_amount: float
     period_months: int
-    topup_percentage: float
+    tiers: List[Dict[str, Any]]
     updated_at: str
 
 @api_router.post("/salons/{salon_id}/customer-packages", response_model=CustomerPackage)
@@ -2514,6 +2526,49 @@ async def get_membership_plans(salon_id: str):
         {"_id": 0}
     ).to_list(100)
     return {"plans": plans}
+
+
+@api_router.put("/salons/{salon_id}/membership-plans/{plan_id}", response_model=MembershipPlan)
+async def update_membership_plan(
+    salon_id: str,
+    plan_id: str,
+    plan: MembershipPlanCreate,
+    current_user=Depends(get_current_salon_user)
+):
+    """Update membership plan (price locked, other fields editable)"""
+    existing = await db.membership_plans.find_one({"id": plan_id}, {"_id": 0})
+    if not existing:
+        raise HTTPException(status_code=404, detail="Membership plan not found")
+    
+    # Update all fields but use existing price (locked)
+    await db.membership_plans.update_one(
+        {"id": plan_id},
+        {"$set": {
+            "name": plan.name,
+            # "amount": existing["amount"],  # Price is LOCKED
+            "credit": plan.credit,
+            "validity_months": plan.validity_months,
+            "terms_conditions": plan.terms_conditions,
+            "updated_at": datetime.now(timezone.utc).isoformat()
+        }}
+    )
+    
+    updated = await db.membership_plans.find_one({"id": plan_id}, {"_id": 0})
+    return updated
+
+@api_router.delete("/salons/{salon_id}/membership-plans/{plan_id}")
+async def delete_membership_plan(
+    salon_id: str,
+    plan_id: str,
+    current_user=Depends(get_current_salon_user)
+):
+    """Delete/deactivate membership plan (doesn't affect existing customers)"""
+    result = await db.membership_plans.delete_one({"id": plan_id})
+    
+    if result.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Membership plan not found")
+    
+    return {"message": "Membership plan deleted successfully"}
 
 @api_router.post("/salons/{salon_id}/sell-membership")
 async def sell_membership(salon_id: str, membership: CustomerMembershipCreate, current_user=Depends(get_current_salon_user)):
