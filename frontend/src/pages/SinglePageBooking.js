@@ -4,9 +4,11 @@ import { useAuth } from '@/contexts/AuthContext';
 import axios from 'axios';
 import { Button } from '@/components/ui/button';
 import { toast } from 'sonner';
-import { Scissors, Calendar, User, CheckCircle, Star, Clock, ArrowLeft, Home, Zap, Check, ChevronDown, ChevronRight, Search, Package } from 'lucide-react';
+import { Scissors, Calendar, User, CheckCircle, Star, Clock, ArrowLeft, Home, Zap, Check, ChevronDown, ChevronRight, Search, Package, Crown } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Input } from '@/components/ui/input';
+import CustomerWalletCard from '@/components/CustomerWalletCard';
+import WalletDisplay from '@/components/WalletDisplay';
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
 const API = `${BACKEND_URL}/api`;
@@ -356,10 +358,30 @@ export default function SinglePageBooking() {
   const fetchPackages = async () => {
     try {
       const gender = user?.gender || 'all';
-      const response = await axios.get(`${API}/salons/${salonId}/packages/with-services`, {
+      
+      // Fetch public salon packages
+      const publicResponse = await axios.get(`${API}/salons/${salonId}/packages/with-services`, {
         params: { gender }
       });
-      setPackages(response.data.packages || []);
+      
+      // Fetch customer-specific packages if user is logged in
+      let customerPackages = [];
+      if (user && user.phone) {
+        try {
+          const customerResponse = await axios.get(`${API}/salons/${salonId}/customers/${user.phone}/packages`);
+          customerPackages = customerResponse.data.customer_packages || [];
+        } catch (error) {
+          console.log('No customer packages found');
+        }
+      }
+      
+      // Combine both package types
+      const allPackages = [
+        ...(publicResponse.data.packages || []),
+        ...customerPackages
+      ];
+      
+      setPackages(allPackages);
     } catch (error) {
       console.error('Error fetching packages:', error);
     }
@@ -610,6 +632,13 @@ export default function SinglePageBooking() {
             <Home className="w-5 h-5 text-gold" />
           </button>
         </div>
+      </div>
+
+      {/* Customer Wallet Card */}
+      <div className="max-w-2xl mx-auto p-4 pt-6">
+        {user && customerMembership && (
+          <CustomerWalletCard membership={customerMembership} />
+        )}
       </div>
 
       <form onSubmit={handleSubmit} className="max-w-2xl mx-auto p-4 space-y-5">

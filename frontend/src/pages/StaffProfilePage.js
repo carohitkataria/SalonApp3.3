@@ -15,6 +15,169 @@ import { motion } from 'framer-motion';
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
 const API = `${BACKEND_URL}/api`;
 
+// Create Staff User Form Component
+function CreateStaffUserForm({ staffId, staffName, staffMobile, salonId, onSuccess }) {
+  const [formData, setFormData] = useState({
+    loginId: '',
+    password: '',
+    confirmPassword: '',
+    permissions: {
+      can_edit_salon: false,
+      can_access_analytics: false,
+      can_delete_salon: false
+    }
+  });
+  const [creating, setCreating] = useState(false);
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+
+    if (formData.password !== formData.confirmPassword) {
+      toast.error('Passwords do not match');
+      return;
+    }
+
+    if (formData.password.length < 6) {
+      toast.error('Password must be at least 6 characters');
+      return;
+    }
+
+    if (!formData.loginId) {
+      toast.error('Please enter a login ID');
+      return;
+    }
+
+    setCreating(true);
+    try {
+      const token = localStorage.getItem('salon_admin_token') || 
+                    JSON.parse(localStorage.getItem('salon_user_auth') || '{}').token;
+
+      await axios.post(
+        `${API}/salon/users`,
+        {
+          salon_id: salonId,
+          name: staffName,
+          mobile: staffMobile,
+          login_id: formData.loginId,
+          password: formData.password,
+          role: 'staff',
+          staff_id: staffId,
+          permissions: formData.permissions
+        },
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+
+      toast.success('Staff login credentials created successfully!');
+      onSuccess();
+    } catch (error) {
+      toast.error(error.response?.data?.detail || 'Failed to create staff user');
+    } finally {
+      setCreating(false);
+    }
+  };
+
+  return (
+    <form onSubmit={handleSubmit} className="space-y-4 bg-card border border-border rounded-lg p-6">
+      <h4 className="font-semibold text-foreground">Create Login Credentials</h4>
+      
+      <div>
+        <Label htmlFor="loginId">Login ID *</Label>
+        <Input
+          id="loginId"
+          value={formData.loginId}
+          onChange={(e) => setFormData({ ...formData, loginId: e.target.value })}
+          placeholder="e.g., staff123 or john_doe"
+          required
+        />
+        <p className="text-xs text-muted-foreground mt-1">
+          Staff will use this ID to login
+        </p>
+      </div>
+
+      <div>
+        <Label htmlFor="password">Password *</Label>
+        <Input
+          id="password"
+          type="password"
+          value={formData.password}
+          onChange={(e) => setFormData({ ...formData, password: e.target.value })}
+          placeholder="Minimum 6 characters"
+          required
+        />
+      </div>
+
+      <div>
+        <Label htmlFor="confirmPassword">Confirm Password *</Label>
+        <Input
+          id="confirmPassword"
+          type="password"
+          value={formData.confirmPassword}
+          onChange={(e) => setFormData({ ...formData, confirmPassword: e.target.value })}
+          placeholder="Re-enter password"
+          required
+        />
+      </div>
+
+      <div className="space-y-3 pt-4 border-t border-border">
+        <Label className="text-base">Permissions</Label>
+        <div className="space-y-2">
+          <div className="flex items-center space-x-2">
+            <Checkbox
+              id="can_edit_salon"
+              checked={formData.permissions.can_edit_salon}
+              onCheckedChange={(checked) => 
+                setFormData({ 
+                  ...formData, 
+                  permissions: { ...formData.permissions, can_edit_salon: checked } 
+                })
+              }
+            />
+            <Label htmlFor="can_edit_salon" className="cursor-pointer font-normal">
+              Can edit salon details
+            </Label>
+          </div>
+
+          <div className="flex items-center space-x-2">
+            <Checkbox
+              id="can_access_analytics"
+              checked={formData.permissions.can_access_analytics}
+              onCheckedChange={(checked) => 
+                setFormData({ 
+                  ...formData, 
+                  permissions: { ...formData.permissions, can_access_analytics: checked } 
+                })
+              }
+            />
+            <Label htmlFor="can_access_analytics" className="cursor-pointer font-normal">
+              Can access analytics
+            </Label>
+          </div>
+
+          <div className="flex items-center space-x-2">
+            <Checkbox
+              id="can_delete_salon"
+              checked={formData.permissions.can_delete_salon}
+              onCheckedChange={(checked) => 
+                setFormData({ 
+                  ...formData, 
+                  permissions: { ...formData.permissions, can_delete_salon: checked } 
+                })
+              }
+            />
+            <Label htmlFor="can_delete_salon" className="cursor-pointer font-normal">
+              Can delete salon (Dangerous)
+            </Label>
+          </div>
+        </div>
+      </div>
+
+      <Button type="submit" disabled={creating} className="w-full bg-gold text-black hover:bg-gold/90">
+        {creating ? 'Creating...' : 'Create Staff Login'}
+      </Button>
+    </form>
+  );
+}
+
 export default function StaffProfilePage() {
   const { staffId } = useParams();
   const navigate = useNavigate();
@@ -466,10 +629,20 @@ export default function StaffProfilePage() {
               <h3 className="text-lg font-semibold mb-4">Access Control & Permissions</h3>
               
               {!staffUser ? (
-                <div className="p-4 bg-muted rounded-lg">
-                  <p className="text-sm text-muted-foreground">
-                    No user account linked to this staff member. Create a user account in "Manage Staff Access" to grant login permissions.
-                  </p>
+                <div className="space-y-4">
+                  <div className="p-4 bg-yellow-500/10 border border-yellow-500/30 rounded-lg mb-4">
+                    <p className="text-sm text-yellow-600 dark:text-yellow-400">
+                      ⚠️ This staff member doesn't have login access yet. Create credentials below to grant access.
+                    </p>
+                  </div>
+
+                  <CreateStaffUserForm 
+                    staffId={staffId} 
+                    staffName={staff.name}
+                    staffMobile={staff.mobile}
+                    salonId={localStorage.getItem('salon_id')}
+                    onSuccess={() => fetchStaffData()}
+                  />
                 </div>
               ) : (
                 <>

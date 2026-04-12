@@ -428,6 +428,3 @@ export default function OTPLoginPage() {
     </div>
   );
 }
- </div>
-  );
-}

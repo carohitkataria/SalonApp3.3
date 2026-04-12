@@ -1821,6 +1821,55 @@ async def update_barber_services(barber_id: str, services: List[BarberServiceAss
     
     return {"message": f"Updated {len([s for s in services if s.is_available])} services for barber"}
 
+@api_router.put("/barbers/{barber_id}/services/{service_id}/toggle")
+async def toggle_barber_service(
+    barber_id: str, 
+    service_id: str, 
+    is_available: bool,
+    credentials: HTTPAuthorizationCredentials = Depends(security)
+):
+    """Toggle service availability for a barber"""
+    # Verify authentication
+    token = credentials.credentials
+    payload = verify_token(token)
+    if not payload:
+        raise HTTPException(status_code=401, detail="Invalid authentication")
+    
+    # Check if barber exists
+    barber = await db.barbers.find_one({"id": barber_id}, {"_id": 0})
+    if not barber:
+        raise HTTPException(status_code=404, detail="Barber not found")
+    
+    # Check if service exists
+    service = await db.services.find_one({"id": service_id}, {"_id": 0})
+    if not service:
+        raise HTTPException(status_code=404, detail="Service not found")
+    
+    # Check if barber_service entry exists
+    existing = await db.barber_services.find_one({
+        "barber_id": barber_id,
+        "service_id": service_id
+    }, {"_id": 0})
+    
+    if existing:
+        # Update existing
+        await db.barber_services.update_one(
+            {"barber_id": barber_id, "service_id": service_id},
+            {"$set": {"is_available": is_available}}
+        )
+    else:
+        # Create new entry with default price
+        await db.barber_services.insert_one({
+            "id": str(uuid.uuid4()),
+            "barber_id": barber_id,
+            "service_id": service_id,
+            "price": service.get("base_price", 0),
+            "is_available": is_available
+        })
+    
+    return {"success": True, "is_available": is_available}
+
+
 @api_router.put("/barbers/{barber_id}/services/{service_id}/price")
 async def update_barber_service_price(barber_id: str, service_id: str, price: float, current_salon=Depends(get_current_salon)):
     existing = await db.barber_services.find_one({"barber_id": barber_id, "service_id": service_id})
@@ -2546,6 +2595,116 @@ async def sell_membership(salon_id: str, membership: CustomerMembershipCreate, c
         })
         
         return {"message": "Membership created", "membership": membership_data}
+
+@api_router.post("/salons/{salon_id}/customers/{phone}/buy-membership")
+async def customer_buy_membership(
+    salon_id: str, 
+    phone: str,
+    membership: CustomerMembershipCreate
+):
+    """Customer-facing endpoint to buy membership (no auth required)"""
+    # Get membership plan
+    plan = await db.membership_plans.find_one({"id": membership.membership_plan_id}, {"_id": 0})
+    if not plan:
+        raise HTTPException(status_code=404, detail="Membership plan not found")
+    
+    # Format phone
+    if not phone.startswith("+91"):
+        phone = f"+91{phone}"
+    
+    # Calculate expiry date
+    expiry_date = datetime.now(timezone.utc) + timedelta(days=plan["validity_months"] * 30)
+    
+    # Check if customer already has active membership
+    existing = await db.customer_memberships.find_one({
+        "salon_id": salon_id,
+        "customer_phone": phone,
+        "is_active": True
+    }, {"_id": 0})
+    
+    if existing:
+        # Add credit to existing wallet
+        new_balance = existing["wallet_balance"] + plan["credit"]
+        await db.customer_memberships.update_one(
+            {"id": existing["id"]},
+            {"$set": {
+                "wallet_balance": new_balance,
+                "expiry_date": expiry_date.isoformat()
+            }}
+        )
+        
+        # Record transaction
+        await db.wallet_transactions.insert_one({
+            "id": str(uuid.uuid4()),
+            "customer_phone": phone,
+            "salon_id": salon_id,
+            "transaction_type": "credit",
+            "amount": plan["credit"],
+            "balance_after": new_balance,
+            "description": f"Membership renewal: {plan['name']}",
+            "created_at": datetime.now(timezone.utc).isoformat()
+        })
+        
+        return {"message": "Membership renewed", "new_balance": new_balance}
+    else:
+        # Create new membership
+        membership_data = {
+            "id": str(uuid.uuid4()),
+            "salon_id": salon_id,
+            "customer_phone": phone,
+            "customer_name": membership.customer_name,
+            "membership_plan_id": plan["id"],
+            "membership_name": plan["name"],
+            "payment_mode": membership.payment_mode,
+            "paid_amount": membership.paid_amount,
+            "credit_added": plan["credit"],
+            "wallet_balance": plan["credit"],
+            "expiry_date": expiry_date.isoformat(),
+            "is_active": True,
+            "purchased_at": datetime.now(timezone.utc).isoformat()
+        }
+        
+        await db.customer_memberships.insert_one(membership_data)
+        
+        # Record transaction
+        await db.wallet_transactions.insert_one({
+            "id": str(uuid.uuid4()),
+            "customer_phone": phone,
+            "salon_id": salon_id,
+            "transaction_type": "credit",
+            "amount": plan["credit"],
+            "balance_after": plan["credit"],
+            "description": f"Membership purchased: {plan['name']}",
+            "created_at": datetime.now(timezone.utc).isoformat()
+        })
+        
+        return {"message": "Membership created", "membership": membership_data}
+
+
+@api_router.get("/salons/{salon_id}/customers/{phone}/packages")
+async def get_customer_available_packages(salon_id: str, phone: str):
+    """Get all packages available to a customer (public + customer-specific)"""
+    if not phone.startswith("+91"):
+        phone = f"+91{phone}"
+    
+    # Get public salon packages
+    public_packages = await db.packages.find({
+        "salon_id": salon_id,
+        "is_active": True
+    }, {"_id": 0}).to_list(100)
+    
+    # Get customer-specific packages
+    customer_packages = await db.customer_packages.find({
+        "salon_id": salon_id,
+        "customer_phone": phone,
+        "is_active": True
+    }, {"_id": 0}).to_list(100)
+    
+    return {
+        "public_packages": public_packages,
+        "customer_packages": customer_packages
+    }
+
 
 @api_router.get("/salons/{salon_id}/customer-membership/{phone}")
 async def get_customer_membership(salon_id: str, phone: str):
