@@ -45,23 +45,29 @@ export default function OTPLoginPage() {
 
   const handlePasswordLogin = async (e) => {
     e.preventDefault();
+    console.log('[LOGIN] Password login handler triggered', { phone, password: '***' });
     
     if (!phone) {
+      console.log('[LOGIN] Validation failed: No phone');
       toast.error('Please enter your Mobile Number or Login ID');
       return;
     }
 
     if (!password) {
+      console.log('[LOGIN] Validation failed: No password');
       toast.error('Please enter your password');
       return;
     }
 
+    console.log('[LOGIN] Validation passed, calling API...');
     setLoading(true);
     try {
+      console.log('[LOGIN] Sending request to:', `${API}/salon/users/login`);
       const response = await axios.post(`${API}/salon/users/login`, {
         identifier: phone,  // Can be mobile number or login_id
         password
       });
+      console.log('[LOGIN] API response received:', response.status);
 
       // Store auth data
       const authData = {
@@ -84,9 +90,11 @@ export default function OTPLoginPage() {
         response.data.permissions
       );
       
+      console.log('[LOGIN] Navigating to dashboard...');
       toast.success('Login successful!');
       navigate('/salon/dashboard');
     } catch (error) {
+      console.error('[LOGIN] Error during login:', error.response?.data || error.message);
       // Fallback to legacy salon login if multi-user login fails
       if (error.response?.status === 404) {
         try {
@@ -303,6 +311,10 @@ export default function OTPLoginPage() {
 
                 <Button 
                   type="submit" 
+                  onClick={(e) => {
+                    console.log('[BUTTON] Button clicked!');
+                    handlePasswordLogin(e);
+                  }}
                   className="w-full bg-gold text-black hover:bg-gold/90 h-12"
                   disabled={loading}
                 >
