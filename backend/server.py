@@ -2927,6 +2927,94 @@ async def use_wallet_balance(salon_id: str, phone: str, amount: float):
     
     return {"new_balance": new_balance}
 
+@api_router.put("/salons/{salon_id}/customers/{phone}/wallet-balance")
+async def update_wallet_balance(
+    salon_id: str,
+    phone: str,
+    body: dict,
+    current_user=Depends(get_current_salon_user)
+):
+    """Admin endpoint to manually adjust customer wallet balance"""
+    if not phone.startswith("+91"):
+        phone = f"+91{phone}"
+    
+    new_balance = body.get("wallet_balance")
+    reason = body.get("reason", "Manual adjustment by admin")
+    
+    if new_balance is None or new_balance < 0:
+        raise HTTPException(status_code=400, detail="Invalid wallet balance")
+    
+    membership = await db.customer_memberships.find_one({
+        "salon_id": salon_id,
+        "customer_phone": phone,
+        "is_active": True
+    }, {"_id": 0})
+    
+    if not membership:
+        raise HTTPException(status_code=404, detail="No active membership found")
+    
+    old_balance = membership["wallet_balance"]
+    diff = new_balance - old_balance
+    
+    # Update balance
+    await db.customer_memberships.update_one(
+        {"id": membership["id"]},
+        {"$set": {"wallet_balance": new_balance}}
+    )
+    
+    # Record transaction for audit
+    if diff != 0:
+        await db.wallet_transactions.insert_one({
+            "id": str(uuid.uuid4()),
+            "customer_phone": phone,
+            "salon_id": salon_id,
+            "transaction_type": "credit" if diff > 0 else "debit",
+            "amount": abs(diff),
+            "balance_after": new_balance,
+            "description": reason,
+            "created_at": datetime.now(timezone.utc).isoformat()
+        })
+    
+    return {"message": "Wallet balance updated", "old_balance": old_balance, "new_balance": new_balance}
+
+@api_router.get("/salons/{salon_id}/customers/{phone}/combined-history")
+async def get_customer_combined_history(salon_id: str, phone: str):
+    """Get combined booking + wallet transaction history for a customer"""
+    if not phone.startswith("+91"):
+        phone = f"+91{phone}"
+    
+    # Fetch bookings
+    bookings = await db.tokens.find({
+        "salon_id": salon_id,
+        "phone": phone
+    }, {"_id": 0}).sort("created_at", -1).limit(50).to_list(50)
+    
+    # Fetch wallet transactions
+    transactions = await db.wallet_transactions.find({
+        "salon_id": salon_id,
+        "customer_phone": phone
+    }, {"_id": 0}).sort("created_at", -1).limit(50).to_list(50)
+    
+    # Combine and tag
+    combined = []
+    for b in bookings:
+        combined.append({
+            **b,
+            "history_type": "booking",
+            "sort_date": b.get("created_at", "")
+        })
+    for t in transactions:
+        combined.append({
+            **t,
+            "history_type": "transaction",
+            "sort_date": t.get("created_at", "")
+        })
+    
+    # Sort by date descending
+    combined.sort(key=lambda x: x.get("sort_date", ""), reverse=True)
+    
+    return {"history": combined}
+
 @api_router.post("/salons/{salon_id}/loyalty-program", response_model=LoyaltyProgram)
 async def update_loyalty_program(salon_id: str, settings: LoyaltyProgramSettings, current_user=Depends(get_current_salon_admin)):
     """Update loyalty program settings"""

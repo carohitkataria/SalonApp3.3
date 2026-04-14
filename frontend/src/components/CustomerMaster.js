@@ -6,7 +6,8 @@ import { Label } from '@/components/ui/label';
 import { Checkbox } from '@/components/ui/checkbox';
 import { toast } from 'sonner';
 import {
-  Users, Search, ArrowLeft, Plus, Calendar, Package, Percent, IndianRupee, Save, Crown, Wallet, CreditCard
+  Users, Search, ArrowLeft, Plus, Calendar, Package, Percent, IndianRupee, Save, Crown, Wallet, CreditCard,
+  Edit2, Check, X, ArrowUpCircle, ArrowDownCircle
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import MembershipManagement from './MembershipManagement';
@@ -28,6 +29,10 @@ export default function CustomerMaster({ salonId, getAuthHeaders }) {
   const [showMembershipManagement, setShowMembershipManagement] = useState(false);
   const [services, setServices] = useState([]);
   const [editingPackage, setEditingPackage] = useState(null);
+  const [combinedHistory, setCombinedHistory] = useState([]);
+  const [editingWallet, setEditingWallet] = useState(false);
+  const [walletEditValue, setWalletEditValue] = useState(0);
+  const [walletEditReason, setWalletEditReason] = useState('');
 
   
   const [packageForm, setPackageForm] = useState({
@@ -51,6 +56,7 @@ export default function CustomerMaster({ salonId, getAuthHeaders }) {
       fetchCustomerBookings(selectedCustomer.phone);
       fetchCustomerPackages(selectedCustomer.phone);
       fetchCustomerMembership(selectedCustomer.phone);
+      fetchCombinedHistory(selectedCustomer.phone);
     }
   }, [selectedCustomer]);
 
@@ -111,6 +117,46 @@ export default function CustomerMaster({ salonId, getAuthHeaders }) {
       setServices(response.data || []);
     } catch (error) {
       console.error('Error fetching services:', error);
+    }
+  };
+
+  const fetchCombinedHistory = async (phone) => {
+    try {
+      const response = await axios.get(`${API}/salons/${salonId}/customers/${phone}/combined-history`);
+      setCombinedHistory(response.data.history || []);
+    } catch (error) {
+      console.error('Error fetching combined history:', error);
+      setCombinedHistory([]);
+    }
+  };
+
+  const handleWalletUpdate = async () => {
+    if (walletEditValue < 0) {
+      toast.error('Wallet balance cannot be negative');
+      return;
+    }
+
+    const confirmed = window.confirm(
+      `Update wallet balance?\n\nCurrent: ₹${customerMembership.wallet_balance}\nNew: ₹${walletEditValue}\nReason: ${walletEditReason || 'Manual adjustment by admin'}`
+    );
+    if (!confirmed) return;
+
+    try {
+      await axios.put(
+        `${API}/salons/${salonId}/customers/${selectedCustomer.phone}/wallet-balance`,
+        {
+          wallet_balance: parseFloat(walletEditValue),
+          reason: walletEditReason || 'Manual adjustment by admin'
+        },
+        { headers: getAuthHeaders() }
+      );
+      toast.success('Wallet balance updated');
+      setEditingWallet(false);
+      setWalletEditReason('');
+      fetchCustomerMembership(selectedCustomer.phone);
+      fetchCombinedHistory(selectedCustomer.phone);
+    } catch (error) {
+      toast.error(error.response?.data?.detail || 'Failed to update wallet balance');
     }
   };
 
@@ -346,7 +392,60 @@ export default function CustomerMaster({ salonId, getAuthHeaders }) {
               </div>
               <div className="text-right">
                 <p className="text-sm text-muted-foreground">Wallet Balance</p>
-                <p className="text-3xl font-bold text-gold">₹{customerMembership.wallet_balance}</p>
+                {editingWallet ? (
+                  <div className="space-y-2 mt-1">
+                    <div className="flex items-center gap-2">
+                      <span className="text-xl font-bold text-gold">₹</span>
+                      <Input
+                        type="number"
+                        value={walletEditValue}
+                        onChange={(e) => setWalletEditValue(e.target.value)}
+                        className="w-32 text-right text-xl font-bold border-gold"
+                        min="0"
+                        autoFocus
+                      />
+                    </div>
+                    <Input
+                      placeholder="Reason for change..."
+                      value={walletEditReason}
+                      onChange={(e) => setWalletEditReason(e.target.value)}
+                      className="w-full text-sm"
+                    />
+                    <div className="flex gap-1 justify-end">
+                      <Button
+                        size="sm"
+                        onClick={handleWalletUpdate}
+                        className="bg-green-600 text-white hover:bg-green-700 h-7 px-2"
+                      >
+                        <Check className="w-3 h-3 mr-1" />
+                        Save
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => { setEditingWallet(false); setWalletEditReason(''); }}
+                        className="h-7 px-2"
+                      >
+                        <X className="w-3 h-3 mr-1" />
+                        Cancel
+                      </Button>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="flex items-center gap-2">
+                    <p className="text-3xl font-bold text-gold">₹{customerMembership.wallet_balance}</p>
+                    <button
+                      onClick={() => {
+                        setWalletEditValue(customerMembership.wallet_balance);
+                        setEditingWallet(true);
+                      }}
+                      className="p-1.5 rounded-full hover:bg-gold/20 transition-colors"
+                      title="Edit wallet balance"
+                    >
+                      <Edit2 className="w-4 h-4 text-gold" />
+                    </button>
+                  </div>
+                )}
               </div>
             </div>
             <div className="grid grid-cols-3 gap-4 pt-4 border-t border-gold/20">
@@ -575,45 +674,98 @@ export default function CustomerMaster({ salonId, getAuthHeaders }) {
           </div>
         )}
 
-        {/* Previous Bookings */}
+        {/* Combined Transaction & Booking History */}
         <div className="bg-card border border-border rounded-lg p-6">
-          <h3 className="font-semibold text-lg mb-4">Booking History ({customerBookings.length})</h3>
+          <h3 className="font-semibold text-lg mb-4">
+            Transaction & Booking History ({combinedHistory.length})
+          </h3>
           <div className="space-y-3">
-            {customerBookings.length === 0 ? (
-              <p className="text-center text-muted-foreground py-8">No bookings found</p>
+            {combinedHistory.length === 0 ? (
+              <p className="text-center text-muted-foreground py-8">No history found</p>
             ) : (
-              customerBookings.map(booking => (
-                <div key={booking.id} className="p-4 border rounded-lg hover:border-gold transition-all">
-                  <div className="flex justify-between items-start">
-                    <div className="flex-1">
-                      <div className="flex items-center space-x-2 mb-2">
-                        <span className={`px-2 py-1 rounded text-xs font-semibold ${
-                          booking.status === 'completed' ? 'bg-green-500/20 text-green-500' :
-                          booking.status === 'waiting' ? 'bg-yellow-500/20 text-yellow-500' :
-                          booking.status === 'cancelled' ? 'bg-red-500/20 text-red-500' :
-                          'bg-blue-500/20 text-blue-500'
-                        }`}>
-                          {booking.status}
-                        </span>
-                        <span className="text-sm text-muted-foreground">Token: {booking.token_number}</span>
+              combinedHistory.map((item, idx) => (
+                <div key={item.id || idx} className={`p-4 border rounded-lg hover:border-gold transition-all ${
+                  item.history_type === 'transaction' ? 'border-l-4 border-l-gold/60' : ''
+                }`}>
+                  {item.history_type === 'booking' ? (
+                    /* Booking Item */
+                    <div className="flex justify-between items-start">
+                      <div className="flex-1">
+                        <div className="flex items-center space-x-2 mb-2">
+                          <span className="px-2 py-0.5 rounded text-xs font-semibold bg-blue-500/20 text-blue-500">
+                            Booking
+                          </span>
+                          <span className={`px-2 py-0.5 rounded text-xs font-semibold ${
+                            item.status === 'completed' ? 'bg-green-500/20 text-green-500' :
+                            item.status === 'waiting' ? 'bg-yellow-500/20 text-yellow-500' :
+                            item.status === 'cancelled' ? 'bg-red-500/20 text-red-500' :
+                            'bg-blue-500/20 text-blue-500'
+                          }`}>
+                            {item.status}
+                          </span>
+                          <span className="text-sm text-muted-foreground">Token: {item.token_number}</span>
+                        </div>
+                        <p className="font-medium">{item.barber_name}</p>
+                        <p className="text-sm text-muted-foreground">
+                          {new Date(item.created_at).toLocaleDateString()} - {item.shift}
+                        </p>
+                        <p className="text-sm mt-1">
+                          {item.selected_services?.length || 0} service(s) - ₹{item.total_amount}
+                        </p>
                       </div>
-                      <p className="font-medium">{booking.barber_name}</p>
-                      <p className="text-sm text-muted-foreground">
-                        {new Date(booking.created_at).toLocaleDateString()} - {booking.shift}
-                      </p>
-                      <p className="text-sm mt-1">
-                        {booking.selected_services?.length || 0} service(s) - ₹{booking.total_amount}
-                      </p>
+                      <Button
+                        size="sm"
+                        onClick={() => handleRebook(item)}
+                        className="bg-gold text-black hover:bg-gold/90"
+                      >
+                        <Calendar className="w-4 h-4 mr-1" />
+                        Rebook
+                      </Button>
                     </div>
-                    <Button
-                      size="sm"
-                      onClick={() => handleRebook(booking)}
-                      className="bg-gold text-black hover:bg-gold/90"
-                    >
-                      <Calendar className="w-4 h-4 mr-1" />
-                      Rebook
-                    </Button>
-                  </div>
+                  ) : (
+                    /* Transaction Item (Membership Purchase / Wallet Activity) */
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-3">
+                        {item.transaction_type === 'credit' ? (
+                          <div className="p-2 bg-green-500/20 rounded-full">
+                            <ArrowUpCircle className="w-4 h-4 text-green-500" />
+                          </div>
+                        ) : (
+                          <div className="p-2 bg-red-500/20 rounded-full">
+                            <ArrowDownCircle className="w-4 h-4 text-red-500" />
+                          </div>
+                        )}
+                        <div>
+                          <div className="flex items-center gap-2 mb-1">
+                            <span className={`px-2 py-0.5 rounded text-xs font-semibold ${
+                              item.description?.toLowerCase().includes('membership')
+                                ? 'bg-gold/20 text-gold'
+                                : 'bg-purple-500/20 text-purple-500'
+                            }`}>
+                              {item.description?.toLowerCase().includes('membership') ? 'Membership' : 'Wallet'}
+                            </span>
+                          </div>
+                          <p className="font-medium text-sm">{item.description}</p>
+                          <p className="text-xs text-muted-foreground">
+                            {new Date(item.created_at).toLocaleString('en-IN', {
+                              day: 'numeric', month: 'short', year: 'numeric',
+                              hour: '2-digit', minute: '2-digit'
+                            })}
+                          </p>
+                        </div>
+                      </div>
+                      <div className="text-right">
+                        <p className={`font-bold ${
+                          item.transaction_type === 'credit' ? 'text-green-500' : 'text-red-500'
+                        }`}>
+                          {item.transaction_type === 'credit' ? '+' : '-'}₹{item.amount}
+                        </p>
+                        <p className="text-xs text-muted-foreground">
+                          Bal: ₹{item.balance_after}
+                        </p>
+                      </div>
+                    </div>
+                  )}
                 </div>
               ))
             )}
