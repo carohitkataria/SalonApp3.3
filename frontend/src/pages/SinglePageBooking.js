@@ -5,7 +5,7 @@ import axios from 'axios';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { toast } from 'sonner';
-import { Scissors, Calendar, User, CheckCircle, Star, Clock, ArrowLeft, Home, Zap, Check, ChevronDown, ChevronRight, Search, Package, Crown, History, Wallet, CreditCard, Banknote, Smartphone } from 'lucide-react';
+import { Scissors, Calendar, User, CheckCircle, Star, Clock, ArrowLeft, Home, Zap, Check, ChevronDown, ChevronRight, Search, Package, Crown, History, Wallet, Banknote, Smartphone } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Input } from '@/components/ui/input';
 import CustomerWalletCard from '@/components/CustomerWalletCard';
@@ -532,7 +532,7 @@ export default function SinglePageBooking() {
   };
 
   const handleSubmit = async (e) => {
-    e.preventDefault();
+    if (e) e.preventDefault();
 
     if (!formData.shift) {
       toast.error('Please select a time slot');
@@ -547,21 +547,6 @@ export default function SinglePageBooking() {
     if (!paymentMode) {
       toast.error('Please select a payment mode');
       return;
-    }
-
-    if (!bookingForSelf) {
-      if (!otherPersonName || !otherPersonPhone) {
-        toast.error('Please enter name and phone for the person');
-        return;
-      }
-      if (!otherPersonGender) {
-        toast.error('Please select gender for the person');
-        return;
-      }
-      if (otherPersonPhone.length < 10) {
-        toast.error('Please enter a valid 10-digit phone number');
-        return;
-      }
     }
 
     // Wallet balance check
@@ -594,6 +579,7 @@ export default function SinglePageBooking() {
 
       const response = await axios.post(`${API}/bookings`, bookingData);
       setBookedToken(response.data);
+      setBookingStep('success');
       
       // Refresh membership data if wallet was used
       if (paymentMode === 'wallet') {
@@ -608,8 +594,83 @@ export default function SinglePageBooking() {
     }
   };
 
+  // Add bookingStep state
+  const [bookingStep, setBookingStep] = useState('services'); // 'services' | 'payment' | 'success'
+
+  // UPI intent handler
+  const handleUpiIntent = () => {
+    if (!salon?.upi_id) {
+      toast.error('Salon UPI ID not configured');
+      return;
+    }
+    const upiUrl = `upi://pay?pa=${salon.upi_id}&pn=${encodeURIComponent(salon.salon_name)}&am=${totalAmount}&cu=INR&tn=Booking_${salonId.slice(0,8)}`;
+    window.location.href = upiUrl;
+  };
+
+  // Handle UPI confirmation by customer
+  const handleUpiConfirm = async () => {
+    setLoading(true);
+    try {
+      // First create the booking
+      const bookingData = {
+        salon_id: salonId,
+        user_id: user.id,
+        customer_name: bookingForSelf ? user.name : otherPersonName,
+        phone: bookingForSelf ? user.phone : otherPersonPhone,
+        date: formData.date,
+        shift: formData.shift,
+        barber_id: fastestAvailable ? 'any' : formData.barberId,
+        selected_services: formData.selectedServices,
+        source: source,
+        booking_type: formData.bookingType,
+        booking_for_self: bookingForSelf,
+        customer_gender: bookingForSelf ? (user.gender || 'Men') : otherPersonGender,
+        payment_mode: 'upi'
+      };
+
+      const response = await axios.post(`${API}/bookings`, bookingData);
+      
+      // Confirm UPI payment on the token
+      await axios.post(`${API}/payments/customer-confirm-upi`, {
+        token_id: response.data.id,
+        upi_reference: 'Customer confirmed'
+      });
+
+      setBookedToken(response.data);
+      setBookingStep('success');
+      toast.success('Booking confirmed with UPI payment!');
+    } catch (error) {
+      toast.error(error.response?.data?.detail || 'Failed to create booking');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Proceed to payment step
+  const goToPayment = () => {
+    if (!formData.shift) {
+      toast.error('Please select a time slot');
+      return;
+    }
+    if (formData.selectedServices.length === 0) {
+      toast.error('Please select at least one service');
+      return;
+    }
+    if (!bookingForSelf) {
+      if (!otherPersonName || !otherPersonPhone) {
+        toast.error('Please enter name and phone for the person');
+        return;
+      }
+      if (!otherPersonGender) {
+        toast.error('Please select gender for the person');
+        return;
+      }
+    }
+    setBookingStep('payment');
+  };
+
   // Success Screen
-  if (bookedToken) {
+  if (bookingStep === 'success' && bookedToken) {
     return (
       <div className="min-h-screen bg-background flex items-center justify-center p-4">
         <motion.div
@@ -685,6 +746,246 @@ export default function SinglePageBooking() {
     return acc;
   }, {});
 
+  // ========== PAYMENT STEP ==========
+  if (bookingStep === 'payment') {
+    const walletBalance = customerMembership?.wallet_balance || 0;
+    const hasWallet = !!customerMembership && walletBalance > 0;
+    const walletSufficient = hasWallet && walletBalance >= totalAmount;
+
+    return (
+      <div className="min-h-screen bg-background pb-32">
+        {/* Header */}
+        <div className="bg-card border-b border-border sticky top-0 z-20">
+          <div className="max-w-2xl mx-auto flex items-center p-3 gap-3">
+            <button onClick={() => setBookingStep('services')} className="p-2 rounded-full hover:bg-muted">
+              <ArrowLeft className="w-5 h-5 text-foreground" />
+            </button>
+            <div className="flex-1">
+              <span className="font-bold text-foreground">Select Payment</span>
+            </div>
+          </div>
+        </div>
+
+        <div className="max-w-2xl mx-auto p-4 space-y-5">
+          {/* Order Summary */}
+          <div className="bg-card border border-border rounded-xl p-4">
+            <h3 className="text-sm font-medium text-muted-foreground mb-3">Order Summary</h3>
+            <div className="space-y-2">
+              {formData.selectedServices.map(sid => {
+                const svc = [...salonServices, ...barberServices].find(s => s.id === sid);
+                return svc ? (
+                  <div key={sid} className="flex justify-between text-sm">
+                    <span className="text-foreground">{svc.service_name}</span>
+                    <span className="font-medium text-foreground">₹{getServicePrice(svc)}</span>
+                  </div>
+                ) : null;
+              })}
+              <div className="flex justify-between pt-2 border-t border-border">
+                <span className="font-bold text-foreground">Total</span>
+                <span className="text-xl font-bold text-gold">₹{totalAmount}</span>
+              </div>
+            </div>
+          </div>
+
+          {/* Payment Options */}
+          <div>
+            <h3 className="text-sm font-medium text-muted-foreground mb-3">Choose Payment Method</h3>
+            <div className="space-y-3">
+              {/* Cash */}
+              <motion.button
+                type="button"
+                whileHover={{ scale: 1.01 }}
+                whileTap={{ scale: 0.99 }}
+                onClick={() => setPaymentMode('cash')}
+                className={`w-full p-4 rounded-xl border-2 transition-all text-left flex items-center gap-4 ${
+                  paymentMode === 'cash' ? 'bg-gold/10 border-gold shadow-md' : 'bg-card border-border hover:border-gold/40'
+                }`}
+              >
+                <div className="p-3 bg-green-500/10 rounded-full">
+                  <Banknote className="w-6 h-6 text-green-600" />
+                </div>
+                <div className="flex-1">
+                  <p className="font-bold text-foreground">Cash</p>
+                  <p className="text-xs text-muted-foreground">Pay at the salon</p>
+                </div>
+                {paymentMode === 'cash' && (
+                  <div className="w-6 h-6 bg-gold rounded-full flex items-center justify-center">
+                    <Check className="w-4 h-4 text-black" />
+                  </div>
+                )}
+              </motion.button>
+
+              {/* UPI */}
+              <motion.button
+                type="button"
+                whileHover={{ scale: 1.01 }}
+                whileTap={{ scale: 0.99 }}
+                onClick={() => setPaymentMode('upi')}
+                className={`w-full p-4 rounded-xl border-2 transition-all text-left flex items-center gap-4 ${
+                  paymentMode === 'upi' ? 'bg-gold/10 border-gold shadow-md' : 'bg-card border-border hover:border-gold/40'
+                }`}
+              >
+                <div className="p-3 bg-blue-500/10 rounded-full">
+                  <Smartphone className="w-6 h-6 text-blue-600" />
+                </div>
+                <div className="flex-1">
+                  <p className="font-bold text-foreground">UPI</p>
+                  <p className="text-xs text-muted-foreground">Pay via UPI app (GPay, PhonePe, etc.)</p>
+                </div>
+                {paymentMode === 'upi' && (
+                  <div className="w-6 h-6 bg-gold rounded-full flex items-center justify-center">
+                    <Check className="w-4 h-4 text-black" />
+                  </div>
+                )}
+              </motion.button>
+
+              {/* Wallet */}
+              <motion.button
+                type="button"
+                whileHover={hasWallet ? { scale: 1.01 } : {}}
+                whileTap={hasWallet ? { scale: 0.99 } : {}}
+                onClick={() => {
+                  if (!hasWallet) return;
+                  if (!walletSufficient) {
+                    toast.error(`Insufficient balance. Available: ₹${walletBalance}, Required: ₹${totalAmount}`);
+                    return;
+                  }
+                  setPaymentMode('wallet');
+                }}
+                disabled={!hasWallet}
+                className={`w-full p-4 rounded-xl border-2 transition-all text-left flex items-center gap-4 ${
+                  !hasWallet
+                    ? 'bg-muted/30 border-border/50 opacity-50 cursor-not-allowed'
+                    : paymentMode === 'wallet'
+                    ? 'bg-gold/10 border-gold shadow-md'
+                    : !walletSufficient
+                    ? 'bg-red-50 dark:bg-red-500/5 border-red-200 dark:border-red-500/30'
+                    : 'bg-card border-border hover:border-gold/40'
+                }`}
+              >
+                <div className="p-3 bg-gold/10 rounded-full">
+                  <Wallet className="w-6 h-6 text-gold" />
+                </div>
+                <div className="flex-1">
+                  <p className="font-bold text-foreground">Wallet</p>
+                  {hasWallet ? (
+                    <p className={`text-xs ${walletSufficient ? 'text-green-600' : 'text-red-500'}`}>
+                      Balance: ₹{walletBalance} {!walletSufficient && '(Insufficient)'}
+                    </p>
+                  ) : (
+                    <p className="text-xs text-muted-foreground">No active wallet</p>
+                  )}
+                </div>
+                {paymentMode === 'wallet' && (
+                  <div className="w-6 h-6 bg-gold rounded-full flex items-center justify-center">
+                    <Check className="w-4 h-4 text-black" />
+                  </div>
+                )}
+              </motion.button>
+
+              {/* Pay later at Salon */}
+              <motion.button
+                type="button"
+                whileHover={{ scale: 1.01 }}
+                whileTap={{ scale: 0.99 }}
+                onClick={() => setPaymentMode('pay_later')}
+                className={`w-full p-4 rounded-xl border-2 transition-all text-left flex items-center gap-4 ${
+                  paymentMode === 'pay_later' ? 'bg-gold/10 border-gold shadow-md' : 'bg-card border-border hover:border-gold/40'
+                }`}
+              >
+                <div className="p-3 bg-purple-500/10 rounded-full">
+                  <Clock className="w-6 h-6 text-purple-600" />
+                </div>
+                <div className="flex-1">
+                  <p className="font-bold text-foreground">Pay later at Salon</p>
+                  <p className="text-xs text-muted-foreground">Pay after your service is done</p>
+                </div>
+                {paymentMode === 'pay_later' && (
+                  <div className="w-6 h-6 bg-gold rounded-full flex items-center justify-center">
+                    <Check className="w-4 h-4 text-black" />
+                  </div>
+                )}
+              </motion.button>
+            </div>
+          </div>
+
+          {/* Wallet Deduction Summary */}
+          {paymentMode === 'wallet' && walletSufficient && (
+            <div className="p-4 bg-gold/10 border border-gold/30 rounded-xl">
+              <div className="flex justify-between items-center">
+                <span className="text-sm text-foreground">Wallet Balance</span>
+                <span className="font-bold text-gold">₹{walletBalance}</span>
+              </div>
+              <div className="flex justify-between items-center mt-1">
+                <span className="text-sm text-foreground">Booking Amount</span>
+                <span className="font-bold text-red-500">- ₹{totalAmount}</span>
+              </div>
+              <div className="flex justify-between items-center mt-2 pt-2 border-t border-gold/20">
+                <span className="text-sm font-medium text-foreground">Balance After</span>
+                <span className="font-bold text-gold">₹{walletBalance - totalAmount}</span>
+              </div>
+            </div>
+          )}
+
+          {/* UPI Flow */}
+          {paymentMode === 'upi' && (
+            <div className="p-4 bg-blue-500/10 border border-blue-500/30 rounded-xl space-y-3">
+              <p className="text-sm font-medium text-foreground">Pay ₹{totalAmount} via UPI</p>
+              {salon?.upi_id ? (
+                <>
+                  <p className="text-xs text-muted-foreground">UPI ID: <span className="font-mono font-bold text-foreground">{salon.upi_id}</span></p>
+                  <Button
+                    type="button"
+                    onClick={handleUpiIntent}
+                    className="w-full bg-blue-600 text-white hover:bg-blue-700 py-3"
+                  >
+                    <Smartphone className="w-4 h-4 mr-2" />
+                    Open UPI App to Pay ₹{totalAmount}
+                  </Button>
+                  <p className="text-xs text-muted-foreground text-center">
+                    After completing payment in your UPI app, tap "I've Paid" below
+                  </p>
+                </>
+              ) : (
+                <p className="text-xs text-red-500">Salon UPI ID not configured. Please choose another payment method.</p>
+              )}
+            </div>
+          )}
+        </div>
+
+        {/* Sticky Footer */}
+        <div className="fixed bottom-0 left-0 right-0 bg-background border-t border-border p-4 z-30">
+          <div className="max-w-2xl mx-auto">
+            <div className="flex items-center justify-between mb-3">
+              <span className="text-muted-foreground text-sm">{formData.selectedServices.length} service(s)</span>
+              <span className="text-2xl font-bold text-gold">₹{totalAmount}</span>
+            </div>
+            {paymentMode === 'upi' ? (
+              <Button
+                type="button"
+                onClick={handleUpiConfirm}
+                disabled={loading || !salon?.upi_id}
+                className="w-full bg-green-600 text-white hover:bg-green-700 py-5 text-base font-bold rounded-xl disabled:opacity-50"
+              >
+                {loading ? 'Confirming...' : "I've Paid - Confirm Booking"}
+              </Button>
+            ) : (
+              <Button
+                type="button"
+                onClick={handleSubmit}
+                disabled={loading || !paymentMode || (paymentMode === 'wallet' && !walletSufficient)}
+                className="w-full bg-gold text-black hover:bg-gold/90 py-5 text-base font-bold rounded-xl disabled:opacity-50"
+              >
+                {loading ? 'Booking...' : paymentMode === 'wallet' ? `Pay ₹${totalAmount} from Wallet` : 'Confirm Booking'}
+              </Button>
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // ========== SERVICES STEP (Main booking form) ==========
   return (
     <div className="min-h-screen bg-background pb-32">
       {/* Compact Header */}
@@ -709,14 +1010,7 @@ export default function SinglePageBooking() {
         </div>
       </div>
 
-      {/* Customer Wallet Card */}
-      <div className="max-w-2xl mx-auto p-4 pt-6">
-        {user && customerMembership && (
-          <CustomerWalletCard membership={customerMembership} />
-        )}
-      </div>
-
-      <form onSubmit={handleSubmit} className="max-w-2xl mx-auto p-4 space-y-5">
+      <form onSubmit={(e) => { e.preventDefault(); goToPayment(); }} className="max-w-2xl mx-auto p-4 space-y-5">
         
         {/* Section 1: Who & When */}
         <div className="space-y-4">
@@ -1047,119 +1341,25 @@ export default function SinglePageBooking() {
           )}
         </div>
 
-        {/* Section 4: Payment Mode */}
-        {formData.selectedServices.length > 0 && (
-          <div className="space-y-3">
-            <p className="text-sm font-medium text-muted-foreground">Payment Mode</p>
-            <div className="grid grid-cols-2 gap-2">
-              {[
-                { id: 'cash', label: 'Cash', icon: Banknote, color: 'text-green-600' },
-                { id: 'upi', label: 'UPI', icon: Smartphone, color: 'text-blue-600' },
-                { id: 'wallet', label: 'Wallet', icon: Wallet, color: 'text-gold' },
-                { id: 'card', label: 'Card', icon: CreditCard, color: 'text-purple-600' }
-              ].map(mode => {
-                const walletBalance = customerMembership?.wallet_balance || 0;
-                const isWalletDisabled = mode.id === 'wallet' && (!customerMembership || walletBalance <= 0);
-                const isWalletInsufficient = mode.id === 'wallet' && customerMembership && walletBalance < totalAmount && walletBalance > 0;
-                
-                return (
-                  <motion.button
-                    key={mode.id}
-                    type="button"
-                    whileHover={isWalletDisabled ? {} : { scale: 1.02 }}
-                    whileTap={isWalletDisabled ? {} : { scale: 0.98 }}
-                    onClick={() => {
-                      if (isWalletDisabled) return;
-                      if (isWalletInsufficient) {
-                        toast.error(`Insufficient balance. Available: ₹${walletBalance}, Required: ₹${totalAmount}`);
-                        return;
-                      }
-                      setPaymentMode(mode.id);
-                    }}
-                    disabled={isWalletDisabled}
-                    className={`relative p-3 rounded-xl border-2 transition-all text-left ${
-                      isWalletDisabled
-                        ? 'bg-muted/30 border-border/50 opacity-50 cursor-not-allowed'
-                        : paymentMode === mode.id
-                        ? 'bg-gold/10 border-gold shadow-md'
-                        : isWalletInsufficient
-                        ? 'bg-red-50 dark:bg-red-500/5 border-red-200 dark:border-red-500/30'
-                        : 'bg-card border-border hover:border-gold/40'
-                    }`}
-                  >
-                    <div className="flex items-center gap-3">
-                      <mode.icon className={`w-5 h-5 ${paymentMode === mode.id ? 'text-gold' : mode.color}`} />
-                      <div className="flex-1">
-                        <p className="font-bold text-sm text-foreground">{mode.label}</p>
-                        {mode.id === 'wallet' && customerMembership && (
-                          <p className={`text-xs mt-0.5 ${walletBalance >= totalAmount ? 'text-green-600' : 'text-red-500'}`}>
-                            Balance: ₹{walletBalance}
-                          </p>
-                        )}
-                        {mode.id === 'wallet' && !customerMembership && (
-                          <p className="text-xs text-muted-foreground mt-0.5">No wallet</p>
-                        )}
-                      </div>
-                    </div>
-                    {paymentMode === mode.id && (
-                      <motion.div
-                        initial={{ scale: 0 }}
-                        animate={{ scale: 1 }}
-                        className="absolute top-2 right-2 w-5 h-5 bg-gold rounded-full flex items-center justify-center"
-                      >
-                        <Check className="w-3 h-3 text-black" />
-                      </motion.div>
-                    )}
-                    {isWalletInsufficient && mode.id === 'wallet' && (
-                      <p className="text-xs text-red-500 mt-1">Insufficient balance</p>
-                    )}
-                  </motion.button>
-                );
-              })}
-            </div>
-            
-            {/* Wallet selected info */}
-            {paymentMode === 'wallet' && customerMembership && (
-              <div className="p-3 bg-gold/10 border border-gold/30 rounded-xl">
-                <div className="flex justify-between items-center">
-                  <span className="text-sm text-foreground">Wallet Balance</span>
-                  <span className="font-bold text-gold">₹{customerMembership.wallet_balance}</span>
-                </div>
-                <div className="flex justify-between items-center mt-1">
-                  <span className="text-sm text-foreground">Booking Amount</span>
-                  <span className="font-bold text-foreground">- ₹{totalAmount}</span>
-                </div>
-                <div className="flex justify-between items-center mt-1 pt-1 border-t border-gold/20">
-                  <span className="text-sm font-medium text-foreground">Balance After</span>
-                  <span className="font-bold text-gold">₹{customerMembership.wallet_balance - totalAmount}</span>
-                </div>
-              </div>
-            )}
-          </div>
-        )}
+        {/* Section 4: Payment Mode - REMOVED, moved to separate step */}
       </form>
 
-      {/* Sticky Footer */}
+      {/* Sticky Footer - Proceed to Payment */}
       <div className="fixed bottom-0 left-0 right-0 bg-background border-t border-border p-4 z-30">
         <div className="max-w-2xl mx-auto">
           {formData.selectedServices.length > 0 && (
             <div className="flex items-center justify-between mb-3">
-              <div>
-                <span className="text-muted-foreground text-sm">{formData.selectedServices.length} service(s)</span>
-                {paymentMode && (
-                  <span className="text-xs text-muted-foreground ml-2">• {paymentMode.toUpperCase()}</span>
-                )}
-              </div>
+              <span className="text-muted-foreground text-sm">{formData.selectedServices.length} service(s)</span>
               <span className="text-2xl font-bold text-gold">₹{totalAmount}</span>
             </div>
           )}
           <Button
-            type="submit"
-            onClick={handleSubmit}
-            disabled={loading || formData.selectedServices.length === 0 || !formData.shift || !paymentMode || (paymentMode === 'wallet' && customerMembership && customerMembership.wallet_balance < totalAmount)}
+            type="button"
+            onClick={goToPayment}
+            disabled={formData.selectedServices.length === 0 || !formData.shift}
             className="w-full bg-gold text-black hover:bg-gold/90 py-5 text-base font-bold rounded-xl disabled:opacity-50"
           >
-            {loading ? 'Booking...' : paymentMode === 'wallet' ? `Pay ₹${totalAmount} from Wallet` : 'Confirm Booking'}
+            Proceed to Payment
           </Button>
         </div>
       </div>

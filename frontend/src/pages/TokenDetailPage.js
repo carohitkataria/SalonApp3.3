@@ -66,7 +66,7 @@ export default function TokenDetailPage() {
     if (!window.confirm('Are you sure you want to cancel this booking?')) return;
     
     try {
-      await axios.post(`${API}/tokens/${tokenId}/cancel`);
+      await axios.post(`${API}/tokens/${tokenId}/customer-cancel`);
       toast.success('Booking cancelled');
       fetchTokenDetails();
     } catch (error) {

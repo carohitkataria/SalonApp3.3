@@ -73,7 +73,7 @@ export default function HistoryPage() {
   const handleCancelBooking = async (bookingId) => {
     setCancellingId(bookingId);
     try {
-      await axios.post(`${API}/tokens/${bookingId}/cancel`);
+      await axios.post(`${API}/tokens/${bookingId}/customer-cancel`);
       toast.success('Booking cancelled successfully');
       fetchHistory();
     } catch (error) {

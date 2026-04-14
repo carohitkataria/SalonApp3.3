@@ -3166,6 +3166,12 @@ async def create_booking(booking: BookingCreate):
     total_amount = 0
     if booking.barber_id != "any":
         total_amount = await calculate_booking_total(booking.selected_services, booking.barber_id)
+    else:
+        # For "any" barber, calculate using base prices
+        for service_id in booking.selected_services:
+            service = await db.services.find_one({"id": service_id}, {"_id": 0})
+            if service:
+                total_amount += service.get("base_price", 0)
     
     # Handle wallet payment
     payment_status = "pending"
@@ -3498,10 +3504,43 @@ async def call_token(token_id: str, current_salon=Depends(get_current_salon)):
 
 @api_router.post("/tokens/{token_id}/cancel")
 async def cancel_token(token_id: str, current_salon=Depends(get_current_salon)):
-    """Cancel token"""
+    """Cancel token and refund wallet if paid via wallet"""
     token = await db.tokens.find_one({"id": token_id}, {"_id": 0})
     if not token:
         raise HTTPException(status_code=404, detail="Token not found")
+    
+    # Refund wallet if payment was via wallet
+    if token.get("payment_mode") == "wallet" and token.get("payment_status") == "paid":
+        wallet_phone = token["phone"]
+        if not wallet_phone.startswith("+91"):
+            wallet_phone = f"+91{wallet_phone}"
+        
+        membership = await db.customer_memberships.find_one({
+            "salon_id": token["salon_id"],
+            "customer_phone": wallet_phone,
+            "is_active": True
+        }, {"_id": 0})
+        
+        if membership:
+            refund_amount = token.get("total_amount", 0)
+            new_balance = membership["wallet_balance"] + refund_amount
+            
+            await db.customer_memberships.update_one(
+                {"id": membership["id"]},
+                {"$set": {"wallet_balance": new_balance}}
+            )
+            
+            # Record refund transaction
+            await db.wallet_transactions.insert_one({
+                "id": str(uuid.uuid4()),
+                "customer_phone": wallet_phone,
+                "salon_id": token["salon_id"],
+                "transaction_type": "credit",
+                "amount": refund_amount,
+                "balance_after": new_balance,
+                "description": f"Refund - Booking cancelled (Token {token['token_number']})",
+                "created_at": datetime.now(timezone.utc).isoformat()
+            })
     
     await db.tokens.update_one({"id": token_id}, {"$set": {"status": "cancelled"}})
     await broadcast_update("token_cancelled", {"token_id": token_id})
@@ -3510,6 +3549,55 @@ async def cancel_token(token_id: str, current_salon=Depends(get_current_salon)):
     await send_booking_notification(token, 'token_cancelled')
     
     return {"message": "Token cancelled"}
+
+@api_router.post("/tokens/{token_id}/customer-cancel")
+async def customer_cancel_token(token_id: str):
+    """Customer-facing cancel token and refund wallet if paid via wallet"""
+    token = await db.tokens.find_one({"id": token_id}, {"_id": 0})
+    if not token:
+        raise HTTPException(status_code=404, detail="Token not found")
+    
+    if token.get("status") in ["completed", "cancelled"]:
+        raise HTTPException(status_code=400, detail="Cannot cancel this booking")
+    
+    # Refund wallet if payment was via wallet
+    if token.get("payment_mode") == "wallet" and token.get("payment_status") == "paid":
+        wallet_phone = token["phone"]
+        if not wallet_phone.startswith("+91"):
+            wallet_phone = f"+91{wallet_phone}"
+        
+        membership = await db.customer_memberships.find_one({
+            "salon_id": token["salon_id"],
+            "customer_phone": wallet_phone,
+            "is_active": True
+        }, {"_id": 0})
+        
+        if membership:
+            refund_amount = token.get("total_amount", 0)
+            new_balance = membership["wallet_balance"] + refund_amount
+            
+            await db.customer_memberships.update_one(
+                {"id": membership["id"]},
+                {"$set": {"wallet_balance": new_balance}}
+            )
+            
+            await db.wallet_transactions.insert_one({
+                "id": str(uuid.uuid4()),
+                "customer_phone": wallet_phone,
+                "salon_id": token["salon_id"],
+                "transaction_type": "credit",
+                "amount": refund_amount,
+                "balance_after": new_balance,
+                "description": f"Refund - Booking cancelled by customer (Token {token['token_number']})",
+                "created_at": datetime.now(timezone.utc).isoformat()
+            })
+    
+    await db.tokens.update_one({"id": token_id}, {"$set": {"status": "cancelled"}})
+    await broadcast_update("token_cancelled", {"token_id": token_id})
+    
+    await send_booking_notification(token, 'token_cancelled')
+    
+    return {"message": "Booking cancelled successfully"}
 
 @api_router.post("/tokens/{token_id}/defer")
 async def defer_token(token_id: str, new_slot: str, current_salon=Depends(get_current_salon)):
@@ -4307,7 +4395,7 @@ async def generate_upi_qr(token_id: str):
 
 @api_router.post("/payments/verify")
 async def verify_payment(token_id: str, transaction_id: str, current_salon=Depends(get_current_salon)):
-    """Verify payment (manual for UPI)"""
+    """Verify payment (manual for UPI) - salon admin"""
     token = await db.tokens.find_one({"id": token_id}, {"_id": 0})
     if not token:
         raise HTTPException(status_code=404, detail="Token not found")
@@ -4322,6 +4410,32 @@ async def verify_payment(token_id: str, transaction_id: str, current_salon=Depen
     )
     
     return {"message": "Payment verified"}
+
+# ============ CUSTOMER PAYMENT CONFIRM ============
+
+@api_router.post("/payments/customer-confirm-upi")
+async def customer_confirm_upi(body: dict):
+    """Customer confirms UPI payment was done"""
+    token_id = body.get("token_id")
+    upi_ref = body.get("upi_reference", "")
+    
+    if not token_id:
+        raise HTTPException(status_code=400, detail="Token ID required")
+    
+    token = await db.tokens.find_one({"id": token_id}, {"_id": 0})
+    if not token:
+        raise HTTPException(status_code=404, detail="Token not found")
+    
+    await db.tokens.update_one(
+        {"id": token_id},
+        {"$set": {
+            "payment_status": "paid",
+            "payment_mode": "upi",
+            "upi_transaction_id": upi_ref or "Customer confirmed"
+        }}
+    )
+    
+    return {"message": "Payment confirmed", "token_id": token_id}
 
 # ============ USER HISTORY ============
 
