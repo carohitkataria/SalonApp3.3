@@ -358,6 +358,8 @@ class BookingCreate(BaseModel):
     source: str = "online"
     booking_type: str = "instant"  # instant/future
     booking_for_self: bool = True  # True = self, False = others
+    payment_mode: Optional[str] = None  # cash/upi/wallet/card
+    customer_gender: Optional[str] = None
 
 class TokenModel(BaseModel):
     model_config = ConfigDict(extra="ignore")
@@ -3015,6 +3017,37 @@ async def get_customer_combined_history(salon_id: str, phone: str):
     
     return {"history": combined}
 
+@api_router.get("/salons/{salon_id}/customers/{phone}/recent-services")
+async def get_customer_recent_services(salon_id: str, phone: str):
+    """Get recently used services by a customer at this salon"""
+    if not phone.startswith("+91"):
+        phone = f"+91{phone}"
+    
+    # Get recent bookings with services
+    bookings = await db.tokens.find({
+        "salon_id": salon_id,
+        "phone": phone,
+        "status": {"$in": ["completed", "waiting", "called"]}
+    }, {"_id": 0, "selected_services": 1, "created_at": 1}).sort("created_at", -1).limit(10).to_list(10)
+    
+    # Collect unique service IDs in order of recency
+    seen = set()
+    recent_service_ids = []
+    for booking in bookings:
+        for sid in (booking.get("selected_services") or []):
+            if sid not in seen:
+                seen.add(sid)
+                recent_service_ids.append(sid)
+    
+    # Fetch service details
+    recent_services = []
+    for sid in recent_service_ids[:15]:  # Limit to 15 recent services
+        service = await db.services.find_one({"id": sid, "is_available": True}, {"_id": 0})
+        if service:
+            recent_services.append(service)
+    
+    return {"recent_services": recent_services}
+
 @api_router.post("/salons/{salon_id}/loyalty-program", response_model=LoyaltyProgram)
 async def update_loyalty_program(salon_id: str, settings: LoyaltyProgramSettings, current_user=Depends(get_current_salon_admin)):
     """Update loyalty program settings"""
@@ -3134,6 +3167,52 @@ async def create_booking(booking: BookingCreate):
     if booking.barber_id != "any":
         total_amount = await calculate_booking_total(booking.selected_services, booking.barber_id)
     
+    # Handle wallet payment
+    payment_status = "pending"
+    payment_mode = booking.payment_mode
+    
+    if payment_mode == "wallet":
+        if not phone.startswith("+91"):
+            wallet_phone = f"+91{phone}"
+        else:
+            wallet_phone = phone
+        
+        membership = await db.customer_memberships.find_one({
+            "salon_id": booking.salon_id,
+            "customer_phone": wallet_phone,
+            "is_active": True
+        }, {"_id": 0})
+        
+        if not membership:
+            raise HTTPException(status_code=400, detail="No active wallet/membership found")
+        
+        if membership["wallet_balance"] < total_amount:
+            raise HTTPException(
+                status_code=400, 
+                detail=f"Insufficient wallet balance. Available: ₹{membership['wallet_balance']}, Required: ₹{total_amount}"
+            )
+        
+        # Deduct wallet balance
+        new_balance = membership["wallet_balance"] - total_amount
+        await db.customer_memberships.update_one(
+            {"id": membership["id"]},
+            {"$set": {"wallet_balance": new_balance}}
+        )
+        
+        # Record wallet transaction
+        await db.wallet_transactions.insert_one({
+            "id": str(uuid.uuid4()),
+            "customer_phone": wallet_phone,
+            "salon_id": booking.salon_id,
+            "transaction_type": "debit",
+            "amount": total_amount,
+            "balance_after": new_balance,
+            "description": f"Booking payment - {booking.shift} shift",
+            "created_at": datetime.now(timezone.utc).isoformat()
+        })
+        
+        payment_status = "paid"
+    
     # Get token number - always assign immediately (even for future bookings)
     token_number = await get_next_token_number(booking.salon_id, booking.barber_id, booking.date, booking.shift)
     
@@ -3153,8 +3232,8 @@ async def create_booking(booking: BookingCreate):
         "selected_services": booking.selected_services,
         "total_amount": total_amount,
         "status": "waiting" if booking.booking_type == "instant" else "future",
-        "payment_status": "pending",
-        "payment_mode": None,
+        "payment_status": payment_status,
+        "payment_mode": payment_mode,
         "upi_transaction_id": None,
         "source": booking.source,
         "booking_type": booking.booking_type,

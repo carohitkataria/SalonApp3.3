@@ -5,7 +5,7 @@ import axios from 'axios';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { toast } from 'sonner';
-import { Scissors, Calendar, User, CheckCircle, Star, Clock, ArrowLeft, Home, Zap, Check, ChevronDown, ChevronRight, Search, Package, Crown, History } from 'lucide-react';
+import { Scissors, Calendar, User, CheckCircle, Star, Clock, ArrowLeft, Home, Zap, Check, ChevronDown, ChevronRight, Search, Package, Crown, History, Wallet, CreditCard, Banknote, Smartphone } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Input } from '@/components/ui/input';
 import CustomerWalletCard from '@/components/CustomerWalletCard';
@@ -226,15 +226,18 @@ export default function SinglePageBooking() {
   const [salon, setSalon] = useState(null);
   const [barbers, setBarbers] = useState([]);
   const [salonServices, setSalonServices] = useState([]);
-  const [packages, setPackages] = useState([]); // New: salon packages
-  const [selectedPackage, setSelectedPackage] = useState(null); // New: selected package
+  const [packages, setPackages] = useState([]);
+  const [selectedPackage, setSelectedPackage] = useState(null);
   const [customerMembership, setCustomerMembership] = useState(null);
   const [showMembershipShop, setShowMembershipShop] = useState(false);
   const [membershipPlans, setMembershipPlans] = useState([]);
   const [activeTab, setActiveTab] = useState('services');
+  const [serviceTab, setServiceTab] = useState('recent'); // recent / services / packages
   const [customerBookings, setCustomerBookings] = useState([]);
-  const [availablePackages, setAvailablePackages] = useState({ public: [], customer: [] }); // New: customer wallet
-  const [useWallet, setUseWallet] = useState(false); // New: use wallet checkbox
+  const [recentServices, setRecentServices] = useState([]);
+  const [availablePackages, setAvailablePackages] = useState({ public: [], customer: [] });
+  const [useWallet, setUseWallet] = useState(false);
+  const [paymentMode, setPaymentMode] = useState(''); // cash/upi/wallet/card
   const [barberServices, setBarberServices] = useState([]);
   const [shifts, setShifts] = useState([]);
   const [liveStatus, setLiveStatus] = useState(null);
@@ -270,6 +273,10 @@ export default function SinglePageBooking() {
     fetchSalonData();
     fetchShifts();
     fetchLiveStatus();
+    fetchRecentServices();
+    fetchCustomerMembership();
+    fetchPackages();
+    fetchCustomerBookings();
     const interval = setInterval(fetchLiveStatus, 30000);
     return () => clearInterval(interval);
   }, [isUserLoggedIn, salonId]);
@@ -403,6 +410,24 @@ export default function SinglePageBooking() {
     }
   };
 
+  const fetchRecentServices = async () => {
+    if (!user || !user.phone) return;
+    try {
+      const phone = user.phone.replace('+91', '');
+      const response = await axios.get(`${API}/salons/${salonId}/customers/${phone}/recent-services`);
+      setRecentServices(response.data.recent_services || []);
+      // If there are recent services, default to 'recent' tab, otherwise 'services'
+      if ((response.data.recent_services || []).length > 0) {
+        setServiceTab('recent');
+      } else {
+        setServiceTab('services');
+      }
+    } catch (error) {
+      console.log('No recent services found');
+      setServiceTab('services');
+    }
+  };
+
   const fetchMembershipPlans = async () => {
     try {
       const response = await axios.get(`${API}/salons/${salonId}/membership-plans`);
@@ -519,6 +544,11 @@ export default function SinglePageBooking() {
       return;
     }
 
+    if (!paymentMode) {
+      toast.error('Please select a payment mode');
+      return;
+    }
+
     if (!bookingForSelf) {
       if (!otherPersonName || !otherPersonPhone) {
         toast.error('Please enter name and phone for the person');
@@ -530,6 +560,15 @@ export default function SinglePageBooking() {
       }
       if (otherPersonPhone.length < 10) {
         toast.error('Please enter a valid 10-digit phone number');
+        return;
+      }
+    }
+
+    // Wallet balance check
+    if (paymentMode === 'wallet') {
+      const walletBalance = customerMembership?.wallet_balance || 0;
+      if (walletBalance < totalAmount) {
+        toast.error(`Insufficient wallet balance. Available: ₹${walletBalance}, Required: ₹${totalAmount}`);
         return;
       }
     }
@@ -549,11 +588,18 @@ export default function SinglePageBooking() {
         source: source,
         booking_type: formData.bookingType,
         booking_for_self: bookingForSelf,
-        customer_gender: bookingForSelf ? (user.gender || 'Men') : otherPersonGender
+        customer_gender: bookingForSelf ? (user.gender || 'Men') : otherPersonGender,
+        payment_mode: paymentMode
       };
 
       const response = await axios.post(`${API}/bookings`, bookingData);
       setBookedToken(response.data);
+      
+      // Refresh membership data if wallet was used
+      if (paymentMode === 'wallet') {
+        fetchCustomerMembership();
+      }
+      
       toast.success('Booking confirmed!');
     } catch (error) {
       toast.error(error.response?.data?.detail || 'Failed to create booking');
@@ -602,6 +648,10 @@ export default function SinglePageBooking() {
                 <span className="font-bold text-foreground">{bookedToken.barber_name}</span>
               </div>
               <div className="flex justify-between border-t border-border pt-3">
+                <span className="text-muted-foreground">Payment</span>
+                <span className="font-bold text-foreground capitalize">{paymentMode || 'Pending'}</span>
+              </div>
+              <div className="flex justify-between">
                 <span className="text-muted-foreground">Total</span>
                 <span className="text-xl font-bold text-gold">₹{bookedToken.total_amount}</span>
               </div>
@@ -813,90 +863,10 @@ export default function SinglePageBooking() {
           )}
         </div>
 
-        {/* Section 2.5: Packages */}
-        {packages.length > 0 && (
-          <div className="space-y-3">
-            <div className="flex items-center justify-between">
-              <p className="text-sm font-medium text-muted-foreground flex items-center gap-2">
-                <Package className="w-4 h-4" />
-                Packages
-              </p>
-              {selectedPackage && (
-                <span className="text-xs bg-gold/20 text-gold px-2 py-1 rounded-full">
-                  Package Selected
-                </span>
-              )}
-            </div>
-            
-            <div className="space-y-2">
-              {packages.map(pkg => (
-                <motion.div
-                  key={pkg.id}
-                  whileHover={{ scale: 1.01 }}
-                  whileTap={{ scale: 0.99 }}
-                  onClick={() => handlePackageSelect(pkg)}
-                  className={`relative p-4 rounded-xl cursor-pointer transition-all border-2 ${
-                    selectedPackage?.id === pkg.id
-                      ? 'bg-gold/10 border-gold shadow-md'
-                      : 'bg-card border-border hover:border-gold/40'
-                  }`}
-                >
-                  <div className="flex justify-between items-start mb-2">
-                    <div className="flex-1">
-                      <h4 className="font-bold text-foreground">{pkg.package_name}</h4>
-                      <p className="text-xs text-muted-foreground mt-1">
-                        {pkg.services?.length || 0} services • {pkg.gender_tag || 'Unisex'}
-                      </p>
-                    </div>
-                    <div className="text-right">
-                      <p className="text-xl font-bold text-gold">₹{pkg.package_price}</p>
-                      {pkg.original_price && pkg.original_price > pkg.package_price && (
-                        <p className="text-xs line-through text-muted-foreground">₹{pkg.original_price}</p>
-                      )}
-                    </div>
-                  </div>
-                  
-                  {pkg.description && (
-                    <p className="text-sm text-muted-foreground mb-2">{pkg.description}</p>
-                  )}
-                  
-                  {/* Package Services */}
-                  {pkg.services && pkg.services.length > 0 && (
-                    <div className="mt-3 pt-3 border-t border-border">
-                      <p className="text-xs font-semibold text-muted-foreground mb-2">Includes:</p>
-                      <div className="flex flex-wrap gap-1">
-                        {pkg.services.map((service, idx) => (
-                          <span key={idx} className="text-xs bg-muted px-2 py-1 rounded">
-                            {service.service_name}
-                          </span>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-                  
-                  {selectedPackage?.id === pkg.id && (
-                    <motion.div
-                      initial={{ scale: 0 }}
-                      animate={{ scale: 1 }}
-                      className="absolute top-3 right-3 w-6 h-6 bg-gold rounded-full flex items-center justify-center"
-                    >
-                      <Check className="w-4 h-4 text-black" />
-                    </motion.div>
-                  )}
-                </motion.div>
-              ))}
-            </div>
-            
-            <p className="text-xs text-muted-foreground text-center">
-              Select a package or choose individual services below
-            </p>
-          </div>
-        )}
-
-        {/* Section 3: Services with Filters and Categories */}
+        {/* Section 3: Services with Tabs (Recent / Services / Packages) */}
         <div className="space-y-3">
           <div className="flex items-center justify-between">
-            <p className="text-sm font-medium text-muted-foreground">Services</p>
+            <p className="text-sm font-medium text-muted-foreground">What would you like?</p>
             {formData.selectedServices.length > 0 && (
               <span className="text-xs bg-gold/20 text-gold px-2 py-1 rounded-full">
                 {formData.selectedServices.length} selected
@@ -904,42 +874,269 @@ export default function SinglePageBooking() {
             )}
           </div>
           
-          {/* Search */}
-          <div className="relative">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-            <Input
-              placeholder="Search services..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className="pl-10 h-10"
-            />
+          {/* Tab Switcher */}
+          <div className="flex bg-muted rounded-xl p-1 gap-1">
+            {[
+              { id: 'recent', label: 'Recent', icon: History },
+              { id: 'services', label: 'Services', icon: Scissors },
+              { id: 'packages', label: 'Packages', icon: Package }
+            ].map(tab => (
+              <button
+                key={tab.id}
+                type="button"
+                onClick={() => setServiceTab(tab.id)}
+                className={`flex-1 flex items-center justify-center gap-1.5 py-2 px-3 rounded-lg text-sm font-medium transition-all ${
+                  serviceTab === tab.id
+                    ? 'bg-gold text-black shadow-sm'
+                    : 'text-muted-foreground hover:text-foreground'
+                }`}
+              >
+                <tab.icon className="w-4 h-4" />
+                {tab.label}
+              </button>
+            ))}
           </div>
 
-          {/* Categorized Services */}
-          <div className="space-y-2">
-            {Object.keys(groupedServices).length > 0 ? (
-              Object.entries(groupedServices).map(([category, categoryServices]) => (
-                <CategorySection
-                  key={category}
-                  category={category}
-                  services={categoryServices}
-                  selectedServices={formData.selectedServices}
-                  onToggle={handleServiceToggle}
-                  priceGetter={getServicePrice}
-                  isOpen={openCategories[category] || false}
-                  onToggleOpen={() => setOpenCategories(prev => ({ ...prev, [category]: !prev[category] }))}
+          {/* Recent Services Tab */}
+          {serviceTab === 'recent' && (
+            <div className="space-y-2">
+              {recentServices.length > 0 ? (
+                <>
+                  <p className="text-xs text-muted-foreground">Your recently used services</p>
+                  {recentServices.map(service => (
+                    <ServiceCard
+                      key={service.id}
+                      service={service}
+                      selected={formData.selectedServices.includes(service.id)}
+                      onToggle={() => handleServiceToggle(service.id)}
+                      price={getServicePrice(service)}
+                    />
+                  ))}
+                </>
+              ) : (
+                <div className="text-center py-8 bg-card border border-border rounded-xl">
+                  <History className="w-12 h-12 text-muted-foreground/30 mx-auto mb-2" />
+                  <p className="text-muted-foreground text-sm">No recent services</p>
+                  <p className="text-xs text-muted-foreground mt-1">Your recently used services will appear here</p>
+                  <button
+                    type="button"
+                    onClick={() => setServiceTab('services')}
+                    className="mt-3 text-sm text-gold font-medium hover:underline"
+                  >
+                    Browse Services →
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Services Tab */}
+          {serviceTab === 'services' && (
+            <div className="space-y-3">
+              {/* Search */}
+              <div className="relative">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+                <Input
+                  placeholder="Search services..."
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  className="pl-10 h-10"
                 />
-              ))
-            ) : (
-              <div className="text-center py-8 bg-card border border-border rounded-xl">
-                <Scissors className="w-12 h-12 text-muted-foreground/30 mx-auto mb-2" />
-                <p className="text-muted-foreground text-sm">
-                  {searchQuery ? 'No services match your search' : 'No services available'}
-                </p>
+              </div>
+
+              {/* Categorized Services */}
+              <div className="space-y-2">
+                {Object.keys(groupedServices).length > 0 ? (
+                  Object.entries(groupedServices).map(([category, categoryServices]) => (
+                    <CategorySection
+                      key={category}
+                      category={category}
+                      services={categoryServices}
+                      selectedServices={formData.selectedServices}
+                      onToggle={handleServiceToggle}
+                      priceGetter={getServicePrice}
+                      isOpen={openCategories[category] || false}
+                      onToggleOpen={() => setOpenCategories(prev => ({ ...prev, [category]: !prev[category] }))}
+                    />
+                  ))
+                ) : (
+                  <div className="text-center py-8 bg-card border border-border rounded-xl">
+                    <Scissors className="w-12 h-12 text-muted-foreground/30 mx-auto mb-2" />
+                    <p className="text-muted-foreground text-sm">
+                      {searchQuery ? 'No services match your search' : 'No services available'}
+                    </p>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* Packages Tab */}
+          {serviceTab === 'packages' && (
+            <div className="space-y-2">
+              {packages.length > 0 ? (
+                <>
+                  {selectedPackage && (
+                    <div className="text-xs bg-gold/20 text-gold px-3 py-1.5 rounded-lg text-center font-medium">
+                      Package Selected: {selectedPackage.package_name}
+                    </div>
+                  )}
+                  {packages.map(pkg => (
+                    <motion.div
+                      key={pkg.id}
+                      whileHover={{ scale: 1.01 }}
+                      whileTap={{ scale: 0.99 }}
+                      onClick={() => handlePackageSelect(pkg)}
+                      className={`relative p-4 rounded-xl cursor-pointer transition-all border-2 ${
+                        selectedPackage?.id === pkg.id
+                          ? 'bg-gold/10 border-gold shadow-md'
+                          : 'bg-card border-border hover:border-gold/40'
+                      }`}
+                    >
+                      <div className="flex justify-between items-start mb-2">
+                        <div className="flex-1">
+                          <h4 className="font-bold text-foreground">{pkg.package_name}</h4>
+                          <p className="text-xs text-muted-foreground mt-1">
+                            {pkg.services?.length || 0} services • {pkg.gender_tag || 'Unisex'}
+                          </p>
+                        </div>
+                        <div className="text-right">
+                          <p className="text-xl font-bold text-gold">₹{pkg.package_price}</p>
+                          {pkg.original_price && pkg.original_price > pkg.package_price && (
+                            <p className="text-xs line-through text-muted-foreground">₹{pkg.original_price}</p>
+                          )}
+                        </div>
+                      </div>
+                      
+                      {pkg.description && (
+                        <p className="text-sm text-muted-foreground mb-2">{pkg.description}</p>
+                      )}
+                      
+                      {pkg.services && pkg.services.length > 0 && (
+                        <div className="mt-3 pt-3 border-t border-border">
+                          <p className="text-xs font-semibold text-muted-foreground mb-2">Includes:</p>
+                          <div className="flex flex-wrap gap-1">
+                            {pkg.services.map((service, idx) => (
+                              <span key={idx} className="text-xs bg-muted px-2 py-1 rounded">
+                                {service.service_name}
+                              </span>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                      
+                      {selectedPackage?.id === pkg.id && (
+                        <motion.div
+                          initial={{ scale: 0 }}
+                          animate={{ scale: 1 }}
+                          className="absolute top-3 right-3 w-6 h-6 bg-gold rounded-full flex items-center justify-center"
+                        >
+                          <Check className="w-4 h-4 text-black" />
+                        </motion.div>
+                      )}
+                    </motion.div>
+                  ))}
+                </>
+              ) : (
+                <div className="text-center py-8 bg-card border border-border rounded-xl">
+                  <Package className="w-12 h-12 text-muted-foreground/30 mx-auto mb-2" />
+                  <p className="text-muted-foreground text-sm">No packages available</p>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+
+        {/* Section 4: Payment Mode */}
+        {formData.selectedServices.length > 0 && (
+          <div className="space-y-3">
+            <p className="text-sm font-medium text-muted-foreground">Payment Mode</p>
+            <div className="grid grid-cols-2 gap-2">
+              {[
+                { id: 'cash', label: 'Cash', icon: Banknote, color: 'text-green-600' },
+                { id: 'upi', label: 'UPI', icon: Smartphone, color: 'text-blue-600' },
+                { id: 'wallet', label: 'Wallet', icon: Wallet, color: 'text-gold' },
+                { id: 'card', label: 'Card', icon: CreditCard, color: 'text-purple-600' }
+              ].map(mode => {
+                const walletBalance = customerMembership?.wallet_balance || 0;
+                const isWalletDisabled = mode.id === 'wallet' && (!customerMembership || walletBalance <= 0);
+                const isWalletInsufficient = mode.id === 'wallet' && customerMembership && walletBalance < totalAmount && walletBalance > 0;
+                
+                return (
+                  <motion.button
+                    key={mode.id}
+                    type="button"
+                    whileHover={isWalletDisabled ? {} : { scale: 1.02 }}
+                    whileTap={isWalletDisabled ? {} : { scale: 0.98 }}
+                    onClick={() => {
+                      if (isWalletDisabled) return;
+                      if (isWalletInsufficient) {
+                        toast.error(`Insufficient balance. Available: ₹${walletBalance}, Required: ₹${totalAmount}`);
+                        return;
+                      }
+                      setPaymentMode(mode.id);
+                    }}
+                    disabled={isWalletDisabled}
+                    className={`relative p-3 rounded-xl border-2 transition-all text-left ${
+                      isWalletDisabled
+                        ? 'bg-muted/30 border-border/50 opacity-50 cursor-not-allowed'
+                        : paymentMode === mode.id
+                        ? 'bg-gold/10 border-gold shadow-md'
+                        : isWalletInsufficient
+                        ? 'bg-red-50 dark:bg-red-500/5 border-red-200 dark:border-red-500/30'
+                        : 'bg-card border-border hover:border-gold/40'
+                    }`}
+                  >
+                    <div className="flex items-center gap-3">
+                      <mode.icon className={`w-5 h-5 ${paymentMode === mode.id ? 'text-gold' : mode.color}`} />
+                      <div className="flex-1">
+                        <p className="font-bold text-sm text-foreground">{mode.label}</p>
+                        {mode.id === 'wallet' && customerMembership && (
+                          <p className={`text-xs mt-0.5 ${walletBalance >= totalAmount ? 'text-green-600' : 'text-red-500'}`}>
+                            Balance: ₹{walletBalance}
+                          </p>
+                        )}
+                        {mode.id === 'wallet' && !customerMembership && (
+                          <p className="text-xs text-muted-foreground mt-0.5">No wallet</p>
+                        )}
+                      </div>
+                    </div>
+                    {paymentMode === mode.id && (
+                      <motion.div
+                        initial={{ scale: 0 }}
+                        animate={{ scale: 1 }}
+                        className="absolute top-2 right-2 w-5 h-5 bg-gold rounded-full flex items-center justify-center"
+                      >
+                        <Check className="w-3 h-3 text-black" />
+                      </motion.div>
+                    )}
+                    {isWalletInsufficient && mode.id === 'wallet' && (
+                      <p className="text-xs text-red-500 mt-1">Insufficient balance</p>
+                    )}
+                  </motion.button>
+                );
+              })}
+            </div>
+            
+            {/* Wallet selected info */}
+            {paymentMode === 'wallet' && customerMembership && (
+              <div className="p-3 bg-gold/10 border border-gold/30 rounded-xl">
+                <div className="flex justify-between items-center">
+                  <span className="text-sm text-foreground">Wallet Balance</span>
+                  <span className="font-bold text-gold">₹{customerMembership.wallet_balance}</span>
+                </div>
+                <div className="flex justify-between items-center mt-1">
+                  <span className="text-sm text-foreground">Booking Amount</span>
+                  <span className="font-bold text-foreground">- ₹{totalAmount}</span>
+                </div>
+                <div className="flex justify-between items-center mt-1 pt-1 border-t border-gold/20">
+                  <span className="text-sm font-medium text-foreground">Balance After</span>
+                  <span className="font-bold text-gold">₹{customerMembership.wallet_balance - totalAmount}</span>
+                </div>
               </div>
             )}
           </div>
-        </div>
+        )}
       </form>
 
       {/* Sticky Footer */}
@@ -947,17 +1144,22 @@ export default function SinglePageBooking() {
         <div className="max-w-2xl mx-auto">
           {formData.selectedServices.length > 0 && (
             <div className="flex items-center justify-between mb-3">
-              <span className="text-muted-foreground text-sm">{formData.selectedServices.length} service(s)</span>
+              <div>
+                <span className="text-muted-foreground text-sm">{formData.selectedServices.length} service(s)</span>
+                {paymentMode && (
+                  <span className="text-xs text-muted-foreground ml-2">• {paymentMode.toUpperCase()}</span>
+                )}
+              </div>
               <span className="text-2xl font-bold text-gold">₹{totalAmount}</span>
             </div>
           )}
           <Button
             type="submit"
             onClick={handleSubmit}
-            disabled={loading || formData.selectedServices.length === 0 || !formData.shift}
+            disabled={loading || formData.selectedServices.length === 0 || !formData.shift || !paymentMode || (paymentMode === 'wallet' && customerMembership && customerMembership.wallet_balance < totalAmount)}
             className="w-full bg-gold text-black hover:bg-gold/90 py-5 text-base font-bold rounded-xl disabled:opacity-50"
           >
-            {loading ? 'Booking...' : 'Confirm Booking'}
+            {loading ? 'Booking...' : paymentMode === 'wallet' ? `Pay ₹${totalAmount} from Wallet` : 'Confirm Booking'}
           </Button>
         </div>
       </div>
