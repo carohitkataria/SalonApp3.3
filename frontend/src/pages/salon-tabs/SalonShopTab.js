@@ -48,10 +48,12 @@ export default function SalonShopTab({ salonId }) {
 
     setLoading(true);
     try {
+      // Use customer-facing endpoint (no auth required)
+      const phone = user.phone.replace('+91', '');
       await axios.post(
-        `${API}/salons/${salonId}/sell-membership`,
+        `${API}/salons/${salonId}/customers/${phone}/buy-membership`,
         {
-          customer_phone: user.phone,
+          customer_phone: phone,
           customer_name: user.name,
           membership_plan_id: selectedPlan.id,
           payment_mode: paymentMode,
