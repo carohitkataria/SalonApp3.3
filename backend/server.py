@@ -3023,12 +3023,12 @@ async def get_customer_recent_services(salon_id: str, phone: str):
     if not phone.startswith("+91"):
         phone = f"+91{phone}"
     
-    # Get recent bookings with services
+    # Get recent bookings with services (include all non-cancelled statuses)
     bookings = await db.tokens.find({
         "salon_id": salon_id,
         "phone": phone,
-        "status": {"$in": ["completed", "waiting", "called"]}
-    }, {"_id": 0, "selected_services": 1, "created_at": 1}).sort("created_at", -1).limit(10).to_list(10)
+        "status": {"$nin": ["cancelled"]}
+    }, {"_id": 0, "selected_services": 1, "created_at": 1}).sort("created_at", -1).limit(20).to_list(20)
     
     # Collect unique service IDs in order of recency
     seen = set()
@@ -3039,10 +3039,10 @@ async def get_customer_recent_services(salon_id: str, phone: str):
                 seen.add(sid)
                 recent_service_ids.append(sid)
     
-    # Fetch service details
+    # Fetch service details (include even disabled ones for recent history)
     recent_services = []
-    for sid in recent_service_ids[:15]:  # Limit to 15 recent services
-        service = await db.services.find_one({"id": sid, "is_available": True}, {"_id": 0})
+    for sid in recent_service_ids[:15]:
+        service = await db.services.find_one({"id": sid}, {"_id": 0})
         if service:
             recent_services.append(service)
     

@@ -383,8 +383,12 @@ export default function SinglePageBooking() {
       let customerPackages = [];
       if (user && user.phone) {
         try {
-          const customerResponse = await axios.get(`${API}/salons/${salonId}/customers/${user.phone}/packages`);
-          customerPackages = customerResponse.data.customer_packages || [];
+          const phone = user.phone.replace('+91', '');
+          const customerResponse = await axios.get(`${API}/salons/${salonId}/customers/${phone}/packages`);
+          customerPackages = (customerResponse.data.customer_packages || []).map(p => ({
+            ...p,
+            is_custom: true  // Mark as custom for display
+          }));
         } catch (error) {
           console.log('No customer packages found');
         }
@@ -394,7 +398,8 @@ export default function SinglePageBooking() {
         public: publicResponse.data.packages || [],
         customer: customerPackages
       });
-      setPackages([...(publicResponse.data.packages || []), ...customerPackages]);
+      // Customer packages first, then public
+      setPackages([...customerPackages, ...(publicResponse.data.packages || [])]);
     } catch (error) {
       console.error('Error fetching packages:', error);
     }
@@ -458,7 +463,8 @@ export default function SinglePageBooking() {
     } else {
       // Select package and auto-select all its services
       setSelectedPackage(pkg);
-      const serviceIds = pkg.services?.map(s => s.id) || [];
+      // CustomerPackage uses service_id, SalonPackage uses id
+      const serviceIds = pkg.services?.map(s => s.id || s.service_id) || [];
       setFormData(prev => ({ ...prev, selectedServices: serviceIds }));
       toast.success(`Package "${pkg.package_name}" selected`);
     }
@@ -738,8 +744,17 @@ export default function SinglePageBooking() {
 
   const services = (fastestAvailable || formData.barberId === 'any') ? salonServices : barberServices;
   
+  // Gender filter: show services matching customer gender + Unisex
+  const customerGender = user?.gender || '';
+  const genderFilteredServices = services.filter(s => {
+    const tag = (s.gender_tag || 'Unisex').toLowerCase();
+    if (tag === 'unisex') return true;
+    if (!customerGender) return true; // Show all if gender not set
+    return tag.toLowerCase() === customerGender.toLowerCase();
+  });
+
   // Filter and group services
-  const filteredServices = services.filter(s => 
+  const filteredServices = genderFilteredServices.filter(s => 
     s.service_name.toLowerCase().includes(searchQuery.toLowerCase())
   );
   
@@ -1234,10 +1249,19 @@ export default function SinglePageBooking() {
           {/* Recent Services Tab */}
           {serviceTab === 'recent' && (
             <div className="space-y-2">
-              {recentServices.length > 0 ? (
+              {(() => {
+                // Filter recent services by gender too
+                const filteredRecent = recentServices.filter(s => {
+                  const tag = (s.gender_tag || 'Unisex').toLowerCase();
+                  if (tag === 'unisex') return true;
+                  if (!customerGender) return true;
+                  return tag.toLowerCase() === customerGender.toLowerCase();
+                });
+                
+                return filteredRecent.length > 0 ? (
                 <>
                   <p className="text-xs text-muted-foreground">Your recently used services</p>
-                  {recentServices.map(service => (
+                  {filteredRecent.map(service => (
                     <ServiceCard
                       key={service.id}
                       service={service}
@@ -1260,7 +1284,8 @@ export default function SinglePageBooking() {
                     Browse Services →
                   </button>
                 </div>
-              )}
+              );
+              })()}
             </div>
           )}
 
@@ -1315,7 +1340,13 @@ export default function SinglePageBooking() {
                       Package Selected: {selectedPackage.package_name}
                     </div>
                   )}
-                  {packages.map(pkg => (
+                  {packages.map(pkg => {
+                    // Normalize price fields: SalonPackage uses total_price, CustomerPackage uses total_discounted
+                    const pkgPrice = pkg.total_price || pkg.total_discounted || pkg.package_price || 0;
+                    const pkgOriginalPrice = pkg.total_original || pkg.original_price || null;
+                    const isCustom = pkg.is_custom;
+                    
+                    return (
                     <motion.div
                       key={pkg.id}
                       whileHover={{ scale: 1.01 }}
@@ -1324,20 +1355,32 @@ export default function SinglePageBooking() {
                       className={`relative p-4 rounded-xl cursor-pointer transition-all border-2 ${
                         selectedPackage?.id === pkg.id
                           ? 'bg-gold/10 border-gold shadow-md'
+                          : isCustom
+                          ? 'bg-gradient-to-br from-gold/5 to-gold/10 border-gold/40 hover:border-gold'
                           : 'bg-card border-border hover:border-gold/40'
                       }`}
                     >
+                      {isCustom && (
+                        <div className="mb-2">
+                          <span className="px-2 py-0.5 text-xs font-bold bg-gold text-black rounded-full">
+                            ✨ Your Custom Package
+                          </span>
+                        </div>
+                      )}
                       <div className="flex justify-between items-start mb-2">
                         <div className="flex-1">
                           <h4 className="font-bold text-foreground">{pkg.package_name}</h4>
                           <p className="text-xs text-muted-foreground mt-1">
-                            {pkg.services?.length || 0} services • {pkg.gender_tag || 'Unisex'}
+                            {pkg.services?.length || 0} services {pkg.gender_tag ? `• ${pkg.gender_tag}` : ''}
                           </p>
                         </div>
                         <div className="text-right">
-                          <p className="text-xl font-bold text-gold">₹{pkg.package_price}</p>
-                          {pkg.original_price && pkg.original_price > pkg.package_price && (
-                            <p className="text-xs line-through text-muted-foreground">₹{pkg.original_price}</p>
+                          <p className="text-xl font-bold text-gold">₹{pkgPrice}</p>
+                          {pkgOriginalPrice && pkgOriginalPrice > pkgPrice && (
+                            <p className="text-xs line-through text-muted-foreground">₹{pkgOriginalPrice}</p>
+                          )}
+                          {isCustom && pkg.discount_percentage > 0 && (
+                            <p className="text-xs text-green-600 font-semibold">{pkg.discount_percentage}% OFF</p>
                           )}
                         </div>
                       </div>
@@ -1369,7 +1412,8 @@ export default function SinglePageBooking() {
                         </motion.div>
                       )}
                     </motion.div>
-                  ))}
+                    );
+                  })}
                 </>
               ) : (
                 <div className="text-center py-8 bg-card border border-border rounded-xl">

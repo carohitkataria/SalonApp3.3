@@ -5,12 +5,14 @@ import { Scissors, Clock, Search, Check, Calendar, ShoppingCart } from 'lucide-r
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { motion, AnimatePresence } from 'framer-motion';
+import { useAuth } from '@/contexts/AuthContext';
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
 const API = `${BACKEND_URL}/api`;
 
 export default function SalonServicesTab({ salonId }) {
   const navigate = useNavigate();
+  const { user } = useAuth();
   const [services, setServices] = useState([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
@@ -52,11 +54,20 @@ export default function SalonServicesTab({ salonId }) {
     navigate(`/book/${salonId}?services=${serviceIds}`);
   };
 
-  // Get unique categories
-  const categories = ['all', ...new Set(services.map(s => s.category || 'General'))];
+  // Filter services by gender + search + category
+  const customerGender = user?.gender || '';
+  const genderFilteredServices = services.filter(s => {
+    const tag = (s.gender_tag || 'Unisex').toLowerCase();
+    if (tag === 'unisex') return true;
+    if (!customerGender) return true;
+    return tag.toLowerCase() === customerGender.toLowerCase();
+  });
+
+  // Get unique categories from gender-filtered services
+  const categories = ['all', ...new Set(genderFilteredServices.map(s => s.category || 'General'))];
 
   // Filter services
-  const filteredServices = services.filter(service => {
+  const filteredServices = genderFilteredServices.filter(service => {
     const matchesSearch = service.service_name.toLowerCase().includes(searchQuery.toLowerCase());
     const matchesCategory = selectedCategory === 'all' || (service.category || 'General') === selectedCategory;
     return matchesSearch && matchesCategory;
