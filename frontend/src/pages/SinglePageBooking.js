@@ -237,7 +237,9 @@ export default function SinglePageBooking() {
   const [recentServices, setRecentServices] = useState([]);
   const [availablePackages, setAvailablePackages] = useState({ public: [], customer: [] });
   const [useWallet, setUseWallet] = useState(false);
-  const [paymentMode, setPaymentMode] = useState(''); // cash/upi/wallet/card
+  const [paymentMode, setPaymentMode] = useState(''); // cash/upi/wallet/pay_later
+  const [couponCode, setCouponCode] = useState('');
+  const [upiAppOpened, setUpiAppOpened] = useState(false);
   const [barberServices, setBarberServices] = useState([]);
   const [shifts, setShifts] = useState([]);
   const [liveStatus, setLiveStatus] = useState(null);
@@ -605,6 +607,8 @@ export default function SinglePageBooking() {
     }
     const upiUrl = `upi://pay?pa=${salon.upi_id}&pn=${encodeURIComponent(salon.salon_name)}&am=${totalAmount}&cu=INR&tn=Booking_${salonId.slice(0,8)}`;
     window.location.href = upiUrl;
+    // Mark that UPI app was opened
+    setUpiAppOpened(true);
   };
 
   // Handle UPI confirmation by customer
@@ -757,7 +761,7 @@ export default function SinglePageBooking() {
         {/* Header */}
         <div className="bg-card border-b border-border sticky top-0 z-20">
           <div className="max-w-2xl mx-auto flex items-center p-3 gap-3">
-            <button onClick={() => setBookingStep('services')} className="p-2 rounded-full hover:bg-muted">
+            <button onClick={() => { setBookingStep('services'); setPaymentMode(''); setUpiAppOpened(false); }} className="p-2 rounded-full hover:bg-muted">
               <ArrowLeft className="w-5 h-5 text-foreground" />
             </button>
             <div className="flex-1">
@@ -787,6 +791,32 @@ export default function SinglePageBooking() {
             </div>
           </div>
 
+          {/* Coupon Code */}
+          <div className="bg-card border border-border rounded-xl p-4">
+            <div className="flex gap-2">
+              <div className="relative flex-1">
+                <input
+                  type="text"
+                  value={couponCode}
+                  onChange={(e) => setCouponCode(e.target.value.toUpperCase())}
+                  placeholder="Enter coupon code"
+                  className="w-full h-10 px-3 rounded-lg border border-border bg-background text-foreground text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-gold/50"
+                />
+              </div>
+              <Button
+                type="button"
+                variant="outline"
+                className="border-gold text-gold hover:bg-gold/10"
+                onClick={() => {
+                  if (couponCode) toast.info('Coupon feature coming soon!');
+                  else toast.error('Please enter a coupon code');
+                }}
+              >
+                Apply
+              </Button>
+            </div>
+          </div>
+
           {/* Payment Options */}
           <div>
             <h3 className="text-sm font-medium text-muted-foreground mb-3">Choose Payment Method</h3>
@@ -796,7 +826,7 @@ export default function SinglePageBooking() {
                 type="button"
                 whileHover={{ scale: 1.01 }}
                 whileTap={{ scale: 0.99 }}
-                onClick={() => setPaymentMode('cash')}
+                onClick={() => { setPaymentMode('cash'); setUpiAppOpened(false); }}
                 className={`w-full p-4 rounded-xl border-2 transition-all text-left flex items-center gap-4 ${
                   paymentMode === 'cash' ? 'bg-gold/10 border-gold shadow-md' : 'bg-card border-border hover:border-gold/40'
                 }`}
@@ -820,7 +850,7 @@ export default function SinglePageBooking() {
                 type="button"
                 whileHover={{ scale: 1.01 }}
                 whileTap={{ scale: 0.99 }}
-                onClick={() => setPaymentMode('upi')}
+                onClick={() => { setPaymentMode('upi'); setUpiAppOpened(false); }}
                 className={`w-full p-4 rounded-xl border-2 transition-all text-left flex items-center gap-4 ${
                   paymentMode === 'upi' ? 'bg-gold/10 border-gold shadow-md' : 'bg-card border-border hover:border-gold/40'
                 }`}
@@ -851,6 +881,7 @@ export default function SinglePageBooking() {
                     return;
                   }
                   setPaymentMode('wallet');
+                  setUpiAppOpened(false);
                 }}
                 disabled={!hasWallet}
                 className={`w-full p-4 rounded-xl border-2 transition-all text-left flex items-center gap-4 ${
@@ -888,7 +919,7 @@ export default function SinglePageBooking() {
                 type="button"
                 whileHover={{ scale: 1.01 }}
                 whileTap={{ scale: 0.99 }}
-                onClick={() => setPaymentMode('pay_later')}
+                onClick={() => { setPaymentMode('pay_later'); setUpiAppOpened(false); }}
                 className={`w-full p-4 rounded-xl border-2 transition-all text-left flex items-center gap-4 ${
                   paymentMode === 'pay_later' ? 'bg-gold/10 border-gold shadow-md' : 'bg-card border-border hover:border-gold/40'
                 }`}
@@ -927,33 +958,25 @@ export default function SinglePageBooking() {
             </div>
           )}
 
-          {/* UPI Flow */}
-          {paymentMode === 'upi' && (
-            <div className="p-4 bg-blue-500/10 border border-blue-500/30 rounded-xl space-y-3">
-              <p className="text-sm font-medium text-foreground">Pay ₹{totalAmount} via UPI</p>
-              {salon?.upi_id ? (
-                <>
-                  <p className="text-xs text-muted-foreground">UPI ID: <span className="font-mono font-bold text-foreground">{salon.upi_id}</span></p>
-                  <Button
-                    type="button"
-                    onClick={handleUpiIntent}
-                    className="w-full bg-blue-600 text-white hover:bg-blue-700 py-3"
-                  >
-                    <Smartphone className="w-4 h-4 mr-2" />
-                    Open UPI App to Pay ₹{totalAmount}
-                  </Button>
-                  <p className="text-xs text-muted-foreground text-center">
-                    After completing payment in your UPI app, tap "I've Paid" below
-                  </p>
-                </>
-              ) : (
-                <p className="text-xs text-red-500">Salon UPI ID not configured. Please choose another payment method.</p>
+          {/* UPI Info */}
+          {paymentMode === 'upi' && salon?.upi_id && (
+            <div className="p-4 bg-blue-500/10 border border-blue-500/30 rounded-xl">
+              <p className="text-xs text-muted-foreground">UPI ID: <span className="font-mono font-bold text-foreground">{salon.upi_id}</span></p>
+              {upiAppOpened && (
+                <p className="text-xs text-green-600 mt-2 font-medium">
+                  ✓ UPI app opened. After completing payment, tap the confirm button below.
+                </p>
               )}
+            </div>
+          )}
+          {paymentMode === 'upi' && !salon?.upi_id && (
+            <div className="p-3 bg-red-50 dark:bg-red-500/10 border border-red-200 dark:border-red-500/30 rounded-xl">
+              <p className="text-xs text-red-500">Salon UPI ID not configured. Please choose another payment method.</p>
             </div>
           )}
         </div>
 
-        {/* Sticky Footer */}
+        {/* Sticky Footer - Single Button that changes based on UPI state */}
         <div className="fixed bottom-0 left-0 right-0 bg-background border-t border-border p-4 z-30">
           <div className="max-w-2xl mx-auto">
             <div className="flex items-center justify-between mb-3">
@@ -961,14 +984,31 @@ export default function SinglePageBooking() {
               <span className="text-2xl font-bold text-gold">₹{totalAmount}</span>
             </div>
             {paymentMode === 'upi' ? (
-              <Button
-                type="button"
-                onClick={handleUpiConfirm}
-                disabled={loading || !salon?.upi_id}
-                className="w-full bg-green-600 text-white hover:bg-green-700 py-5 text-base font-bold rounded-xl disabled:opacity-50"
-              >
-                {loading ? 'Confirming...' : "I've Paid - Confirm Booking"}
-              </Button>
+              !upiAppOpened ? (
+                <Button
+                  type="button"
+                  onClick={handleUpiIntent}
+                  disabled={!salon?.upi_id}
+                  className="w-full bg-blue-600 text-white hover:bg-blue-700 py-5 text-base font-bold rounded-xl disabled:opacity-50"
+                >
+                  <Smartphone className="w-5 h-5 mr-2" />
+                  Open UPI App to Pay ₹{totalAmount}
+                </Button>
+              ) : (
+                <Button
+                  type="button"
+                  onClick={handleUpiConfirm}
+                  disabled={loading}
+                  className="w-full bg-green-600 text-white hover:bg-green-700 py-5 text-base font-bold rounded-xl disabled:opacity-50"
+                >
+                  {loading ? 'Confirming...' : (
+                    <>
+                      <CheckCircle className="w-5 h-5 mr-2" />
+                      I've Paid — Confirm Booking
+                    </>
+                  )}
+                </Button>
+              )
             ) : (
               <Button
                 type="button"

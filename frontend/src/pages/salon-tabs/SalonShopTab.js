@@ -3,7 +3,7 @@ import axios from 'axios';
 import { useAuth } from '@/contexts/AuthContext';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
-import { Crown, ShoppingBag, FileText, CreditCard, Banknote, Smartphone, CheckCircle } from 'lucide-react';
+import { Crown, ShoppingBag, FileText, Banknote, Smartphone, CheckCircle, Clock, ArrowLeft, Check } from 'lucide-react';
 import { toast } from 'sonner';
 import { motion } from 'framer-motion';
 
@@ -14,15 +14,19 @@ export default function SalonShopTab({ salonId }) {
   const { user } = useAuth();
   const [membershipPlans, setMembershipPlans] = useState([]);
   const [selectedPlan, setSelectedPlan] = useState(null);
-  const [showPurchaseModal, setShowPurchaseModal] = useState(false);
   const [showTCModal, setShowTCModal] = useState(false);
   const [selectedTC, setSelectedTC] = useState('');
-  const [paymentMode, setPaymentMode] = useState('cash');
+  const [paymentMode, setPaymentMode] = useState('');
+  const [couponCode, setCouponCode] = useState('');
+  const [upiAppOpened, setUpiAppOpened] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [salon, setSalon] = useState(null);
+  const [shopStep, setShopStep] = useState('browse'); // browse | payment | success
 
   useEffect(() => {
     if (salonId) {
       fetchMembershipPlans();
+      fetchSalon();
     }
   }, [salonId]);
 
@@ -33,6 +37,26 @@ export default function SalonShopTab({ salonId }) {
     } catch (error) {
       console.error('Error fetching membership plans:', error);
     }
+  };
+
+  const fetchSalon = async () => {
+    try {
+      const response = await axios.get(`${API}/salons/${salonId}`);
+      setSalon(response.data);
+    } catch (error) {
+      console.error('Error fetching salon:', error);
+    }
+  };
+
+  const handleUpiIntent = () => {
+    if (!salon?.upi_id) {
+      toast.error('Salon UPI ID not configured');
+      return;
+    }
+    const amount = selectedPlan?.amount || 0;
+    const upiUrl = `upi://pay?pa=${salon.upi_id}&pn=${encodeURIComponent(salon.salon_name)}&am=${amount}&cu=INR&tn=Membership_${selectedPlan?.name}`;
+    window.location.href = upiUrl;
+    setUpiAppOpened(true);
   };
 
   const handlePurchaseMembership = async () => {
@@ -46,9 +70,13 @@ export default function SalonShopTab({ salonId }) {
       return;
     }
 
+    if (!paymentMode) {
+      toast.error('Please select a payment mode');
+      return;
+    }
+
     setLoading(true);
     try {
-      // Use customer-facing endpoint (no auth required)
       const phone = user.phone.replace('+91', '');
       await axios.post(
         `${API}/salons/${salonId}/customers/${phone}/buy-membership`,
@@ -56,14 +84,18 @@ export default function SalonShopTab({ salonId }) {
           customer_phone: phone,
           customer_name: user.name,
           membership_plan_id: selectedPlan.id,
-          payment_mode: paymentMode,
+          payment_mode: paymentMode === 'pay_later' ? 'pay_later' : paymentMode,
           paid_amount: selectedPlan.amount
         }
       );
 
+      // If UPI, confirm payment
+      if (paymentMode === 'upi') {
+        // Payment already confirmed by customer tapping the confirm button
+      }
+
       toast.success('Membership purchased successfully! Check your wallet.');
-      setShowPurchaseModal(false);
-      setSelectedPlan(null);
+      setShopStep('success');
     } catch (error) {
       toast.error(error.response?.data?.detail || 'Failed to purchase membership');
     } finally {
@@ -71,12 +103,236 @@ export default function SalonShopTab({ salonId }) {
     }
   };
 
-  const paymentModes = [
-    { value: 'cash', label: 'Cash', icon: Banknote },
-    { value: 'card', label: 'Card', icon: CreditCard },
-    { value: 'upi', label: 'UPI', icon: Smartphone }
-  ];
+  // Success screen
+  if (shopStep === 'success') {
+    return (
+      <div className="flex items-center justify-center py-16">
+        <motion.div
+          initial={{ scale: 0.8, opacity: 0 }}
+          animate={{ scale: 1, opacity: 1 }}
+          className="text-center space-y-4"
+        >
+          <div className="w-20 h-20 bg-green-500/20 rounded-full flex items-center justify-center mx-auto">
+            <CheckCircle className="w-12 h-12 text-green-500" />
+          </div>
+          <h2 className="text-2xl font-bold text-foreground">Purchase Successful!</h2>
+          <p className="text-muted-foreground">
+            Your {selectedPlan?.name} membership is now active.<br />
+            ₹{selectedPlan?.credit} has been added to your wallet.
+          </p>
+          <Button
+            onClick={() => {
+              setShopStep('browse');
+              setSelectedPlan(null);
+              setPaymentMode('');
+              setCouponCode('');
+              setUpiAppOpened(false);
+            }}
+            className="bg-gold text-black hover:bg-gold/90"
+          >
+            Back to Shop
+          </Button>
+        </motion.div>
+      </div>
+    );
+  }
 
+  // Payment step
+  if (shopStep === 'payment' && selectedPlan) {
+    const amount = selectedPlan.amount;
+
+    return (
+      <div className="space-y-5 max-w-lg mx-auto">
+        {/* Header */}
+        <div className="flex items-center gap-3">
+          <button onClick={() => { setShopStep('browse'); setPaymentMode(''); setUpiAppOpened(false); }} className="p-2 rounded-full hover:bg-muted">
+            <ArrowLeft className="w-5 h-5 text-foreground" />
+          </button>
+          <span className="font-bold text-lg text-foreground">Payment</span>
+        </div>
+
+        {/* Order Summary */}
+        <div className="bg-card border border-border rounded-xl p-4">
+          <h3 className="text-sm font-medium text-muted-foreground mb-3">Order Summary</h3>
+          <div className="space-y-2">
+            <div className="flex justify-between text-sm">
+              <span className="text-foreground">{selectedPlan.name} Membership</span>
+              <span className="font-medium text-foreground">₹{amount}</span>
+            </div>
+            <div className="flex justify-between text-sm text-green-600">
+              <span>Wallet Credit</span>
+              <span className="font-bold">₹{selectedPlan.credit}</span>
+            </div>
+            <div className="flex justify-between pt-2 border-t border-border">
+              <span className="font-bold text-foreground">Amount to Pay</span>
+              <span className="text-xl font-bold text-gold">₹{amount}</span>
+            </div>
+          </div>
+        </div>
+
+        {/* Coupon Code */}
+        <div className="bg-card border border-border rounded-xl p-4">
+          <div className="flex gap-2">
+            <input
+              type="text"
+              value={couponCode}
+              onChange={(e) => setCouponCode(e.target.value.toUpperCase())}
+              placeholder="Enter coupon code"
+              className="flex-1 h-10 px-3 rounded-lg border border-border bg-background text-foreground text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-gold/50"
+            />
+            <Button
+              type="button"
+              variant="outline"
+              className="border-gold text-gold hover:bg-gold/10"
+              onClick={() => {
+                if (couponCode) toast.info('Coupon feature coming soon!');
+                else toast.error('Please enter a coupon code');
+              }}
+            >
+              Apply
+            </Button>
+          </div>
+        </div>
+
+        {/* Payment Options - No Wallet for Shop */}
+        <div>
+          <h3 className="text-sm font-medium text-muted-foreground mb-3">Choose Payment Method</h3>
+          <div className="space-y-3">
+            {/* Cash */}
+            <motion.button
+              type="button"
+              whileHover={{ scale: 1.01 }}
+              whileTap={{ scale: 0.99 }}
+              onClick={() => { setPaymentMode('cash'); setUpiAppOpened(false); }}
+              className={`w-full p-4 rounded-xl border-2 transition-all text-left flex items-center gap-4 ${
+                paymentMode === 'cash' ? 'bg-gold/10 border-gold shadow-md' : 'bg-card border-border hover:border-gold/40'
+              }`}
+            >
+              <div className="p-3 bg-green-500/10 rounded-full">
+                <Banknote className="w-6 h-6 text-green-600" />
+              </div>
+              <div className="flex-1">
+                <p className="font-bold text-foreground">Cash</p>
+                <p className="text-xs text-muted-foreground">Pay at the salon</p>
+              </div>
+              {paymentMode === 'cash' && (
+                <div className="w-6 h-6 bg-gold rounded-full flex items-center justify-center">
+                  <Check className="w-4 h-4 text-black" />
+                </div>
+              )}
+            </motion.button>
+
+            {/* UPI */}
+            <motion.button
+              type="button"
+              whileHover={{ scale: 1.01 }}
+              whileTap={{ scale: 0.99 }}
+              onClick={() => { setPaymentMode('upi'); setUpiAppOpened(false); }}
+              className={`w-full p-4 rounded-xl border-2 transition-all text-left flex items-center gap-4 ${
+                paymentMode === 'upi' ? 'bg-gold/10 border-gold shadow-md' : 'bg-card border-border hover:border-gold/40'
+              }`}
+            >
+              <div className="p-3 bg-blue-500/10 rounded-full">
+                <Smartphone className="w-6 h-6 text-blue-600" />
+              </div>
+              <div className="flex-1">
+                <p className="font-bold text-foreground">UPI</p>
+                <p className="text-xs text-muted-foreground">Pay via UPI app (GPay, PhonePe, etc.)</p>
+              </div>
+              {paymentMode === 'upi' && (
+                <div className="w-6 h-6 bg-gold rounded-full flex items-center justify-center">
+                  <Check className="w-4 h-4 text-black" />
+                </div>
+              )}
+            </motion.button>
+
+            {/* Pay later at Salon */}
+            <motion.button
+              type="button"
+              whileHover={{ scale: 1.01 }}
+              whileTap={{ scale: 0.99 }}
+              onClick={() => { setPaymentMode('pay_later'); setUpiAppOpened(false); }}
+              className={`w-full p-4 rounded-xl border-2 transition-all text-left flex items-center gap-4 ${
+                paymentMode === 'pay_later' ? 'bg-gold/10 border-gold shadow-md' : 'bg-card border-border hover:border-gold/40'
+              }`}
+            >
+              <div className="p-3 bg-purple-500/10 rounded-full">
+                <Clock className="w-6 h-6 text-purple-600" />
+              </div>
+              <div className="flex-1">
+                <p className="font-bold text-foreground">Pay later at Salon</p>
+                <p className="text-xs text-muted-foreground">Pay when you visit the salon</p>
+              </div>
+              {paymentMode === 'pay_later' && (
+                <div className="w-6 h-6 bg-gold rounded-full flex items-center justify-center">
+                  <Check className="w-4 h-4 text-black" />
+                </div>
+              )}
+            </motion.button>
+          </div>
+        </div>
+
+        {/* UPI Info */}
+        {paymentMode === 'upi' && salon?.upi_id && (
+          <div className="p-4 bg-blue-500/10 border border-blue-500/30 rounded-xl">
+            <p className="text-xs text-muted-foreground">UPI ID: <span className="font-mono font-bold text-foreground">{salon.upi_id}</span></p>
+            {upiAppOpened && (
+              <p className="text-xs text-green-600 mt-2 font-medium">
+                ✓ UPI app opened. After completing payment, tap the confirm button below.
+              </p>
+            )}
+          </div>
+        )}
+        {paymentMode === 'upi' && !salon?.upi_id && (
+          <div className="p-3 bg-red-50 dark:bg-red-500/10 border border-red-200 dark:border-red-500/30 rounded-xl">
+            <p className="text-xs text-red-500">Salon UPI ID not configured. Please choose another payment method.</p>
+          </div>
+        )}
+
+        {/* Action Button - Single button that changes for UPI */}
+        <div className="pt-2">
+          {paymentMode === 'upi' ? (
+            !upiAppOpened ? (
+              <Button
+                type="button"
+                onClick={handleUpiIntent}
+                disabled={!salon?.upi_id}
+                className="w-full bg-blue-600 text-white hover:bg-blue-700 py-5 text-base font-bold rounded-xl disabled:opacity-50"
+              >
+                <Smartphone className="w-5 h-5 mr-2" />
+                Open UPI App to Pay ₹{amount}
+              </Button>
+            ) : (
+              <Button
+                type="button"
+                onClick={handlePurchaseMembership}
+                disabled={loading}
+                className="w-full bg-green-600 text-white hover:bg-green-700 py-5 text-base font-bold rounded-xl disabled:opacity-50"
+              >
+                {loading ? 'Processing...' : (
+                  <>
+                    <CheckCircle className="w-5 h-5 mr-2" />
+                    I've Paid — Confirm Purchase
+                  </>
+                )}
+              </Button>
+            )
+          ) : (
+            <Button
+              type="button"
+              onClick={handlePurchaseMembership}
+              disabled={loading || !paymentMode}
+              className="w-full bg-gold text-black hover:bg-gold/90 py-5 text-base font-bold rounded-xl disabled:opacity-50"
+            >
+              {loading ? 'Processing...' : 'Confirm Purchase'}
+            </Button>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  // Browse step (default)
   return (
     <div className="space-y-6">
       {/* Header */}
@@ -155,7 +411,10 @@ export default function SalonShopTab({ salonId }) {
                   <Button
                     onClick={() => {
                       setSelectedPlan(plan);
-                      setShowPurchaseModal(true);
+                      setPaymentMode('');
+                      setCouponCode('');
+                      setUpiAppOpened(false);
+                      setShopStep('payment');
                     }}
                     className="w-full bg-gold text-black hover:bg-gold/90"
                   >
@@ -176,83 +435,6 @@ export default function SalonShopTab({ salonId }) {
           Gift cards, premium products, and exclusive packages
         </p>
       </div>
-
-      {/* Purchase Modal */}
-      <Dialog open={showPurchaseModal} onOpenChange={setShowPurchaseModal}>
-        <DialogContent className="max-w-md">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <Crown className="w-5 h-5 text-gold" />
-              Purchase {selectedPlan?.name} Membership
-            </DialogTitle>
-          </DialogHeader>
-
-          <div className="space-y-6 py-4">
-            {/* Summary */}
-            <div className="p-4 bg-muted rounded-lg space-y-2">
-              <div className="flex justify-between">
-                <span>Membership</span>
-                <span className="font-semibold">{selectedPlan?.name}</span>
-              </div>
-              <div className="flex justify-between">
-                <span>Validity</span>
-                <span className="font-semibold">{selectedPlan?.validity_months} month(s)</span>
-              </div>
-              <div className="flex justify-between text-lg font-bold pt-2 border-t">
-                <span>Amount to Pay</span>
-                <span className="text-gold">₹{selectedPlan?.amount}</span>
-              </div>
-              <div className="flex justify-between text-green-600">
-                <span>Wallet Credit</span>
-                <span className="font-bold">₹{selectedPlan?.credit}</span>
-              </div>
-            </div>
-
-            {/* Payment Mode */}
-            <div>
-              <label className="text-sm font-medium mb-3 block">Select Payment Mode</label>
-              <div className="grid grid-cols-3 gap-3">
-                {paymentModes.map(mode => {
-                  const Icon = mode.icon;
-                  return (
-                    <button
-                      key={mode.value}
-                      type="button"
-                      onClick={() => setPaymentMode(mode.value)}
-                      className={`p-3 rounded-lg border-2 transition-all flex flex-col items-center gap-2 ${
-                        paymentMode === mode.value
-                          ? 'border-gold bg-gold/10'
-                          : 'border-border hover:border-gold/50'
-                      }`}
-                    >
-                      <Icon className={`w-6 h-6 ${paymentMode === mode.value ? 'text-gold' : ''}`} />
-                      <span className="text-sm font-medium">{mode.label}</span>
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-
-            {/* Action Buttons */}
-            <div className="flex gap-3">
-              <Button
-                variant="outline"
-                className="flex-1"
-                onClick={() => setShowPurchaseModal(false)}
-              >
-                Cancel
-              </Button>
-              <Button
-                onClick={handlePurchaseMembership}
-                disabled={loading}
-                className="flex-1 bg-gold text-black hover:bg-gold/90"
-              >
-                {loading ? 'Processing...' : 'Confirm Purchase'}
-              </Button>
-            </div>
-          </div>
-        </DialogContent>
-      </Dialog>
 
       {/* T&C Modal */}
       <Dialog open={showTCModal} onOpenChange={setShowTCModal}>
