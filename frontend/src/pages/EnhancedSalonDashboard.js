@@ -13,6 +13,7 @@ import ThemeToggle from '@/components/ThemeToggle';
 import BarberManagement from '@/components/BarberManagement';
 import CustomerMaster from '@/components/CustomerMaster';
 import OfferingsModule from '@/components/OfferingsModule';
+import FinancialsModule from '@/components/FinancialsModule';
 import MyProfile from '@/components/MyProfile';
 import Analytics from '@/components/Analytics';
 import { getSession, clearSession } from '@/utils/sessionManager';
@@ -342,8 +343,8 @@ export default function EnhancedSalonDashboard() {
         anyChange = true;
       }
 
-      // 4. Confirm payment if not yet confirmed
-      if (!selectedToken.payment_confirmed && confirmPaymentMode) {
+      // 4. Confirm payment if not yet confirmed and a real mode is selected
+      if (!selectedToken.payment_confirmed && confirmPaymentMode && confirmPaymentMode !== 'not_confirmed') {
         await axios.post(
           `${API}/tokens/${selectedToken.id}/confirm-payment`,
           { payment_mode: confirmPaymentMode },
@@ -408,7 +409,7 @@ export default function EnhancedSalonDashboard() {
     setSelectedToken(token);
     setSelectedNewServices(token.selected_services || []); // Pre-select existing services
     setSelectedNewBarber(token.barber_id);
-    setConfirmPaymentMode(token.payment_mode || 'cash');
+    setConfirmPaymentMode(token.payment_confirmed ? (token.payment_mode || 'cash') : 'not_confirmed');
     setFinalAmount(token.total_amount || 0);
     setServiceSearchQuery('');
     await fetchAllServices();
@@ -1032,14 +1033,8 @@ export default function EnhancedSalonDashboard() {
           <CustomerMaster salonId={salonId} getAuthHeaders={getAuthHeaders} />
         )}
 
-        {activeTab === 'financials' && (
-          <div className="bg-card border border-border rounded-lg p-8 text-center">
-            <DollarSign className="w-16 h-16 text-gold mx-auto mb-4" />
-            <h3 className="text-2xl font-bold mb-2">Financials</h3>
-            <p className="text-muted-foreground">
-              Financial reports, revenue tracking, and expense management coming soon.
-            </p>
-          </div>
+        {activeTab === 'financials' && salonId && (
+          <FinancialsModule salonId={salonId} getAuthHeaders={getAuthHeaders} />
         )}
 
         {activeTab === 'customer-master' && (
@@ -1256,6 +1251,7 @@ export default function EnhancedSalonDashboard() {
                   onChange={(e) => setConfirmPaymentMode(e.target.value)}
                   className="flex-1 h-9 px-3 rounded-lg border border-border bg-background text-sm focus:outline-none focus:ring-2 focus:ring-gold/50"
                 >
+                  <option value="not_confirmed">Not Confirmed</option>
                   <option value="cash">Cash</option>
                   <option value="upi">UPI</option>
                   <option value="wallet">Wallet</option>

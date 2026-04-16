@@ -2919,9 +2919,24 @@ async def sell_membership(salon_id: str, membership: CustomerMembershipCreate, c
             "created_at": datetime.now(timezone.utc).isoformat()
         })
         
+        # Record financial transaction for salon-side sell (auto-confirmed)
+        if membership.payment_mode != "wallet":
+            await db.financial_transactions.insert_one({
+                "id": str(uuid.uuid4()),
+                "salon_id": salon_id,
+                "type": "inflow",
+                "category": "membership_payment",
+                "amount": float(membership.paid_amount),
+                "payment_mode": membership.payment_mode,
+                "narration": f"Membership sold: {plan['name']} - {membership.customer_name}",
+                "reference_id": membership_data["id"],
+                "reference_type": "membership",
+                "created_by": "system",
+                "date": datetime.now(timezone.utc).strftime("%Y-%m-%d"),
+                "created_at": datetime.now(timezone.utc).isoformat()
+            })
+        
         return {"message": "Membership created", "membership": membership_data}
-
-@api_router.post("/salons/{salon_id}/customers/{phone}/buy-membership")
 async def customer_buy_membership(
     salon_id: str, 
     phone: str,
@@ -4017,6 +4032,23 @@ async def confirm_token_payment(token_id: str, body: dict, current_salon=Depends
     
     await broadcast_update("token_updated", updated_token)
     
+    # Record financial transaction (wallet payments don't impact cash flow for bookings)
+    if payment_mode != "wallet":
+        await db.financial_transactions.insert_one({
+            "id": str(uuid.uuid4()),
+            "salon_id": token.get("salon_id", ""),
+            "type": "inflow",
+            "category": "booking_payment",
+            "amount": float(token.get("total_amount", 0)),
+            "payment_mode": payment_mode,
+            "narration": f"Booking {token.get('token_number', '')} - {token.get('customer_name', '')}",
+            "reference_id": token_id,
+            "reference_type": "token",
+            "created_by": "system",
+            "date": datetime.now(timezone.utc).strftime("%Y-%m-%d"),
+            "created_at": datetime.now(timezone.utc).isoformat()
+        })
+    
     return {
         "message": "Payment confirmed successfully",
         "token": TokenModel(**updated_token)
@@ -4164,11 +4196,284 @@ async def confirm_membership_payment(salon_id: str, membership_id: str, body: di
         "created_at": datetime.now(timezone.utc).isoformat()
     })
     
+    # Record financial transaction for membership (cash/upi/card impact cash flow)
+    if payment_mode != "wallet":
+        await db.financial_transactions.insert_one({
+            "id": str(uuid.uuid4()),
+            "salon_id": salon_id,
+            "type": "inflow",
+            "category": "membership_payment",
+            "amount": float(membership.get("paid_amount", 0)),
+            "payment_mode": payment_mode,
+            "narration": f"Membership: {membership.get('membership_name', '')} - {membership.get('customer_name', '')}",
+            "reference_id": membership_id,
+            "reference_type": "membership",
+            "created_by": "system",
+            "date": datetime.now(timezone.utc).strftime("%Y-%m-%d"),
+            "created_at": datetime.now(timezone.utc).isoformat()
+        })
+    
     return {
         "message": "Membership payment confirmed and wallet credited",
         "credit_added": credit_amount,
         "wallet_balance": wallet_balance_after
     }
+
+
+# ============ FINANCIALS SYSTEM ============
+
+class FinancialTransactionCreate(BaseModel):
+    type: str  # inflow, outflow, withdrawal, deposit, adjustment
+    category: str  # salary, staff_refreshment, consumables, utilities, rent, maintenance, products, custom, withdrawal, deposit, adjustment
+    amount: float
+    payment_mode: str = "cash"  # cash, upi, card, wallet
+    narration: Optional[str] = ""
+    date: Optional[str] = None  # YYYY-MM-DD, defaults to today
+
+@api_router.get("/salons/{salon_id}/financials/settings")
+async def get_financial_settings(salon_id: str, current_user=Depends(get_current_salon_user)):
+    """Get financial settings (opening balance, etc.)"""
+    settings = await db.financial_settings.find_one({"salon_id": salon_id}, {"_id": 0})
+    if not settings:
+        return {"salon_id": salon_id, "opening_balance": 0, "opening_balance_date": datetime.now(timezone.utc).strftime("%Y-%m-%d")}
+    return settings
+
+@api_router.put("/salons/{salon_id}/financials/settings")
+async def update_financial_settings(salon_id: str, body: dict, current_user=Depends(get_current_salon_user)):
+    """Update financial settings (opening balance)"""
+    opening_balance = body.get("opening_balance", 0)
+    opening_balance_date = body.get("opening_balance_date", datetime.now(timezone.utc).strftime("%Y-%m-%d"))
+    
+    await db.financial_settings.update_one(
+        {"salon_id": salon_id},
+        {"$set": {
+            "salon_id": salon_id,
+            "opening_balance": float(opening_balance),
+            "opening_balance_date": opening_balance_date,
+            "updated_at": datetime.now(timezone.utc).isoformat()
+        }},
+        upsert=True
+    )
+    
+    return {"message": "Financial settings updated", "opening_balance": opening_balance}
+
+@api_router.get("/salons/{salon_id}/financials/transactions")
+async def get_financial_transactions(
+    salon_id: str,
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+    type: Optional[str] = None,
+    category: Optional[str] = None,
+    payment_mode: Optional[str] = None,
+    limit: int = 200,
+    current_user=Depends(get_current_salon_user)
+):
+    """Get financial transactions with filters"""
+    query = {"salon_id": salon_id}
+    
+    if start_date:
+        query["date"] = {"$gte": start_date}
+    if end_date:
+        if "date" in query:
+            query["date"]["$lte"] = end_date
+        else:
+            query["date"] = {"$lte": end_date}
+    if type:
+        query["type"] = type
+    if category:
+        query["category"] = category
+    if payment_mode:
+        query["payment_mode"] = payment_mode
+    
+    transactions = await db.financial_transactions.find(query, {"_id": 0}).sort("created_at", -1).limit(limit).to_list(limit)
+    
+    return {"transactions": transactions}
+
+@api_router.post("/salons/{salon_id}/financials/transactions")
+async def create_financial_transaction(salon_id: str, txn: FinancialTransactionCreate, current_user=Depends(get_current_salon_user)):
+    """Create a manual financial transaction (expense, withdrawal, deposit, adjustment)"""
+    txn_date = txn.date or datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    
+    txn_data = {
+        "id": str(uuid.uuid4()),
+        "salon_id": salon_id,
+        "type": txn.type,
+        "category": txn.category,
+        "amount": abs(txn.amount),
+        "payment_mode": txn.payment_mode,
+        "narration": txn.narration or "",
+        "reference_id": "",
+        "reference_type": "manual",
+        "created_by": current_user.get("id", "admin"),
+        "date": txn_date,
+        "created_at": datetime.now(timezone.utc).isoformat()
+    }
+    
+    await db.financial_transactions.insert_one(txn_data)
+    
+    return {"message": "Transaction recorded", "transaction": txn_data}
+
+@api_router.delete("/salons/{salon_id}/financials/transactions/{txn_id}")
+async def delete_financial_transaction(salon_id: str, txn_id: str, current_user=Depends(get_current_salon_user)):
+    """Delete a manual financial transaction (admin only)"""
+    txn = await db.financial_transactions.find_one({"id": txn_id, "salon_id": salon_id}, {"_id": 0})
+    if not txn:
+        raise HTTPException(status_code=404, detail="Transaction not found")
+    if txn.get("reference_type") != "manual":
+        raise HTTPException(status_code=400, detail="Cannot delete system-generated transactions")
+    
+    await db.financial_transactions.delete_one({"id": txn_id})
+    return {"message": "Transaction deleted"}
+
+@api_router.get("/salons/{salon_id}/financials/dashboard")
+async def get_financial_dashboard(
+    salon_id: str,
+    period: str = "daily",  # daily or monthly
+    date: Optional[str] = None,  # YYYY-MM-DD for daily, YYYY-MM for monthly
+    current_user=Depends(get_current_salon_user)
+):
+    """Get financial dashboard data with cash in/out summary"""
+    today = datetime.now(timezone.utc)
+    
+    if period == "daily":
+        target_date = date or today.strftime("%Y-%m-%d")
+        query = {"salon_id": salon_id, "date": target_date}
+    else:  # monthly
+        target_month = date or today.strftime("%Y-%m")
+        query = {"salon_id": salon_id, "date": {"$regex": f"^{target_month}"}}
+    
+    transactions = await db.financial_transactions.find(query, {"_id": 0}).sort("created_at", -1).to_list(1000)
+    
+    # Calculate summaries
+    total_inflow = 0
+    total_outflow = 0
+    inflow_by_mode = {"cash": 0, "upi": 0, "card": 0, "wallet": 0}
+    outflow_by_category = {}
+    inflow_by_category = {}
+    
+    for txn in transactions:
+        amount = txn.get("amount", 0)
+        mode = txn.get("payment_mode", "cash")
+        cat = txn.get("category", "other")
+        txn_type = txn.get("type", "")
+        
+        if txn_type in ("inflow", "deposit"):
+            total_inflow += amount
+            if mode in inflow_by_mode:
+                inflow_by_mode[mode] += amount
+            inflow_by_category[cat] = inflow_by_category.get(cat, 0) + amount
+        elif txn_type in ("outflow", "withdrawal"):
+            total_outflow += amount
+            outflow_by_category[cat] = outflow_by_category.get(cat, 0) + amount
+        elif txn_type == "adjustment":
+            if amount >= 0:
+                total_inflow += amount
+            else:
+                total_outflow += abs(amount)
+    
+    # Get opening balance
+    settings = await db.financial_settings.find_one({"salon_id": salon_id}, {"_id": 0})
+    opening_balance = settings.get("opening_balance", 0) if settings else 0
+    
+    # For daily view, calculate running balance from opening + all previous transactions
+    if period == "daily":
+        target = target_date
+        prev_txns = await db.financial_transactions.find({
+            "salon_id": salon_id,
+            "date": {"$lt": target}
+        }, {"_id": 0, "type": 1, "amount": 1}).to_list(10000)
+        
+        running_balance = opening_balance
+        for pt in prev_txns:
+            if pt["type"] in ("inflow", "deposit"):
+                running_balance += pt["amount"]
+            elif pt["type"] in ("outflow", "withdrawal"):
+                running_balance -= pt["amount"]
+        
+        day_opening = running_balance
+        day_closing = day_opening + total_inflow - total_outflow
+    else:
+        day_opening = opening_balance
+        day_closing = opening_balance + total_inflow - total_outflow
+    
+    # Daily breakdown for monthly view
+    daily_breakdown = []
+    if period == "monthly":
+        daily_data = {}
+        for txn in transactions:
+            d = txn.get("date", "")
+            if d not in daily_data:
+                daily_data[d] = {"date": d, "inflow": 0, "outflow": 0}
+            if txn["type"] in ("inflow", "deposit"):
+                daily_data[d]["inflow"] += txn["amount"]
+            elif txn["type"] in ("outflow", "withdrawal"):
+                daily_data[d]["outflow"] += txn["amount"]
+        daily_breakdown = sorted(daily_data.values(), key=lambda x: x["date"])
+    
+    return {
+        "period": period,
+        "date": date or (today.strftime("%Y-%m-%d") if period == "daily" else today.strftime("%Y-%m")),
+        "opening_balance": day_opening,
+        "closing_balance": day_closing,
+        "total_inflow": total_inflow,
+        "total_outflow": total_outflow,
+        "net": total_inflow - total_outflow,
+        "inflow_by_mode": inflow_by_mode,
+        "inflow_by_category": inflow_by_category,
+        "outflow_by_category": outflow_by_category,
+        "daily_breakdown": daily_breakdown,
+        "transactions": transactions
+    }
+
+@api_router.get("/salons/{salon_id}/financials/report/csv")
+async def download_financial_report_csv(
+    salon_id: str,
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+    current_user=Depends(get_current_salon_user)
+):
+    """Download financial report as CSV"""
+    from fastapi.responses import StreamingResponse
+    import io
+    import csv
+    
+    query = {"salon_id": salon_id}
+    if start_date:
+        query["date"] = {"$gte": start_date}
+    if end_date:
+        if "date" in query:
+            query["date"]["$lte"] = end_date
+        else:
+            query["date"] = {"$lte": end_date}
+    
+    transactions = await db.financial_transactions.find(query, {"_id": 0}).sort("date", 1).to_list(10000)
+    
+    # Build CSV
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow(["Date", "Type", "Category", "Amount", "Payment Mode", "Narration", "Reference", "Created At"])
+    
+    for txn in transactions:
+        writer.writerow([
+            txn.get("date", ""),
+            txn.get("type", ""),
+            txn.get("category", ""),
+            txn.get("amount", 0),
+            txn.get("payment_mode", ""),
+            txn.get("narration", ""),
+            txn.get("reference_type", ""),
+            txn.get("created_at", "")
+        ])
+    
+    output.seek(0)
+    filename = f"financials_{salon_id}_{start_date or 'all'}_{end_date or 'all'}.csv"
+    
+    return StreamingResponse(
+        io.BytesIO(output.getvalue().encode()),
+        media_type="text/csv",
+        headers={"Content-Disposition": f"attachment; filename={filename}"}
+    )
+
 
 # ============ NOTIFICATIONS SYSTEM ============
 
