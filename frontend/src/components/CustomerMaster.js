@@ -4,6 +4,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Checkbox } from '@/components/ui/checkbox';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { toast } from 'sonner';
 import {
   Users, Search, ArrowLeft, Plus, Calendar, Package, Percent, IndianRupee, Save, Crown, Wallet, CreditCard,
@@ -33,6 +34,14 @@ export default function CustomerMaster({ salonId, getAuthHeaders }) {
   const [editingWallet, setEditingWallet] = useState(false);
   const [walletEditValue, setWalletEditValue] = useState(0);
   const [walletEditReason, setWalletEditReason] = useState('');
+  
+  // Add Customer Modal State
+  const [showAddCustomerModal, setShowAddCustomerModal] = useState(false);
+  const [newCustomerForm, setNewCustomerForm] = useState({
+    name: '',
+    phone: '',
+    gender: 'Men'
+  });
 
   
   const [packageForm, setPackageForm] = useState({
@@ -267,6 +276,7 @@ export default function CustomerMaster({ salonId, getAuthHeaders }) {
     } catch (error) {
       toast.error('Failed to create package');
     }
+  };
 
   const handleEditPackage = (pkg) => {
     setEditingPackage(pkg);
@@ -295,6 +305,29 @@ export default function CustomerMaster({ salonId, getAuthHeaders }) {
     }
   };
 
+  const handleAddCustomer = async () => {
+    if (!newCustomerForm.name.trim()) {
+      toast.error('Customer name is required');
+      return;
+    }
+
+    try {
+      await axios.post(
+        `${API}/salons/${salonId}/customers`,
+        {
+          name: newCustomerForm.name.trim(),
+          phone: newCustomerForm.phone.trim(),
+          gender: newCustomerForm.gender
+        },
+        { headers: getAuthHeaders() }
+      );
+      toast.success('Customer added successfully');
+      setShowAddCustomerModal(false);
+      setNewCustomerForm({ name: '', phone: '', gender: 'Men' });
+      fetchCustomers();
+    } catch (error) {
+      toast.error(error.response?.data?.detail || 'Failed to add customer');
+    }
   };
 
   const filteredCustomers = customers.filter(c =>
@@ -779,19 +812,28 @@ export default function CustomerMaster({ salonId, getAuthHeaders }) {
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-3">
         <div className="flex items-center space-x-3">
           <Users className="w-6 h-6 text-gold" />
           <h2 className="text-2xl font-bold">Customer Master</h2>
         </div>
-        <Button
-          onClick={() => setShowMembershipManagement(true)}
-          variant="outline"
-          className="border-gold text-gold hover:bg-gold/10"
-        >
-          <Crown className="w-4 h-4 mr-2" />
-          Manage Memberships
-        </Button>
+        <div className="flex flex-wrap gap-2">
+          <Button
+            onClick={() => setShowAddCustomerModal(true)}
+            className="bg-gold text-black hover:bg-gold/90"
+          >
+            <Plus className="w-4 h-4 mr-2" />
+            Add Customer
+          </Button>
+          <Button
+            onClick={() => setShowMembershipManagement(true)}
+            variant="outline"
+            className="border-gold text-gold hover:bg-gold/10"
+          >
+            <Crown className="w-4 h-4 mr-2" />
+            Manage Memberships
+          </Button>
+        </div>
       </div>
 
       {/* Search */}
@@ -804,6 +846,74 @@ export default function CustomerMaster({ salonId, getAuthHeaders }) {
           className="pl-10"
         />
       </div>
+
+      {/* Add Customer Modal */}
+      <Dialog open={showAddCustomerModal} onOpenChange={setShowAddCustomerModal}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Add Customer Manually</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 mt-4">
+            <div>
+              <Label htmlFor="customer-name">Customer Name *</Label>
+              <Input
+                id="customer-name"
+                value={newCustomerForm.name}
+                onChange={(e) => setNewCustomerForm(prev => ({ ...prev, name: e.target.value }))}
+                placeholder="Enter customer name"
+                className="mt-1"
+              />
+            </div>
+            <div>
+              <Label htmlFor="customer-phone">Mobile Number</Label>
+              <Input
+                id="customer-phone"
+                value={newCustomerForm.phone}
+                onChange={(e) => setNewCustomerForm(prev => ({ ...prev, phone: e.target.value }))}
+                placeholder="e.g., +919876543210"
+                className="mt-1"
+              />
+              <p className="text-xs text-muted-foreground mt-1">Optional - for walk-in customers without phone</p>
+            </div>
+            <div>
+              <Label htmlFor="customer-gender">Gender *</Label>
+              <div className="flex gap-2 mt-2">
+                {['Men', 'Women', 'Kids'].map((gender) => (
+                  <button
+                    key={gender}
+                    onClick={() => setNewCustomerForm(prev => ({ ...prev, gender }))}
+                    className={`flex-1 px-4 py-2 rounded-lg border transition-colors ${
+                      newCustomerForm.gender === gender
+                        ? 'bg-gold text-black border-gold font-semibold'
+                        : 'bg-card border-border hover:bg-muted'
+                    }`}
+                  >
+                    {gender}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div className="flex gap-2 pt-2">
+              <Button
+                onClick={handleAddCustomer}
+                className="flex-1 bg-gold text-black hover:bg-gold/90"
+              >
+                <Plus className="w-4 h-4 mr-2" />
+                Add Customer
+              </Button>
+              <Button
+                onClick={() => {
+                  setShowAddCustomerModal(false);
+                  setNewCustomerForm({ name: '', phone: '', gender: 'Men' });
+                }}
+                variant="outline"
+              >
+                Cancel
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
 
       {/* Customer List */}
       <div className="bg-card border border-border rounded-lg">

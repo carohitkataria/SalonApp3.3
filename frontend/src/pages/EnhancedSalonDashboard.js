@@ -51,6 +51,19 @@ export default function EnhancedSalonDashboard() {
   const [allServices, setAllServices] = useState([]);
   const [selectedNewServices, setSelectedNewServices] = useState([]);
   const [serviceSearchQuery, setServiceSearchQuery] = useState('');
+  
+  // Manual Booking Dialog State
+  const [showManualBookingDialog, setShowManualBookingDialog] = useState(false);
+  const [customers, setCustomers] = useState([]);
+  const [bookingMode, setBookingMode] = useState('existing'); // 'existing' or 'adhoc'
+  const [manualBookingForm, setManualBookingForm] = useState({
+    customer_name: '',
+    phone: '',
+    gender: 'Men',
+    barber_id: 'any',
+    selected_services: [],
+    payment_mode: 'cash'
+  });
 
   useEffect(() => {
     const storedSalonId = localStorage.getItem('salon_id');
@@ -284,6 +297,85 @@ export default function EnhancedSalonDashboard() {
     );
   };
 
+  const fetchCustomers = async () => {
+    try {
+      const response = await axios.get(`${API}/salons/${salonId}/customers`, {
+        headers: getAuthHeaders()
+      });
+      setCustomers(response.data.customers || []);
+    } catch (error) {
+      console.error('Error fetching customers:', error);
+    }
+  };
+
+  const handleOpenManualBooking = async () => {
+    await fetchCustomers();
+    await fetchAllServices();
+    setBookingMode('existing');
+    setManualBookingForm({
+      customer_name: '',
+      phone: '',
+      gender: 'Men',
+      barber_id: selectedBarber === 'all' ? 'any' : selectedBarber,
+      selected_services: [],
+      payment_mode: 'cash'
+    });
+    setShowManualBookingDialog(true);
+  };
+
+  const handleManualBooking = async () => {
+    if (bookingMode === 'existing' && !manualBookingForm.customer_name) {
+      toast.error('Please select a customer');
+      return;
+    }
+    if (bookingMode === 'adhoc' && !manualBookingForm.customer_name.trim()) {
+      toast.error('Customer name is required');
+      return;
+    }
+    if (manualBookingForm.selected_services.length === 0) {
+      toast.error('Please select at least one service');
+      return;
+    }
+
+    try {
+      await axios.post(
+        `${API}/salons/${salonId}/salon-booking`,
+        {
+          customer_name: manualBookingForm.customer_name,
+          phone: manualBookingForm.phone,
+          gender: manualBookingForm.gender,
+          barber_id: manualBookingForm.barber_id,
+          selected_services: manualBookingForm.selected_services,
+          payment_mode: manualBookingForm.payment_mode
+        },
+        { headers: getAuthHeaders() }
+      );
+      toast.success('Booking created successfully');
+      setShowManualBookingDialog(false);
+      fetchTokens(salonId);
+    } catch (error) {
+      toast.error(error.response?.data?.detail || 'Failed to create booking');
+    }
+  };
+
+  const handleCustomerSelection = (customer) => {
+    setManualBookingForm(prev => ({
+      ...prev,
+      customer_name: customer.name,
+      phone: customer.phone,
+      gender: customer.gender || 'Men'
+    }));
+  };
+
+  const toggleManualServiceSelection = (serviceId) => {
+    setManualBookingForm(prev => ({
+      ...prev,
+      selected_services: prev.selected_services.includes(serviceId)
+        ? prev.selected_services.filter(id => id !== serviceId)
+        : [...prev.selected_services, serviceId]
+    }));
+  };
+
   const handleLogout = () => {
     clearSession();  // Clear all session data using session manager
     navigate('/salon/login');
@@ -512,14 +604,23 @@ export default function EnhancedSalonDashboard() {
             </div>
 
             {/* Single Call Next Button Based on Selected Barber */}
-            <div className="flex justify-center">
+            <div className="flex flex-col md:flex-row gap-2 md:gap-3">
               <Button
                 onClick={() => handleCallNext(selectedBarber === 'all' ? null : selectedBarber)}
-                className="bg-gold text-black hover:bg-gold/90 px-4 md:px-8 py-3 text-sm md:text-lg w-full md:w-auto"
+                className="bg-gold text-black hover:bg-gold/90 px-4 md:px-8 py-3 text-sm md:text-lg flex-1"
                 disabled={!tokens.some(t => t.status === 'waiting')}
               >
                 <ChevronRight className="mr-1 md:mr-2 w-4 md:w-5 h-4 md:h-5" /> 
                 Call Next {selectedBarber !== 'all' && `(${barbers.find(b => b.id === selectedBarber)?.name})`}
+              </Button>
+              <Button
+                onClick={handleOpenManualBooking}
+                variant="outline"
+                className="border-gold text-gold hover:bg-gold/10 px-4 md:px-6 py-3 text-sm md:text-lg"
+              >
+                <Plus className="mr-1 md:mr-2 w-4 md:w-5 h-4 md:h-5" />
+                <span className="hidden md:inline">Add Booking</span>
+                <span className="md:hidden">Add</span>
               </Button>
             </div>
 
@@ -1010,6 +1111,209 @@ export default function EnhancedSalonDashboard() {
             ).length === 0 && (
               <p className="text-center text-muted-foreground py-8">No services found</p>
             )}
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Manual Booking Dialog */}
+      <Dialog open={showManualBookingDialog} onOpenChange={setShowManualBookingDialog}>
+        <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Add Manual Booking</DialogTitle>
+          </DialogHeader>
+
+          {/* Mode Selection */}
+          <div className="flex gap-2 mb-4">
+            <Button
+              onClick={() => setBookingMode('existing')}
+              className={bookingMode === 'existing' ? 'bg-gold text-black' : 'bg-muted'}
+              variant={bookingMode === 'existing' ? 'default' : 'outline'}
+            >
+              Select Existing Customer
+            </Button>
+            <Button
+              onClick={() => setBookingMode('adhoc')}
+              className={bookingMode === 'adhoc' ? 'bg-gold text-black' : 'bg-muted'}
+              variant={bookingMode === 'adhoc' ? 'default' : 'outline'}
+            >
+              Add New Customer
+            </Button>
+          </div>
+
+          {/* Customer Selection (Existing Mode) */}
+          {bookingMode === 'existing' && (
+            <div className="mb-4">
+              <Label>Select Customer</Label>
+              <div className="max-h-48 overflow-y-auto border rounded-lg mt-2">
+                {customers.length === 0 ? (
+                  <p className="text-sm text-muted-foreground p-4 text-center">
+                    No customers found. Switch to "Add New Customer" mode.
+                  </p>
+                ) : (
+                  customers.map((customer) => (
+                    <div
+                      key={customer.phone || customer.name}
+                      onClick={() => handleCustomerSelection(customer)}
+                      className={`p-3 cursor-pointer hover:bg-muted border-b transition-colors ${
+                        manualBookingForm.customer_name === customer.name ? 'bg-gold/20 border-gold' : ''
+                      }`}
+                    >
+                      <p className="font-semibold">{customer.name}</p>
+                      <p className="text-xs text-muted-foreground">{customer.phone}</p>
+                      {customer.gender && (
+                        <span className="text-xs px-2 py-0.5 bg-muted rounded mt-1 inline-block">
+                          {customer.gender}
+                        </span>
+                      )}
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* Customer Details (Ad-hoc Mode) */}
+          {bookingMode === 'adhoc' && (
+            <div className="space-y-3 mb-4">
+              <div>
+                <Label htmlFor="adhoc-name">Customer Name *</Label>
+                <Input
+                  id="adhoc-name"
+                  value={manualBookingForm.customer_name}
+                  onChange={(e) => setManualBookingForm(prev => ({ ...prev, customer_name: e.target.value }))}
+                  placeholder="Enter customer name"
+                  className="mt-1"
+                />
+              </div>
+              <div>
+                <Label htmlFor="adhoc-phone">Mobile Number (Optional)</Label>
+                <Input
+                  id="adhoc-phone"
+                  value={manualBookingForm.phone}
+                  onChange={(e) => setManualBookingForm(prev => ({ ...prev, phone: e.target.value }))}
+                  placeholder="e.g., +919876543210"
+                  className="mt-1"
+                />
+              </div>
+              <div>
+                <Label>Gender</Label>
+                <div className="flex gap-2 mt-2">
+                  {['Men', 'Women', 'Kids'].map((gender) => (
+                    <button
+                      key={gender}
+                      onClick={() => setManualBookingForm(prev => ({ ...prev, gender }))}
+                      className={`flex-1 px-3 py-2 rounded-lg border text-sm transition-colors ${
+                        manualBookingForm.gender === gender
+                          ? 'bg-gold text-black border-gold font-semibold'
+                          : 'bg-card border-border hover:bg-muted'
+                      }`}
+                    >
+                      {gender}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Barber Selection */}
+          <div className="mb-4">
+            <Label>Select Barber</Label>
+            <div className="flex flex-wrap gap-2 mt-2">
+              <button
+                onClick={() => setManualBookingForm(prev => ({ ...prev, barber_id: 'any' }))}
+                className={`px-3 py-2 rounded-lg border text-sm transition-colors ${
+                  manualBookingForm.barber_id === 'any'
+                    ? 'bg-gold text-black border-gold font-semibold'
+                    : 'bg-card border-border hover:bg-muted'
+                }`}
+              >
+                Any Available
+              </button>
+              {barbers.map((barber) => (
+                <button
+                  key={barber.id}
+                  onClick={() => setManualBookingForm(prev => ({ ...prev, barber_id: barber.id }))}
+                  className={`px-3 py-2 rounded-lg border text-sm transition-colors ${
+                    manualBookingForm.barber_id === barber.id
+                      ? 'bg-gold text-black border-gold font-semibold'
+                      : 'bg-card border-border hover:bg-muted'
+                  }`}
+                >
+                  {barber.name}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Service Selection */}
+          <div className="mb-4">
+            <Label>Select Services *</Label>
+            <div className="max-h-64 overflow-y-auto border rounded-lg mt-2">
+              {allServices.length === 0 ? (
+                <p className="text-sm text-muted-foreground p-4 text-center">Loading services...</p>
+              ) : (
+                allServices.map((service) => {
+                  const isSelected = manualBookingForm.selected_services.includes(service.id);
+                  return (
+                    <div
+                      key={service.id}
+                      onClick={() => toggleManualServiceSelection(service.id)}
+                      className={`p-3 cursor-pointer hover:bg-muted border-b transition-colors flex items-center justify-between ${
+                        isSelected ? 'bg-gold/20 border-gold' : ''
+                      }`}
+                    >
+                      <div className="flex items-center gap-3">
+                        <Checkbox checked={isSelected} />
+                        <div>
+                          <p className="font-semibold text-sm">{service.service_name}</p>
+                          <p className="text-xs text-muted-foreground">{service.category}</p>
+                        </div>
+                      </div>
+                      <p className="font-bold text-gold">₹{service.base_price}</p>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+          </div>
+
+          {/* Payment Mode */}
+          <div className="mb-4">
+            <Label>Payment Mode</Label>
+            <div className="flex flex-wrap gap-2 mt-2">
+              {['cash', 'upi', 'card', 'pay_later'].map((mode) => (
+                <button
+                  key={mode}
+                  onClick={() => setManualBookingForm(prev => ({ ...prev, payment_mode: mode }))}
+                  className={`px-3 py-2 rounded-lg border text-sm transition-colors capitalize ${
+                    manualBookingForm.payment_mode === mode
+                      ? 'bg-gold text-black border-gold font-semibold'
+                      : 'bg-card border-border hover:bg-muted'
+                  }`}
+                >
+                  {mode === 'pay_later' ? 'Pay Later at Salon' : mode.toUpperCase()}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Action Buttons */}
+          <div className="flex gap-2 pt-4 border-t">
+            <Button
+              onClick={handleManualBooking}
+              className="flex-1 bg-gold text-black hover:bg-gold/90"
+              disabled={!manualBookingForm.customer_name || manualBookingForm.selected_services.length === 0}
+            >
+              <Plus className="w-4 h-4 mr-2" />
+              Create Booking
+            </Button>
+            <Button
+              onClick={() => setShowManualBookingDialog(false)}
+              variant="outline"
+            >
+              Cancel
+            </Button>
           </div>
         </DialogContent>
       </Dialog>

@@ -552,7 +552,14 @@ metadata:
 
 test_plan:
   current_focus:
-    []
+    - task: "Manual Customer Addition in Customer Master"
+      file: "/app/frontend/src/components/CustomerMaster.js"
+      description: "Test the 'Add Customer' button and modal in Customer Master page. Verify customer can be added with Name (required), Mobile (optional), and Gender."
+      backend_endpoint: "POST /api/salons/{salon_id}/customers"
+    - task: "Manual Booking from Salon Dashboard"
+      file: "/app/frontend/src/pages/EnhancedSalonDashboard.js"
+      description: "Test the 'Add Booking' button near Call Next. Verify dual mode: 1) Select existing customer from dropdown, 2) Add ad-hoc customer (Name mandatory, Mobile/Gender optional). Verify service selection, barber selection, and payment mode selection."
+      backend_endpoint: "POST /api/salons/{salon_id}/salon-booking"
   stuck_tasks:
     []
   test_all: false

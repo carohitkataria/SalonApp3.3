@@ -2343,7 +2343,7 @@ async def user_login(credentials: UserLogin):
 
 @api_router.get("/salons/{salon_id}/customers")
 async def get_salon_customers(salon_id: str, current_user=Depends(get_current_salon_user)):
-    """Get all customers who have booked at this salon"""
+    """Get all customers who have booked at this salon + manually added"""
     # Get unique customers from tokens
     tokens = await db.tokens.find(
         {"salon_id": salon_id},
@@ -2367,7 +2367,180 @@ async def get_salon_customers(salon_id: str, current_user=Depends(get_current_sa
                 "gender": user_data.get('gender') if user_data else None
             }
     
+    # Also include manually added customers
+    manual_customers = await db.salon_customers.find(
+        {"salon_id": salon_id}, {"_id": 0}
+    ).to_list(10000)
+    
+    for mc in manual_customers:
+        phone = mc.get('phone')
+        if phone and phone not in customers_map:
+            customers_map[phone] = {
+                "phone": phone,
+                "name": mc.get('name'),
+                "user_id": None,
+                "gender": mc.get('gender', 'Men'),
+                "source": "manual"
+            }
+        elif phone and phone in customers_map:
+            # Update gender if not set from booking
+            if not customers_map[phone].get('gender'):
+                customers_map[phone]['gender'] = mc.get('gender', 'Men')
+    
     return {"customers": list(customers_map.values())}
+
+@api_router.post("/salons/{salon_id}/customers")
+async def add_salon_customer(salon_id: str, body: dict, current_user=Depends(get_current_salon_user)):
+    """Manually add a customer to the salon"""
+    name = body.get("name", "").strip()
+    phone = body.get("phone", "").strip()
+    gender = body.get("gender", "Men")
+    
+    if not name:
+        raise HTTPException(status_code=400, detail="Customer name is required")
+    
+    if phone:
+        # Normalize phone
+        phone = phone.replace(" ", "").replace("-", "")
+        if not phone.startswith("+91"):
+            phone = f"+91{phone}"
+        
+        # Check if already exists
+        existing = await db.salon_customers.find_one({
+            "salon_id": salon_id,
+            "phone": phone
+        })
+        if existing:
+            # Update name/gender
+            await db.salon_customers.update_one(
+                {"id": existing["id"]},
+                {"$set": {"name": name, "gender": gender}}
+            )
+            return {"message": "Customer updated", "customer": {
+                "id": existing["id"], "name": name, "phone": phone, "gender": gender
+            }}
+    
+    customer = {
+        "id": str(uuid.uuid4()),
+        "salon_id": salon_id,
+        "name": name,
+        "phone": phone or None,
+        "gender": gender,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "source": "manual"
+    }
+    
+    await db.salon_customers.insert_one(customer)
+    customer.pop("_id", None)
+    
+    return {"message": "Customer added", "customer": customer}
+
+@api_router.post("/salons/{salon_id}/salon-booking")
+async def create_salon_booking(salon_id: str, body: dict, current_user=Depends(get_current_salon_user)):
+    """Create a booking from the salon side (walk-in, phone call, etc.)"""
+    customer_name = body.get("customer_name", "Walk-in").strip()
+    phone = body.get("phone", "").strip()
+    gender = body.get("gender", "Men")
+    barber_id = body.get("barber_id", "any")
+    selected_services = body.get("selected_services", [])
+    shift = body.get("shift", "")
+    date = body.get("date", datetime.now(timezone.utc).strftime("%Y-%m-%d"))
+    payment_mode = body.get("payment_mode")
+    
+    if not customer_name:
+        customer_name = "Walk-in"
+    
+    # Normalize phone
+    if phone:
+        phone = phone.replace(" ", "").replace("-", "")
+        if not phone.startswith("+91"):
+            phone = f"+91{phone}"
+    
+    # Auto-detect current shift if not provided
+    if not shift:
+        from datetime import datetime as dt
+        now = dt.now()
+        hour = now.hour
+        if hour < 12:
+            shift = "Morning"
+        elif hour < 16:
+            shift = "Noon"
+        else:
+            shift = "Evening"
+    
+    # Calculate total
+    total_amount = 0
+    for service_id in selected_services:
+        if barber_id and barber_id != "any":
+            # Check barber-specific pricing
+            barber = await db.barbers.find_one({"id": barber_id}, {"_id": 0})
+            if barber:
+                barber_service = next((s for s in (barber.get("services") or []) if s.get("service_id") == service_id), None)
+                if barber_service:
+                    total_amount += barber_service.get("price", 0)
+                    continue
+        # Fallback to base price
+        service = await db.services.find_one({"id": service_id}, {"_id": 0})
+        if service:
+            total_amount += service.get("base_price", 0)
+    
+    # Get token number
+    token_number = await get_next_token_number(salon_id, barber_id, date, shift)
+    
+    # Get barber name
+    barber_name = "Any Available"
+    if barber_id and barber_id != "any":
+        barber = await db.barbers.find_one({"id": barber_id}, {"_id": 0})
+        if barber:
+            barber_name = barber.get("name", "Unknown")
+    
+    token_dict = {
+        "id": str(uuid.uuid4()),
+        "salon_id": salon_id,
+        "token_number": token_number,
+        "customer_name": customer_name,
+        "phone": phone or "",
+        "user_id": "",
+        "barber_id": barber_id,
+        "barber_name": barber_name,
+        "selected_services": selected_services,
+        "date": date,
+        "shift": shift,
+        "time_slot": shift,
+        "total_amount": total_amount,
+        "status": "waiting",
+        "payment_status": "pending",
+        "payment_mode": payment_mode,
+        "source": "salon",
+        "booking_type": "instant",
+        "booking_for_self": True,
+        "customer_gender": gender,
+        "recall_count": 0,
+        "created_at": datetime.now(timezone.utc).isoformat()
+    }
+    
+    await db.tokens.insert_one(token_dict)
+    token_dict.pop("_id", None)
+    
+    # Also save customer if phone provided
+    if phone:
+        existing_customer = await db.salon_customers.find_one({
+            "salon_id": salon_id, "phone": phone
+        })
+        if not existing_customer:
+            await db.salon_customers.insert_one({
+                "id": str(uuid.uuid4()),
+                "salon_id": salon_id,
+                "name": customer_name,
+                "phone": phone,
+                "gender": gender,
+                "created_at": datetime.now(timezone.utc).isoformat(),
+                "source": "salon_booking"
+            })
+    
+    await broadcast_update("new_token", token_dict)
+    
+    return token_dict
 
 @api_router.get("/salons/{salon_id}/customers/{phone}/bookings")
 async def get_customer_bookings(salon_id: str, phone: str, current_user=Depends(get_current_salon_user)):
