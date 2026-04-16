@@ -51,9 +51,10 @@ export default function EnhancedSalonDashboard() {
   const [allServices, setAllServices] = useState([]);
   const [selectedNewServices, setSelectedNewServices] = useState([]);
   const [serviceSearchQuery, setServiceSearchQuery] = useState('');
-  const [modifyTab, setModifyTab] = useState('services'); // 'services' | 'barber' | 'payment'
+  const [modifyTab, setModifyTab] = useState('services'); // kept for compatibility
   const [selectedNewBarber, setSelectedNewBarber] = useState(null);
   const [confirmPaymentMode, setConfirmPaymentMode] = useState('cash');
+  const [finalAmount, setFinalAmount] = useState(0);
   
   // Payment Confirmation Dialog (for Complete action)
   const [showPaymentConfirmDialog, setShowPaymentConfirmDialog] = useState(false);
@@ -303,6 +304,67 @@ export default function EnhancedSalonDashboard() {
     }
   };
 
+  // Unified save handler for the modify dialog
+  const handleSaveAllModifications = async () => {
+    if (!selectedToken) return;
+    let anyChange = false;
+
+    try {
+      // 1. Check if services changed
+      const originalServices = selectedToken.selected_services || [];
+      const servicesChanged = JSON.stringify([...selectedNewServices].sort()) !== JSON.stringify([...originalServices].sort());
+      if (servicesChanged && selectedNewServices.length > 0) {
+        await axios.put(
+          `${API}/tokens/${selectedToken.id}/update-services`,
+          { service_ids: selectedNewServices },
+          { headers: getAuthHeaders() }
+        );
+        anyChange = true;
+      }
+
+      // 2. Check if barber changed
+      if (selectedNewBarber && selectedNewBarber !== selectedToken.barber_id) {
+        await axios.put(
+          `${API}/tokens/${selectedToken.id}/change-barber`,
+          { barber_id: selectedNewBarber },
+          { headers: getAuthHeaders() }
+        );
+        anyChange = true;
+      }
+
+      // 3. Update final amount if changed
+      if (parseFloat(finalAmount) !== parseFloat(selectedToken.total_amount)) {
+        await axios.put(
+          `${API}/tokens/${selectedToken.id}/update-amount`,
+          { final_amount: parseFloat(finalAmount) },
+          { headers: getAuthHeaders() }
+        );
+        anyChange = true;
+      }
+
+      // 4. Confirm payment if not yet confirmed
+      if (!selectedToken.payment_confirmed && confirmPaymentMode) {
+        await axios.post(
+          `${API}/tokens/${selectedToken.id}/confirm-payment`,
+          { payment_mode: confirmPaymentMode },
+          { headers: getAuthHeaders() }
+        );
+        anyChange = true;
+      }
+
+      if (anyChange) {
+        toast.success('Booking updated successfully');
+      } else {
+        toast.info('No changes detected');
+      }
+
+      setAddServicesDialog(false);
+      fetchTokens(salonId);
+    } catch (error) {
+      toast.error(error.response?.data?.detail || 'Failed to update booking');
+    }
+  };
+
   const fetchNotificationCount = async (sid) => {
     try {
       const response = await axios.get(`${API}/notifications/salon/${sid}/unread-count`);
@@ -347,7 +409,7 @@ export default function EnhancedSalonDashboard() {
     setSelectedNewServices(token.selected_services || []); // Pre-select existing services
     setSelectedNewBarber(token.barber_id);
     setConfirmPaymentMode(token.payment_mode || 'cash');
-    setModifyTab('services');
+    setFinalAmount(token.total_amount || 0);
     setServiceSearchQuery('');
     await fetchAllServices();
     setAddServicesDialog(true);
@@ -1153,291 +1215,170 @@ export default function EnhancedSalonDashboard() {
 
       {/* Modify Booking Dialog */}
       <Dialog open={addServicesDialog} onOpenChange={setAddServicesDialog}>
-        <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
+        <DialogContent className="max-w-2xl max-h-[85vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>Modify Booking</DialogTitle>
+            <DialogTitle className="text-lg">Modify Booking</DialogTitle>
           </DialogHeader>
           
           {selectedToken && (
-            <div className="mb-4 p-4 bg-muted rounded-lg">
-              <p className="text-sm"><strong>Customer:</strong> {selectedToken.customer_name}</p>
-              <p className="text-sm"><strong>Token:</strong> {selectedToken.token_number}</p>
-              <p className="text-sm"><strong>Barber:</strong> {selectedToken.barber_name}</p>
-              <p className="text-sm"><strong>Amount:</strong> ₹{selectedToken.total_amount}</p>
-              <p className="text-sm"><strong>Payment:</strong> {selectedToken.payment_mode || 'N/A'} {selectedToken.payment_confirmed ? '✓ Confirmed' : '⏳ Pending'}</p>
-            </div>
-          )}
-
-          {/* Tab Selector */}
-          <div className="flex gap-1 mb-4 p-1 bg-muted rounded-lg">
-            <button
-              onClick={() => setModifyTab('services')}
-              className={`flex-1 px-3 py-2 rounded-md text-sm font-medium transition-all ${
-                modifyTab === 'services' ? 'bg-gold text-black shadow' : 'text-muted-foreground hover:text-foreground'
-              }`}
-            >
-              Services
-            </button>
-            <button
-              onClick={() => setModifyTab('barber')}
-              className={`flex-1 px-3 py-2 rounded-md text-sm font-medium transition-all ${
-                modifyTab === 'barber' ? 'bg-gold text-black shadow' : 'text-muted-foreground hover:text-foreground'
-              }`}
-            >
-              Change Barber
-            </button>
-            <button
-              onClick={() => setModifyTab('payment')}
-              className={`flex-1 px-3 py-2 rounded-md text-sm font-medium transition-all ${
-                modifyTab === 'payment' ? 'bg-gold text-black shadow' : 'text-muted-foreground hover:text-foreground'
-              }`}
-            >
-              Confirm Payment
-            </button>
-          </div>
-
-          {/* Services Tab */}
-          {modifyTab === 'services' && (
             <>
-              <div className="flex justify-between items-center space-x-2 mb-4 pb-4 border-b">
-                <Button variant="outline" onClick={() => setAddServicesDialog(false)}>
-                  Cancel
-                </Button>
-                <Button 
-                  onClick={handleUpdateServices}
-                  className="bg-gold text-black hover:bg-gold/90"
-                  disabled={selectedNewServices.length === 0}
-                >
-                  Update Services ({selectedNewServices.length} selected)
-                </Button>
+              {/* Compact Info Row */}
+              <div className="flex items-center gap-3 p-3 bg-muted rounded-lg text-sm">
+                <span className="font-bold text-gold">{selectedToken.token_number}</span>
+                <span className="text-foreground font-semibold">{selectedToken.customer_name}</span>
+                <span className="text-muted-foreground">•</span>
+                <span className={selectedToken.payment_confirmed ? 'text-green-500 font-medium' : 'text-yellow-500 font-medium'}>
+                  {selectedToken.payment_confirmed ? '✓ Paid' : '⏳ Unpaid'}
+                </span>
               </div>
 
-              <div className="mb-4">
+              {/* Horizontal Controls Row: Services label | Barber dropdown | Payment dropdown */}
+              <div className="flex items-center gap-3 mt-3">
+                <div className="flex-shrink-0 text-sm font-semibold text-gold border border-gold/30 bg-gold/5 px-3 py-2 rounded-lg">
+                  Services
+                </div>
+                
+                {/* Barber Dropdown */}
+                <select
+                  value={selectedNewBarber || ''}
+                  onChange={(e) => setSelectedNewBarber(e.target.value)}
+                  className="flex-1 h-9 px-3 rounded-lg border border-border bg-background text-sm focus:outline-none focus:ring-2 focus:ring-gold/50"
+                >
+                  <option value="any">Any Available</option>
+                  {barbers.map(b => (
+                    <option key={b.id} value={b.id}>{b.name}</option>
+                  ))}
+                </select>
+
+                {/* Payment Dropdown */}
+                <select
+                  value={confirmPaymentMode}
+                  onChange={(e) => setConfirmPaymentMode(e.target.value)}
+                  className="flex-1 h-9 px-3 rounded-lg border border-border bg-background text-sm focus:outline-none focus:ring-2 focus:ring-gold/50"
+                >
+                  <option value="cash">Cash</option>
+                  <option value="upi">UPI</option>
+                  <option value="wallet">Wallet</option>
+                  <option value="card">Card</option>
+                </select>
+              </div>
+
+              {/* Service Search */}
+              <div className="mt-3">
                 <Input
                   type="text"
                   placeholder="Search services..."
                   value={serviceSearchQuery}
                   onChange={(e) => setServiceSearchQuery(e.target.value)}
-                  className="w-full"
+                  className="w-full h-9 text-sm"
                 />
               </div>
 
-              <div className="space-y-3">
-                <p className="text-sm text-muted-foreground">
-                  <strong>Select/Deselect services:</strong> Check to add, Uncheck to remove
-                </p>
+              {/* Service List */}
+              <div className="mt-2 space-y-1.5 max-h-[35vh] overflow-y-auto pr-1">
                 {allServices
                   .filter(service => 
                     service.service_name.toLowerCase().includes(serviceSearchQuery.toLowerCase()) ||
                     service.category?.toLowerCase().includes(serviceSearchQuery.toLowerCase())
                   )
                   .map(service => {
-                  const isSelected = selectedNewServices.includes(service.id);
-                  return (
-                    <div 
-                      key={service.id}
-                      className="flex items-center space-x-3 p-3 border rounded-lg hover:border-gold cursor-pointer transition-all"
-                      onClick={() => toggleServiceSelection(service.id)}
-                    >
-                      <Checkbox
-                        checked={isSelected}
-                        onCheckedChange={() => toggleServiceSelection(service.id)}
-                      />
-                      <div className="flex-1">
-                        <p className="font-semibold">{service.service_name}</p>
-                        <p className="text-xs text-muted-foreground">{service.category}</p>
+                    const isSelected = selectedNewServices.includes(service.id);
+                    return (
+                      <div 
+                        key={service.id}
+                        className={`flex items-center gap-3 px-3 py-2 border rounded-lg cursor-pointer transition-all text-sm ${
+                          isSelected ? 'border-gold bg-gold/5' : 'border-border hover:border-gold/40'
+                        }`}
+                        onClick={() => toggleServiceSelection(service.id)}
+                      >
+                        <Checkbox
+                          checked={isSelected}
+                          onCheckedChange={() => toggleServiceSelection(service.id)}
+                        />
+                        <span className="flex-1 font-medium">{service.service_name}</span>
+                        <span className="text-xs text-muted-foreground">{service.category}</span>
+                        <span className="font-bold text-gold">₹{service.base_price}</span>
                       </div>
-                      <div className="text-right">
-                        <p className="font-bold text-gold">₹{service.base_price}</p>
-                      </div>
-                    </div>
-                  );
-                })}
+                    );
+                  })}
                 {allServices.filter(service => 
                   service.service_name.toLowerCase().includes(serviceSearchQuery.toLowerCase()) ||
                   service.category?.toLowerCase().includes(serviceSearchQuery.toLowerCase())
                 ).length === 0 && (
-                  <p className="text-center text-muted-foreground py-8">No services found</p>
+                  <p className="text-center text-muted-foreground py-6 text-sm">No services found</p>
                 )}
               </div>
-            </>
-          )}
 
-          {/* Change Barber Tab */}
-          {modifyTab === 'barber' && (
-            <div className="space-y-4">
-              <p className="text-sm text-muted-foreground">
-                Select a new barber. The total amount will be recalculated based on the new barber's pricing.
-              </p>
-              <div className="space-y-2">
-                <button
-                  onClick={() => setSelectedNewBarber('any')}
-                  className={`w-full p-4 rounded-lg border-2 text-left transition-all ${
-                    selectedNewBarber === 'any' ? 'border-gold bg-gold/10' : 'border-border hover:border-gold/50'
-                  }`}
-                >
-                  <p className="font-semibold">Any Available</p>
-                  <p className="text-xs text-muted-foreground">Assign to next available barber</p>
-                </button>
-                {barbers.map(barber => (
-                  <button
-                    key={barber.id}
-                    onClick={() => setSelectedNewBarber(barber.id)}
-                    className={`w-full p-4 rounded-lg border-2 text-left transition-all ${
-                      selectedNewBarber === barber.id ? 'border-gold bg-gold/10' : 'border-border hover:border-gold/50'
-                    }`}
-                  >
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <p className="font-semibold">{barber.name}</p>
-                        <p className="text-xs text-muted-foreground">{barber.specialization || 'General'}</p>
-                      </div>
-                      {barber.rating && (
-                        <span className="text-sm text-gold">★ {barber.rating}</span>
-                      )}
-                    </div>
-                  </button>
-                ))}
-              </div>
-              <div className="flex gap-2 pt-4 border-t">
-                <Button
-                  onClick={handleChangeBarber}
-                  className="flex-1 bg-gold text-black hover:bg-gold/90"
-                  disabled={!selectedNewBarber || selectedNewBarber === selectedToken?.barber_id}
-                >
-                  Change Barber
-                </Button>
-                <Button variant="outline" onClick={() => setAddServicesDialog(false)}>
-                  Cancel
-                </Button>
-              </div>
-            </div>
-          )}
-
-          {/* Confirm Payment Tab */}
-          {modifyTab === 'payment' && (
-            <div className="space-y-4">
-              {selectedToken?.payment_confirmed ? (
-                <div className="p-6 text-center">
-                  <CheckCircle className="w-12 h-12 text-green-500 mx-auto mb-3" />
-                  <h3 className="text-lg font-semibold text-green-600">Payment Already Confirmed</h3>
-                  <p className="text-sm text-muted-foreground mt-1">
-                    Mode: {selectedToken.payment_mode?.toUpperCase()} • Amount: ₹{selectedToken.total_amount}
-                  </p>
+              {/* Final Amount + Actions */}
+              <div className="mt-4 pt-3 border-t border-border space-y-3">
+                <div className="flex items-center gap-3">
+                  <Label className="text-sm font-semibold whitespace-nowrap">Final Amount (₹)</Label>
+                  <Input
+                    type="number"
+                    value={finalAmount}
+                    onChange={(e) => setFinalAmount(e.target.value)}
+                    className="w-32 h-9 text-sm font-bold text-gold"
+                    min={0}
+                  />
+                  <span className="text-xs text-muted-foreground">Editable — adjust if customer pays short</span>
                 </div>
-              ) : (
-                <>
-                  <p className="text-sm text-muted-foreground">
-                    Confirm payment received from the customer. You can change the payment mode if needed.
-                  </p>
-                  <div>
-                    <Label className="mb-3 block font-semibold">Payment Mode</Label>
-                    <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
-                      {[
-                        { value: 'cash', label: 'Cash', icon: Banknote },
-                        { value: 'upi', label: 'UPI', icon: Smartphone },
-                        { value: 'card', label: 'Card', icon: CreditCard },
-                        { value: 'pay_later', label: 'Pay Later', icon: Clock }
-                      ].map(mode => {
-                        const Icon = mode.icon;
-                        return (
-                          <button
-                            key={mode.value}
-                            onClick={() => setConfirmPaymentMode(mode.value)}
-                            className={`p-3 rounded-lg border-2 transition-all flex flex-col items-center gap-2 ${
-                              confirmPaymentMode === mode.value
-                                ? 'border-gold bg-gold/10'
-                                : 'border-border hover:border-gold/50'
-                            }`}
-                          >
-                            <Icon className={`w-6 h-6 ${confirmPaymentMode === mode.value ? 'text-gold' : ''}`} />
-                            <span className="text-xs font-medium">{mode.label}</span>
-                          </button>
-                        );
-                      })}
-                    </div>
-                  </div>
-                  <div className="p-4 bg-muted rounded-lg">
-                    <div className="flex justify-between text-sm">
-                      <span>Amount:</span>
-                      <span className="font-bold text-gold">₹{selectedToken?.total_amount}</span>
-                    </div>
-                    <div className="flex justify-between text-sm mt-1">
-                      <span>Mode:</span>
-                      <span className="font-semibold capitalize">{confirmPaymentMode}</span>
-                    </div>
-                  </div>
-                  <div className="flex gap-2 pt-4 border-t">
-                    <Button
-                      onClick={handleConfirmPaymentOnly}
-                      className="flex-1 bg-green-600 text-white hover:bg-green-700"
-                    >
-                      <CheckCircle className="w-4 h-4 mr-2" />
-                      Confirm Payment
-                    </Button>
-                    <Button variant="outline" onClick={() => setAddServicesDialog(false)}>
-                      Cancel
-                    </Button>
-                  </div>
-                </>
-              )}
-            </div>
+                
+                <div className="flex gap-2">
+                  <Button
+                    onClick={handleSaveAllModifications}
+                    className="flex-1 bg-gold text-black hover:bg-gold/90 h-9 text-sm"
+                  >
+                    <CheckCircle className="w-4 h-4 mr-1.5" />
+                    Save Changes
+                  </Button>
+                  <Button variant="outline" onClick={() => setAddServicesDialog(false)} className="h-9 text-sm">
+                    Cancel
+                  </Button>
+                </div>
+              </div>
+            </>
           )}
         </DialogContent>
       </Dialog>
 
       {/* Payment Confirmation Dialog (when clicking Complete) */}
       <Dialog open={showPaymentConfirmDialog} onOpenChange={setShowPaymentConfirmDialog}>
-        <DialogContent className="max-w-md">
+        <DialogContent className="max-w-sm">
           <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
+            <DialogTitle className="flex items-center gap-2 text-base">
               <CreditCard className="w-5 h-5 text-gold" />
               Confirm Payment to Complete
             </DialogTitle>
           </DialogHeader>
           
-          <p className="text-sm text-muted-foreground">
-            Payment must be confirmed before marking the service as complete. Please confirm the payment mode and proceed.
+          <p className="text-xs text-muted-foreground">
+            Payment must be confirmed before completing. Select payment mode and proceed.
           </p>
           
-          <div className="space-y-4 py-2">
+          <div className="space-y-3 py-1">
             <div>
-              <Label className="mb-3 block font-semibold">Payment Mode</Label>
-              <div className="grid grid-cols-2 gap-2">
-                {[
-                  { value: 'cash', label: 'Cash', icon: Banknote },
-                  { value: 'upi', label: 'UPI', icon: Smartphone },
-                  { value: 'card', label: 'Card', icon: CreditCard },
-                  { value: 'pay_later', label: 'Pay Later', icon: Clock }
-                ].map(mode => {
-                  const Icon = mode.icon;
-                  return (
-                    <button
-                      key={mode.value}
-                      onClick={() => setCompletePaymentMode(mode.value)}
-                      className={`p-3 rounded-lg border-2 transition-all flex flex-col items-center gap-2 ${
-                        completePaymentMode === mode.value
-                          ? 'border-gold bg-gold/10'
-                          : 'border-border hover:border-gold/50'
-                      }`}
-                    >
-                      <Icon className={`w-6 h-6 ${completePaymentMode === mode.value ? 'text-gold' : ''}`} />
-                      <span className="text-xs font-medium">{mode.label}</span>
-                    </button>
-                  );
-                })}
-              </div>
+              <Label className="mb-2 block text-sm font-semibold">Payment Mode</Label>
+              <select
+                value={completePaymentMode}
+                onChange={(e) => setCompletePaymentMode(e.target.value)}
+                className="w-full h-9 px-3 rounded-lg border border-border bg-background text-sm focus:outline-none focus:ring-2 focus:ring-gold/50"
+              >
+                <option value="cash">Cash</option>
+                <option value="upi">UPI</option>
+                <option value="wallet">Wallet</option>
+                <option value="card">Card</option>
+              </select>
             </div>
             
-            <div className="flex gap-2 pt-4 border-t">
+            <div className="flex gap-2 pt-3 border-t">
               <Button
                 onClick={handleConfirmPaymentAndComplete}
-                className="flex-1 bg-green-600 text-white hover:bg-green-700"
+                className="flex-1 bg-green-600 text-white hover:bg-green-700 h-9 text-sm"
               >
-                <CheckCircle className="w-4 h-4 mr-2" />
+                <CheckCircle className="w-4 h-4 mr-1.5" />
                 Confirm & Complete
               </Button>
-              <Button variant="outline" onClick={() => setShowPaymentConfirmDialog(false)}>
+              <Button variant="outline" onClick={() => setShowPaymentConfirmDialog(false)} className="h-9 text-sm">
                 Cancel
               </Button>
             </div>

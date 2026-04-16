@@ -393,6 +393,7 @@ class TokenModel(BaseModel):
 
 class AddServicesRequest(BaseModel):
     service_ids: List[str]  # List of new service IDs to add
+    final_amount: Optional[float] = None  # Override final amount (salon can adjust)
 
 # Invoice Model
 class Invoice(BaseModel):
@@ -3924,6 +3925,10 @@ async def update_token_services(token_id: str, request: AddServicesRequest, curr
     if token["barber_id"] != "any":
         total_amount = await calculate_booking_total(new_services, token["barber_id"])
     
+    # Use final_amount override if provided by salon
+    if request.final_amount is not None:
+        total_amount = request.final_amount
+    
     # Update token
     await db.tokens.update_one(
         {"id": token_id},
@@ -3943,6 +3948,31 @@ async def update_token_services(token_id: str, request: AddServicesRequest, curr
         "message": "Services updated successfully",
         "token": TokenModel(**updated_token)
     }
+
+@api_router.put("/tokens/{token_id}/update-amount")
+async def update_token_amount(token_id: str, body: dict, current_salon=Depends(get_current_salon)):
+    """Update final amount for a token (salon override)"""
+    token = await db.tokens.find_one({"id": token_id}, {"_id": 0})
+    if not token:
+        raise HTTPException(status_code=404, detail="Token not found")
+    
+    if token.get("status") == "completed":
+        raise HTTPException(status_code=400, detail="Cannot modify completed booking")
+    
+    final_amount = body.get("final_amount")
+    if final_amount is None:
+        raise HTTPException(status_code=400, detail="final_amount is required")
+    
+    await db.tokens.update_one(
+        {"id": token_id},
+        {"$set": {"total_amount": float(final_amount)}}
+    )
+    
+    updated_token = await db.tokens.find_one({"id": token_id}, {"_id": 0})
+    await broadcast_update("token_updated", updated_token)
+    
+    return {"message": f"Amount updated to ₹{final_amount}", "token": TokenModel(**updated_token)}
+
 
 @api_router.post("/tokens/{token_id}/confirm-payment")
 async def confirm_token_payment(token_id: str, body: dict, current_salon=Depends(get_current_salon)):
