@@ -4032,8 +4032,9 @@ async def confirm_token_payment(token_id: str, body: dict, current_salon=Depends
     
     await broadcast_update("token_updated", updated_token)
     
-    # Record financial transaction (wallet payments don't impact cash flow for bookings)
-    if payment_mode != "wallet":
+    # Record financial transaction only for FIRST confirmation (wallet payments don't impact cash flow)
+    already_confirmed = token.get("payment_confirmed", False)
+    if not already_confirmed and payment_mode != "wallet":
         await db.financial_transactions.insert_one({
             "id": str(uuid.uuid4()),
             "salon_id": token.get("salon_id", ""),
@@ -4048,6 +4049,12 @@ async def confirm_token_payment(token_id: str, body: dict, current_salon=Depends
             "date": datetime.now(timezone.utc).strftime("%Y-%m-%d"),
             "created_at": datetime.now(timezone.utc).isoformat()
         })
+    elif already_confirmed:
+        # Just update the payment_mode on existing financial transaction
+        await db.financial_transactions.update_one(
+            {"reference_id": token_id, "reference_type": "token"},
+            {"$set": {"payment_mode": payment_mode}}
+        )
     
     return {
         "message": "Payment confirmed successfully",
@@ -4359,8 +4366,7 @@ async def get_financial_dashboard(
         
         if txn_type in ("inflow", "deposit"):
             total_inflow += amount
-            if mode in inflow_by_mode:
-                inflow_by_mode[mode] += amount
+            inflow_by_mode[mode] = inflow_by_mode.get(mode, 0) + amount
             inflow_by_category[cat] = inflow_by_category.get(cat, 0) + amount
         elif txn_type in ("outflow", "withdrawal"):
             total_outflow += amount

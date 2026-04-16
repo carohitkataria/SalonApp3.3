@@ -343,14 +343,19 @@ export default function EnhancedSalonDashboard() {
         anyChange = true;
       }
 
-      // 4. Confirm payment if not yet confirmed and a real mode is selected
-      if (!selectedToken.payment_confirmed && confirmPaymentMode && confirmPaymentMode !== 'not_confirmed') {
-        await axios.post(
-          `${API}/tokens/${selectedToken.id}/confirm-payment`,
-          { payment_mode: confirmPaymentMode },
-          { headers: getAuthHeaders() }
-        );
-        anyChange = true;
+      // 4. Handle payment: confirm if needed, or update mode if changed
+      if (confirmPaymentMode && confirmPaymentMode !== 'not_confirmed') {
+        const needsConfirmation = !selectedToken.payment_confirmed;
+        const modeChanged = selectedToken.payment_mode !== confirmPaymentMode;
+        
+        if (needsConfirmation || modeChanged) {
+          await axios.post(
+            `${API}/tokens/${selectedToken.id}/confirm-payment`,
+            { payment_mode: confirmPaymentMode },
+            { headers: getAuthHeaders() }
+          );
+          anyChange = true;
+        }
       }
 
       if (anyChange) {
@@ -843,8 +848,8 @@ export default function EnhancedSalonDashboard() {
                       </p>
                       <p className="text-muted-foreground text-xs truncate">
                         {token.barber_name} • {token.shift || token.time_slot} • ₹{token.total_amount}
-                        {token.payment_confirmed && <span className="text-green-500 ml-1">• ✓ Paid</span>}
-                        {!token.payment_confirmed && token.status !== 'completed' && <span className="text-yellow-500 ml-1">• Payment Pending</span>}
+                        {token.payment_confirmed && <span className="text-green-500 ml-1">• ✓ {(token.payment_mode || 'paid').toUpperCase()}</span>}
+                        {!token.payment_confirmed && token.status !== 'completed' && <span className="text-yellow-500 ml-1">• ⏳ Unpaid</span>}
                       </p>
                       <p className="text-muted-foreground text-xs flex items-center space-x-1 mt-0.5">
                         <Calendar className="w-3 h-3 flex-shrink-0" />
@@ -1307,24 +1312,26 @@ export default function EnhancedSalonDashboard() {
 
               {/* Final Amount + Actions — always visible at bottom */}
               <div className="flex-shrink-0 pt-3 mt-2 border-t border-border bg-background">
-                <div className="flex items-center gap-2 mb-3">
-                  <Label className="text-sm font-semibold whitespace-nowrap">Final ₹</Label>
-                  <Input
-                    type="number"
-                    value={finalAmount}
-                    onChange={(e) => setFinalAmount(e.target.value)}
-                    className="w-28 h-9 text-sm font-bold text-gold"
-                    min={0}
-                  />
+                <div className="flex items-center gap-3">
+                  <div className="text-xs text-muted-foreground whitespace-nowrap">
+                    Svc: <span className="font-semibold text-foreground">₹{allServices.filter(s => selectedNewServices.includes(s.id)).reduce((sum, s) => sum + (s.base_price || 0), 0)}</span>
+                  </div>
+                  <div className="flex items-center gap-1">
+                    <Label className="text-xs font-semibold whitespace-nowrap">Final ₹</Label>
+                    <Input
+                      type="number"
+                      value={finalAmount}
+                      onChange={(e) => setFinalAmount(e.target.value)}
+                      className="w-24 h-8 text-sm font-bold text-gold"
+                      min={0}
+                    />
+                  </div>
                   <Button
                     onClick={handleSaveAllModifications}
-                    className="flex-1 bg-gold text-black hover:bg-gold/90 h-9 text-sm"
+                    className="flex-1 bg-gold text-black hover:bg-gold/90 h-8 text-sm"
                   >
                     <CheckCircle className="w-4 h-4 mr-1.5" />
                     Save Changes
-                  </Button>
-                  <Button variant="outline" onClick={() => setAddServicesDialog(false)} className="h-9 text-sm">
-                    Cancel
                   </Button>
                 </div>
               </div>
