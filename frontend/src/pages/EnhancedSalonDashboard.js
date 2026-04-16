@@ -361,34 +361,34 @@ export default function EnhancedSalonDashboard() {
       {/* Content */}
       <div className="relative z-10">
         {/* Header */}
-        <div className="backdrop-blur-xl bg-background/80 border-b border-gold/20 p-4 shadow-lg">
-          <div className="max-w-7xl mx-auto flex items-center justify-between">
-            <div className="flex items-center space-x-4">
+        <div className="backdrop-blur-xl bg-background/80 border-b border-gold/20 p-3 md:p-4 shadow-lg">
+          <div className="max-w-7xl mx-auto flex items-center justify-between gap-2">
+            <div className="flex items-center space-x-2 md:space-x-4 min-w-0">
               {/* Hamburger Menu Button */}
               <button
                 onClick={() => setMenuOpen(!menuOpen)}
-                className="p-2 hover:bg-gold/10 rounded-lg transition-colors"
+                className="p-2 hover:bg-gold/10 rounded-lg transition-colors flex-shrink-0"
               >
                 <Menu className="w-6 h-6 text-gold" />
               </button>
               
-              <div className="p-3 bg-gradient-to-br from-gold/20 to-gold/5 rounded-xl border border-gold/30">
+              <div className="hidden sm:block p-3 bg-gradient-to-br from-gold/20 to-gold/5 rounded-xl border border-gold/30 flex-shrink-0">
                 <Scissors className="w-8 h-8 text-gold" />
               </div>
-              <div>
-                <h1 className="text-2xl font-playfair font-bold text-foreground">Salon Dashboard</h1>
-                <p className="text-sm text-gold">{salon?.salon_name || 'Loading...'}</p>
+              <div className="min-w-0">
+                <h1 className="text-lg md:text-2xl font-playfair font-bold text-foreground truncate">Salon Dashboard</h1>
+                <p className="text-xs md:text-sm text-gold truncate">{salon?.salon_name || 'Loading...'}</p>
               </div>
             </div>
-            <div className="flex items-center space-x-3">
+            <div className="flex items-center space-x-2 md:space-x-3 flex-shrink-0">
               <ThemeToggle />
               <Button 
                 onClick={handleLogout} 
                 variant="outline" 
                 size="sm"
-                className="border-gold/30 hover:bg-gold/10"
+                className="border-gold/30 hover:bg-gold/10 text-xs md:text-sm"
               >
-                <LogOut className="w-4 h-4 mr-2" /> Logout
+                <LogOut className="w-4 h-4 md:mr-2" /> <span className="hidden md:inline">Logout</span>
               </Button>
             </div>
           </div>
@@ -415,7 +415,7 @@ export default function EnhancedSalonDashboard() {
                 animate={{ x: 0 }}
                 exit={{ x: -300 }}
                 transition={{ type: 'spring', damping: 20 }}
-                className={`fixed left-0 top-0 bottom-0 w-72 bg-card border-r border-border shadow-2xl z-50 overflow-y-auto ${
+                className={`fixed left-0 top-0 bottom-0 w-64 md:w-72 bg-card border-r border-border shadow-2xl z-50 overflow-y-auto ${
                   menuPinned ? 'sticky' : ''
                 }`}
               >
@@ -485,10 +485,10 @@ export default function EnhancedSalonDashboard() {
         {activeTab === 'queue' && (
           <div className="space-y-6">
             {/* Barber Filter */}
-            <div className="flex items-center space-x-2 overflow-x-auto pb-2">
+            <div className="flex items-center space-x-2 overflow-x-auto pb-2 scrollbar-hide">
               <button
                 onClick={() => setSelectedBarber('all')}
-                className={`px-4 py-2 rounded-lg whitespace-nowrap ${
+                className={`px-3 md:px-4 py-1.5 md:py-2 rounded-lg whitespace-nowrap text-sm ${
                   selectedBarber === 'all'
                     ? 'bg-gold text-black'
                     : 'bg-card border border-border text-foreground'
@@ -500,7 +500,7 @@ export default function EnhancedSalonDashboard() {
                 <button
                   key={barber.id}
                   onClick={() => setSelectedBarber(barber.id)}
-                  className={`px-4 py-2 rounded-lg whitespace-nowrap ${
+                  className={`px-3 md:px-4 py-1.5 md:py-2 rounded-lg whitespace-nowrap text-sm ${
                     selectedBarber === barber.id
                       ? 'bg-gold text-black'
                       : 'bg-card border border-border text-foreground'
@@ -515,21 +515,21 @@ export default function EnhancedSalonDashboard() {
             <div className="flex justify-center">
               <Button
                 onClick={() => handleCallNext(selectedBarber === 'all' ? null : selectedBarber)}
-                className="bg-gold text-black hover:bg-gold/90 px-8 py-3 text-lg"
+                className="bg-gold text-black hover:bg-gold/90 px-4 md:px-8 py-3 text-sm md:text-lg w-full md:w-auto"
                 disabled={!tokens.some(t => t.status === 'waiting')}
               >
-                <ChevronRight className="mr-2 w-5 h-5" /> 
-                Call Next Customer {selectedBarber !== 'all' && `(${barbers.find(b => b.id === selectedBarber)?.name})`}
+                <ChevronRight className="mr-1 md:mr-2 w-4 md:w-5 h-4 md:h-5" /> 
+                Call Next {selectedBarber !== 'all' && `(${barbers.find(b => b.id === selectedBarber)?.name})`}
               </Button>
             </div>
 
             {/* Status Filters */}
-            <div className="flex space-x-2">
+            <div className="flex space-x-2 overflow-x-auto pb-1 scrollbar-hide">
               {['all', 'waiting', 'called', 'completed', 'skipped', 'cancelled'].map((f) => (
                 <button
                   key={f}
                   onClick={() => setFilter(f)}
-                  className={`px-4 py-2 rounded uppercase text-sm font-bold ${
+                  className={`px-3 md:px-4 py-1.5 md:py-2 rounded uppercase text-xs md:text-sm font-bold whitespace-nowrap ${
                     filter === f
                       ? 'bg-gold text-black'
                       : 'bg-card border border-border text-foreground'
@@ -548,62 +548,63 @@ export default function EnhancedSalonDashboard() {
                   initial={{ opacity: 0, y: 20 }}
                   animate={{ opacity: 1, y: 0 }}
                   transition={{ delay: index * 0.05 }}
-                  className={`bg-card/90 backdrop-blur-sm border-2 ${getStatusColor(token.status)} rounded-xl p-4 hover:shadow-xl transition-all`}
+                  className={`bg-card/90 backdrop-blur-sm border-2 ${getStatusColor(token.status)} rounded-xl p-3 md:p-4 hover:shadow-xl transition-all`}
                 >
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center space-x-4 flex-1">
-                      <div className="text-3xl font-bebas text-gold min-w-[60px] text-center bg-gold/10 rounded-lg p-2 border border-gold/30">
-                        {token.token_number || 'TBA'}
-                      </div>
-                      <div className="flex-1">
-                        <p className="text-foreground font-bold flex items-center space-x-2">
-                          <User className="w-3 h-3" />
-                          <span>{token.customer_name}</span>
-                        </p>
-                        <p className="text-muted-foreground text-xs flex items-center space-x-2">
-                          <Phone className="w-3 h-3" />
-                          <a href={`tel:${token.phone}`} className="hover:text-gold">
-                            {token.phone}
-                          </a>
-                        </p>
-                        <p className="text-muted-foreground text-xs">
-                          {token.barber_name} • {token.shift || token.time_slot} • ₹{token.total_amount}
-                        </p>
-                        <p className="text-muted-foreground text-xs flex items-center space-x-1 mt-1">
-                          <Calendar className="w-3 h-3" />
-                          <span>{new Date(token.date).toLocaleDateString('en-IN')} at {token.created_at ? new Date(token.created_at).toLocaleTimeString('en-IN', {hour: '2-digit', minute: '2-digit'}) : token.shift || token.time_slot}</span>
-                        </p>
-                      </div>
+                  {/* Token Info Row */}
+                  <div className="flex items-start gap-3">
+                    <div className="text-2xl md:text-3xl font-bebas text-gold min-w-[48px] md:min-w-[60px] text-center bg-gold/10 rounded-lg p-1.5 md:p-2 border border-gold/30 flex-shrink-0">
+                      {token.token_number || 'TBA'}
                     </div>
-                    
-                    <div className="flex items-center space-x-2">
-                      <div className={`flex items-center space-x-1 px-3 py-1 rounded-full ${
-                        token.status === 'called' ? 'bg-blue-500/20 border border-blue-500' :
-                        token.status === 'completed' ? 'bg-green-500/20 border border-green-500' :
-                        token.status === 'skipped' ? 'bg-red-500/20 border border-red-500' :
-                        'bg-muted border border-border'
-                      }`}>
-                        {getStatusIcon(token.status)}
-                        <span className="text-xs uppercase font-bold">
-                          {token.status === 'called' ? 'Called' : 
-                           token.status === 'waiting' ? 'Waiting' :
-                           token.status === 'completed' ? 'Completed' :
-                           token.status === 'skipped' ? 'Skipped' : token.status}
+                    <div className="flex-1 min-w-0">
+                      <p className="text-foreground font-bold flex items-center space-x-2 text-sm md:text-base">
+                        <User className="w-3 h-3 flex-shrink-0" />
+                        <span className="truncate">{token.customer_name}</span>
+                      </p>
+                      <p className="text-muted-foreground text-xs flex items-center space-x-2">
+                        <Phone className="w-3 h-3 flex-shrink-0" />
+                        <a href={`tel:${token.phone}`} className="hover:text-gold">
+                          {token.phone}
+                        </a>
+                      </p>
+                      <p className="text-muted-foreground text-xs truncate">
+                        {token.barber_name} • {token.shift || token.time_slot} • ₹{token.total_amount}
+                      </p>
+                      <p className="text-muted-foreground text-xs flex items-center space-x-1 mt-0.5">
+                        <Calendar className="w-3 h-3 flex-shrink-0" />
+                        <span className="truncate">{new Date(token.date).toLocaleDateString('en-IN')} at {token.created_at ? new Date(token.created_at).toLocaleTimeString('en-IN', {hour: '2-digit', minute: '2-digit'}) : token.shift || token.time_slot}</span>
+                      </p>
+                    </div>
+                    {/* Status Badge - always visible */}
+                    <div className={`flex items-center space-x-1 px-2 md:px-3 py-1 rounded-full flex-shrink-0 ${
+                      token.status === 'called' ? 'bg-blue-500/20 border border-blue-500' :
+                      token.status === 'completed' ? 'bg-green-500/20 border border-green-500' :
+                      token.status === 'skipped' ? 'bg-red-500/20 border border-red-500' :
+                      'bg-muted border border-border'
+                    }`}>
+                      {getStatusIcon(token.status)}
+                      <span className="text-xs uppercase font-bold">
+                        {token.status === 'called' ? 'Called' : 
+                         token.status === 'waiting' ? 'Waiting' :
+                         token.status === 'completed' ? 'Done' :
+                         token.status === 'skipped' ? 'Skip' : token.status}
+                      </span>
+                      {token.recall_count > 0 && (
+                        <span className="text-xs text-muted-foreground">
+                          ({token.recall_count}x)
                         </span>
-                        {token.recall_count > 0 && (
-                          <span className="text-xs text-muted-foreground ml-1">
-                            ({token.recall_count}x)
-                          </span>
-                        )}
-                      </div>
-                      
+                      )}
+                    </div>
+                  </div>
+                    
+                  {/* Action Buttons - Below info, wrap on mobile */}
+                  <div className="flex flex-wrap gap-1.5 mt-2 pt-2 border-t border-border/50">
                       {/* Waiting Status Actions */}
                       {token.status === 'waiting' && (
                         <>
                           <Button 
                             size="sm" 
                             onClick={() => handleCallToken(token.id)} 
-                            className="bg-blue-600 hover:bg-blue-700"
+                            className="bg-blue-600 hover:bg-blue-700 h-8 text-xs px-2.5"
                             title="Call this customer now"
                           >
                             <ChevronRight className="w-3 h-3 mr-1" />
@@ -612,16 +613,16 @@ export default function EnhancedSalonDashboard() {
                           <Button 
                             size="sm" 
                             onClick={() => handleOpenAddServices(token)} 
-                            className="bg-purple-600 hover:bg-purple-700"
+                            className="bg-purple-600 hover:bg-purple-700 h-8 text-xs px-2.5"
                             title="Add more services"
                           >
                             <Plus className="w-3 h-3 mr-1" />
-                            Add Services
+                            Add
                           </Button>
                           <Button 
                             size="sm" 
                             onClick={() => handleSendNotification(token.id)} 
-                            className="bg-gray-600 hover:bg-gray-700"
+                            className="bg-gray-600 hover:bg-gray-700 h-8 text-xs px-2"
                             title="Send notification"
                           >
                             <Bell className="w-3 h-3" />
@@ -629,7 +630,7 @@ export default function EnhancedSalonDashboard() {
                           <Button 
                             size="sm" 
                             onClick={() => handleSkipToken(token.id)} 
-                            className="bg-orange-600 hover:bg-orange-700 text-white"
+                            className="bg-orange-600 hover:bg-orange-700 text-white h-8 text-xs px-2"
                             title="Skip this customer"
                           >
                             <SkipForward className="w-3 h-3" />
@@ -638,7 +639,7 @@ export default function EnhancedSalonDashboard() {
                             size="sm" 
                             onClick={() => handleCancelToken(token.id)} 
                             variant="outline"
-                            className="border-red-500 text-red-500 hover:bg-red-500 hover:text-white"
+                            className="border-red-500 text-red-500 hover:bg-red-500 hover:text-white h-8 text-xs px-2"
                             title="Cancel token"
                           >
                             <XCircle className="w-3 h-3" />
@@ -646,13 +647,13 @@ export default function EnhancedSalonDashboard() {
                         </>
                       )}
                       
-                      {/* Called Status Actions - MAIN CONTROLS */}
+                      {/* Called Status Actions */}
                       {token.status === 'called' && (
-                        <div className="flex items-center space-x-2">
+                        <>
                           <Button 
                             size="sm" 
                             onClick={() => handleCompleteToken(token.id)} 
-                            className="bg-green-600 hover:bg-green-700 text-white"
+                            className="bg-green-600 hover:bg-green-700 text-white h-8 text-xs px-2.5"
                             title="Mark as completed"
                           >
                             <CheckCircle className="w-3 h-3 mr-1" />
@@ -661,16 +662,16 @@ export default function EnhancedSalonDashboard() {
                           <Button 
                             size="sm" 
                             onClick={() => handleOpenAddServices(token)} 
-                            className="bg-purple-600 hover:bg-purple-700 text-white"
+                            className="bg-purple-600 hover:bg-purple-700 text-white h-8 text-xs px-2.5"
                             title="Add more services"
                           >
                             <Plus className="w-3 h-3 mr-1" />
-                            Add Services
+                            Add
                           </Button>
                           <Button 
                             size="sm" 
                             onClick={() => handleRecallToken(token.id)} 
-                            className="bg-blue-600 hover:bg-blue-700 text-white"
+                            className="bg-blue-600 hover:bg-blue-700 text-white h-8 text-xs px-2.5"
                             title="Re-call customer"
                           >
                             <RotateCcw className="w-3 h-3 mr-1" />
@@ -679,13 +680,12 @@ export default function EnhancedSalonDashboard() {
                           <Button 
                             size="sm" 
                             onClick={() => handleSkipToken(token.id)} 
-                            className="bg-red-600 hover:bg-red-700 text-white"
+                            className="bg-red-600 hover:bg-red-700 text-white h-8 text-xs px-2"
                             title="Skip customer"
                           >
-                            <SkipForward className="w-3 h-3 mr-1" />
-                            Skip
+                            <SkipForward className="w-3 h-3" />
                           </Button>
-                        </div>
+                        </>
                       )}
                       
                       {/* Skipped Status Actions */}
@@ -693,7 +693,7 @@ export default function EnhancedSalonDashboard() {
                         <Button 
                           size="sm" 
                           onClick={() => handleRecallToken(token.id)} 
-                          className="bg-blue-600 hover:bg-blue-700"
+                          className="bg-blue-600 hover:bg-blue-700 h-8 text-xs px-2.5"
                           title="Recall this customer"
                         >
                           <RotateCcw className="w-3 h-3 mr-1" />
@@ -701,17 +701,17 @@ export default function EnhancedSalonDashboard() {
                         </Button>
                       )}
                       
-                      {/* Completed Status Actions - View Invoice */}
+                      {/* Completed Status Actions */}
                       {token.status === 'completed' && token.invoice_id && (
-                        <div className="flex items-center space-x-2">
+                        <>
                           <Button 
                             size="sm" 
                             onClick={() => window.open(`${API}/invoices/${token.invoice_id}/view`, '_blank')} 
-                            className="bg-purple-600 hover:bg-purple-700 text-white"
+                            className="bg-purple-600 hover:bg-purple-700 text-white h-8 text-xs px-2.5"
                             title="View invoice"
                           >
                             <FileText className="w-3 h-3 mr-1" />
-                            View Invoice
+                            Invoice
                           </Button>
                           <Button 
                             size="sm" 
@@ -721,15 +721,19 @@ export default function EnhancedSalonDashboard() {
                               link.download = `invoice_${token.token_number}.pdf`;
                               link.click();
                             }}
-                            className="bg-green-600 hover:bg-green-700 text-white"
+                            className="bg-green-600 hover:bg-green-700 text-white h-8 text-xs px-2.5"
                             title="Download invoice"
                           >
                             <Download className="w-3 h-3 mr-1" />
                             Download
                           </Button>
-                        </div>
+                        </>
                       )}
-                    </div>
+
+                      {/* No actions for cancelled/future */}
+                      {['cancelled', 'future'].includes(token.status) && (
+                        <span className="text-xs text-muted-foreground italic px-1">No actions</span>
+                      )}
                   </div>
                 </motion.div>
               ))}

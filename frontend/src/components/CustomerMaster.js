@@ -328,35 +328,36 @@ export default function CustomerMaster({ salonId, getAuthHeaders }) {
     return (
       <div className="space-y-6">
         {/* Customer Header */}
-        <div className="flex items-center justify-between">
-          <div className="flex items-center space-x-3">
+        <div className="space-y-3">
+          <div className="flex items-center gap-2">
             <Button
               variant="outline"
               size="sm"
               onClick={() => setSelectedCustomer(null)}
+              className="flex-shrink-0"
             >
-              <ArrowLeft className="w-4 h-4 mr-2" />
-              Back
+              <ArrowLeft className="w-4 h-4 md:mr-2" />
+              <span className="hidden md:inline">Back</span>
             </Button>
-            <div>
-              <h2 className="text-2xl font-bold">{selectedCustomer.name}</h2>
-              <p className="text-muted-foreground">{selectedCustomer.phone}</p>
+            <div className="min-w-0">
+              <h2 className="text-lg md:text-2xl font-bold truncate">{selectedCustomer.name}</h2>
+              <p className="text-muted-foreground text-xs md:text-sm">{selectedCustomer.phone}</p>
             </div>
           </div>
-          <div className="flex gap-2">
+          <div className="flex flex-wrap gap-2">
             <Button
               onClick={() => setShowMembershipModal(true)}
               variant="outline"
-              className="border-gold text-gold hover:bg-gold/10"
+              className="border-gold text-gold hover:bg-gold/10 text-xs md:text-sm h-8 md:h-9"
             >
-              <Crown className="w-4 h-4 mr-2" />
+              <Crown className="w-4 h-4 mr-1 md:mr-2" />
               Sell Membership
             </Button>
             <Button
               onClick={() => setShowPackageForm(!showPackageForm)}
-              className="bg-gold text-black hover:bg-gold/90"
+              className="bg-gold text-black hover:bg-gold/90 text-xs md:text-sm h-8 md:h-9"
             >
-              <Package className="w-4 h-4 mr-2" />
+              <Package className="w-4 h-4 mr-1 md:mr-2" />
               {showPackageForm ? 'Cancel' : 'Create Custom Package'}
             </Button>
           </div>
@@ -377,8 +378,8 @@ export default function CustomerMaster({ salonId, getAuthHeaders }) {
 
         {/* Customer Membership Display */}
         {customerMembership && (
-          <div className="bg-gradient-to-br from-gold/10 to-gold/5 border-2 border-gold/30 rounded-xl p-6">
-            <div className="flex items-start justify-between mb-4">
+          <div className="bg-gradient-to-br from-gold/10 to-gold/5 border-2 border-gold/30 rounded-xl p-4 md:p-6">
+            <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3 mb-4">
               <div className="flex items-center gap-3">
                 <div className="p-3 bg-gold/20 rounded-full">
                   <Crown className="w-6 h-6 text-gold" />
