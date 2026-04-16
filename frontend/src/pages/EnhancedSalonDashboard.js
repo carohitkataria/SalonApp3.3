@@ -1215,7 +1215,7 @@ export default function EnhancedSalonDashboard() {
 
       {/* Modify Booking Dialog */}
       <Dialog open={addServicesDialog} onOpenChange={setAddServicesDialog}>
-        <DialogContent className="max-w-2xl max-h-[85vh] overflow-y-auto">
+        <DialogContent className="max-w-2xl max-h-[85vh] overflow-hidden flex flex-col">
           <DialogHeader>
             <DialogTitle className="text-lg">Modify Booking</DialogTitle>
           </DialogHeader>
@@ -1223,7 +1223,7 @@ export default function EnhancedSalonDashboard() {
           {selectedToken && (
             <>
               {/* Compact Info Row */}
-              <div className="flex items-center gap-3 p-3 bg-muted rounded-lg text-sm">
+              <div className="flex items-center gap-3 p-3 bg-muted rounded-lg text-sm flex-shrink-0">
                 <span className="font-bold text-gold">{selectedToken.token_number}</span>
                 <span className="text-foreground font-semibold">{selectedToken.customer_name}</span>
                 <span className="text-muted-foreground">•</span>
@@ -1233,7 +1233,7 @@ export default function EnhancedSalonDashboard() {
               </div>
 
               {/* Horizontal Controls Row: Services label | Barber dropdown | Payment dropdown */}
-              <div className="flex items-center gap-3 mt-3">
+              <div className="flex items-center gap-3 mt-2 flex-shrink-0">
                 <div className="flex-shrink-0 text-sm font-semibold text-gold border border-gold/30 bg-gold/5 px-3 py-2 rounded-lg">
                   Services
                 </div>
@@ -1264,7 +1264,7 @@ export default function EnhancedSalonDashboard() {
               </div>
 
               {/* Service Search */}
-              <div className="mt-3">
+              <div className="mt-2 flex-shrink-0">
                 <Input
                   type="text"
                   placeholder="Search services..."
@@ -1274,8 +1274,8 @@ export default function EnhancedSalonDashboard() {
                 />
               </div>
 
-              {/* Service List */}
-              <div className="mt-2 space-y-1.5 max-h-[35vh] overflow-y-auto pr-1">
+              {/* Service List — only this part scrolls */}
+              <div className="mt-2 space-y-1.5 overflow-y-auto flex-1 min-h-0 pr-1">
                 {allServices
                   .filter(service => 
                     service.service_name.toLowerCase().includes(serviceSearchQuery.toLowerCase()) ||
@@ -1309,21 +1309,17 @@ export default function EnhancedSalonDashboard() {
                 )}
               </div>
 
-              {/* Final Amount + Actions */}
-              <div className="mt-4 pt-3 border-t border-border space-y-3">
-                <div className="flex items-center gap-3">
-                  <Label className="text-sm font-semibold whitespace-nowrap">Final Amount (₹)</Label>
+              {/* Final Amount + Actions — always visible at bottom */}
+              <div className="flex-shrink-0 pt-3 mt-2 border-t border-border bg-background">
+                <div className="flex items-center gap-2 mb-3">
+                  <Label className="text-sm font-semibold whitespace-nowrap">Final ₹</Label>
                   <Input
                     type="number"
                     value={finalAmount}
                     onChange={(e) => setFinalAmount(e.target.value)}
-                    className="w-32 h-9 text-sm font-bold text-gold"
+                    className="w-28 h-9 text-sm font-bold text-gold"
                     min={0}
                   />
-                  <span className="text-xs text-muted-foreground">Editable — adjust if customer pays short</span>
-                </div>
-                
-                <div className="flex gap-2">
                   <Button
                     onClick={handleSaveAllModifications}
                     className="flex-1 bg-gold text-black hover:bg-gold/90 h-9 text-sm"
