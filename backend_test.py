@@ -10,7 +10,7 @@ import uuid
 from datetime import datetime
 
 # Configuration
-BASE_URL = "https://wallet-history-view.preview.emergentagent.com/api"
+BASE_URL = "https://payment-workflow-hub-1.preview.emergentagent.com/api"
 SALON_ID = "a1221fbc-f5b1-4485-87a9-9ed23d6e1e27"
 TEST_PHONE = "7503070727"
 

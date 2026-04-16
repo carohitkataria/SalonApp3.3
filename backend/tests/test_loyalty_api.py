@@ -5,7 +5,7 @@ import pytest
 import requests
 import os
 
-BASE_URL = os.environ.get('REACT_APP_BACKEND_URL', 'https://salon-access-ctrl.preview.emergentagent.com').rstrip('/')
+BASE_URL = os.environ.get('REACT_APP_BACKEND_URL', 'https://payment-workflow-hub-1.preview.emergentagent.com').rstrip('/')
 
 # Test salon credentials
 TEST_PHONE = "9876543210"
