@@ -1,10 +1,44 @@
 import React from 'react';
-import { Crown, Wallet, Calendar, Sparkles } from 'lucide-react';
+import { Crown, Wallet, Calendar, Sparkles, Clock } from 'lucide-react';
 import { motion } from 'framer-motion';
 
 export default function CustomerWalletCard({ membership }) {
-  if (!membership || !membership.has_membership) {
+  // Show pending memberships even if no confirmed membership
+  const pendingMemberships = membership?.pending_memberships || [];
+  const hasMembership = membership?.has_membership;
+
+  if (!hasMembership && pendingMemberships.length === 0) {
     return null;
+  }
+
+  // If only pending memberships, no confirmed one
+  if (!hasMembership && pendingMemberships.length > 0) {
+    return (
+      <motion.div
+        initial={{ opacity: 0, y: -20 }}
+        animate={{ opacity: 1, y: 0 }}
+        className="relative overflow-hidden rounded-2xl p-6 mb-6 bg-gradient-to-br from-yellow-500/10 to-amber-500/10 border-2 border-yellow-500/30"
+      >
+        <div className="relative z-10">
+          <div className="flex items-center gap-3 mb-4">
+            <div className="p-3 rounded-full bg-yellow-500/20">
+              <Clock className="w-6 h-6 text-yellow-500" />
+            </div>
+            <div>
+              <h3 className="text-lg font-bold text-foreground">Membership Pending</h3>
+              <p className="text-sm text-yellow-600">Awaiting salon confirmation</p>
+            </div>
+          </div>
+          {pendingMemberships.map(pm => (
+            <div key={pm.id} className="p-3 bg-card/50 rounded-lg border border-border mt-2">
+              <p className="font-semibold">{pm.membership_name}</p>
+              <p className="text-sm text-muted-foreground">Credit: ₹{pm.credit_added} • Paid: ₹{pm.paid_amount}</p>
+              <p className="text-xs text-yellow-600 mt-1">⏳ Wallet credit will be added after salon confirms payment</p>
+            </div>
+          ))}
+        </div>
+      </motion.div>
+    );
   }
 
   const daysUntilExpiry = Math.ceil(
@@ -112,6 +146,23 @@ export default function CustomerWalletCard({ membership }) {
             </p>
           </div>
         </div>
+
+        {/* Pending Memberships */}
+        {pendingMemberships.length > 0 && (
+          <div className="mt-4 p-3 bg-yellow-500/10 border border-yellow-500/30 rounded-lg">
+            <div className="flex items-center gap-2 mb-2">
+              <Clock className="w-4 h-4 text-yellow-500" />
+              <p className="text-sm font-semibold text-yellow-600 dark:text-yellow-400">
+                Pending Confirmation ({pendingMemberships.length})
+              </p>
+            </div>
+            {pendingMemberships.map(pm => (
+              <div key={pm.id} className="text-xs text-muted-foreground mt-1">
+                {pm.membership_name} • ₹{pm.credit_added} credit • Awaiting salon confirmation
+              </div>
+            ))}
+          </div>
+        )}
       </div>
     </motion.div>
   );

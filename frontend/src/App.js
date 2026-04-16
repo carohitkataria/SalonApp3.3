@@ -19,6 +19,7 @@ import BarberProfilePage from '@/pages/BarberProfilePage';
 import TokenDetailPage from '@/pages/TokenDetailPage';
 import SalonRatingsPage from '@/pages/SalonRatingsPage';
 import CustomerWalletPage from '@/pages/CustomerWalletPage';
+import CustomerNotificationsPage from '@/pages/CustomerNotificationsPage';
 
 // Salon Pages
 import OTPLoginPage from '@/pages/OTPLoginPage';
@@ -56,6 +57,7 @@ function App() {
                 <Route path="/salon/:salonId/barber/:barberId" element={<CustomerLayout><BarberProfilePage /></CustomerLayout>} />
                 <Route path="/salon/:salonId/ratings" element={<CustomerLayout><SalonRatingsPage /></CustomerLayout>} />
                 <Route path="/salon/:salonId/wallet" element={<CustomerLayout><CustomerWalletPage /></CustomerLayout>} />
+                <Route path="/notifications" element={<CustomerLayout><CustomerNotificationsPage /></CustomerLayout>} />
                 <Route path="/token/:tokenId" element={<CustomerLayout><TokenDetailPage /></CustomerLayout>} />
                 
                 {/* Salon Admin Routes */}

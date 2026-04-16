@@ -379,6 +379,7 @@ class TokenModel(BaseModel):
     status: str = "waiting"  # waiting | called | completed | skipped
     payment_status: str = "pending"
     payment_mode: Optional[str] = None
+    payment_confirmed: bool = False  # Salon must confirm payment before completing
     upi_transaction_id: Optional[str] = None
     source: str
     booking_type: str
@@ -2511,6 +2512,7 @@ async def create_salon_booking(salon_id: str, body: dict, current_user=Depends(g
         "status": "waiting",
         "payment_status": "pending",
         "payment_mode": payment_mode,
+        "payment_confirmed": False,
         "source": "salon",
         "booking_type": "instant",
         "booking_for_self": True,
@@ -2631,6 +2633,7 @@ class CustomerMembership(BaseModel):
     wallet_balance: float
     expiry_date: str
     is_active: bool = True
+    payment_confirmed: bool = True  # False for customer purchases until salon confirms
     purchased_at: str
 
 class WalletTransaction(BaseModel):
@@ -2897,6 +2900,7 @@ async def sell_membership(salon_id: str, membership: CustomerMembershipCreate, c
             "wallet_balance": plan["credit"],
             "expiry_date": expiry_date.isoformat(),
             "is_active": True,
+            "payment_confirmed": True,  # Salon-side sells are auto-confirmed
             "purchased_at": datetime.now(timezone.utc).isoformat()
         }
         
@@ -2922,7 +2926,8 @@ async def customer_buy_membership(
     phone: str,
     membership: CustomerMembershipCreate
 ):
-    """Customer-facing endpoint to buy membership (no auth required)"""
+    """Customer-facing endpoint to buy membership (no auth required).
+    Credit is NOT added until salon confirms payment."""
     # Get membership plan
     plan = await db.membership_plans.find_one({"id": membership.membership_plan_id}, {"_id": 0})
     if not plan:
@@ -2935,70 +2940,60 @@ async def customer_buy_membership(
     # Calculate expiry date
     expiry_date = datetime.now(timezone.utc) + timedelta(days=plan["validity_months"] * 30)
     
-    # Check if customer already has active membership
-    existing = await db.customer_memberships.find_one({
+    # Create new membership with payment_confirmed=False
+    # Credit will be added after salon confirms payment
+    membership_data = {
+        "id": str(uuid.uuid4()),
         "salon_id": salon_id,
         "customer_phone": phone,
-        "is_active": True
-    }, {"_id": 0})
+        "customer_name": membership.customer_name,
+        "membership_plan_id": plan["id"],
+        "membership_name": plan["name"],
+        "payment_mode": membership.payment_mode,
+        "paid_amount": membership.paid_amount,
+        "credit_added": plan["credit"],
+        "wallet_balance": 0,  # No credit until confirmed
+        "expiry_date": expiry_date.isoformat(),
+        "is_active": True,
+        "payment_confirmed": False,  # Requires salon confirmation
+        "purchased_at": datetime.now(timezone.utc).isoformat()
+    }
     
-    if existing:
-        # Add credit to existing wallet
-        new_balance = existing["wallet_balance"] + plan["credit"]
-        await db.customer_memberships.update_one(
-            {"id": existing["id"]},
-            {"$set": {
-                "wallet_balance": new_balance,
-                "expiry_date": expiry_date.isoformat()
-            }}
-        )
-        
-        # Record transaction
-        await db.wallet_transactions.insert_one({
-            "id": str(uuid.uuid4()),
-            "customer_phone": phone,
-            "salon_id": salon_id,
-            "transaction_type": "credit",
-            "amount": plan["credit"],
-            "balance_after": new_balance,
-            "description": f"Membership renewal: {plan['name']}",
-            "created_at": datetime.now(timezone.utc).isoformat()
-        })
-        
-        return {"message": "Membership renewed", "new_balance": new_balance}
-    else:
-        # Create new membership
-        membership_data = {
-            "id": str(uuid.uuid4()),
-            "salon_id": salon_id,
-            "customer_phone": phone,
-            "customer_name": membership.customer_name,
-            "membership_plan_id": plan["id"],
-            "membership_name": plan["name"],
-            "payment_mode": membership.payment_mode,
-            "paid_amount": membership.paid_amount,
-            "credit_added": plan["credit"],
-            "wallet_balance": plan["credit"],
-            "expiry_date": expiry_date.isoformat(),
-            "is_active": True,
-            "purchased_at": datetime.now(timezone.utc).isoformat()
-        }
-        
-        await db.customer_memberships.insert_one(membership_data)
-        
-        # Record transaction
-        await db.wallet_transactions.insert_one({
-            "id": str(uuid.uuid4()),
-            "customer_phone": phone,
-            "salon_id": salon_id,
-            "transaction_type": "credit",
-            "amount": plan["credit"],
-            "balance_after": plan["credit"],
-            "description": f"Membership purchased: {plan['name']}",
-            "created_at": datetime.now(timezone.utc).isoformat()
-        })
-        
-        return {"message": "Membership created", "membership": membership_data}
+    await db.customer_memberships.insert_one(membership_data)
+    
+    # Create notification for salon about pending membership confirmation
+    await db.notifications.insert_one({
+        "id": str(uuid.uuid4()),
+        "user_type": "salon",
+        "user_id": salon_id,
+        "salon_id": salon_id,
+        "title": "New Membership Purchase - Confirmation Required",
+        "message": f"{membership.customer_name} ({phone}) purchased {plan['name']} membership for ₹{membership.paid_amount}. Please confirm payment.",
+        "type": "membership_pending",
+        "related_id": membership_data["id"],
+        "is_read": False,
+        "created_at": datetime.now(timezone.utc).isoformat()
+    })
+    
+    # Create notification for customer about pending confirmation
+    await db.notifications.insert_one({
+        "id": str(uuid.uuid4()),
+        "user_type": "customer",
+        "user_id": phone,
+        "salon_id": salon_id,
+        "title": "Membership Purchase - Pending Confirmation",
+        "message": f"Your {plan['name']} membership purchase is pending confirmation by the salon. Wallet credit of ₹{plan['credit']} will be added after confirmation.",
+        "type": "membership_pending",
+        "related_id": membership_data["id"],
+        "is_read": False,
+        "created_at": datetime.now(timezone.utc).isoformat()
+    })
+    
+    return {
+        "message": "Membership purchase submitted. Pending salon confirmation.",
+        "membership": membership_data,
+        "pending_confirmation": True
+    }
 
 
 @api_router.get("/salons/{salon_id}/customers/{phone}/packages")
@@ -3032,26 +3027,38 @@ async def get_customer_membership(salon_id: str, phone: str):
     if not phone.startswith("+91"):
         phone = f"+91{phone}"
     
+    # Get confirmed active membership
     membership = await db.customer_memberships.find_one({
         "salon_id": salon_id,
         "customer_phone": phone,
-        "is_active": True
+        "is_active": True,
+        "payment_confirmed": True
     }, {"_id": 0})
     
-    if not membership:
-        return {"has_membership": False, "wallet_balance": 0}
+    # Also check for pending (unconfirmed) memberships
+    pending_memberships = await db.customer_memberships.find({
+        "salon_id": salon_id,
+        "customer_phone": phone,
+        "is_active": True,
+        "payment_confirmed": False
+    }, {"_id": 0}).to_list(10)
     
-    # Check if expired
-    expiry_date = datetime.fromisoformat(membership["expiry_date"])
-    if expiry_date < datetime.now(timezone.utc):
-        # Mark as inactive
-        await db.customer_memberships.update_one(
-            {"id": membership["id"]},
-            {"$set": {"is_active": False, "wallet_balance": 0}}
-        )
-        return {"has_membership": False, "wallet_balance": 0, "expired": True}
+    if not membership and not pending_memberships:
+        return {"has_membership": False, "wallet_balance": 0, "pending_memberships": []}
     
-    return {"has_membership": True, **membership}
+    if membership:
+        # Check if expired
+        expiry_date = datetime.fromisoformat(membership["expiry_date"])
+        if expiry_date < datetime.now(timezone.utc):
+            await db.customer_memberships.update_one(
+                {"id": membership["id"]},
+                {"$set": {"is_active": False, "wallet_balance": 0}}
+            )
+            return {"has_membership": False, "wallet_balance": 0, "expired": True, "pending_memberships": pending_memberships}
+        
+        return {"has_membership": True, **membership, "pending_memberships": pending_memberships}
+    
+    return {"has_membership": False, "wallet_balance": 0, "pending_memberships": pending_memberships}
 
 @api_router.get("/salons/{salon_id}/wallet-transactions/{phone}")
 async def get_wallet_transactions(salon_id: str, phone: str):
@@ -3413,6 +3420,7 @@ async def create_booking(booking: BookingCreate):
         "status": "waiting" if booking.booking_type == "instant" else "future",
         "payment_status": payment_status,
         "payment_mode": payment_mode,
+        "payment_confirmed": payment_mode == "wallet",  # Auto-confirm wallet payments
         "upi_transaction_id": None,
         "source": booking.source,
         "booking_type": booking.booking_type,
@@ -3543,6 +3551,13 @@ async def complete_token(token_id: str, current_salon=Depends(get_current_salon)
     token = await db.tokens.find_one({"id": token_id}, {"_id": 0})
     if not token:
         raise HTTPException(status_code=404, detail="Token not found")
+    
+    # Check if payment is confirmed
+    if not token.get("payment_confirmed", False):
+        raise HTTPException(
+            status_code=400, 
+            detail="Payment must be confirmed before marking as complete. Please confirm payment first."
+        )
     
     # Mark as completed
     await db.tokens.update_one(
@@ -3928,6 +3943,260 @@ async def update_token_services(token_id: str, request: AddServicesRequest, curr
         "message": "Services updated successfully",
         "token": TokenModel(**updated_token)
     }
+
+@api_router.post("/tokens/{token_id}/confirm-payment")
+async def confirm_token_payment(token_id: str, body: dict, current_salon=Depends(get_current_salon)):
+    """Salon confirms payment for a token. Can also change payment mode."""
+    token = await db.tokens.find_one({"id": token_id}, {"_id": 0})
+    if not token:
+        raise HTTPException(status_code=404, detail="Token not found")
+    
+    if token.get("status") == "completed":
+        raise HTTPException(status_code=400, detail="Token is already completed")
+    
+    payment_mode = body.get("payment_mode", token.get("payment_mode", "cash"))
+    
+    update_data = {
+        "payment_confirmed": True,
+        "payment_status": "paid",
+        "payment_mode": payment_mode
+    }
+    
+    await db.tokens.update_one(
+        {"id": token_id},
+        {"$set": update_data}
+    )
+    
+    # Get updated token
+    updated_token = await db.tokens.find_one({"id": token_id}, {"_id": 0})
+    
+    # Create notification for customer
+    if token.get("phone"):
+        await db.notifications.insert_one({
+            "id": str(uuid.uuid4()),
+            "user_type": "customer",
+            "user_id": token["phone"],
+            "salon_id": token.get("salon_id", ""),
+            "title": "Payment Confirmed",
+            "message": f"Payment of ₹{token.get('total_amount', 0)} for token {token.get('token_number', '')} has been confirmed by the salon via {payment_mode}.",
+            "type": "payment_confirmed",
+            "related_id": token_id,
+            "is_read": False,
+            "created_at": datetime.now(timezone.utc).isoformat()
+        })
+    
+    await broadcast_update("token_updated", updated_token)
+    
+    return {
+        "message": "Payment confirmed successfully",
+        "token": TokenModel(**updated_token)
+    }
+
+@api_router.put("/tokens/{token_id}/change-barber")
+async def change_token_barber(token_id: str, body: dict, current_salon=Depends(get_current_salon)):
+    """Change the barber assigned to a token and recalculate total."""
+    token = await db.tokens.find_one({"id": token_id}, {"_id": 0})
+    if not token:
+        raise HTTPException(status_code=404, detail="Token not found")
+    
+    if token.get("status") == "completed":
+        raise HTTPException(status_code=400, detail="Cannot change barber for completed booking")
+    
+    new_barber_id = body.get("barber_id")
+    if not new_barber_id:
+        raise HTTPException(status_code=400, detail="barber_id is required")
+    
+    # Get new barber details
+    new_barber_name = "Any Available"
+    if new_barber_id != "any":
+        barber = await db.barbers.find_one({"id": new_barber_id}, {"_id": 0})
+        if not barber:
+            raise HTTPException(status_code=404, detail="Barber not found")
+        new_barber_name = barber.get("name", "Unknown")
+    
+    # Recalculate total amount based on new barber's pricing
+    selected_services = token.get("selected_services", [])
+    total_amount = 0
+    if new_barber_id != "any":
+        total_amount = await calculate_booking_total(selected_services, new_barber_id)
+    else:
+        for service_id in selected_services:
+            service = await db.services.find_one({"id": service_id}, {"_id": 0})
+            if service:
+                total_amount += service.get("base_price", 0)
+    
+    # Update token
+    await db.tokens.update_one(
+        {"id": token_id},
+        {"$set": {
+            "barber_id": new_barber_id,
+            "barber_name": new_barber_name,
+            "total_amount": total_amount
+        }}
+    )
+    
+    # Get updated token
+    updated_token = await db.tokens.find_one({"id": token_id}, {"_id": 0})
+    
+    await broadcast_update("token_updated", updated_token)
+    
+    return {
+        "message": f"Barber changed to {new_barber_name}. Total recalculated: ₹{total_amount}",
+        "token": TokenModel(**updated_token)
+    }
+
+# ============ MEMBERSHIP PAYMENT CONFIRMATION ============
+
+@api_router.post("/salons/{salon_id}/memberships/{membership_id}/confirm-payment")
+async def confirm_membership_payment(salon_id: str, membership_id: str, body: dict = {}, current_user=Depends(get_current_salon_user)):
+    """Salon confirms payment for a customer-purchased membership. Credits wallet after confirmation."""
+    membership = await db.customer_memberships.find_one({
+        "id": membership_id,
+        "salon_id": salon_id
+    }, {"_id": 0})
+    
+    if not membership:
+        raise HTTPException(status_code=404, detail="Membership not found")
+    
+    if membership.get("payment_confirmed", True):
+        raise HTTPException(status_code=400, detail="Payment is already confirmed")
+    
+    # Get the plan to know credit amount
+    plan = await db.membership_plans.find_one({"id": membership["membership_plan_id"]}, {"_id": 0})
+    credit_amount = plan["credit"] if plan else membership.get("credit_added", 0)
+    
+    # Optionally change payment mode
+    payment_mode = body.get("payment_mode", membership.get("payment_mode"))
+    
+    # Check for existing active membership to add credit to
+    phone = membership["customer_phone"]
+    existing = await db.customer_memberships.find_one({
+        "salon_id": salon_id,
+        "customer_phone": phone,
+        "is_active": True,
+        "payment_confirmed": True,
+        "id": {"$ne": membership_id}
+    }, {"_id": 0})
+    
+    if existing:
+        # Add credit to existing confirmed membership wallet
+        new_balance = existing["wallet_balance"] + credit_amount
+        await db.customer_memberships.update_one(
+            {"id": existing["id"]},
+            {"$set": {"wallet_balance": new_balance, "expiry_date": membership.get("expiry_date")}}
+        )
+        # Mark this one as merged/confirmed
+        await db.customer_memberships.update_one(
+            {"id": membership_id},
+            {"$set": {
+                "payment_confirmed": True,
+                "payment_mode": payment_mode,
+                "wallet_balance": 0,
+                "is_active": False  # merged into existing
+            }}
+        )
+        wallet_balance_after = new_balance
+    else:
+        # Confirm and activate this membership with credit
+        await db.customer_memberships.update_one(
+            {"id": membership_id},
+            {"$set": {
+                "payment_confirmed": True,
+                "payment_mode": payment_mode,
+                "wallet_balance": credit_amount
+            }}
+        )
+        wallet_balance_after = credit_amount
+    
+    # Record wallet transaction
+    await db.wallet_transactions.insert_one({
+        "id": str(uuid.uuid4()),
+        "customer_phone": phone,
+        "salon_id": salon_id,
+        "transaction_type": "credit",
+        "amount": credit_amount,
+        "balance_after": wallet_balance_after,
+        "description": f"Membership confirmed: {membership.get('membership_name', 'N/A')}",
+        "created_at": datetime.now(timezone.utc).isoformat()
+    })
+    
+    # Create notification for customer
+    await db.notifications.insert_one({
+        "id": str(uuid.uuid4()),
+        "user_type": "customer",
+        "user_id": phone,
+        "salon_id": salon_id,
+        "title": "Membership Payment Confirmed",
+        "message": f"Your {membership.get('membership_name', '')} membership payment has been confirmed. ₹{credit_amount} has been added to your wallet.",
+        "type": "membership_confirmed",
+        "related_id": membership_id,
+        "is_read": False,
+        "created_at": datetime.now(timezone.utc).isoformat()
+    })
+    
+    return {
+        "message": "Membership payment confirmed and wallet credited",
+        "credit_added": credit_amount,
+        "wallet_balance": wallet_balance_after
+    }
+
+# ============ NOTIFICATIONS SYSTEM ============
+
+@api_router.get("/notifications/{user_type}/{user_id}")
+async def get_notifications(user_type: str, user_id: str, limit: int = 50):
+    """Get notifications for a user (customer or salon)"""
+    # Normalize phone for customer
+    if user_type == "customer" and not user_id.startswith("+91"):
+        user_id = f"+91{user_id}"
+    
+    notifications = await db.notifications.find({
+        "user_type": user_type,
+        "user_id": user_id
+    }, {"_id": 0}).sort("created_at", -1).limit(limit).to_list(limit)
+    
+    return {"notifications": notifications}
+
+@api_router.get("/notifications/{user_type}/{user_id}/unread-count")
+async def get_unread_notification_count(user_type: str, user_id: str):
+    """Get unread notification count"""
+    if user_type == "customer" and not user_id.startswith("+91"):
+        user_id = f"+91{user_id}"
+    
+    count = await db.notifications.count_documents({
+        "user_type": user_type,
+        "user_id": user_id,
+        "is_read": False
+    })
+    
+    return {"unread_count": count}
+
+@api_router.put("/notifications/{notification_id}/read")
+async def mark_notification_read(notification_id: str):
+    """Mark a notification as read"""
+    result = await db.notifications.update_one(
+        {"id": notification_id},
+        {"$set": {"is_read": True}}
+    )
+    
+    if result.modified_count == 0:
+        raise HTTPException(status_code=404, detail="Notification not found")
+    
+    return {"message": "Notification marked as read"}
+
+@api_router.put("/notifications/{user_type}/{user_id}/read-all")
+async def mark_all_notifications_read(user_type: str, user_id: str):
+    """Mark all notifications as read for a user"""
+    if user_type == "customer" and not user_id.startswith("+91"):
+        user_id = f"+91{user_id}"
+    
+    await db.notifications.update_many(
+        {"user_type": user_type, "user_id": user_id, "is_read": False},
+        {"$set": {"is_read": True}}
+    )
+    
+    return {"message": "All notifications marked as read"}
+
+
 
 @api_router.get("/users/last-salon")
 async def get_last_salon_by_phone(phone: str):

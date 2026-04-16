@@ -94,7 +94,7 @@ export default function SalonShopTab({ salonId }) {
         // Payment already confirmed by customer tapping the confirm button
       }
 
-      toast.success('Membership purchased successfully! Check your wallet.');
+      toast.success('Membership purchase submitted! Awaiting salon confirmation.');
       setShopStep('success');
     } catch (error) {
       toast.error(error.response?.data?.detail || 'Failed to purchase membership');
@@ -112,14 +112,17 @@ export default function SalonShopTab({ salonId }) {
           animate={{ scale: 1, opacity: 1 }}
           className="text-center space-y-4"
         >
-          <div className="w-20 h-20 bg-green-500/20 rounded-full flex items-center justify-center mx-auto">
-            <CheckCircle className="w-12 h-12 text-green-500" />
+          <div className="w-20 h-20 bg-yellow-500/20 rounded-full flex items-center justify-center mx-auto">
+            <Clock className="w-12 h-12 text-yellow-500" />
           </div>
-          <h2 className="text-2xl font-bold text-foreground">Purchase Successful!</h2>
+          <h2 className="text-2xl font-bold text-foreground">Purchase Submitted!</h2>
           <p className="text-muted-foreground">
-            Your {selectedPlan?.name} membership is now active.<br />
-            ₹{selectedPlan?.credit} has been added to your wallet.
+            Your {selectedPlan?.name} membership purchase is pending confirmation by the salon.<br />
+            ₹{selectedPlan?.credit} will be added to your wallet once confirmed.
           </p>
+          <div className="p-3 bg-yellow-500/10 border border-yellow-500/30 rounded-lg text-sm text-yellow-600">
+            ⏳ Confirmation pending by salon
+          </div>
           <Button
             onClick={() => {
               setShopStep('browse');

@@ -4,7 +4,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { 
   Menu, X, Home, History, User, HelpCircle, Bug, LogOut, Scissors,
   ChevronDown, ChevronRight, Calendar, ShoppingBag, MapPin, Image as ImageIcon,
-  Pin, PinOff, Wallet
+  Pin, PinOff, Wallet, Bell
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -27,6 +27,7 @@ export default function CustomerLayout({ children }) {
   const [salonExpanded, setSalonExpanded] = useState(true);
   const [currentSalon, setCurrentSalon] = useState(null);
   const [currentSalonId, setCurrentSalonId] = useState(null);
+  const [unreadNotifCount, setUnreadNotifCount] = useState(0);
 
   // Extract salonId from URL
   useEffect(() => {
@@ -69,6 +70,24 @@ export default function CustomerLayout({ children }) {
       console.error('Error fetching salon info:', error);
     }
   };
+
+  // Fetch notification count
+  useEffect(() => {
+    const userPhone = user?.phone?.replace('+91', '') || '';
+    if (userPhone) {
+      const fetchNotifCount = async () => {
+        try {
+          const response = await axios.get(`${API}/notifications/customer/${userPhone}/unread-count`);
+          setUnreadNotifCount(response.data.unread_count || 0);
+        } catch (error) {
+          console.error('Error fetching notification count:', error);
+        }
+      };
+      fetchNotifCount();
+      const interval = setInterval(fetchNotifCount, 30000); // Refresh every 30s
+      return () => clearInterval(interval);
+    }
+  }, [user]);
 
   const handleLogout = () => {
     logoutUser();
@@ -290,6 +309,19 @@ export default function CustomerLayout({ children }) {
           <Menu className="w-6 h-6 text-black" />
         </button>
       )}
+
+      {/* Notification Bell - Fixed Position top-right */}
+      <button
+        onClick={() => navigate('/notifications')}
+        className="fixed top-4 right-4 z-50 p-2 bg-card border border-border rounded-lg shadow-lg hover:bg-muted transition-colors"
+      >
+        <Bell className="w-5 h-5 text-gold" />
+        {unreadNotifCount > 0 && (
+          <span className="absolute -top-1 -right-1 w-5 h-5 bg-red-500 text-white text-[10px] font-bold rounded-full flex items-center justify-center">
+            {unreadNotifCount > 9 ? '9+' : unreadNotifCount}
+          </span>
+        )}
+      </button>
 
       {/* Main Content - shift when pinned */}
       <div className={`w-full transition-all duration-300 ${isPinned && sidebarOpen ? 'pl-72' : ''}`}>

@@ -20,7 +20,7 @@ import {
   Scissors, LogOut, ChevronRight, SkipForward, RotateCcw, XCircle,
   Clock, User, Phone, Bell, MapPin, Settings, CheckCircle, Calendar,
   Users, ArrowLeft, FileText, Download, Plus, X, TrendingUp, Menu,
-  Shield, DollarSign, Database, Pin, PinOff
+  Shield, DollarSign, Database, Pin, PinOff, Edit, CreditCard, Banknote, Smartphone
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
@@ -51,6 +51,17 @@ export default function EnhancedSalonDashboard() {
   const [allServices, setAllServices] = useState([]);
   const [selectedNewServices, setSelectedNewServices] = useState([]);
   const [serviceSearchQuery, setServiceSearchQuery] = useState('');
+  const [modifyTab, setModifyTab] = useState('services'); // 'services' | 'barber' | 'payment'
+  const [selectedNewBarber, setSelectedNewBarber] = useState(null);
+  const [confirmPaymentMode, setConfirmPaymentMode] = useState('cash');
+  
+  // Payment Confirmation Dialog (for Complete action)
+  const [showPaymentConfirmDialog, setShowPaymentConfirmDialog] = useState(false);
+  const [pendingCompleteTokenId, setPendingCompleteTokenId] = useState(null);
+  const [completePaymentMode, setCompletePaymentMode] = useState('cash');
+  
+  // Notifications
+  const [unreadNotifCount, setUnreadNotifCount] = useState(0);
   
   // Manual Booking Dialog State
   const [showManualBookingDialog, setShowManualBookingDialog] = useState(false);
@@ -80,6 +91,7 @@ export default function EnhancedSalonDashboard() {
     fetchSalonData(storedSalonId);
     fetchBarbers(storedSalonId);
     fetchTokens(storedSalonId);
+    fetchNotificationCount(storedSalonId);
 
     // WebSocket subscriptions
     const handleUpdate = () => {
@@ -215,6 +227,16 @@ export default function EnhancedSalonDashboard() {
   };
 
   const handleCompleteToken = async (tokenId) => {
+    // Find the token to check payment status
+    const token = tokens.find(t => t.id === tokenId);
+    if (token && !token.payment_confirmed) {
+      // Show payment confirmation dialog first
+      setPendingCompleteTokenId(tokenId);
+      setCompletePaymentMode(token.payment_mode || 'cash');
+      setShowPaymentConfirmDialog(true);
+      return;
+    }
+    
     if (!window.confirm('Mark this customer as completed? Invoice will be generated.')) return;
     
     try {
@@ -222,6 +244,71 @@ export default function EnhancedSalonDashboard() {
       toast.success('Token marked as completed');
     } catch (error) {
       toast.error(error.response?.data?.detail || 'Failed to complete token');
+    }
+  };
+
+  const handleConfirmPaymentAndComplete = async () => {
+    if (!pendingCompleteTokenId) return;
+    
+    try {
+      // First confirm payment
+      await axios.post(
+        `${API}/tokens/${pendingCompleteTokenId}/confirm-payment`,
+        { payment_mode: completePaymentMode },
+        { headers: getAuthHeaders() }
+      );
+      
+      // Then complete the token
+      await axios.post(`${API}/tokens/${pendingCompleteTokenId}/complete`, {}, { headers: getAuthHeaders() });
+      toast.success('Payment confirmed and token marked as completed');
+      setShowPaymentConfirmDialog(false);
+      setPendingCompleteTokenId(null);
+      fetchTokens(salonId);
+    } catch (error) {
+      toast.error(error.response?.data?.detail || 'Failed to complete token');
+    }
+  };
+
+  const handleConfirmPaymentOnly = async () => {
+    if (!selectedToken) return;
+    
+    try {
+      await axios.post(
+        `${API}/tokens/${selectedToken.id}/confirm-payment`,
+        { payment_mode: confirmPaymentMode },
+        { headers: getAuthHeaders() }
+      );
+      toast.success('Payment confirmed successfully');
+      setAddServicesDialog(false);
+      fetchTokens(salonId);
+    } catch (error) {
+      toast.error(error.response?.data?.detail || 'Failed to confirm payment');
+    }
+  };
+
+  const handleChangeBarber = async () => {
+    if (!selectedToken || !selectedNewBarber) return;
+    
+    try {
+      const response = await axios.put(
+        `${API}/tokens/${selectedToken.id}/change-barber`,
+        { barber_id: selectedNewBarber },
+        { headers: getAuthHeaders() }
+      );
+      toast.success(response.data.message || 'Barber changed successfully');
+      setAddServicesDialog(false);
+      fetchTokens(salonId);
+    } catch (error) {
+      toast.error(error.response?.data?.detail || 'Failed to change barber');
+    }
+  };
+
+  const fetchNotificationCount = async (sid) => {
+    try {
+      const response = await axios.get(`${API}/notifications/salon/${sid}/unread-count`);
+      setUnreadNotifCount(response.data.unread_count || 0);
+    } catch (error) {
+      console.error('Error fetching notification count:', error);
     }
   };
 
@@ -258,6 +345,9 @@ export default function EnhancedSalonDashboard() {
   const handleOpenAddServices = async (token) => {
     setSelectedToken(token);
     setSelectedNewServices(token.selected_services || []); // Pre-select existing services
+    setSelectedNewBarber(token.barber_id);
+    setConfirmPaymentMode(token.payment_mode || 'cash');
+    setModifyTab('services');
     setServiceSearchQuery('');
     await fetchAllServices();
     setAddServicesDialog(true);
@@ -473,15 +563,21 @@ export default function EnhancedSalonDashboard() {
               </div>
             </div>
             <div className="flex items-center space-x-2 md:space-x-3 flex-shrink-0">
-              <ThemeToggle />
-              <Button 
-                onClick={handleLogout} 
-                variant="outline" 
-                size="sm"
-                className="border-gold/30 hover:bg-gold/10 text-xs md:text-sm"
+              <button
+                onClick={() => {
+                  setActiveTab('notifications');
+                  if (!menuPinned) setMenuOpen(false);
+                }}
+                className="relative p-2 hover:bg-gold/10 rounded-lg transition-colors"
+                title="Notifications"
               >
-                <LogOut className="w-4 h-4 md:mr-2" /> <span className="hidden md:inline">Logout</span>
-              </Button>
+                <Bell className="w-5 h-5 text-gold" />
+                {unreadNotifCount > 0 && (
+                  <span className="absolute -top-1 -right-1 w-5 h-5 bg-red-500 text-white text-[10px] font-bold rounded-full flex items-center justify-center">
+                    {unreadNotifCount > 9 ? '9+' : unreadNotifCount}
+                  </span>
+                )}
+              </button>
             </div>
           </div>
         </div>
@@ -567,6 +663,21 @@ export default function EnhancedSalonDashboard() {
                       </button>
                     );
                   })}
+                </div>
+                
+                {/* Bottom section: Theme toggle and Logout */}
+                <div className="border-t border-border p-2 mt-2">
+                  <div className="flex items-center justify-between px-4 py-3">
+                    <span className="text-sm text-muted-foreground">Theme</span>
+                    <ThemeToggle />
+                  </div>
+                  <button
+                    onClick={handleLogout}
+                    className="w-full flex items-center space-x-3 px-4 py-3 rounded-lg text-red-500 hover:bg-red-500/10 transition-all"
+                  >
+                    <LogOut className="w-5 h-5" />
+                    <span>Logout</span>
+                  </button>
                 </div>
               </motion.div>
             </>
@@ -669,6 +780,8 @@ export default function EnhancedSalonDashboard() {
                       </p>
                       <p className="text-muted-foreground text-xs truncate">
                         {token.barber_name} • {token.shift || token.time_slot} • ₹{token.total_amount}
+                        {token.payment_confirmed && <span className="text-green-500 ml-1">• ✓ Paid</span>}
+                        {!token.payment_confirmed && token.status !== 'completed' && <span className="text-yellow-500 ml-1">• Payment Pending</span>}
                       </p>
                       <p className="text-muted-foreground text-xs flex items-center space-x-1 mt-0.5">
                         <Calendar className="w-3 h-3 flex-shrink-0" />
@@ -715,10 +828,10 @@ export default function EnhancedSalonDashboard() {
                             size="sm" 
                             onClick={() => handleOpenAddServices(token)} 
                             className="bg-purple-600 hover:bg-purple-700 h-8 text-xs px-2.5"
-                            title="Add more services"
+                            title="Modify booking"
                           >
-                            <Plus className="w-3 h-3 mr-1" />
-                            Add
+                            <Edit className="w-3 h-3 mr-1" />
+                            Modify
                           </Button>
                           <Button 
                             size="sm" 
@@ -764,10 +877,10 @@ export default function EnhancedSalonDashboard() {
                             size="sm" 
                             onClick={() => handleOpenAddServices(token)} 
                             className="bg-purple-600 hover:bg-purple-700 text-white h-8 text-xs px-2.5"
-                            title="Add more services"
+                            title="Modify booking"
                           >
-                            <Plus className="w-3 h-3 mr-1" />
-                            Add
+                            <Edit className="w-3 h-3 mr-1" />
+                            Modify
                           </Button>
                           <Button 
                             size="sm" 
@@ -1032,85 +1145,302 @@ export default function EnhancedSalonDashboard() {
             onDeleteSalon={handleLogout}
           />
         )}
+
+        {activeTab === 'notifications' && salonId && (
+          <SalonNotificationsPanel salonId={salonId} onCountUpdate={(count) => setUnreadNotifCount(count)} />
+        )}
       </div>
 
-      {/* Manage Services Dialog */}
+      {/* Modify Booking Dialog */}
       <Dialog open={addServicesDialog} onOpenChange={setAddServicesDialog}>
         <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>Manage Services</DialogTitle>
+            <DialogTitle>Modify Booking</DialogTitle>
           </DialogHeader>
           
           {selectedToken && (
             <div className="mb-4 p-4 bg-muted rounded-lg">
               <p className="text-sm"><strong>Customer:</strong> {selectedToken.customer_name}</p>
               <p className="text-sm"><strong>Token:</strong> {selectedToken.token_number}</p>
-              <p className="text-sm"><strong>Current Amount:</strong> ₹{selectedToken.total_amount}</p>
+              <p className="text-sm"><strong>Barber:</strong> {selectedToken.barber_name}</p>
+              <p className="text-sm"><strong>Amount:</strong> ₹{selectedToken.total_amount}</p>
+              <p className="text-sm"><strong>Payment:</strong> {selectedToken.payment_mode || 'N/A'} {selectedToken.payment_confirmed ? '✓ Confirmed' : '⏳ Pending'}</p>
             </div>
           )}
 
-          {/* Action Buttons at Top */}
-          <div className="flex justify-between items-center space-x-2 mb-4 pb-4 border-b">
-            <Button variant="outline" onClick={() => setAddServicesDialog(false)}>
-              Cancel
-            </Button>
-            <Button 
-              onClick={handleUpdateServices}
-              className="bg-gold text-black hover:bg-gold/90"
-              disabled={selectedNewServices.length === 0}
+          {/* Tab Selector */}
+          <div className="flex gap-1 mb-4 p-1 bg-muted rounded-lg">
+            <button
+              onClick={() => setModifyTab('services')}
+              className={`flex-1 px-3 py-2 rounded-md text-sm font-medium transition-all ${
+                modifyTab === 'services' ? 'bg-gold text-black shadow' : 'text-muted-foreground hover:text-foreground'
+              }`}
             >
-              Update Services ({selectedNewServices.length} selected)
-            </Button>
+              Services
+            </button>
+            <button
+              onClick={() => setModifyTab('barber')}
+              className={`flex-1 px-3 py-2 rounded-md text-sm font-medium transition-all ${
+                modifyTab === 'barber' ? 'bg-gold text-black shadow' : 'text-muted-foreground hover:text-foreground'
+              }`}
+            >
+              Change Barber
+            </button>
+            <button
+              onClick={() => setModifyTab('payment')}
+              className={`flex-1 px-3 py-2 rounded-md text-sm font-medium transition-all ${
+                modifyTab === 'payment' ? 'bg-gold text-black shadow' : 'text-muted-foreground hover:text-foreground'
+              }`}
+            >
+              Confirm Payment
+            </button>
           </div>
 
-          {/* Search Bar */}
-          <div className="mb-4">
-            <Input
-              type="text"
-              placeholder="Search services..."
-              value={serviceSearchQuery}
-              onChange={(e) => setServiceSearchQuery(e.target.value)}
-              className="w-full"
-            />
-          </div>
-
-          <div className="space-y-3">
-            <p className="text-sm text-muted-foreground">
-              <strong>Select/Deselect services:</strong> Check to add, Uncheck to remove
-            </p>
-            {allServices
-              .filter(service => 
-                service.service_name.toLowerCase().includes(serviceSearchQuery.toLowerCase()) ||
-                service.category?.toLowerCase().includes(serviceSearchQuery.toLowerCase())
-              )
-              .map(service => {
-              const isSelected = selectedNewServices.includes(service.id);
-              return (
-                <div 
-                  key={service.id}
-                  className="flex items-center space-x-3 p-3 border rounded-lg hover:border-gold cursor-pointer transition-all"
-                  onClick={() => toggleServiceSelection(service.id)}
+          {/* Services Tab */}
+          {modifyTab === 'services' && (
+            <>
+              <div className="flex justify-between items-center space-x-2 mb-4 pb-4 border-b">
+                <Button variant="outline" onClick={() => setAddServicesDialog(false)}>
+                  Cancel
+                </Button>
+                <Button 
+                  onClick={handleUpdateServices}
+                  className="bg-gold text-black hover:bg-gold/90"
+                  disabled={selectedNewServices.length === 0}
                 >
-                  <Checkbox
-                    checked={isSelected}
-                    onCheckedChange={() => toggleServiceSelection(service.id)}
-                  />
-                  <div className="flex-1">
-                    <p className="font-semibold">{service.service_name}</p>
-                    <p className="text-xs text-muted-foreground">{service.category}</p>
-                  </div>
-                  <div className="text-right">
-                    <p className="font-bold text-gold">₹{service.base_price}</p>
-                  </div>
+                  Update Services ({selectedNewServices.length} selected)
+                </Button>
+              </div>
+
+              <div className="mb-4">
+                <Input
+                  type="text"
+                  placeholder="Search services..."
+                  value={serviceSearchQuery}
+                  onChange={(e) => setServiceSearchQuery(e.target.value)}
+                  className="w-full"
+                />
+              </div>
+
+              <div className="space-y-3">
+                <p className="text-sm text-muted-foreground">
+                  <strong>Select/Deselect services:</strong> Check to add, Uncheck to remove
+                </p>
+                {allServices
+                  .filter(service => 
+                    service.service_name.toLowerCase().includes(serviceSearchQuery.toLowerCase()) ||
+                    service.category?.toLowerCase().includes(serviceSearchQuery.toLowerCase())
+                  )
+                  .map(service => {
+                  const isSelected = selectedNewServices.includes(service.id);
+                  return (
+                    <div 
+                      key={service.id}
+                      className="flex items-center space-x-3 p-3 border rounded-lg hover:border-gold cursor-pointer transition-all"
+                      onClick={() => toggleServiceSelection(service.id)}
+                    >
+                      <Checkbox
+                        checked={isSelected}
+                        onCheckedChange={() => toggleServiceSelection(service.id)}
+                      />
+                      <div className="flex-1">
+                        <p className="font-semibold">{service.service_name}</p>
+                        <p className="text-xs text-muted-foreground">{service.category}</p>
+                      </div>
+                      <div className="text-right">
+                        <p className="font-bold text-gold">₹{service.base_price}</p>
+                      </div>
+                    </div>
+                  );
+                })}
+                {allServices.filter(service => 
+                  service.service_name.toLowerCase().includes(serviceSearchQuery.toLowerCase()) ||
+                  service.category?.toLowerCase().includes(serviceSearchQuery.toLowerCase())
+                ).length === 0 && (
+                  <p className="text-center text-muted-foreground py-8">No services found</p>
+                )}
+              </div>
+            </>
+          )}
+
+          {/* Change Barber Tab */}
+          {modifyTab === 'barber' && (
+            <div className="space-y-4">
+              <p className="text-sm text-muted-foreground">
+                Select a new barber. The total amount will be recalculated based on the new barber's pricing.
+              </p>
+              <div className="space-y-2">
+                <button
+                  onClick={() => setSelectedNewBarber('any')}
+                  className={`w-full p-4 rounded-lg border-2 text-left transition-all ${
+                    selectedNewBarber === 'any' ? 'border-gold bg-gold/10' : 'border-border hover:border-gold/50'
+                  }`}
+                >
+                  <p className="font-semibold">Any Available</p>
+                  <p className="text-xs text-muted-foreground">Assign to next available barber</p>
+                </button>
+                {barbers.map(barber => (
+                  <button
+                    key={barber.id}
+                    onClick={() => setSelectedNewBarber(barber.id)}
+                    className={`w-full p-4 rounded-lg border-2 text-left transition-all ${
+                      selectedNewBarber === barber.id ? 'border-gold bg-gold/10' : 'border-border hover:border-gold/50'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <p className="font-semibold">{barber.name}</p>
+                        <p className="text-xs text-muted-foreground">{barber.specialization || 'General'}</p>
+                      </div>
+                      {barber.rating && (
+                        <span className="text-sm text-gold">★ {barber.rating}</span>
+                      )}
+                    </div>
+                  </button>
+                ))}
+              </div>
+              <div className="flex gap-2 pt-4 border-t">
+                <Button
+                  onClick={handleChangeBarber}
+                  className="flex-1 bg-gold text-black hover:bg-gold/90"
+                  disabled={!selectedNewBarber || selectedNewBarber === selectedToken?.barber_id}
+                >
+                  Change Barber
+                </Button>
+                <Button variant="outline" onClick={() => setAddServicesDialog(false)}>
+                  Cancel
+                </Button>
+              </div>
+            </div>
+          )}
+
+          {/* Confirm Payment Tab */}
+          {modifyTab === 'payment' && (
+            <div className="space-y-4">
+              {selectedToken?.payment_confirmed ? (
+                <div className="p-6 text-center">
+                  <CheckCircle className="w-12 h-12 text-green-500 mx-auto mb-3" />
+                  <h3 className="text-lg font-semibold text-green-600">Payment Already Confirmed</h3>
+                  <p className="text-sm text-muted-foreground mt-1">
+                    Mode: {selectedToken.payment_mode?.toUpperCase()} • Amount: ₹{selectedToken.total_amount}
+                  </p>
                 </div>
-              );
-            })}
-            {allServices.filter(service => 
-              service.service_name.toLowerCase().includes(serviceSearchQuery.toLowerCase()) ||
-              service.category?.toLowerCase().includes(serviceSearchQuery.toLowerCase())
-            ).length === 0 && (
-              <p className="text-center text-muted-foreground py-8">No services found</p>
-            )}
+              ) : (
+                <>
+                  <p className="text-sm text-muted-foreground">
+                    Confirm payment received from the customer. You can change the payment mode if needed.
+                  </p>
+                  <div>
+                    <Label className="mb-3 block font-semibold">Payment Mode</Label>
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+                      {[
+                        { value: 'cash', label: 'Cash', icon: Banknote },
+                        { value: 'upi', label: 'UPI', icon: Smartphone },
+                        { value: 'card', label: 'Card', icon: CreditCard },
+                        { value: 'pay_later', label: 'Pay Later', icon: Clock }
+                      ].map(mode => {
+                        const Icon = mode.icon;
+                        return (
+                          <button
+                            key={mode.value}
+                            onClick={() => setConfirmPaymentMode(mode.value)}
+                            className={`p-3 rounded-lg border-2 transition-all flex flex-col items-center gap-2 ${
+                              confirmPaymentMode === mode.value
+                                ? 'border-gold bg-gold/10'
+                                : 'border-border hover:border-gold/50'
+                            }`}
+                          >
+                            <Icon className={`w-6 h-6 ${confirmPaymentMode === mode.value ? 'text-gold' : ''}`} />
+                            <span className="text-xs font-medium">{mode.label}</span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                  <div className="p-4 bg-muted rounded-lg">
+                    <div className="flex justify-between text-sm">
+                      <span>Amount:</span>
+                      <span className="font-bold text-gold">₹{selectedToken?.total_amount}</span>
+                    </div>
+                    <div className="flex justify-between text-sm mt-1">
+                      <span>Mode:</span>
+                      <span className="font-semibold capitalize">{confirmPaymentMode}</span>
+                    </div>
+                  </div>
+                  <div className="flex gap-2 pt-4 border-t">
+                    <Button
+                      onClick={handleConfirmPaymentOnly}
+                      className="flex-1 bg-green-600 text-white hover:bg-green-700"
+                    >
+                      <CheckCircle className="w-4 h-4 mr-2" />
+                      Confirm Payment
+                    </Button>
+                    <Button variant="outline" onClick={() => setAddServicesDialog(false)}>
+                      Cancel
+                    </Button>
+                  </div>
+                </>
+              )}
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      {/* Payment Confirmation Dialog (when clicking Complete) */}
+      <Dialog open={showPaymentConfirmDialog} onOpenChange={setShowPaymentConfirmDialog}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <CreditCard className="w-5 h-5 text-gold" />
+              Confirm Payment to Complete
+            </DialogTitle>
+          </DialogHeader>
+          
+          <p className="text-sm text-muted-foreground">
+            Payment must be confirmed before marking the service as complete. Please confirm the payment mode and proceed.
+          </p>
+          
+          <div className="space-y-4 py-2">
+            <div>
+              <Label className="mb-3 block font-semibold">Payment Mode</Label>
+              <div className="grid grid-cols-2 gap-2">
+                {[
+                  { value: 'cash', label: 'Cash', icon: Banknote },
+                  { value: 'upi', label: 'UPI', icon: Smartphone },
+                  { value: 'card', label: 'Card', icon: CreditCard },
+                  { value: 'pay_later', label: 'Pay Later', icon: Clock }
+                ].map(mode => {
+                  const Icon = mode.icon;
+                  return (
+                    <button
+                      key={mode.value}
+                      onClick={() => setCompletePaymentMode(mode.value)}
+                      className={`p-3 rounded-lg border-2 transition-all flex flex-col items-center gap-2 ${
+                        completePaymentMode === mode.value
+                          ? 'border-gold bg-gold/10'
+                          : 'border-border hover:border-gold/50'
+                      }`}
+                    >
+                      <Icon className={`w-6 h-6 ${completePaymentMode === mode.value ? 'text-gold' : ''}`} />
+                      <span className="text-xs font-medium">{mode.label}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+            
+            <div className="flex gap-2 pt-4 border-t">
+              <Button
+                onClick={handleConfirmPaymentAndComplete}
+                className="flex-1 bg-green-600 text-white hover:bg-green-700"
+              >
+                <CheckCircle className="w-4 h-4 mr-2" />
+                Confirm & Complete
+              </Button>
+              <Button variant="outline" onClick={() => setShowPaymentConfirmDialog(false)}>
+                Cancel
+              </Button>
+            </div>
           </div>
         </DialogContent>
       </Dialog>
@@ -1318,6 +1648,120 @@ export default function EnhancedSalonDashboard() {
         </DialogContent>
       </Dialog>
       </div>
+    </div>
+  );
+}
+
+
+// Salon Notifications Panel Component
+function SalonNotificationsPanel({ salonId, onCountUpdate }) {
+  const [notifications, setNotifications] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    fetchNotifications();
+  }, [salonId]);
+
+  const fetchNotifications = async () => {
+    try {
+      const response = await axios.get(`${BACKEND_URL}/api/notifications/salon/${salonId}`);
+      setNotifications(response.data.notifications || []);
+      const unread = (response.data.notifications || []).filter(n => !n.is_read).length;
+      if (onCountUpdate) onCountUpdate(unread);
+    } catch (error) {
+      console.error('Error fetching notifications:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const markAsRead = async (notifId) => {
+    try {
+      await axios.put(`${BACKEND_URL}/api/notifications/${notifId}/read`);
+      fetchNotifications();
+    } catch (error) {
+      console.error('Error marking notification as read:', error);
+    }
+  };
+
+  const markAllRead = async () => {
+    try {
+      await axios.put(`${BACKEND_URL}/api/notifications/salon/${salonId}/read-all`);
+      fetchNotifications();
+    } catch (error) {
+      console.error('Error marking all as read:', error);
+    }
+  };
+
+  const getTypeIcon = (type) => {
+    switch (type) {
+      case 'payment_confirmed': return <CheckCircle className="w-5 h-5 text-green-500" />;
+      case 'membership_pending': return <Clock className="w-5 h-5 text-yellow-500" />;
+      case 'membership_confirmed': return <CheckCircle className="w-5 h-5 text-green-500" />;
+      default: return <Bell className="w-5 h-5 text-blue-500" />;
+    }
+  };
+
+  if (loading) {
+    return (
+      <div className="bg-card border border-border rounded-lg p-8 text-center">
+        <p className="text-muted-foreground">Loading notifications...</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="bg-card/50 backdrop-blur-sm border border-gold/20 rounded-2xl p-6 shadow-xl">
+      <div className="flex items-center justify-between mb-6">
+        <h2 className="text-2xl font-playfair font-bold text-foreground flex items-center gap-3">
+          <Bell className="w-6 h-6 text-gold" />
+          Notifications
+        </h2>
+        {notifications.some(n => !n.is_read) && (
+          <Button variant="outline" size="sm" onClick={markAllRead} className="text-xs">
+            Mark all read
+          </Button>
+        )}
+      </div>
+
+      {notifications.length === 0 ? (
+        <div className="text-center py-12">
+          <Bell className="w-16 h-16 text-muted-foreground mx-auto mb-4 opacity-30" />
+          <p className="text-muted-foreground">No notifications yet</p>
+        </div>
+      ) : (
+        <div className="space-y-3">
+          {notifications.map((notif) => (
+            <div
+              key={notif.id}
+              onClick={() => !notif.is_read && markAsRead(notif.id)}
+              className={`p-4 rounded-lg border transition-all cursor-pointer ${
+                notif.is_read
+                  ? 'bg-muted/30 border-border'
+                  : 'bg-gold/5 border-gold/30 hover:bg-gold/10'
+              }`}
+            >
+              <div className="flex items-start gap-3">
+                {getTypeIcon(notif.type)}
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center justify-between">
+                    <h4 className={`text-sm font-semibold ${notif.is_read ? 'text-muted-foreground' : 'text-foreground'}`}>
+                      {notif.title}
+                    </h4>
+                    {!notif.is_read && (
+                      <span className="w-2 h-2 bg-gold rounded-full flex-shrink-0" />
+                    )}
+                  </div>
+                  <p className="text-xs text-muted-foreground mt-1">{notif.message}</p>
+                  <p className="text-[10px] text-muted-foreground mt-2">
+                    {new Date(notif.created_at).toLocaleString('en-IN')}
+                  </p>
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
