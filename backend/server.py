@@ -4306,7 +4306,7 @@ async def create_financial_transaction(salon_id: str, txn: FinancialTransactionC
         "salon_id": salon_id,
         "type": txn.type,
         "category": txn.category,
-        "amount": abs(txn.amount),
+        "amount": txn.amount if txn.type == "adjustment" else abs(txn.amount),
         "payment_mode": txn.payment_mode,
         "narration": txn.narration or "",
         "reference_id": "",
@@ -4317,6 +4317,9 @@ async def create_financial_transaction(salon_id: str, txn: FinancialTransactionC
     }
     
     await db.financial_transactions.insert_one(txn_data)
+    
+    # Remove MongoDB _id before returning
+    txn_data.pop("_id", None)
     
     return {"message": "Transaction recorded", "transaction": txn_data}
 

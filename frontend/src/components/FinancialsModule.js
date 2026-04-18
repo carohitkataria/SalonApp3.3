@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect } from 'react';
 import axios from 'axios';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -7,8 +7,8 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/u
 import { toast } from 'sonner';
 import {
   DollarSign, TrendingUp, TrendingDown, ArrowUpCircle, ArrowDownCircle,
-  Plus, Download, Settings, Calendar, ChevronLeft, ChevronRight,
-  Banknote, CreditCard, Smartphone, Wallet, Trash2, FileText
+  Plus, Download, Settings, ChevronLeft, ChevronRight,
+  Banknote, CreditCard, Smartphone, Wallet, Trash2
 } from 'lucide-react';
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
@@ -52,8 +52,19 @@ const MODE_ICONS = {
   wallet: Wallet,
 };
 
+function formatDT(isoStr) {
+  if (!isoStr) return '';
+  const d = new Date(isoStr);
+  const dd = String(d.getDate()).padStart(2, '0');
+  const mm = String(d.getMonth() + 1).padStart(2, '0');
+  const yy = String(d.getFullYear()).slice(2);
+  const hh = String(d.getHours()).padStart(2, '0');
+  const min = String(d.getMinutes()).padStart(2, '0');
+  return `${dd}-${mm}-${yy} ${hh}:${min}`;
+}
+
 export default function FinancialsModule({ salonId, getAuthHeaders }) {
-  const [activeView, setActiveView] = useState('dashboard'); // dashboard | transactions | settings
+  const [activeView, setActiveView] = useState('dashboard');
   const [period, setPeriod] = useState('daily');
   const [selectedDate, setSelectedDate] = useState(new Date().toISOString().slice(0, 10));
   const [selectedMonth, setSelectedMonth] = useState(new Date().toISOString().slice(0, 7));
@@ -62,7 +73,8 @@ export default function FinancialsModule({ salonId, getAuthHeaders }) {
 
   // Add transaction dialog
   const [showAddDialog, setShowAddDialog] = useState(false);
-  const [txnType, setTxnType] = useState('outflow'); // outflow | withdrawal | deposit | adjustment
+  const [txnType, setTxnType] = useState('outflow'); // outflow | other (withdrawal/deposit/adjustment)
+  const [txnSubType, setTxnSubType] = useState('withdrawal'); // withdrawal | deposit | adjustment
   const [txnCategory, setTxnCategory] = useState('salary');
   const [txnAmount, setTxnAmount] = useState('');
   const [txnMode, setTxnMode] = useState('cash');
@@ -79,21 +91,15 @@ export default function FinancialsModule({ salonId, getAuthHeaders }) {
   const [allTransactions, setAllTransactions] = useState([]);
 
   useEffect(() => {
-    if (salonId) {
-      fetchDashboard();
-    }
+    if (salonId) fetchDashboard();
   }, [salonId, period, selectedDate, selectedMonth]);
 
   useEffect(() => {
-    if (salonId && activeView === 'settings') {
-      fetchSettings();
-    }
+    if (salonId && activeView === 'settings') fetchSettings();
   }, [salonId, activeView]);
 
   useEffect(() => {
-    if (salonId && activeView === 'transactions') {
-      fetchAllTransactions();
-    }
+    if (salonId && activeView === 'transactions') fetchAllTransactions();
   }, [salonId, activeView, filterStartDate, filterEndDate]);
 
   const fetchDashboard = async () => {
@@ -148,24 +154,28 @@ export default function FinancialsModule({ salonId, getAuthHeaders }) {
   };
 
   const handleAddTransaction = async () => {
-    if (!txnAmount || parseFloat(txnAmount) <= 0) {
+    const amt = parseFloat(txnAmount);
+    if (!txnAmount || isNaN(amt) || amt === 0) {
       toast.error('Please enter a valid amount');
       return;
     }
 
+    // For non-adjustment types, amount must be positive
+    const resolvedType = txnType === 'outflow' ? 'outflow' : txnSubType;
+    if (resolvedType !== 'adjustment' && amt < 0) {
+      toast.error('Amount must be positive for this entry type');
+      return;
+    }
+
     try {
-      let finalType = txnType;
-      let finalCategory = txnCategory;
-      if (txnType === 'withdrawal') { finalType = 'withdrawal'; finalCategory = 'withdrawal'; }
-      if (txnType === 'deposit') { finalType = 'deposit'; finalCategory = 'deposit'; }
-      if (txnType === 'adjustment') { finalType = 'adjustment'; finalCategory = 'adjustment'; }
+      const finalCategory = resolvedType === 'outflow' ? txnCategory : resolvedType;
 
       await axios.post(
         `${API}/salons/${salonId}/financials/transactions`,
         {
-          type: finalType,
+          type: resolvedType,
           category: finalCategory,
-          amount: parseFloat(txnAmount),
+          amount: amt,
           payment_mode: txnMode,
           narration: txnNarration,
           date: txnDate
@@ -178,7 +188,7 @@ export default function FinancialsModule({ salonId, getAuthHeaders }) {
       fetchDashboard();
       if (activeView === 'transactions') fetchAllTransactions();
     } catch (error) {
-      toast.error('Failed to record transaction');
+      toast.error(error.response?.data?.detail || 'Failed to record transaction');
     }
   };
 
@@ -198,15 +208,13 @@ export default function FinancialsModule({ salonId, getAuthHeaders }) {
     let url = `${API}/salons/${salonId}/financials/report/csv?`;
     if (filterStartDate) url += `start_date=${filterStartDate}&`;
     if (filterEndDate) url += `end_date=${filterEndDate}&`;
-    // Open in new tab to download
     const token = localStorage.getItem('salon_token');
-    // Use fetch with auth
     fetch(url, { headers: { Authorization: `Bearer ${token}` } })
       .then(res => res.blob())
       .then(blob => {
         const link = document.createElement('a');
         link.href = URL.createObjectURL(blob);
-        link.download = `financials_report.csv`;
+        link.download = 'financials_report.csv';
         link.click();
       })
       .catch(() => toast.error('Failed to download CSV'));
@@ -218,6 +226,7 @@ export default function FinancialsModule({ salonId, getAuthHeaders }) {
     setTxnCategory('salary');
     setTxnMode('cash');
     setTxnType('outflow');
+    setTxnSubType('withdrawal');
     setTxnDate(new Date().toISOString().slice(0, 10));
   };
 
@@ -233,7 +242,7 @@ export default function FinancialsModule({ salonId, getAuthHeaders }) {
     }
   };
 
-  const formatCurrency = (val) => `₹${(val || 0).toLocaleString('en-IN')}`;
+  const formatCurrency = (val) => `₹${Math.abs(val || 0).toLocaleString('en-IN')}`;
 
   return (
     <div className="space-y-4">
@@ -252,11 +261,9 @@ export default function FinancialsModule({ salonId, getAuthHeaders }) {
             </button>
           ))}
         </div>
-        <div className="flex items-center gap-2">
-          <Button size="sm" onClick={() => { resetTxnForm(); setShowAddDialog(true); }} className="bg-gold text-black hover:bg-gold/90 h-8 text-xs">
-            <Plus className="w-3.5 h-3.5 mr-1" /> Add Entry
-          </Button>
-        </div>
+        <Button size="sm" onClick={() => { resetTxnForm(); setShowAddDialog(true); }} className="bg-gold text-black hover:bg-gold/90 h-8 text-xs">
+          <Plus className="w-3.5 h-3.5 mr-1" /> Add Entry
+        </Button>
       </div>
 
       {/* ===== DASHBOARD VIEW ===== */}
@@ -265,26 +272,15 @@ export default function FinancialsModule({ salonId, getAuthHeaders }) {
           {/* Period Toggle + Date Nav */}
           <div className="flex items-center justify-between">
             <div className="flex gap-1 p-1 bg-muted rounded-lg">
-              <button
-                onClick={() => setPeriod('daily')}
-                className={`px-3 py-1 rounded text-xs font-medium ${period === 'daily' ? 'bg-gold text-black' : 'text-muted-foreground'}`}
-              >
-                Daily
-              </button>
-              <button
-                onClick={() => setPeriod('monthly')}
-                className={`px-3 py-1 rounded text-xs font-medium ${period === 'monthly' ? 'bg-gold text-black' : 'text-muted-foreground'}`}
-              >
-                Monthly
-              </button>
+              <button onClick={() => setPeriod('daily')} className={`px-3 py-1 rounded text-xs font-medium ${period === 'daily' ? 'bg-gold text-black' : 'text-muted-foreground'}`}>Daily</button>
+              <button onClick={() => setPeriod('monthly')} className={`px-3 py-1 rounded text-xs font-medium ${period === 'monthly' ? 'bg-gold text-black' : 'text-muted-foreground'}`}>Monthly</button>
             </div>
             <div className="flex items-center gap-2">
               <button onClick={() => navigateDate(-1)} className="p-1 hover:bg-muted rounded"><ChevronLeft className="w-4 h-4" /></button>
               <span className="text-sm font-semibold min-w-[120px] text-center">
                 {period === 'daily'
                   ? new Date(selectedDate).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })
-                  : new Date(selectedMonth + '-01').toLocaleDateString('en-IN', { month: 'long', year: 'numeric' })
-                }
+                  : new Date(selectedMonth + '-01').toLocaleDateString('en-IN', { month: 'long', year: 'numeric' })}
               </span>
               <button onClick={() => navigateDate(1)} className="p-1 hover:bg-muted rounded"><ChevronRight className="w-4 h-4" /></button>
             </div>
@@ -303,28 +299,26 @@ export default function FinancialsModule({ salonId, getAuthHeaders }) {
               </div>
 
               {/* Net Cash Flow */}
-              <div className={`p-4 rounded-xl border-2 text-center ${
-                dashboardData.net >= 0 ? 'border-green-500/30 bg-green-500/5' : 'border-red-500/30 bg-red-500/5'
-              }`}>
+              <div className={`p-4 rounded-xl border-2 text-center ${dashboardData.net >= 0 ? 'border-green-500/30 bg-green-500/5' : 'border-red-500/30 bg-red-500/5'}`}>
                 <p className="text-xs text-muted-foreground mb-1">Net Cash Flow</p>
                 <p className={`text-2xl font-bold ${dashboardData.net >= 0 ? 'text-green-500' : 'text-red-500'}`}>
-                  {dashboardData.net >= 0 ? '+' : ''}{formatCurrency(dashboardData.net)}
+                  {dashboardData.net >= 0 ? '+' : '-'}{formatCurrency(dashboardData.net)}
                 </p>
               </div>
 
-              {/* Inflow by Mode */}
+              {/* Inflow by Mode + Outflow by Category */}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div className="bg-card border border-border rounded-xl p-4">
                   <h4 className="text-sm font-semibold mb-3 flex items-center gap-2"><TrendingUp className="w-4 h-4 text-green-500" /> Inflow by Mode</h4>
                   <div className="space-y-2">
-                    {Object.entries(dashboardData.inflow_by_mode || {}).map(([mode, amount]) => {
+                    {Object.entries(dashboardData.inflow_by_mode || {}).filter(([, a]) => a > 0).map(([mode, amount]) => {
                       const Icon = MODE_ICONS[mode] || Banknote;
-                      return amount > 0 ? (
+                      return (
                         <div key={mode} className="flex items-center justify-between text-sm">
                           <div className="flex items-center gap-2"><Icon className="w-4 h-4 text-muted-foreground" /><span className="capitalize">{mode}</span></div>
                           <span className="font-semibold text-green-500">{formatCurrency(amount)}</span>
                         </div>
-                      ) : null;
+                      );
                     })}
                     {Object.values(dashboardData.inflow_by_mode || {}).every(v => v === 0) && (
                       <p className="text-xs text-muted-foreground text-center py-2">No inflow</p>
@@ -347,7 +341,7 @@ export default function FinancialsModule({ salonId, getAuthHeaders }) {
                 </div>
               </div>
 
-              {/* Monthly Bar Chart (simple) */}
+              {/* Monthly daily bar breakdown */}
               {period === 'monthly' && dashboardData.daily_breakdown?.length > 0 && (
                 <div className="bg-card border border-border rounded-xl p-4">
                   <h4 className="text-sm font-semibold mb-3">Daily Breakdown</h4>
@@ -375,7 +369,7 @@ export default function FinancialsModule({ salonId, getAuthHeaders }) {
               {/* Recent Transactions */}
               <div className="bg-card border border-border rounded-xl p-4">
                 <h4 className="text-sm font-semibold mb-3">Transactions ({dashboardData.transactions?.length || 0})</h4>
-                <div className="space-y-1.5 max-h-[300px] overflow-y-auto">
+                <div className="space-y-1 max-h-[300px] overflow-y-auto">
                   {(dashboardData.transactions || []).map(txn => (
                     <TransactionRow key={txn.id} txn={txn} onDelete={handleDeleteTransaction} formatCurrency={formatCurrency} />
                   ))}
@@ -409,7 +403,7 @@ export default function FinancialsModule({ salonId, getAuthHeaders }) {
           </div>
 
           <div className="bg-card border border-border rounded-xl p-4">
-            <div className="space-y-1.5 max-h-[60vh] overflow-y-auto">
+            <div className="space-y-1 max-h-[60vh] overflow-y-auto">
               {allTransactions.map(txn => (
                 <TransactionRow key={txn.id} txn={txn} onDelete={handleDeleteTransaction} formatCurrency={formatCurrency} />
               ))}
@@ -427,27 +421,14 @@ export default function FinancialsModule({ salonId, getAuthHeaders }) {
           <h3 className="text-lg font-bold flex items-center gap-2"><Settings className="w-5 h-5 text-gold" /> Financial Settings</h3>
           <div>
             <Label className="text-sm font-semibold">Opening Cash Balance (₹)</Label>
-            <Input
-              type="number"
-              value={openingBalance}
-              onChange={e => setOpeningBalance(e.target.value)}
-              className="mt-1"
-              min={0}
-            />
+            <Input type="number" value={openingBalance} onChange={e => setOpeningBalance(e.target.value)} className="mt-1" min={0} />
             <p className="text-xs text-muted-foreground mt-1">Set the starting cash balance of your salon</p>
           </div>
           <div>
             <Label className="text-sm font-semibold">As of Date</Label>
-            <Input
-              type="date"
-              value={openingBalanceDate}
-              onChange={e => setOpeningBalanceDate(e.target.value)}
-              className="mt-1"
-            />
+            <Input type="date" value={openingBalanceDate} onChange={e => setOpeningBalanceDate(e.target.value)} className="mt-1" />
           </div>
-          <Button onClick={handleSaveSettings} className="w-full bg-gold text-black hover:bg-gold/90">
-            Save Settings
-          </Button>
+          <Button onClick={handleSaveSettings} className="w-full bg-gold text-black hover:bg-gold/90">Save Settings</Button>
         </div>
       )}
 
@@ -459,27 +440,23 @@ export default function FinancialsModule({ salonId, getAuthHeaders }) {
           </DialogHeader>
 
           <div className="space-y-4">
-            {/* Type Selection */}
-            <div className="grid grid-cols-4 gap-1 p-1 bg-muted rounded-lg">
-              {[
-                { value: 'outflow', label: 'Expense' },
-                { value: 'withdrawal', label: 'Withdraw' },
-                { value: 'deposit', label: 'Deposit' },
-                { value: 'adjustment', label: 'Adjust' },
-              ].map(t => (
-                <button
-                  key={t.value}
-                  onClick={() => setTxnType(t.value)}
-                  className={`px-2 py-1.5 rounded text-xs font-medium transition-all ${
-                    txnType === t.value ? 'bg-gold text-black shadow' : 'text-muted-foreground hover:text-foreground'
-                  }`}
-                >
-                  {t.label}
-                </button>
-              ))}
+            {/* Type: Expense or Other */}
+            <div className="grid grid-cols-2 gap-1 p-1 bg-muted rounded-lg">
+              <button
+                onClick={() => setTxnType('outflow')}
+                className={`px-3 py-1.5 rounded text-sm font-medium transition-all ${txnType === 'outflow' ? 'bg-gold text-black shadow' : 'text-muted-foreground hover:text-foreground'}`}
+              >
+                Expense
+              </button>
+              <button
+                onClick={() => setTxnType('other')}
+                className={`px-3 py-1.5 rounded text-sm font-medium transition-all ${txnType === 'other' ? 'bg-gold text-black shadow' : 'text-muted-foreground hover:text-foreground'}`}
+              >
+                Deposit / Withdraw / Adjust
+              </button>
             </div>
 
-            {/* Category (only for expenses) */}
+            {/* Category for Expense */}
             {txnType === 'outflow' && (
               <div>
                 <Label className="text-sm">Category</Label>
@@ -495,6 +472,25 @@ export default function FinancialsModule({ salonId, getAuthHeaders }) {
               </div>
             )}
 
+            {/* Sub-type dropdown for Other */}
+            {txnType === 'other' && (
+              <div>
+                <Label className="text-sm">Entry Type</Label>
+                <select
+                  value={txnSubType}
+                  onChange={e => setTxnSubType(e.target.value)}
+                  className="w-full h-9 px-3 mt-1 rounded-lg border border-border bg-background text-sm focus:outline-none focus:ring-2 focus:ring-gold/50"
+                >
+                  <option value="deposit">Deposit</option>
+                  <option value="withdrawal">Withdrawal</option>
+                  <option value="adjustment">Adjustment</option>
+                </select>
+                {txnSubType === 'adjustment' && (
+                  <p className="text-[11px] text-muted-foreground mt-1">Use negative amount for deductions</p>
+                )}
+              </div>
+            )}
+
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <Label className="text-sm">Amount (₹)</Label>
@@ -504,7 +500,6 @@ export default function FinancialsModule({ salonId, getAuthHeaders }) {
                   onChange={e => setTxnAmount(e.target.value)}
                   placeholder="0"
                   className="mt-1"
-                  min={0}
                 />
               </div>
               <div>
@@ -561,30 +556,43 @@ function SummaryCard({ label, value, icon: Icon, color }) {
 }
 
 function TransactionRow({ txn, onDelete, formatCurrency }) {
-  const isInflow = txn.type === 'inflow' || txn.type === 'deposit';
+  const amt = txn.amount || 0;
+  // Determine display sign: inflow/deposit = positive, outflow/withdrawal = negative, adjustment = as-is
+  let isPositive;
+  if (txn.type === 'adjustment') {
+    isPositive = amt >= 0;
+  } else {
+    isPositive = txn.type === 'inflow' || txn.type === 'deposit';
+  }
   const ModeIcon = MODE_ICONS[txn.payment_mode] || Banknote;
-  
+
   return (
-    <div className="flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-muted/50 transition-colors group text-sm">
-      <div className={`w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 ${
-        isInflow ? 'bg-green-500/10' : 'bg-red-500/10'
-      }`}>
-        {isInflow ? <ArrowUpCircle className="w-4 h-4 text-green-500" /> : <ArrowDownCircle className="w-4 h-4 text-red-500" />}
+    <div className="flex items-center gap-2 px-2 py-1.5 rounded-lg hover:bg-muted/50 transition-colors group text-sm">
+      {/* Date+Time */}
+      <span className="text-[11px] text-muted-foreground w-[90px] flex-shrink-0 font-mono">
+        {formatDT(txn.created_at)}
+      </span>
+      {/* Icon */}
+      <div className={`w-7 h-7 rounded-full flex items-center justify-center flex-shrink-0 ${isPositive ? 'bg-green-500/10' : 'bg-red-500/10'}`}>
+        {isPositive ? <ArrowUpCircle className="w-3.5 h-3.5 text-green-500" /> : <ArrowDownCircle className="w-3.5 h-3.5 text-red-500" />}
       </div>
+      {/* Details */}
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2">
           <span className="font-medium truncate">{CATEGORY_LABELS[txn.category] || txn.category}</span>
           <ModeIcon className="w-3 h-3 text-muted-foreground flex-shrink-0" />
         </div>
-        {txn.narration && <p className="text-[11px] text-muted-foreground truncate">{txn.narration}</p>}
+        {txn.narration && <p className="text-[10px] text-muted-foreground truncate">{txn.narration}</p>}
       </div>
-      <span className={`font-bold whitespace-nowrap ${isInflow ? 'text-green-500' : 'text-red-500'}`}>
-        {isInflow ? '+' : '-'}{formatCurrency(txn.amount)}
+      {/* Amount */}
+      <span className={`font-bold whitespace-nowrap ${isPositive ? 'text-green-500' : 'text-red-500'}`}>
+        {isPositive ? '+' : '-'}{formatCurrency(amt)}
       </span>
+      {/* Delete (manual only) */}
       {txn.reference_type === 'manual' && (
         <button
           onClick={(e) => { e.stopPropagation(); onDelete(txn.id); }}
-          className="opacity-0 group-hover:opacity-100 p-1 hover:bg-red-500/10 rounded transition-opacity"
+          className="opacity-0 group-hover:opacity-100 p-1 hover:bg-red-500/10 rounded transition-opacity flex-shrink-0"
         >
           <Trash2 className="w-3.5 h-3.5 text-red-500" />
         </button>
