@@ -4487,19 +4487,18 @@ async def download_financial_report_csv(
 async def get_today_sales(
     salon_id: str
 ):
-    """Get today's sales from completed tokens only (not including deposits/adjustments)"""
+    """Get today's sales from completed tokens (analytics logic)"""
     today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     
-    # Find all completed tokens for today with payment confirmed
+    # Find all completed tokens for today (matching analytics logic)
     completed_tokens = await db.tokens.find({
         "salon_id": salon_id,
         "date": today,
-        "status": "completed",
-        "payment_confirmed": True
-    }, {"_id": 0, "final_amount": 1}).to_list(1000)
+        "status": "completed"
+    }, {"_id": 0, "total_amount": 1}).to_list(1000)
     
-    # Sum up final_amount from all completed tokens
-    total_sales = sum(token.get("final_amount", 0) for token in completed_tokens)
+    # Sum up total_amount from all completed tokens (same as analytics)
+    total_sales = sum(token.get("total_amount", 0) for token in completed_tokens)
     
     return {"today_sales": total_sales}
 

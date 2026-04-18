@@ -657,11 +657,15 @@ export default function EnhancedSalonDashboard() {
               </button>
               
               <div 
-                className="hidden sm:block p-3 bg-gradient-to-br from-gold/20 to-gold/5 rounded-xl border border-gold/30 flex-shrink-0 cursor-pointer hover:bg-gold/30 transition-colors"
+                className="hidden sm:block p-3 bg-gradient-to-br from-gold/20 to-gold/5 rounded-xl border border-gold/30 flex-shrink-0 cursor-pointer hover:bg-gold/30 transition-colors overflow-hidden"
                 onClick={() => setActiveTab('home')}
                 title="Go to Home"
               >
-                <Scissors className="w-8 h-8 text-gold" />
+                {salon?.logo_url ? (
+                  <img src={salon.logo_url} alt="Salon Logo" className="w-8 h-8 object-cover rounded" />
+                ) : (
+                  <Scissors className="w-8 h-8 text-gold" />
+                )}
               </div>
               <div className="min-w-0">
                 <h1 className="text-lg md:text-2xl font-playfair font-bold text-foreground truncate">Salon Dashboard</h1>
@@ -850,8 +854,8 @@ export default function EnhancedSalonDashboard() {
               </div>
               <div 
                 className="bg-card border border-border rounded-xl p-4 hover:border-gold/30 transition-colors cursor-pointer"
-                onClick={() => setActiveTab('financials')}
-                title="View Financials"
+                onClick={() => setActiveTab('analytics')}
+                title="View Analytics"
               >
                 <div className="flex items-center gap-2 mb-2">
                   <div className="p-2 rounded-lg bg-gold/10"><DollarSign className="w-5 h-5 text-gold" /></div>
@@ -995,10 +999,10 @@ export default function EnhancedSalonDashboard() {
             </div>
 
             {/* Single Call Next Button Based on Selected Barber */}
-            <div className="flex flex-col md:flex-row gap-2 md:gap-3">
+            <div className="flex flex-row gap-2">
               <Button
                 onClick={() => handleCallNext(selectedBarber === 'all' ? null : selectedBarber)}
-                className="bg-gold text-black hover:bg-gold/90 px-4 md:px-8 py-3 text-sm md:text-lg flex-1"
+                className="bg-gold text-black hover:bg-gold/90 px-3 md:px-8 py-3 text-xs md:text-lg w-[60%] md:flex-1"
                 disabled={!tokens.some(t => t.status === 'waiting')}
               >
                 <ChevronRight className="mr-1 md:mr-2 w-4 md:w-5 h-4 md:h-5" /> 
@@ -1007,7 +1011,7 @@ export default function EnhancedSalonDashboard() {
               <Button
                 onClick={handleOpenManualBooking}
                 variant="outline"
-                className="border-gold text-gold hover:bg-gold/10 px-4 md:px-6 py-3 text-sm md:text-lg"
+                className="border-gold text-gold hover:bg-gold/10 px-3 md:px-6 py-3 text-xs md:text-lg w-[40%] md:flex-none"
               >
                 <Plus className="mr-1 md:mr-2 w-4 md:w-5 h-4 md:h-5" />
                 <span className="hidden md:inline">Add Booking</span>
