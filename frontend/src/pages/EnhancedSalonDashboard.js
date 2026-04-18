@@ -21,7 +21,8 @@ import {
   Scissors, LogOut, ChevronRight, SkipForward, RotateCcw, XCircle,
   Clock, User, Phone, Bell, MapPin, Settings, CheckCircle, Calendar,
   Users, ArrowLeft, FileText, Download, Plus, X, TrendingUp, Menu,
-  Shield, DollarSign, Database, Pin, PinOff, Edit, CreditCard, Banknote, Smartphone
+  Shield, DollarSign, Database, Pin, PinOff, Edit, CreditCard, Banknote, Smartphone,
+  LayoutDashboard, Activity, Zap
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
@@ -33,7 +34,10 @@ export default function EnhancedSalonDashboard() {
   const { subscribe, unsubscribe } = useWebSocket();
   const { salonUser, isAdmin, hasPermission } = useAuth();
   
-  const [activeTab, setActiveTab] = useState('queue');
+  const [activeTab, setActiveTab] = useState(() => {
+    // Restore tab from localStorage
+    return localStorage.getItem('salon_active_tab') || 'home';
+  });
   const [salonId, setSalonId] = useState(null);
   const [salon, setSalon] = useState(null);
   const [barbers, setBarbers] = useState([]);
@@ -64,6 +68,10 @@ export default function EnhancedSalonDashboard() {
   
   // Notifications
   const [unreadNotifCount, setUnreadNotifCount] = useState(0);
+
+  // Home dashboard
+  const [dailySales, setDailySales] = useState(0);
+  const [homeBarberFilter, setHomeBarberFilter] = useState('all');
   
   // Manual Booking Dialog State
   const [showManualBookingDialog, setShowManualBookingDialog] = useState(false);
@@ -94,11 +102,13 @@ export default function EnhancedSalonDashboard() {
     fetchBarbers(storedSalonId);
     fetchTokens(storedSalonId);
     fetchNotificationCount(storedSalonId);
+    fetchDailySales(storedSalonId);
 
     // WebSocket subscriptions
     const handleUpdate = () => {
       if (storedSalonId) {
         fetchTokens(storedSalonId);
+        fetchDailySales(storedSalonId);
       }
     };
 
@@ -118,6 +128,11 @@ export default function EnhancedSalonDashboard() {
       unsubscribe('token_recalled', handleUpdate);
     };
   }, [filter, selectedBarber]);
+
+  // Save active tab to localStorage whenever it changes
+  useEffect(() => {
+    localStorage.setItem('salon_active_tab', activeTab);
+  }, [activeTab]);
 
   const getAuthHeaders = () => {
     // Try new multi-user auth first, fall back to legacy
@@ -380,6 +395,18 @@ export default function EnhancedSalonDashboard() {
     }
   };
 
+  const fetchDailySales = async (sid) => {
+    try {
+      const response = await axios.get(
+        `${API}/salons/${sid}/today-sales`,
+        { headers: getAuthHeaders() }
+      );
+      setDailySales(response.data.today_sales || 0);
+    } catch (error) {
+      console.error('Error fetching daily sales:', error);
+    }
+  };
+
   const handleCancelToken = async (tokenId) => {
     if (!window.confirm('Cancel this token?')) return;
     
@@ -448,11 +475,17 @@ export default function EnhancedSalonDashboard() {
   };
 
   const toggleServiceSelection = (serviceId) => {
-    setSelectedNewServices(prev =>
-      prev.includes(serviceId)
+    setSelectedNewServices(prev => {
+      const next = prev.includes(serviceId)
         ? prev.filter(id => id !== serviceId)
-        : [...prev, serviceId]
-    );
+        : [...prev, serviceId];
+      // Auto-recalculate final amount from selected services
+      const total = allServices
+        .filter(s => next.includes(s.id))
+        .reduce((sum, s) => sum + (s.base_price || 0), 0);
+      setFinalAmount(total);
+      return next;
+    });
   };
 
   const fetchCustomers = async () => {
@@ -563,8 +596,9 @@ export default function EnhancedSalonDashboard() {
 
   // Define menu items with role-based visibility
   const menuItems = [
+    { id: 'home', label: 'Home', icon: LayoutDashboard, show: true },
     { id: 'queue', label: 'Token Queue', icon: Calendar, show: true },
-    { id: 'staff', label: 'Staff Management', icon: Users, show: checkIsAdmin() }, // Admin only
+    { id: 'staff', label: 'Staff Management', icon: Users, show: checkIsAdmin() },
     { id: 'services', label: 'Services & Offerings', icon: Scissors, show: true },
     { id: 'financials', label: 'Financials', icon: DollarSign, show: checkIsAdmin() },
     { id: 'customer-master', label: 'Customer Master', icon: Database, show: true },
@@ -622,7 +656,11 @@ export default function EnhancedSalonDashboard() {
                 <Menu className="w-6 h-6 text-gold" />
               </button>
               
-              <div className="hidden sm:block p-3 bg-gradient-to-br from-gold/20 to-gold/5 rounded-xl border border-gold/30 flex-shrink-0">
+              <div 
+                className="hidden sm:block p-3 bg-gradient-to-br from-gold/20 to-gold/5 rounded-xl border border-gold/30 flex-shrink-0 cursor-pointer hover:bg-gold/30 transition-colors"
+                onClick={() => setActiveTab('home')}
+                title="Go to Home"
+              >
                 <Scissors className="w-8 h-8 text-gold" />
               </div>
               <div className="min-w-0">
@@ -753,6 +791,180 @@ export default function EnhancedSalonDashboard() {
         </AnimatePresence>
 
         <div className="max-w-7xl mx-auto p-4">
+
+        {/* ===== HOME DASHBOARD ===== */}
+        {activeTab === 'home' && (
+          <div className="space-y-6">
+            {/* Welcome Header */}
+            <div className="flex items-center justify-between">
+              <div>
+                <h2 className="text-2xl font-playfair font-bold text-foreground">{salon?.salon_name || salon?.name || 'Salon'}</h2>
+                <p className="text-sm text-muted-foreground">{new Date().toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}</p>
+              </div>
+              <div className="flex items-center gap-2">
+                <Activity className="w-4 h-4 text-green-500 animate-pulse" />
+                <span className="text-xs text-green-500 font-medium">Live</span>
+              </div>
+            </div>
+
+            {/* Summary Cards */}
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+              <div 
+                className="bg-card border border-border rounded-xl p-4 hover:border-gold/30 transition-colors cursor-pointer"
+                onClick={() => setActiveTab('queue')}
+                title="View Queue"
+              >
+                <div className="flex items-center gap-2 mb-2">
+                  <div className="p-2 rounded-lg bg-blue-500/10"><Calendar className="w-5 h-5 text-blue-500" /></div>
+                </div>
+                <p className="text-2xl font-bold text-foreground">{tokens.length}</p>
+                <p className="text-xs text-muted-foreground">Total Tokens Today</p>
+              </div>
+              <div 
+                className="bg-card border border-border rounded-xl p-4 hover:border-gold/30 transition-colors cursor-pointer"
+                onClick={() => {
+                  setActiveTab('queue');
+                  setFilter('waiting');
+                }}
+                title="View Waiting Tokens"
+              >
+                <div className="flex items-center gap-2 mb-2">
+                  <div className="p-2 rounded-lg bg-yellow-500/10"><Clock className="w-5 h-5 text-yellow-500" /></div>
+                </div>
+                <p className="text-2xl font-bold text-yellow-500">{tokens.filter(t => t.status === 'waiting' || t.status === 'called').length}</p>
+                <p className="text-xs text-muted-foreground">Waiting / In Queue</p>
+              </div>
+              <div 
+                className="bg-card border border-border rounded-xl p-4 hover:border-gold/30 transition-colors cursor-pointer"
+                onClick={() => {
+                  setActiveTab('queue');
+                  setFilter('completed');
+                }}
+                title="View Completed Tokens"
+              >
+                <div className="flex items-center gap-2 mb-2">
+                  <div className="p-2 rounded-lg bg-green-500/10"><CheckCircle className="w-5 h-5 text-green-500" /></div>
+                </div>
+                <p className="text-2xl font-bold text-green-500">{tokens.filter(t => t.status === 'completed').length}</p>
+                <p className="text-xs text-muted-foreground">Served / Completed</p>
+              </div>
+              <div 
+                className="bg-card border border-border rounded-xl p-4 hover:border-gold/30 transition-colors cursor-pointer"
+                onClick={() => setActiveTab('financials')}
+                title="View Financials"
+              >
+                <div className="flex items-center gap-2 mb-2">
+                  <div className="p-2 rounded-lg bg-gold/10"><DollarSign className="w-5 h-5 text-gold" /></div>
+                </div>
+                <p className="text-2xl font-bold text-gold">₹{dailySales.toLocaleString('en-IN')}</p>
+                <p className="text-xs text-muted-foreground">Today's Sales</p>
+              </div>
+            </div>
+
+            {/* Upcoming Bookings */}
+            <div className="bg-card border border-border rounded-xl p-5">
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-lg font-bold flex items-center gap-2">
+                  <Zap className="w-5 h-5 text-gold" /> Upcoming Queue
+                </h3>
+                <select
+                  value={homeBarberFilter}
+                  onChange={(e) => setHomeBarberFilter(e.target.value)}
+                  className="h-8 px-3 rounded-lg border border-border bg-background text-xs focus:outline-none focus:ring-2 focus:ring-gold/50"
+                >
+                  <option value="all">All Barbers</option>
+                  {barbers.map(b => (
+                    <option key={b.id} value={b.id}>{b.name}</option>
+                  ))}
+                </select>
+              </div>
+              {(() => {
+                const upcoming = tokens
+                  .filter(t => (t.status === 'waiting' || t.status === 'called'))
+                  .filter(t => homeBarberFilter === 'all' || t.barber_id === homeBarberFilter)
+                  .slice(0, 5);
+                return upcoming.length > 0 ? (
+                  <div className="space-y-2">
+                    {upcoming.map((token, idx) => (
+                      <div key={token.id} className={`flex items-center gap-3 p-3 rounded-lg border transition-all ${
+                        token.status === 'called' ? 'border-blue-500/50 bg-blue-500/5' : 'border-border hover:border-gold/30'
+                      }`}>
+                        <div className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold ${
+                          token.status === 'called' ? 'bg-blue-500 text-white' : 'bg-gold/10 text-gold'
+                        }`}>
+                          {idx + 1}
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2">
+                            <span className="font-semibold text-sm">{token.customer_name}</span>
+                            <span className="text-xs text-gold font-mono">{token.token_number}</span>
+                            {token.status === 'called' && (
+                              <span className="px-1.5 py-0.5 text-[10px] bg-blue-500/20 text-blue-500 rounded font-medium">IN SERVICE</span>
+                            )}
+                          </div>
+                          <p className="text-xs text-muted-foreground truncate">
+                            {token.barber_name} • {token.selected_services?.length || 0} services • ₹{token.total_amount}
+                          </p>
+                        </div>
+                        <span className={`text-xs font-medium px-2 py-1 rounded ${
+                          token.payment_confirmed ? 'bg-green-500/10 text-green-500' : 'bg-yellow-500/10 text-yellow-500'
+                        }`}>
+                          {token.payment_confirmed ? `✓ ${(token.payment_mode || '').toUpperCase()}` : '⏳ Unpaid'}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="text-center py-8">
+                    <CheckCircle className="w-12 h-12 text-green-500/30 mx-auto mb-2" />
+                    <p className="text-sm text-muted-foreground">No upcoming bookings — queue is clear!</p>
+                  </div>
+                );
+              })()}
+              {tokens.filter(t => t.status === 'waiting' || t.status === 'called').length > 5 && (
+                <button
+                  onClick={() => setActiveTab('queue')}
+                  className="w-full mt-3 py-2 text-xs text-gold hover:text-gold/80 font-medium transition-colors"
+                >
+                  View all {tokens.filter(t => t.status === 'waiting' || t.status === 'called').length} in queue →
+                </button>
+              )}
+            </div>
+
+            {/* Quick Navigation */}
+            <div>
+              <h3 className="text-lg font-bold mb-3">Quick Actions</h3>
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                {[
+                  { id: 'queue', label: 'Token Queue', icon: Calendar, color: 'bg-blue-500/10 text-blue-500', desc: 'Manage live queue' },
+                  { id: 'customer-master', label: 'Customers', icon: Database, color: 'bg-purple-500/10 text-purple-500', desc: 'Customer records' },
+                  { id: 'services', label: 'Services', icon: Scissors, color: 'bg-emerald-500/10 text-emerald-500', desc: 'Offerings & memberships' },
+                  { id: 'staff', label: 'Staff', icon: Users, color: 'bg-orange-500/10 text-orange-500', desc: 'Manage barbers' },
+                  { id: 'financials', label: 'Financials', icon: DollarSign, color: 'bg-gold/10 text-gold', desc: 'Cash flow & reports' },
+                  { id: 'analytics', label: 'Analytics', icon: TrendingUp, color: 'bg-cyan-500/10 text-cyan-500', desc: 'Performance stats' },
+                  { id: 'gallery', label: 'Gallery', icon: FileText, color: 'bg-pink-500/10 text-pink-500', desc: 'Salon portfolio' },
+                  { id: 'salon', label: 'Settings', icon: Settings, color: 'bg-gray-500/10 text-gray-400', desc: 'Salon profile' },
+                ].map(item => {
+                  const Icon = item.icon;
+                  return (
+                    <button
+                      key={item.id}
+                      onClick={() => { setActiveTab(item.id); if (!menuPinned) setMenuOpen(false); }}
+                      className="p-4 bg-card border border-border rounded-xl hover:border-gold/40 transition-all text-left group"
+                    >
+                      <div className={`w-10 h-10 rounded-lg flex items-center justify-center mb-2 ${item.color}`}>
+                        <Icon className="w-5 h-5" />
+                      </div>
+                      <p className="font-semibold text-sm group-hover:text-gold transition-colors">{item.label}</p>
+                      <p className="text-[11px] text-muted-foreground">{item.desc}</p>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+        )}
+
         {activeTab === 'queue' && (
           <div className="space-y-6">
             {/* Barber Filter */}

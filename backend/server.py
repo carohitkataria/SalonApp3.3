@@ -4483,6 +4483,26 @@ async def download_financial_report_csv(
         headers={"Content-Disposition": f"attachment; filename={filename}"}
     )
 
+@api_router.get("/salons/{salon_id}/today-sales")
+async def get_today_sales(
+    salon_id: str
+):
+    """Get today's sales from completed tokens only (not including deposits/adjustments)"""
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    
+    # Find all completed tokens for today with payment confirmed
+    completed_tokens = await db.tokens.find({
+        "salon_id": salon_id,
+        "date": today,
+        "status": "completed",
+        "payment_confirmed": True
+    }, {"_id": 0, "final_amount": 1}).to_list(1000)
+    
+    # Sum up final_amount from all completed tokens
+    total_sales = sum(token.get("final_amount", 0) for token in completed_tokens)
+    
+    return {"today_sales": total_sales}
+
 
 # ============ NOTIFICATIONS SYSTEM ============
 
