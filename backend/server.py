@@ -4438,8 +4438,7 @@ async def get_financial_dashboard(
 async def download_financial_report_csv(
     salon_id: str,
     start_date: Optional[str] = None,
-    end_date: Optional[str] = None,
-    current_user=Depends(get_current_salon_user)
+    end_date: Optional[str] = None
 ):
     """Download financial report as CSV"""
     from fastapi.responses import StreamingResponse
@@ -4460,18 +4459,28 @@ async def download_financial_report_csv(
     # Build CSV
     output = io.StringIO()
     writer = csv.writer(output)
-    writer.writerow(["Date", "Type", "Category", "Amount", "Payment Mode", "Narration", "Reference", "Created At"])
+    writer.writerow(["Date", "Time", "Type", "Category", "Amount", "Payment Mode", "Narration", "Reference"])
     
     for txn in transactions:
+        # Extract time from created_at
+        created_at = txn.get("created_at", "")
+        time_str = ""
+        if created_at:
+            try:
+                dt = datetime.fromisoformat(created_at.replace('Z', '+00:00'))
+                time_str = dt.strftime("%H:%M:%S")
+            except:
+                time_str = ""
+        
         writer.writerow([
             txn.get("date", ""),
+            time_str,
             txn.get("type", ""),
             txn.get("category", ""),
             txn.get("amount", 0),
             txn.get("payment_mode", ""),
             txn.get("narration", ""),
-            txn.get("reference_type", ""),
-            txn.get("created_at", "")
+            txn.get("reference_type", "")
         ])
     
     output.seek(0)

@@ -208,14 +208,20 @@ export default function FinancialsModule({ salonId, getAuthHeaders }) {
     let url = `${API}/salons/${salonId}/financials/report/csv?`;
     if (filterStartDate) url += `start_date=${filterStartDate}&`;
     if (filterEndDate) url += `end_date=${filterEndDate}&`;
-    const token = localStorage.getItem('salon_token');
-    fetch(url, { headers: { Authorization: `Bearer ${token}` } })
-      .then(res => res.blob())
+    
+    const authHeaders = getAuthHeaders();
+    fetch(url, { headers: authHeaders })
+      .then(res => {
+        if (!res.ok) throw new Error('Download failed');
+        return res.blob();
+      })
       .then(blob => {
         const link = document.createElement('a');
         link.href = URL.createObjectURL(blob);
-        link.download = 'financials_report.csv';
+        const filename = `financials_${filterStartDate || 'all'}_to_${filterEndDate || 'all'}.csv`;
+        link.download = filename;
         link.click();
+        toast.success('CSV downloaded successfully');
       })
       .catch(() => toast.error('Failed to download CSV'));
   };
