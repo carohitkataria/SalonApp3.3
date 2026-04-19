@@ -3,22 +3,33 @@ import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
 import { Button } from '@/components/ui/button';
 import { Bell, CheckCircle, Clock, ArrowLeft, CreditCard } from 'lucide-react';
+import { useAuth } from '@/contexts/AuthContext';
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
 const API = `${BACKEND_URL}/api`;
 
 export default function CustomerNotificationsPage() {
   const navigate = useNavigate();
+  const { user } = useAuth();
   const [notifications, setNotifications] = useState([]);
   const [loading, setLoading] = useState(true);
 
-  const user = JSON.parse(localStorage.getItem('user') || '{}');
-  const phone = user?.phone || '';
+  // Read phone from AuthContext (primary) or legacy localStorage keys (fallback)
+  const phone = user?.phone
+    || (() => {
+      try {
+        const stored = JSON.parse(localStorage.getItem('salon_user') || '{}');
+        return stored?.phone || '';
+      } catch { return ''; }
+    })();
 
   useEffect(() => {
     if (phone) {
       fetchNotifications();
+    } else {
+      setLoading(false);
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [phone]);
 
   const fetchNotifications = async () => {
@@ -85,6 +96,12 @@ export default function CustomerNotificationsPage() {
         {loading ? (
           <div className="text-center py-12">
             <p className="text-muted-foreground">Loading notifications...</p>
+          </div>
+        ) : !phone ? (
+          <div className="text-center py-16">
+            <Bell className="w-16 h-16 text-muted-foreground mx-auto mb-4 opacity-30" />
+            <p className="text-lg font-semibold text-muted-foreground">Please log in</p>
+            <p className="text-sm text-muted-foreground mt-1">Log in to view your notifications</p>
           </div>
         ) : notifications.length === 0 ? (
           <div className="text-center py-16">

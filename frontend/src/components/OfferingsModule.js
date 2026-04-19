@@ -387,7 +387,7 @@ export default function OfferingsModule({ salonId, token }) {
                       <Checkbox
                         checked={allEnabled}
                         onCheckedChange={handleCategorySelectAll}
-                        className="data-[state=checked]:bg-gold data-[state=checked]:border-gold"
+                        className="data-[state=checked]:bg-gold data-[state=checked]:border-gold data-[state=checked]:text-black"
                       />
                       <span className="text-xs text-muted-foreground">Select All</span>
                     </div>
@@ -551,7 +551,7 @@ function ServiceCardContent({ service, onToggleFavorite, onToggleEnabled, onEdit
           <Checkbox
             checked={isEnabledForSalon}
             onCheckedChange={() => onToggleEnabled(service.id, isEnabledForSalon)}
-            className="data-[state=checked]:bg-gold data-[state=checked]:border-gold"
+            className="data-[state=checked]:bg-gold data-[state=checked]:border-gold data-[state=checked]:text-black"
           />
           <span className="text-[10px] text-muted-foreground mt-1">Enable</span>
         </div>

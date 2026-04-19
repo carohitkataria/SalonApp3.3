@@ -63,7 +63,9 @@ const SelectChip = ({ selected, onClick, children, icon: Icon, disabled = false 
 );
 
 // Service Card Component
-const ServiceCard = ({ service, selected, onToggle, price }) => (
+const ServiceCard = ({ service, selected, onToggle, price }) => {
+  const isOnwards = service.price_type === 'onwards';
+  return (
   <motion.div
     whileHover={{ scale: 1.01 }}
     whileTap={{ scale: 0.99 }}
@@ -84,7 +86,12 @@ const ServiceCard = ({ service, selected, onToggle, price }) => (
         )}
       </div>
       <div className="flex items-center gap-2">
-        <p className="text-base font-bold text-gold">₹{price}</p>
+        <div className="text-right">
+          <p className="text-base font-bold text-gold leading-tight">₹{price}</p>
+          {isOnwards && (
+            <p className="text-[10px] font-semibold text-amber-500 uppercase tracking-wide leading-tight">Onwards</p>
+          )}
+        </div>
         {selected && (
           <motion.div
             initial={{ scale: 0 }}
@@ -97,7 +104,8 @@ const ServiceCard = ({ service, selected, onToggle, price }) => (
       </div>
     </div>
   </motion.div>
-);
+  );
+};
 
 // Barber Selection Component
 const BarberChip = ({ barber, selected, onSelect, liveStatus, slotAvailability }) => {
@@ -528,6 +536,26 @@ export default function SinglePageBooking() {
     setFormData(prev => ({ ...prev, barberId }));
   };
 
+  // Check if any selected service has price_type='onwards' → force Pay at Salon
+  const hasOnwardsSelected = (() => {
+    if (formData.selectedServices.length === 0) return false;
+    const serviceList = (fastestAvailable || formData.barberId === 'any') ? salonServices : barberServices;
+    return formData.selectedServices.some(sid => {
+      const svc = serviceList.find(s => s.id === sid);
+      return svc && svc.price_type === 'onwards';
+    });
+  })();
+
+  // Auto-switch to pay_later when an onwards service is selected and another mode was active
+  useEffect(() => {
+    if (hasOnwardsSelected && paymentMode && paymentMode !== 'pay_later') {
+      setPaymentMode('pay_later');
+      setUpiAppOpened(false);
+      toast.info("'Pay at Salon' is the only option because you selected a service with price 'Onwards'.");
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hasOnwardsSelected]);
+
   const handleFastestAvailable = () => {
     setFastestAvailable(true);
     setFormData(prev => ({ ...prev, barberId: 'any' }));
@@ -835,8 +863,14 @@ export default function SinglePageBooking() {
           {/* Payment Options */}
           <div>
             <h3 className="text-sm font-medium text-muted-foreground mb-3">Choose Payment Method</h3>
+            {hasOnwardsSelected && (
+              <div className="mb-3 p-3 rounded-lg bg-amber-500/10 border border-amber-500/30 text-xs text-amber-700 dark:text-amber-300">
+                One or more selected services are priced as <strong>"Onwards"</strong>. Final price will be decided at the salon, so only <strong>Pay at Salon</strong> is available.
+              </div>
+            )}
             <div className="space-y-3">
               {/* Cash */}
+              {!hasOnwardsSelected && (
               <motion.button
                 type="button"
                 whileHover={{ scale: 1.01 }}
@@ -859,8 +893,10 @@ export default function SinglePageBooking() {
                   </div>
                 )}
               </motion.button>
+              )}
 
               {/* UPI */}
+              {!hasOnwardsSelected && (
               <motion.button
                 type="button"
                 whileHover={{ scale: 1.01 }}
@@ -883,8 +919,10 @@ export default function SinglePageBooking() {
                   </div>
                 )}
               </motion.button>
+              )}
 
               {/* Wallet */}
+              {!hasOnwardsSelected && (
               <motion.button
                 type="button"
                 whileHover={hasWallet ? { scale: 1.01 } : {}}
@@ -928,6 +966,7 @@ export default function SinglePageBooking() {
                   </div>
                 )}
               </motion.button>
+              )}
 
               {/* Pay later at Salon */}
               <motion.button

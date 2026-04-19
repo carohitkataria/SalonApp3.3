@@ -340,37 +340,36 @@ export default function MyProfile({ salon, onUpdate, getAuthHeaders, onDeleteSal
               </div>
             </div>
             <div className="md:col-span-2">
-              <Label htmlFor="gallery">Salon Photo Gallery</Label>
+              <Label htmlFor="gallery">Salon Photo &amp; Video Gallery</Label>
               <div className="space-y-2">
                 <Input
                   id="gallery"
                   type="file"
-                  accept="image/*"
+                  accept="image/*,video/*"
                   multiple
                   onChange={(e) => {
                     const files = Array.from(e.target.files);
                     if (files.length === 0) return;
-                    
+                    let completed = 0;
                     files.forEach(file => {
-                      if (file.size > 2 * 1024 * 1024) {
-                        toast.error(`${file.name} is too large (max 2MB)`);
-                        return;
-                      }
                       const reader = new FileReader();
                       reader.onloadend = () => {
                         setEditData(prev => ({
                           ...prev,
                           photo_gallery: [...(prev.photo_gallery || []), reader.result]
                         }));
+                        completed++;
+                        if (completed === files.length) {
+                          toast.success(`${files.length} file(s) uploaded`);
+                        }
                       };
                       reader.onerror = () => toast.error(`Failed to upload ${file.name}`);
                       reader.readAsDataURL(file);
                     });
-                    toast.success(`${files.length} photo(s) uploaded`);
                   }}
                 />
                 <Input
-                  placeholder="Or enter image URLs (comma-separated)"
+                  placeholder="Or enter image/video URLs (comma-separated)"
                   onChange={(e) => {
                     const urls = e.target.value.split(',').map(url => url.trim()).filter(Boolean);
                     if (urls.length > 0) {
@@ -380,30 +379,42 @@ export default function MyProfile({ salon, onUpdate, getAuthHeaders, onDeleteSal
                 />
                 {editData.photo_gallery && editData.photo_gallery.length > 0 && (
                   <div className="grid grid-cols-3 md:grid-cols-4 gap-2">
-                    {editData.photo_gallery.map((url, index) => (
-                      <div key={index} className="relative group">
-                        <img 
-                          src={url} 
-                          alt={`Gallery ${index + 1}`} 
-                          className="w-full h-24 object-cover border border-border rounded-lg"
-                        />
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setEditData({
-                              ...editData,
-                              photo_gallery: editData.photo_gallery.filter((_, i) => i !== index)
-                            });
-                          }}
-                          className="absolute -top-1 -right-1 p-1 bg-red-500 text-white rounded-full hover:bg-red-600 opacity-0 group-hover:opacity-100 transition-opacity"
-                        >
-                          <X className="w-3 h-3" />
-                        </button>
-                      </div>
-                    ))}
+                    {editData.photo_gallery.map((url, index) => {
+                      const isVideo = typeof url === 'string' && (url.startsWith('data:video') || /\.(mp4|webm|mov|ogg)(\?|$)/i.test(url));
+                      return (
+                        <div key={index} className="relative group">
+                          {isVideo ? (
+                            <video
+                              src={url}
+                              className="w-full h-24 object-cover border border-border rounded-lg bg-black"
+                              controls
+                              muted
+                            />
+                          ) : (
+                            <img
+                              src={url}
+                              alt={`Gallery ${index + 1}`}
+                              className="w-full h-24 object-cover border border-border rounded-lg"
+                            />
+                          )}
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setEditData({
+                                ...editData,
+                                photo_gallery: editData.photo_gallery.filter((_, i) => i !== index)
+                              });
+                            }}
+                            className="absolute -top-1 -right-1 p-1 bg-red-500 text-white rounded-full hover:bg-red-600 opacity-0 group-hover:opacity-100 transition-opacity"
+                          >
+                            <X className="w-3 h-3" />
+                          </button>
+                        </div>
+                      );
+                    })}
                   </div>
                 )}
-                <p className="text-xs text-muted-foreground">Upload multiple photos to showcase your salon</p>
+                <p className="text-xs text-muted-foreground">Upload multiple photos and videos to showcase your salon. No size limit.</p>
               </div>
             </div>
             <div className="md:col-span-2">

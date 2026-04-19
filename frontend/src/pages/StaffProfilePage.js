@@ -299,8 +299,8 @@ export default function StaffProfilePage() {
                     JSON.parse(localStorage.getItem('salon_user_auth') || '{}').token;
 
       await axios.put(
-        `${API}/barbers/${staffId}/services/${serviceId}/toggle`,
-        { is_available: isAvailable },
+        `${API}/barbers/${staffId}/services/${serviceId}/toggle?is_available=${isAvailable}`,
+        null,
         { headers: { Authorization: `Bearer ${token}` } }
       );
 

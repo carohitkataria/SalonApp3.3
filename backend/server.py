@@ -342,7 +342,22 @@ class User(BaseModel):
     name: str
     phone: str
     gender: Optional[str] = None  # Men/Women
+    dob: Optional[str] = None  # YYYY-MM-DD
+    email: Optional[str] = None
+    address: Optional[str] = None
+    city: Optional[str] = None
+    pincode: Optional[str] = None
     created_at: str
+
+
+class UserProfileUpdate(BaseModel):
+    name: Optional[str] = None
+    gender: Optional[str] = None
+    dob: Optional[str] = None
+    email: Optional[str] = None
+    address: Optional[str] = None
+    city: Optional[str] = None
+    pincode: Optional[str] = None
 
 # Token/Booking Models
 class BookingCreate(BaseModel):
@@ -2530,6 +2545,33 @@ async def user_login(credentials: UserLogin):
         await db.users.insert_one(new_user)
         return User(**new_user)
 
+
+@api_router.get("/users/by-phone/{phone}", response_model=User)
+async def get_user_by_phone(phone: str):
+    """Get a customer's profile by phone."""
+    if not phone.startswith("+91"):
+        phone = f"+91{phone}"
+    user = await db.users.find_one({"phone": phone}, {"_id": 0})
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    return User(**user)
+
+
+@api_router.put("/users/by-phone/{phone}", response_model=User)
+async def update_user_profile(phone: str, payload: UserProfileUpdate):
+    """Update a customer's profile fields (name, gender, dob, email, address, city, pincode)."""
+    if not phone.startswith("+91"):
+        phone = f"+91{phone}"
+    user = await db.users.find_one({"phone": phone}, {"_id": 0})
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    update_dict = {k: v for k, v in payload.model_dump(exclude_unset=True).items() if v is not None}
+    if update_dict:
+        await db.users.update_one({"phone": phone}, {"$set": update_dict})
+        user.update(update_dict)
+    return User(**user)
+
+
 # ============ CUSTOMER MASTER ROUTES ============
 
 @api_router.get("/salons/{salon_id}/customers")
@@ -2907,6 +2949,8 @@ async def create_membership_plan(salon_id: str, plan: MembershipPlanCreate, curr
     plan_dict["created_at"] = datetime.now(timezone.utc).isoformat()
     
     await db.membership_plans.insert_one(plan_dict)
+    return MembershipPlan(**plan_dict)
+
 
 @api_router.put("/salons/{salon_id}/customer-packages/{package_id}")
 async def update_customer_package(
@@ -2934,7 +2978,6 @@ async def delete_customer_package(
         raise HTTPException(status_code=404, detail="Package not found")
     return {"message": "Package deleted successfully"}
 
-    return MembershipPlan(**plan_dict)
 
 @api_router.get("/salons/{salon_id}/membership-plans")
 async def get_membership_plans(salon_id: str):
@@ -3161,6 +3204,8 @@ async def sell_membership(salon_id: str, membership: CustomerMembershipCreate, c
             await send_whatsapp_notification(phone, wa_msg, "membership_added")
 
         return {"message": "Membership created", "membership": membership_data}
+
+@api_router.post("/salons/{salon_id}/customers/{phone}/buy-membership")
 async def customer_buy_membership(
     salon_id: str, 
     phone: str,
