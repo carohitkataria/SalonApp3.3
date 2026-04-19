@@ -2,6 +2,8 @@ import { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import axios from 'axios';
 import GenderBadge from '@/components/GenderBadge';
+import RescheduleDialog from '@/components/RescheduleDialog';
+import QueueVelocityChart from '@/components/QueueVelocityChart';
 import { 
   ArrowLeft, Calendar, Clock, User, Scissors, MapPin, 
   CheckCircle, AlertCircle, XCircle, Phone, CreditCard, Share2, Edit, Users
@@ -20,6 +22,7 @@ export default function TokenDetailPage() {
   const [salon, setSalon] = useState(null);
   const [barber, setBarber] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [showRescheduleDialog, setShowRescheduleDialog] = useState(false);
 
   useEffect(() => {
     fetchTokenDetails();
@@ -64,6 +67,12 @@ export default function TokenDetailPage() {
       navigator.clipboard.writeText(window.location.href);
       toast.success('Link copied to clipboard!');
     }
+  };
+
+  const handleRescheduleSuccess = (newToken) => {
+    // Reload token details
+    fetchTokenDetails();
+    toast.success('Booking rescheduled successfully!');
   };
 
   const getStatusConfig = (status) => {
@@ -209,7 +218,7 @@ export default function TokenDetailPage() {
           {(token.status === 'waiting' || token.status === 'future') && (
             <>
               <Button
-                onClick={() => toast.info('Reschedule feature coming soon!')}
+                onClick={() => setShowRescheduleDialog(true)}
                 variant="outline"
                 className="flex-1 border-blue-500 text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-950"
               >
@@ -381,7 +390,27 @@ export default function TokenDetailPage() {
             Book Again
           </Button>
         )}
+
+        {/* Queue Velocity Chart - Show only for waiting status */}
+        {token.status === 'waiting' && salon && (
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.4 }}
+          >
+            <QueueVelocityChart token={token} salon={salon} />
+          </motion.div>
+        )}
       </div>
+
+      {/* Reschedule Dialog */}
+      {showRescheduleDialog && (
+        <RescheduleDialog
+          token={token}
+          onClose={() => setShowRescheduleDialog(false)}
+          onSuccess={handleRescheduleSuccess}
+        />
+      )}
     </div>
   );
 }

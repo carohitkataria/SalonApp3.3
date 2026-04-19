@@ -1,0 +1,40 @@
+{
+  "summary": "Backend: 6/6 tests PASS for active-bookings API, booking limit enforcement, and barber gender_specialization. Frontend: CRITICAL — ActiveBookingTracker component does NOT render on /salons page despite the logged-in customer having 1 active booking (confirmed via backend). 'Track My Token' button and greeting are completely missing from the salons page, matching user's reported issue.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [
+      {"component": "ActiveBookingTracker", "issue": "Component does not render on /salons page. No greeting, no 'Track My Token' button, data-testid='active-booking-tracker' not found in DOM. Customer has 1 confirmed active booking (booking-limit API rejects new self-booking with 'You already have an active booking for yourself today'). Component is likely failing to read the correct phone from user context/localStorage, or its conditional render hides it unexpectedly.", "selector": "[data-testid='active-booking-tracker']", "priority": "CRITICAL"}
+    ],
+    "integration_issues": [
+      {"flow": "Customer /salons active-booking tracker", "issue": "Frontend does not call /api/customers/{phone}/active-bookings after login OR the response is not displayed. Backend endpoint is working and returns enriched data with salon_details. Verify phone normalization and user context wiring in ActiveBookingTracker.js. Check console: only geolocation errors, no component-level console.log despite E1 adding extensive logging — suggests the component never mounts or is not imported on SalonSelectionPage.", "affected_selectors": ["[data-testid='active-booking-tracker']", "button:has-text('Track My Token')"]}
+    ],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_booking_features.py",
+    "/app/test_reports/pytest/booking_features.xml"
+  ],
+  "action_items": [
+    "Fix ActiveBookingTracker not rendering on /salons — verify: (1) component is actually imported/mounted in SalonSelectionPage.js, (2) phone number is read from user context/localStorage and normalized with +91 prefix before calling /api/customers/{phone}/active-bookings, (3) the count>0 conditional is correct, (4) add console.log on mount to confirm, (5) add data-testid='active-booking-tracker' on root element",
+    "Could NOT validate Reschedule dialog, Queue Velocity Chart, or Token Detail page large display because entry point (Track My Token button) is absent. Retest required after fix.",
+    "Barber gender badge visibility in booking flow not validated via UI (blocked by same flow). Backend confirms gender_specialization field is present and updatable."
+  ],
+  "critical_code_review_comments": [
+    "ActiveBookingTracker.js — suspected not being mounted on /salons or phone lookup mismatch. Verify SalonSelectionPage.js imports and renders <ActiveBookingTracker /> near top of JSX.",
+    "Recommend adding explicit data-testid='active-booking-tracker' and data-testid='track-my-token-btn' to aid automated verification.",
+    "Backend /api/customers/{phone}/active-bookings correctly normalizes phone and enriches with salon_details — works as designed."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_booking_features.py"
+  ],
+  "success_rate": {"backend": "100% (6/6)", "frontend": "Blocked — core ActiveBookingTracker feature not rendering"},
+  "test_credentials": "Customer login flow on /login is signup-style (name + phone + gender); used Test User / 7503070727 / Men. Salon admin: +917503070727 / salon123.",
+  "seed_data_creation": "None — existing active booking for +917503070727 used",
+  "retest_needed": true,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Backend verified: /api/customers/+917503070727/active-bookings returns bookings with salon_details enrichment and no _id leak. Booking limit API correctly returns 400 'You already have an active booking for yourself today' when self-booking is attempted a second time. Barber gender_specialization PUT works when authenticated via /api/salon/password-login (access_token Bearer). Frontend blocker: ActiveBookingTracker does not render on /salons after customer /login signup — verify component mount, phone context, and conditional render. Once fixed, retest: Track My Token → Token Detail (8xl number, progress bar, Share/Reschedule/Cancel) → Reschedule dialog (date picker +1..+30 days, shift selector) → Queue Velocity Chart → gender badges on barber cards in SinglePageBooking.",
+  "rca_of_the_issue": "ActiveBookingTracker invisible on /salons. Reproduction: 1) Go to /login (https://notify-control-4.preview.emergentagent.com/login), 2) Fill name 'Test User', phone '7503070727', select 'Men', click Continue — redirected to /salons with 'Welcome to SalonHub!' toast, 3) DOM inspect shows no [data-testid='active-booking-tracker'], no 'Track My Token' text, no greeting. Backend returns valid data for that phone. Likely cause: either ActiveBookingTracker is not imported/mounted in SalonSelectionPage.js, or user phone from login context is not passed/normalized correctly, or a silent exception prevents render. Mitigation: open SalonSelectionPage.js and verify <ActiveBookingTracker userPhone={...} /> is rendered above the salon list; add console.log on mount and API call; ensure phone is prefixed with +91."
+}

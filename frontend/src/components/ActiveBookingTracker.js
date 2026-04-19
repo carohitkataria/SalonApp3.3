@@ -16,15 +16,20 @@ export default function ActiveBookingTracker({ userPhone, userName }) {
   useEffect(() => {
     if (userPhone) {
       fetchActiveBookings();
+    } else {
+      setLoading(false);
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [userPhone]);
 
   const fetchActiveBookings = async () => {
     try {
+      console.log('[ActiveBookingTracker] Fetching bookings for phone:', userPhone);
       const response = await axios.get(`${API}/customers/${userPhone}/active-bookings`);
+      console.log('[ActiveBookingTracker] Response:', response.data);
       setActiveBookings(response.data.active_bookings || []);
     } catch (error) {
-      console.error('Error fetching active bookings:', error);
+      console.error('[ActiveBookingTracker] Error fetching active bookings:', error);
     } finally {
       setLoading(false);
     }
@@ -43,22 +48,19 @@ export default function ActiveBookingTracker({ userPhone, userName }) {
     return Math.max(tokensAhead * 15, 5);
   };
 
-  const getServiceNames = async (serviceIds) => {
-    try {
-      const services = await Promise.all(
-        serviceIds.map(async (id) => {
-          const res = await axios.get(`${API}/services/${id}`);
-          return res.data.service_name;
-        })
-      );
-      return services.join(', ');
-    } catch {
-      return 'Services';
-    }
-  };
+  console.log('[ActiveBookingTracker] Render state:', { loading, activeBookings: activeBookings.length, userPhone });
 
-  if (loading) return null;
-  if (activeBookings.length === 0) return null;
+  if (loading) {
+    console.log('[ActiveBookingTracker] Still loading...');
+    return null;
+  }
+  
+  if (activeBookings.length === 0) {
+    console.log('[ActiveBookingTracker] No active bookings, hiding component');
+    return null;
+  }
+
+  console.log('[ActiveBookingTracker] Rendering with', activeBookings.length, 'booking(s)');
 
   return (
     <div className="w-full bg-gradient-to-br from-pink-500 via-purple-500 to-blue-500 p-6 rounded-b-3xl shadow-2xl">
