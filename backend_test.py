@@ -10,7 +10,7 @@ import uuid
 from datetime import datetime, timedelta
 
 # Configuration
-BASE_URL = "https://payment-workflow-hub-1.preview.emergentagent.com/api"
+BASE_URL = "https://notify-control-4.preview.emergentagent.com/api"
 SALON_ID = "02ce3728-5ffb-48a9-be59-6556b12d2561"
 TEST_PHONE = "9876543210"
 
