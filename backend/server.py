@@ -3245,7 +3245,8 @@ async def customer_buy_membership(
     }
     
     await db.customer_memberships.insert_one(membership_data)
-    
+    membership_data.pop("_id", None)
+
     # Create notification for salon about pending membership confirmation
     await db.notifications.insert_one({
         "id": str(uuid.uuid4()),
