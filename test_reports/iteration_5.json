@@ -1,0 +1,40 @@
+{
+  "summary": "Tested Landing Page, Operational Hours APIs, Manual Toggle, Booking Availability and Salon Dashboard UI. Backend: 8/10 tests pass. Frontend: landing page, routing, and dashboard badges all working. Found 1 critical backend bug in manual-toggle endpoint.",
+  "backend_issues": {
+    "critical": [
+      {"endpoint": "PUT /api/salons/{id}/manual-toggle", "issue": "Endpoint hardcodes is_overridden=True regardless of request body. Clients cannot clear the override. Since GET /is-accepting-bookings short-circuits on is_overridden, once a salon is manually toggled, the holiday-blocking code path is unreachable via API. Fix: read toggle_data.get('is_overridden') and honor it; if False, reset overridden_at to None. Also add an auto-clear-on-day-transition mechanism as per requirements.", "priority": "HIGH"}
+    ],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "Landing Page header", "issues": ["Logo text 'SalonHub' appears duplicated next to logo icon — looks like '{logo} SalonHub SalonHub'. Remove one occurrence."]}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_operational_hours.py",
+    "/app/test_reports/pytest/op_hours.xml"
+  ],
+  "action_items": [
+    "Fix PUT /api/salons/{id}/manual-toggle to honor is_overridden field from request body so override can be cleared",
+    "Implement auto-clear of manual_toggle override on day transition (per requirement 'Manual toggle should remain overridden until next automatic day transition')",
+    "Remove duplicate 'SalonHub' text in landing page header"
+  ],
+  "critical_code_review_comments": [
+    "server.py:1615 hardcodes is_overridden=True in manual-toggle handler — ignores client intent",
+    "is-accepting-bookings unconditionally short-circuits when is_overridden=True — combined with the above bug, holiday logic becomes unreachable after any manual toggle",
+    "No scheduled job or on-read logic found to auto-clear override on day transition"
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_operational_hours.py"
+  ],
+  "success_rate": {"backend": "80% (8/10 passed)", "frontend": "100% of tested flows"},
+  "test_credentials": "Salon: +917503070727 / salon123 (salon_id a356c4e6-274f-40e7-9a37-66d3a4613d17)",
+  "seed_data_creation": "None — used existing salon account",
+  "retest_needed": true,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Landing page at / renders with Google colors and Login button; /user/login correctly redirects to /login. Salon dashboard shows 'MANUALLY OPEN' badge in the header when override is set. Settings tab contains Operational Hours module with Monday-Sunday, Lunch and Holiday controls. Only unresolved issue: manual-toggle API cannot clear override (hardcoded True). Backend PUT operational-hours accepts body as flat OperationalHours object (NOT wrapped in {'operational_hours': ...}).",
+  "rca_of_the_issue": "Root cause of manual-toggle bug: in /app/backend/server.py lines 1613-1619, update_manual_toggle() builds the stored dict with a literal 'is_overridden': True instead of reading the value from toggle_data. Reproduction: PUT /api/salons/{id}/manual-toggle with {is_overridden: false, is_open: true} and then GET /operational-hours — the stored is_overridden is still true. Mitigation: change line 1616 to 'is_overridden': toggle_data.get('is_overridden', True) and set overridden_at to None when False. Additionally implement a day-transition auto-clear (either on read comparing overridden_at date to today, or a scheduled task)."
+}

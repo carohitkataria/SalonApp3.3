@@ -7,6 +7,9 @@ import { Toaster } from '@/components/ui/sonner';
 // Layout
 import CustomerLayout from '@/components/CustomerLayout';
 
+// Landing Page
+import LandingPage from '@/pages/LandingPage';
+
 // User Pages
 import UserLoginPage from '@/pages/UserLoginPage';
 import SalonSelectionPage from '@/pages/SalonSelectionPage';
@@ -39,9 +42,12 @@ function App() {
             <Toaster position="top-center" richColors />
             <BrowserRouter>
               <Routes>
+                {/* Landing Page */}
+                <Route path="/" element={<LandingPage />} />
+                
                 {/* User Routes */}
-                <Route path="/user/login" element={<UserLoginPage />} />
-                <Route path="/" element={<Navigate to="/salons" replace />} />
+                <Route path="/login" element={<UserLoginPage />} />
+                <Route path="/user/login" element={<Navigate to="/login" replace />} />
                 
                 {/* Customer Routes with Layout */}
                 <Route path="/salons" element={<CustomerLayout><SalonSelectionPage /></CustomerLayout>} />

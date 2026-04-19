@@ -16,6 +16,7 @@ import OfferingsModule from '@/components/OfferingsModule';
 import FinancialsModule from '@/components/FinancialsModule';
 import MyProfile from '@/components/MyProfile';
 import SalonNotificationSettings from '@/components/SalonNotificationSettings';
+import OperationalHoursModule from '@/components/OperationalHoursModule';
 import Analytics from '@/components/Analytics';
 import { getSession, clearSession } from '@/utils/sessionManager';
 import { 
@@ -817,9 +818,28 @@ export default function EnhancedSalonDashboard() {
                 <h2 className="text-2xl font-playfair font-bold text-foreground">{salon?.salon_name || salon?.name || 'Salon'}</h2>
                 <p className="text-sm text-muted-foreground">{new Date().toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}</p>
               </div>
-              <div className="flex items-center gap-2">
-                <Activity className="w-4 h-4 text-green-500 animate-pulse" />
-                <span className="text-xs text-green-500 font-medium">Live</span>
+              <div className="flex items-center gap-3">
+                {/* Manual Toggle Status Badge */}
+                {salon?.manual_toggle?.is_overridden && (
+                  <div className={`flex items-center gap-2 px-3 py-1.5 rounded-full ${
+                    salon.manual_toggle.is_open 
+                      ? 'bg-green-500/10 border border-green-500/30' 
+                      : 'bg-red-500/10 border border-red-500/30'
+                  }`}>
+                    <span className={`w-2 h-2 rounded-full ${
+                      salon.manual_toggle.is_open ? 'bg-green-500 animate-pulse' : 'bg-red-500'
+                    }`}></span>
+                    <span className={`text-xs font-bold ${
+                      salon.manual_toggle.is_open ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'
+                    }`}>
+                      {salon.manual_toggle.is_open ? 'MANUALLY OPEN' : 'MANUALLY CLOSED'}
+                    </span>
+                  </div>
+                )}
+                <div className="flex items-center gap-2">
+                  <Activity className="w-4 h-4 text-green-500 animate-pulse" />
+                  <span className="text-xs text-green-500 font-medium">Live</span>
+                </div>
               </div>
             </div>
 
@@ -1438,6 +1458,9 @@ export default function EnhancedSalonDashboard() {
             <SalonNotificationSettings
               salonId={salonId}
               getAuthHeaders={getAuthHeaders}
+            />
+            <OperationalHoursModule
+              salonId={salonId}
             />
           </div>
         )}

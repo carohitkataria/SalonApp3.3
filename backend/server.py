@@ -101,6 +101,30 @@ class SalonPasswordLogin(BaseModel):
     phone: str
     password: str
 
+class DayOperationalHours(BaseModel):
+    """Operational hours for a specific day"""
+    is_holiday: bool = False
+    opening_time: Optional[str] = "09:00"  # Format: "HH:MM"
+    closing_time: Optional[str] = "20:00"  # Format: "HH:MM"
+    lunch_start: Optional[str] = None  # Format: "HH:MM"
+    lunch_end: Optional[str] = None  # Format: "HH:MM"
+
+class OperationalHours(BaseModel):
+    """Weekly operational hours"""
+    monday: DayOperationalHours = Field(default_factory=DayOperationalHours)
+    tuesday: DayOperationalHours = Field(default_factory=DayOperationalHours)
+    wednesday: DayOperationalHours = Field(default_factory=DayOperationalHours)
+    thursday: DayOperationalHours = Field(default_factory=DayOperationalHours)
+    friday: DayOperationalHours = Field(default_factory=DayOperationalHours)
+    saturday: DayOperationalHours = Field(default_factory=DayOperationalHours)
+    sunday: DayOperationalHours = Field(default_factory=DayOperationalHours)
+
+class ManualToggle(BaseModel):
+    """Manual open/close override"""
+    is_overridden: bool = False
+    is_open: bool = True
+    overridden_at: Optional[str] = None  # ISO timestamp
+
 class Salon(BaseModel):
     model_config = ConfigDict(extra="ignore")
     id: str
@@ -126,6 +150,8 @@ class Salon(BaseModel):
     invoice_prefix: str = "INV"  # Invoice number prefix
     invoice_start_number: int = 1  # Starting invoice number
     current_invoice_number: int = 1  # Current invoice counter
+    operational_hours: Optional[OperationalHours] = None
+    manual_toggle: Optional[ManualToggle] = None
     created_at: str
 
 # Service Models
@@ -1535,6 +1561,106 @@ async def delete_salon(salon_id: str, current_salon=Depends(get_current_salon)):
     await db.salons.delete_one({"id": salon_id})
     
     return {"message": "Salon and all associated data deleted successfully"}
+
+@api_router.get("/salons/{salon_id}/operational-hours")
+async def get_operational_hours(salon_id: str):
+    """Get operational hours for a salon"""
+    salon = await db.salons.find_one({"id": salon_id}, {"_id": 0})
+    if not salon:
+        raise HTTPException(status_code=404, detail="Salon not found")
+    
+    # Return default if not set
+    if not salon.get("operational_hours"):
+        default_hours = OperationalHours().model_dump()
+        return {"operational_hours": default_hours, "manual_toggle": {"is_overridden": False, "is_open": True, "overridden_at": None}}
+    
+    return {
+        "operational_hours": salon.get("operational_hours", OperationalHours().model_dump()),
+        "manual_toggle": salon.get("manual_toggle", {"is_overridden": False, "is_open": True, "overridden_at": None})
+    }
+
+@api_router.put("/salons/{salon_id}/operational-hours")
+async def update_operational_hours(salon_id: str, hours: OperationalHours, current_salon=Depends(get_current_salon)):
+    """Update operational hours for a salon"""
+    existing = await db.salons.find_one({"id": salon_id}, {"_id": 0})
+    if not existing:
+        raise HTTPException(status_code=404, detail="Salon not found")
+    
+    # Verify ownership (JWT payload uses "sub" for salon ID)
+    salon_id_from_token = current_salon.get("sub") or current_salon.get("id")
+    if salon_id_from_token != salon_id:
+        raise HTTPException(status_code=403, detail="Unauthorized")
+    
+    await db.salons.update_one(
+        {"id": salon_id},
+        {"$set": {"operational_hours": hours.model_dump()}}
+    )
+    
+    return {"message": "Operational hours updated successfully", "operational_hours": hours.model_dump()}
+
+@api_router.put("/salons/{salon_id}/manual-toggle")
+async def update_manual_toggle(salon_id: str, toggle_data: dict, current_salon=Depends(get_current_salon)):
+    """Toggle salon open/close manually"""
+    existing = await db.salons.find_one({"id": salon_id}, {"_id": 0})
+    if not existing:
+        raise HTTPException(status_code=404, detail="Salon not found")
+    
+    # Verify ownership (JWT payload uses "sub" for salon ID)
+    salon_id_from_token = current_salon.get("sub") or current_salon.get("id")
+    if salon_id_from_token != salon_id:
+        raise HTTPException(status_code=403, detail="Unauthorized")
+    
+    is_open = toggle_data.get("is_open", True)
+    
+    manual_toggle = {
+        "is_overridden": True,
+        "is_open": is_open,
+        "overridden_at": datetime.now(timezone.utc).isoformat()
+    }
+    
+    await db.salons.update_one(
+        {"id": salon_id},
+        {"$set": {"manual_toggle": manual_toggle}}
+    )
+    
+    return {"message": f"Salon manually {'opened' if is_open else 'closed'}", "manual_toggle": manual_toggle}
+
+@api_router.get("/salons/{salon_id}/is-accepting-bookings")
+async def check_booking_availability(salon_id: str):
+    """Check if salon is accepting bookings based on operational hours and holidays"""
+    salon = await db.salons.find_one({"id": salon_id}, {"_id": 0})
+    if not salon:
+        raise HTTPException(status_code=404, detail="Salon not found")
+    
+    # Check manual toggle first
+    manual_toggle = salon.get("manual_toggle", {})
+    if manual_toggle.get("is_overridden"):
+        return {
+            "is_accepting_bookings": manual_toggle.get("is_open", True),
+            "reason": "manual_override",
+            "message": f"Salon is manually {'open' if manual_toggle.get('is_open') else 'closed'}"
+        }
+    
+    # Check operational hours
+    operational_hours = salon.get("operational_hours")
+    if not operational_hours:
+        # Default: always open
+        return {"is_accepting_bookings": True, "reason": "default", "message": "Salon is open"}
+    
+    # Get current day
+    current_day = datetime.now(timezone.utc).strftime('%A').lower()
+    day_hours = operational_hours.get(current_day)
+    
+    if not day_hours:
+        return {"is_accepting_bookings": True, "reason": "no_config", "message": "Salon is open"}
+    
+    # Check if today is a holiday
+    if day_hours.get("is_holiday"):
+        return {"is_accepting_bookings": False, "reason": "holiday", "message": "Salon is closed (Holiday)"}
+    
+    # Salon is open (we don't block during lunch as per requirements)
+    return {"is_accepting_bookings": True, "reason": "operational_hours", "message": "Salon is open"}
+
 
 @api_router.get("/salons/{salon_id}/ratings")
 async def get_salon_ratings(salon_id: str, limit: int = 50, skip: int = 0):

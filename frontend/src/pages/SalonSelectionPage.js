@@ -371,6 +371,23 @@ export default function SalonSelectionPage() {
             </div>
           )}
           
+          {/* Manual Toggle Badge */}
+          {salon.manual_toggle?.is_overridden && (
+            <>
+              {salon.manual_toggle.is_open ? (
+                <div className="absolute top-1.5 right-1.5 bg-green-500 text-white text-[10px] font-bold px-2 py-0.5 rounded-full shadow-lg flex items-center gap-1">
+                  <span className="w-1.5 h-1.5 bg-white rounded-full animate-pulse"></span>
+                  OPEN
+                </div>
+              ) : (
+                <div className="absolute top-1.5 right-1.5 bg-red-500 text-white text-[10px] font-bold px-2 py-0.5 rounded-full shadow-lg flex items-center gap-1">
+                  <span className="w-1.5 h-1.5 bg-white rounded-full"></span>
+                  CLOSED
+                </div>
+              )}
+            </>
+          )}
+          
           {/* Carousel Controls */}
           {images.length > 1 && (
             <>
@@ -470,6 +487,22 @@ export default function SalonSelectionPage() {
               )}
               {salon.city && (
                 <span className="text-[10px] text-muted-foreground bg-muted px-1.5 py-0.5 rounded">{salon.city}</span>
+              )}
+              {/* Manual Toggle Badge */}
+              {salon.manual_toggle?.is_overridden && (
+                <>
+                  {salon.manual_toggle.is_open ? (
+                    <span className="text-[10px] bg-green-500 text-white font-bold px-2 py-0.5 rounded-full flex items-center gap-1">
+                      <span className="w-1 h-1 bg-white rounded-full animate-pulse"></span>
+                      OPEN
+                    </span>
+                  ) : (
+                    <span className="text-[10px] bg-red-500 text-white font-bold px-2 py-0.5 rounded-full flex items-center gap-1">
+                      <span className="w-1 h-1 bg-white rounded-full"></span>
+                      CLOSED
+                    </span>
+                  )}
+                </>
               )}
             </div>
           </div>
