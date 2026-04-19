@@ -4,6 +4,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import axios from 'axios';
 import { Button } from '@/components/ui/button';
 import { toast } from 'sonner';
+import CustomerBookingStatus from '@/components/CustomerBookingStatus';
 import { 
   Scissors, Calendar, User, MapPin, Star, Clock, 
   ArrowLeft, Users, CheckCircle, AlertCircle, ChevronRight, X

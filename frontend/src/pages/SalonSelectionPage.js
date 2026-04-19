@@ -6,7 +6,6 @@ import axios from 'axios';
 import { MapContainer, TileLayer, Marker, Popup, Tooltip, useMap } from 'react-leaflet';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import ActiveBookingTracker from '@/components/ActiveBookingTracker';
 import { 
   MapPin, List, Navigation, Scissors, Search, Star, ChevronLeft, ChevronRight, Map as MapIcon, Crosshair
 } from 'lucide-react';
@@ -139,25 +138,6 @@ export default function SalonSelectionPage() {
   const [searchType, setSearchType] = useState('nearby'); // 'nearby', 'name', 'city'
   const [citySearchQuery, setCitySearchQuery] = useState('');
   const [showCityDropdown, setShowCityDropdown] = useState(false);
-  
-  // Get user info from session
-  const [userInfo, setUserInfo] = useState(null);
-
-  useEffect(() => {
-    // Load user info from localStorage (not sessionStorage)
-    try {
-      const user = localStorage.getItem('salon_user');
-      if (user) {
-        const parsedUser = JSON.parse(user);
-        console.log('[SalonSelectionPage] Loaded user from localStorage:', parsedUser);
-        setUserInfo(parsedUser);
-      } else {
-        console.log('[SalonSelectionPage] No user found in localStorage');
-      }
-    } catch (error) {
-      console.error('[SalonSelectionPage] Error loading user info:', error);
-    }
-  }, []);
 
   useEffect(() => {
     if (!isUserLoggedIn) {
@@ -545,13 +525,7 @@ export default function SalonSelectionPage() {
 
   return (
     <div className="min-h-screen bg-background">
-      {/* Active Booking Tracker */}
-      {userInfo && (
-        <ActiveBookingTracker 
-          userPhone={userInfo.phone} 
-          userName={userInfo.name}
-        />
-      )}
+      {/* Active Booking Tracker - REMOVED as per user request */}
       
       {/* Header */}
       <div className="bg-card border-b border-border sticky top-0 z-30 shadow-sm">
