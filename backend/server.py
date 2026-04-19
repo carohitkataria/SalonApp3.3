@@ -1610,12 +1610,13 @@ async def update_manual_toggle(salon_id: str, toggle_data: dict, current_salon=D
     if salon_id_from_token != salon_id:
         raise HTTPException(status_code=403, detail="Unauthorized")
     
+    is_overridden = toggle_data.get("is_overridden", True)
     is_open = toggle_data.get("is_open", True)
     
     manual_toggle = {
-        "is_overridden": True,
+        "is_overridden": is_overridden,
         "is_open": is_open,
-        "overridden_at": datetime.now(timezone.utc).isoformat()
+        "overridden_at": datetime.now(timezone.utc).isoformat() if is_overridden else None
     }
     
     await db.salons.update_one(
@@ -1623,7 +1624,7 @@ async def update_manual_toggle(salon_id: str, toggle_data: dict, current_salon=D
         {"$set": {"manual_toggle": manual_toggle}}
     )
     
-    return {"message": f"Salon manually {'opened' if is_open else 'closed'}", "manual_toggle": manual_toggle}
+    return {"message": f"Salon manually {'opened' if is_open else 'closed'}" if is_overridden else "Manual override cleared", "manual_toggle": manual_toggle}
 
 @api_router.get("/salons/{salon_id}/is-accepting-bookings")
 async def check_booking_availability(salon_id: str):
@@ -1632,14 +1633,29 @@ async def check_booking_availability(salon_id: str):
     if not salon:
         raise HTTPException(status_code=404, detail="Salon not found")
     
-    # Check manual toggle first
+    # Check manual toggle first and auto-clear if day has changed
     manual_toggle = salon.get("manual_toggle", {})
     if manual_toggle.get("is_overridden"):
-        return {
-            "is_accepting_bookings": manual_toggle.get("is_open", True),
-            "reason": "manual_override",
-            "message": f"Salon is manually {'open' if manual_toggle.get('is_open') else 'closed'}"
-        }
+        # Auto-clear override if day has changed
+        overridden_at = manual_toggle.get("overridden_at")
+        if overridden_at:
+            overridden_date = datetime.fromisoformat(overridden_at).date()
+            current_date = datetime.now(timezone.utc).date()
+            if overridden_date < current_date:
+                # Day has changed, clear the override
+                await db.salons.update_one(
+                    {"id": salon_id},
+                    {"$set": {"manual_toggle": {"is_overridden": False, "is_open": True, "overridden_at": None}}}
+                )
+                manual_toggle = {"is_overridden": False, "is_open": True, "overridden_at": None}
+        
+        # If still overridden, return manual status
+        if manual_toggle.get("is_overridden"):
+            return {
+                "is_accepting_bookings": manual_toggle.get("is_open", True),
+                "reason": "manual_override",
+                "message": f"Salon is manually {'open' if manual_toggle.get('is_open') else 'closed'}"
+            }
     
     # Check operational hours
     operational_hours = salon.get("operational_hours")
