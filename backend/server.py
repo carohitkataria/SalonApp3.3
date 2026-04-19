@@ -1165,7 +1165,7 @@ async def initialize_data():
             "id": str(uuid.uuid4()),
             "salon_name": "The Looks Unisex Salon",
             "owner_name": "Owner Name",
-            "phone": "+919876543210",
+            "phone": "+917503070727",
             "email": "salon@example.com",
             "address": "123 Main Street, Bangalore, Karnataka",
             "latitude": 12.9716,

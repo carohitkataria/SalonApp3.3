@@ -23,7 +23,7 @@ db = client[DB_NAME]
 
 async def set_password():
     phone = "+917503070727"
-    password = "Rohit@123"
+    password = "salon123"
     
     # Hash password
     password_hash = pwd_context.hash(password)
