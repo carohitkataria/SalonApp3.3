@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
 import { Button } from '@/components/ui/button';
-import { Eye, Clock, Users, Scissors, MapPin, ChevronRight } from 'lucide-react';
+import { Store, Clock, Users, Scissors, MapPin, ChevronRight } from 'lucide-react';
 import { motion } from 'framer-motion';
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
@@ -63,7 +63,7 @@ export default function ActiveBookingTracker({ userPhone, userName }) {
   console.log('[ActiveBookingTracker] Rendering with', activeBookings.length, 'booking(s)');
 
   return (
-    <div className="w-full bg-gradient-to-br from-pink-500 via-purple-500 to-blue-500 p-6 rounded-b-3xl shadow-2xl" data-testid="active-booking-tracker">
+    <div className="w-full bg-gradient-to-br from-amber-600 via-yellow-600 to-amber-700 p-6 rounded-b-3xl shadow-2xl" data-testid="active-booking-tracker">
       <div className="max-w-7xl mx-auto">
         {/* Greeting */}
         <motion.div
@@ -106,10 +106,10 @@ export default function ActiveBookingTracker({ userPhone, userName }) {
                     </p>
                   </div>
                   <div className="text-right">
-                    <div className="bg-yellow-500/20 text-yellow-300 px-3 py-1 rounded-full text-sm font-bold border border-yellow-400/30">
+                    <div className="bg-white/20 text-white px-3 py-1 rounded-full text-sm font-bold border border-white/30">
                       {booking.queue_position || 0} In Queue
                     </div>
-                    <div className="bg-red-500/20 text-red-300 px-3 py-1 rounded-full text-xs font-semibold mt-2 border border-red-400/30">
+                    <div className="bg-white/20 text-white px-3 py-1 rounded-full text-xs font-semibold mt-2 border border-white/30">
                       ~{calculateWaitTime(booking)}m Wait
                     </div>
                   </div>
@@ -120,12 +120,12 @@ export default function ActiveBookingTracker({ userPhone, userName }) {
               <div className="bg-white rounded-xl p-4 space-y-3">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
-                    <div className="bg-pink-500/10 p-2 rounded-lg">
-                      <Scissors className="text-pink-600" size={20} />
+                    <div className="bg-amber-500/10 p-2 rounded-lg">
+                      <Scissors className="text-amber-600" size={20} />
                     </div>
-                    <span className="text-pink-600 font-semibold">Active Booking</span>
+                    <span className="text-amber-600 font-semibold">Active Booking</span>
                   </div>
-                  <div className="bg-purple-100 text-purple-700 px-3 py-1 rounded-full text-sm font-bold">
+                  <div className="bg-amber-100 text-amber-700 px-3 py-1 rounded-full text-sm font-bold">
                     Token #{booking.token_number}
                   </div>
                 </div>
@@ -151,35 +151,35 @@ export default function ActiveBookingTracker({ userPhone, userName }) {
                     </p>
                   </div>
 
-                  <div className="bg-pink-50 p-3 rounded-lg">
-                    <div className="flex items-center gap-2 text-pink-600 text-xs mb-1">
+                  <div className="bg-amber-50 p-3 rounded-lg">
+                    <div className="flex items-center gap-2 text-amber-600 text-xs mb-1">
                       <Clock size={14} />
                       <span>Wait Time</span>
                     </div>
-                    <p className="font-bold text-pink-600 text-sm">
+                    <p className="font-bold text-amber-600 text-sm">
                       ~{calculateWaitTime(booking)} min wait
                     </p>
                   </div>
 
-                  <div className="bg-purple-50 p-3 rounded-lg">
-                    <div className="flex items-center gap-2 text-purple-600 text-xs mb-1">
+                  <div className="bg-amber-50 p-3 rounded-lg">
+                    <div className="flex items-center gap-2 text-amber-600 text-xs mb-1">
                       <Users size={14} />
                       <span>Queue Position</span>
                     </div>
-                    <p className="font-bold text-purple-600 text-sm">
+                    <p className="font-bold text-amber-600 text-sm">
                       {booking.queue_position || 0} ahead of you
                     </p>
                   </div>
                 </div>
 
-                {/* Track Button */}
+                {/* View Salon Button */}
                 <Button
-                  onClick={() => navigate(`/token/${booking.id}`)}
-                  className="w-full bg-gradient-to-r from-pink-500 to-purple-600 hover:from-pink-600 hover:to-purple-700 text-white font-bold py-3 rounded-xl shadow-lg hover:shadow-xl transition-all duration-300 flex items-center justify-center gap-2"
-                  data-testid="track-my-token-btn"
+                  onClick={() => navigate(`/salon/${booking.salon_id}`)}
+                  className="w-full bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-600 hover:to-amber-700 text-white font-bold py-3 rounded-xl shadow-lg hover:shadow-xl transition-all duration-300 flex items-center justify-center gap-2"
+                  data-testid="view-salon-btn"
                 >
-                  <Eye size={20} />
-                  Track My Token
+                  <Store size={20} />
+                  View Salon
                   <ChevronRight size={20} />
                 </Button>
               </div>

@@ -19,7 +19,6 @@ import HistoryPage from '@/pages/HistoryPage';
 import TokenDashboard from '@/pages/TokenDashboard';
 import ServicesBrowser from '@/pages/ServicesBrowser';
 import BarberProfilePage from '@/pages/BarberProfilePage';
-import TokenDetailPage from '@/pages/TokenDetailPage';
 import SalonRatingsPage from '@/pages/SalonRatingsPage';
 import CustomerWalletPage from '@/pages/CustomerWalletPage';
 import CustomerNotificationsPage from '@/pages/CustomerNotificationsPage';
@@ -65,7 +64,6 @@ function App() {
                 <Route path="/salon/:salonId/ratings" element={<CustomerLayout><SalonRatingsPage /></CustomerLayout>} />
                 <Route path="/salon/:salonId/wallet" element={<CustomerLayout><CustomerWalletPage /></CustomerLayout>} />
                 <Route path="/notifications" element={<CustomerLayout><CustomerNotificationsPage /></CustomerLayout>} />
-                <Route path="/token/:tokenId" element={<CustomerLayout><TokenDetailPage /></CustomerLayout>} />
                 
                 {/* Salon Admin Routes */}
                 <Route path="/salon/login" element={<OTPLoginPage />} />
