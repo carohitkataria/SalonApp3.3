@@ -67,9 +67,46 @@ export default function CustomerNotificationsPage() {
     switch (type) {
       case 'payment_confirmed': return <CheckCircle className="w-5 h-5 text-green-500" />;
       case 'membership_pending': return <Clock className="w-5 h-5 text-yellow-500" />;
-      case 'membership_confirmed': return <CheckCircle className="w-5 h-5 text-green-500" />;
+      case 'membership_confirmed':
+      case 'membership_added':
+        return <CheckCircle className="w-5 h-5 text-green-500" />;
+      case 'booking_cancelled': return <CheckCircle className="w-5 h-5 text-red-500" />;
+      case 'booking_completed':
+      case 'turn_now':
+        return <CheckCircle className="w-5 h-5 text-green-500" />;
       default: return <Bell className="w-5 h-5 text-blue-500" />;
     }
+  };
+
+  const handleNotifClick = (notif) => {
+    if (!notif.is_read) markAsRead(notif.id);
+
+    const type = notif.type;
+    const relatedId = notif.related_id;
+    const salonId = notif.salon_id;
+
+    // Route to target screen
+    if (type === 'custom_package' && salonId) {
+      navigate(`/salon/${salonId}?tab=shop`);
+      return;
+    }
+    if ((type === 'membership_added' || type === 'payment_confirmed' || type === 'membership_confirmed') && salonId) {
+      navigate(`/salon/${salonId}/wallet`);
+      return;
+    }
+    if (
+      ['booking_confirmation', 'booking_cancelled', 'booking_completed',
+       'turn_now', 'turn_3_away', 'turn_2_away', 'turn_1_away'].includes(type)
+    ) {
+      if (relatedId) {
+        navigate(`/token/${relatedId}`);
+      } else {
+        navigate('/history');
+      }
+      return;
+    }
+    // Default fallback → history
+    navigate('/history');
   };
 
   return (
@@ -114,8 +151,8 @@ export default function CustomerNotificationsPage() {
             {notifications.map((notif) => (
               <div
                 key={notif.id}
-                onClick={() => !notif.is_read && markAsRead(notif.id)}
-                className={`p-4 rounded-xl border transition-all cursor-pointer ${
+                onClick={() => handleNotifClick(notif)}
+                className={`p-4 rounded-xl border transition-all cursor-pointer hover:-translate-y-0.5 hover:shadow-md ${
                   notif.is_read
                     ? 'bg-card border-border'
                     : 'bg-gold/5 border-gold/30 shadow-md hover:bg-gold/10'

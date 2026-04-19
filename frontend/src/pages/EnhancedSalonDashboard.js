@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useWebSocket } from '@/contexts/WebSocketContext';
 import { useAuth } from '@/contexts/AuthContext';
 import axios from 'axios';
@@ -32,13 +32,24 @@ const API = `${BACKEND_URL}/api`;
 
 export default function EnhancedSalonDashboard() {
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const { subscribe, unsubscribe } = useWebSocket();
   const { salonUser, isAdmin, hasPermission } = useAuth();
   
   const [activeTab, setActiveTab] = useState(() => {
-    // Restore tab from localStorage
-    return localStorage.getItem('salon_active_tab') || 'home';
+    // URL param takes precedence, then localStorage, then 'home'
+    const urlTab = new URLSearchParams(window.location.search).get('tab');
+    return urlTab || localStorage.getItem('salon_active_tab') || 'home';
   });
+
+  // React to URL param changes so notification clicks jump to the right tab
+  useEffect(() => {
+    const tab = searchParams.get('tab');
+    if (tab && tab !== activeTab) {
+      setActiveTab(tab);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams]);
   const [salonId, setSalonId] = useState(null);
   const [salon, setSalon] = useState(null);
   const [barbers, setBarbers] = useState([]);
@@ -1432,7 +1443,15 @@ export default function EnhancedSalonDashboard() {
         )}
 
         {activeTab === 'notifications' && salonId && (
-          <SalonNotificationsPanel salonId={salonId} onCountUpdate={(count) => setUnreadNotifCount(count)} />
+          <SalonNotificationsPanel
+            salonId={salonId}
+            onCountUpdate={(count) => setUnreadNotifCount(count)}
+            onNavigate={(tabId) => {
+              setActiveTab(tabId);
+              localStorage.setItem('salon_active_tab', tabId);
+              setSearchParams({ tab: tabId });
+            }}
+          />
         )}
       </div>
 
@@ -1817,7 +1836,7 @@ export default function EnhancedSalonDashboard() {
 
 
 // Salon Notifications Panel Component
-function SalonNotificationsPanel({ salonId, onCountUpdate }) {
+function SalonNotificationsPanel({ salonId, onCountUpdate, onNavigate }) {
   const [notifications, setNotifications] = useState([]);
   const [loading, setLoading] = useState(true);
 
@@ -1856,11 +1875,41 @@ function SalonNotificationsPanel({ salonId, onCountUpdate }) {
     }
   };
 
+  // Determine which tab to navigate to based on notification type
+  const getTargetTab = (type) => {
+    switch (type) {
+      case 'new_booking':
+      case 'booking_cancelled':
+      case 'booking_completed':
+      case 'booking_rescheduled':
+      case 'token_called':
+        return 'home'; // queue / dashboard with active bookings
+      case 'membership_pending':
+      case 'membership_purchase':
+      case 'membership_confirmed':
+        return 'services'; // memberships live under services/offerings
+      case 'review_added':
+        return 'analytics'; // reviews/analytics tab
+      default:
+        return null;
+    }
+  };
+
+  const handleNotifClick = (notif) => {
+    if (!notif.is_read) markAsRead(notif.id);
+    const target = getTargetTab(notif.type);
+    if (target && onNavigate) onNavigate(target);
+  };
+
   const getTypeIcon = (type) => {
     switch (type) {
       case 'payment_confirmed': return <CheckCircle className="w-5 h-5 text-green-500" />;
       case 'membership_pending': return <Clock className="w-5 h-5 text-yellow-500" />;
       case 'membership_confirmed': return <CheckCircle className="w-5 h-5 text-green-500" />;
+      case 'new_booking': return <Calendar className="w-5 h-5 text-blue-500" />;
+      case 'booking_cancelled': return <XCircle className="w-5 h-5 text-red-500" />;
+      case 'booking_completed': return <CheckCircle className="w-5 h-5 text-green-500" />;
+      case 'review_added': return <TrendingUp className="w-5 h-5 text-gold" />;
       default: return <Bell className="w-5 h-5 text-blue-500" />;
     }
   };
@@ -1897,10 +1946,10 @@ function SalonNotificationsPanel({ salonId, onCountUpdate }) {
           {notifications.map((notif) => (
             <div
               key={notif.id}
-              onClick={() => !notif.is_read && markAsRead(notif.id)}
+              onClick={() => handleNotifClick(notif)}
               className={`p-4 rounded-lg border transition-all cursor-pointer ${
                 notif.is_read
-                  ? 'bg-muted/30 border-border'
+                  ? 'bg-muted/30 border-border hover:bg-muted/50'
                   : 'bg-gold/5 border-gold/30 hover:bg-gold/10'
               }`}
             >

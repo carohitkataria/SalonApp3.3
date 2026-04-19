@@ -5298,7 +5298,7 @@ async def create_rating(rating_data: RatingCreate):
     return RatingResponse(**rating_dict)
 
 async def update_barber_average_rating(barber_id: str):
-    """Update barber's average rating after a new review"""
+    """Update barber's average rating after a new review, and also update the salon-level aggregate."""
     pipeline = [
         {"$match": {"barber_id": barber_id}},
         {"$group": {
@@ -5308,7 +5308,8 @@ async def update_barber_average_rating(barber_id: str):
         }}
     ]
     result = await db.ratings.aggregate(pipeline).to_list(1)
-    
+
+    salon_id = None
     if result:
         avg_rating = round(result[0]["average_rating"], 1)
         total_reviews = result[0]["total_reviews"]
@@ -5316,6 +5317,41 @@ async def update_barber_average_rating(barber_id: str):
             {"id": barber_id},
             {"$set": {"rating": avg_rating, "total_reviews": total_reviews}}
         )
+        barber = await db.barbers.find_one({"id": barber_id}, {"_id": 0, "salon_id": 1})
+        if barber:
+            salon_id = barber.get("salon_id")
+
+    if not salon_id:
+        # Fallback: look up salon via ratings
+        sample = await db.ratings.find_one({"barber_id": barber_id}, {"_id": 0, "salon_id": 1})
+        if sample:
+            salon_id = sample.get("salon_id")
+
+    if salon_id:
+        await update_salon_average_rating(salon_id)
+
+
+async def update_salon_average_rating(salon_id: str):
+    """Recompute the salon's aggregate rating across all its ratings."""
+    pipeline = [
+        {"$match": {"salon_id": salon_id}},
+        {"$group": {
+            "_id": "$salon_id",
+            "average_rating": {"$avg": "$rating"},
+            "total_reviews": {"$sum": 1}
+        }}
+    ]
+    result = await db.ratings.aggregate(pipeline).to_list(1)
+    if result:
+        avg = round(result[0]["average_rating"], 1)
+        total = result[0]["total_reviews"]
+    else:
+        avg = 0
+        total = 0
+    await db.salons.update_one(
+        {"id": salon_id},
+        {"$set": {"rating": avg, "total_reviews": total}}
+    )
 
 @api_router.get("/barbers/{barber_id}/ratings", response_model=BarberRatingSummary)
 async def get_barber_ratings(barber_id: str, limit: int = 20, skip: int = 0):

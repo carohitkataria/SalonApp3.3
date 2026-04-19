@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import axios from 'axios';
 import { Button } from '@/components/ui/button';
@@ -23,14 +23,22 @@ const API = `${BACKEND_URL}/api`;
 export default function SalonMainPage() {
   const { salonId } = useParams();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const { isUserLoggedIn, user } = useAuth();
   
   const [salon, setSalon] = useState(null);
   const [loading, setLoading] = useState(true);
   const [liveStatus, setLiveStatus] = useState(null);
   const [userBookings, setUserBookings] = useState([]);
-  const [activeTab, setActiveTab] = useState('dashboard');
+  const [activeTab, setActiveTab] = useState(() => searchParams.get('tab') || 'dashboard');
   const [showLiveQueue, setShowLiveQueue] = useState(false);
+
+  // Keep activeTab synced with ?tab= URL param
+  useEffect(() => {
+    const tab = searchParams.get('tab');
+    if (tab && tab !== activeTab) setActiveTab(tab);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams]);
 
   useEffect(() => {
     if (!isUserLoggedIn) {
