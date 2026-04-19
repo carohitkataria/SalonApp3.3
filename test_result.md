@@ -853,11 +853,10 @@ metadata:
 
 test_plan:
   current_focus:
-    - "Advanced Token Management — Global + Barber Queue"
-    - "75% Rule Shift Capacity"
-    - "Fastest Barber Auto Assignment"
-    - "Queue Status Endpoint"
-    - "Change Barber Flow"
+    - "Wallet Balance Validation + Partial Wallet Payment"
+    - "Membership Sell Fix (ObjectId bug) + Color Tier + Soft Delete"
+    - "Membership Expiry Notifications (30d / 7d)"
+    - "Booked-Barber Live Queue Card"
   stuck_tasks: []
   test_all: false
   test_priority: "high_first"

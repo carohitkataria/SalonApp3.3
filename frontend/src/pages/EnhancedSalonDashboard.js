@@ -24,7 +24,7 @@ import {
   Clock, User, Phone, Bell, MapPin, Settings, CheckCircle, Calendar,
   Users, ArrowLeft, FileText, Download, Plus, X, TrendingUp, Menu,
   Shield, DollarSign, Database, Pin, PinOff, Edit, CreditCard, Banknote, Smartphone,
-  LayoutDashboard, Activity, Zap
+  LayoutDashboard, Activity, Zap, Wallet
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
@@ -78,6 +78,12 @@ export default function EnhancedSalonDashboard() {
   const [showPaymentConfirmDialog, setShowPaymentConfirmDialog] = useState(false);
   const [pendingCompleteTokenId, setPendingCompleteTokenId] = useState(null);
   const [completePaymentMode, setCompletePaymentMode] = useState('cash');
+  // Wallet + partial-payment state for the "Complete" dialog
+  const [walletInfo, setWalletInfo] = useState(null); // { wallet_balance, membership_name, tier, color, has_membership }
+  const [completeWalletAmount, setCompleteWalletAmount] = useState(0);
+  const [completeCashAmount, setCompleteCashAmount] = useState(0);
+  const [completeUpiAmount, setCompleteUpiAmount] = useState(0);
+  const [completeTokenTotal, setCompleteTokenTotal] = useState(0);
   
   // Notifications
   const [unreadNotifCount, setUnreadNotifCount] = useState(0);
@@ -260,9 +266,25 @@ export default function EnhancedSalonDashboard() {
     // Find the token to check payment status
     const token = tokens.find(t => t.id === tokenId);
     if (token && !token.payment_confirmed) {
-      // Show payment confirmation dialog first
+      // Pre-fetch wallet balance so we can show it + enable partial wallet
+      const totalAmt = Number(token.total_amount) || 0;
       setPendingCompleteTokenId(tokenId);
       setCompletePaymentMode(token.payment_mode || 'cash');
+      setCompleteTokenTotal(totalAmt);
+      setCompleteWalletAmount(0);
+      setCompleteCashAmount(totalAmt);
+      setCompleteUpiAmount(0);
+      setWalletInfo(null);
+      try {
+        const phoneQ = (token.phone || '').replace(/^\+91/, '');
+        if (phoneQ && token.salon_id) {
+          const res = await axios.get(`${API}/salons/${token.salon_id}/customers/${phoneQ}/wallet`);
+          setWalletInfo(res.data || null);
+        }
+      } catch (err) {
+        // Non-fatal — dialog still opens with wallet balance = 0
+        console.warn('Failed to fetch wallet:', err);
+      }
       setShowPaymentConfirmDialog(true);
       return;
     }
@@ -277,14 +299,70 @@ export default function EnhancedSalonDashboard() {
     }
   };
 
+  // Helpers for the partial-payment dialog
+  const applyWalletSelection = (mode) => {
+    const bal = Number(walletInfo?.wallet_balance) || 0;
+    const total = completeTokenTotal;
+    if (mode === 'wallet_full') {
+      if (bal >= total) {
+        setCompleteWalletAmount(total);
+        setCompleteCashAmount(0);
+        setCompleteUpiAmount(0);
+        setCompletePaymentMode('wallet');
+      } else {
+        // Partial: use all wallet, rest in cash
+        setCompleteWalletAmount(bal);
+        setCompleteCashAmount(Math.max(0, total - bal));
+        setCompleteUpiAmount(0);
+        setCompletePaymentMode('split');
+      }
+    } else if (mode === 'wallet_partial') {
+      const useWallet = Math.min(bal, total);
+      setCompleteWalletAmount(useWallet);
+      setCompleteCashAmount(Math.max(0, total - useWallet));
+      setCompleteUpiAmount(0);
+      setCompletePaymentMode(useWallet > 0 ? 'split' : 'cash');
+    } else if (mode === 'cash') {
+      setCompleteWalletAmount(0);
+      setCompleteCashAmount(total);
+      setCompleteUpiAmount(0);
+      setCompletePaymentMode('cash');
+    } else if (mode === 'upi') {
+      setCompleteWalletAmount(0);
+      setCompleteCashAmount(0);
+      setCompleteUpiAmount(total);
+      setCompletePaymentMode('upi');
+    }
+  };
+
   const handleConfirmPaymentAndComplete = async () => {
     if (!pendingCompleteTokenId) return;
     
+    const total = completeTokenTotal;
+    const w = Number(completeWalletAmount) || 0;
+    const c = Number(completeCashAmount) || 0;
+    const u = Number(completeUpiAmount) || 0;
+    const sum = w + c + u;
+
+    if (Math.abs(sum - total) > 1) {
+      toast.error(`Totals mismatch: entered ₹${sum.toFixed(0)}, expected ₹${total.toFixed(0)}`);
+      return;
+    }
+    const walletBal = Number(walletInfo?.wallet_balance) || 0;
+    if (w > walletBal + 0.001) {
+      toast.error(`Wallet amount ₹${w.toFixed(0)} exceeds available balance ₹${walletBal.toFixed(0)}`);
+      return;
+    }
+
     try {
-      // First confirm payment
       await axios.post(
         `${API}/tokens/${pendingCompleteTokenId}/confirm-payment`,
-        { payment_mode: completePaymentMode },
+        {
+          payment_mode: completePaymentMode,
+          wallet_amount: w,
+          cash_amount: c,
+          upi_amount: u,
+        },
         { headers: getAuthHeaders() }
       );
       
@@ -1607,33 +1685,148 @@ export default function EnhancedSalonDashboard() {
 
       {/* Payment Confirmation Dialog (when clicking Complete) */}
       <Dialog open={showPaymentConfirmDialog} onOpenChange={setShowPaymentConfirmDialog}>
-        <DialogContent className="max-w-sm">
+        <DialogContent className="max-w-md">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2 text-base">
               <CreditCard className="w-5 h-5 text-gold" />
               Confirm Payment to Complete
             </DialogTitle>
           </DialogHeader>
-          
-          <p className="text-xs text-muted-foreground">
-            Payment must be confirmed before completing. Select payment mode and proceed.
-          </p>
-          
+
           <div className="space-y-3 py-1">
-            <div>
-              <Label className="mb-2 block text-sm font-semibold">Payment Mode</Label>
-              <select
-                value={completePaymentMode}
-                onChange={(e) => setCompletePaymentMode(e.target.value)}
-                className="w-full h-9 px-3 rounded-lg border border-border bg-background text-sm focus:outline-none focus:ring-2 focus:ring-gold/50"
-              >
-                <option value="cash">Cash</option>
-                <option value="upi">UPI</option>
-                <option value="wallet">Wallet</option>
-                <option value="card">Card</option>
-              </select>
+            {/* Total + Wallet Summary */}
+            <div className="rounded-lg border border-border bg-muted/40 p-3">
+              <div className="flex items-center justify-between">
+                <span className="text-sm text-muted-foreground">Bill total</span>
+                <span className="text-lg font-bold">₹{completeTokenTotal.toFixed(0)}</span>
+              </div>
+              <div className="flex items-center justify-between mt-1.5">
+                <span className="text-sm text-muted-foreground flex items-center gap-1">
+                  <Wallet className="w-3.5 h-3.5" />
+                  Wallet balance
+                  {walletInfo?.membership_name && (
+                    <span className="ml-1 text-xs px-1.5 py-0.5 rounded"
+                      style={{
+                        color: walletInfo.color || '#a855f7',
+                        backgroundColor: (walletInfo.color || '#a855f7') + '1A',
+                      }}>
+                      {walletInfo.tier || 'Member'}
+                    </span>
+                  )}
+                </span>
+                <span className={`text-base font-bold ${(walletInfo?.wallet_balance || 0) >= completeTokenTotal ? 'text-green-600' : 'text-amber-600'}`}>
+                  ₹{Number(walletInfo?.wallet_balance || 0).toFixed(0)}
+                </span>
+              </div>
+              {(walletInfo?.wallet_balance || 0) > 0 && (walletInfo?.wallet_balance || 0) < completeTokenTotal && (
+                <p className="text-xs text-amber-600 mt-1.5">
+                  Insufficient for full wallet payment — remainder will be split into cash/UPI.
+                </p>
+              )}
+              {!walletInfo?.has_membership && (
+                <p className="text-xs text-muted-foreground mt-1.5">Customer has no active wallet.</p>
+              )}
             </div>
-            
+
+            {/* Quick modes */}
+            <div>
+              <Label className="mb-2 block text-sm font-semibold">Quick select</Label>
+              <div className="grid grid-cols-2 gap-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  className={`h-9 text-xs ${completePaymentMode === 'cash' ? 'bg-gold/20 border-gold' : ''}`}
+                  onClick={() => applyWalletSelection('cash')}
+                >
+                  <Banknote className="w-3.5 h-3.5 mr-1" />Cash
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  className={`h-9 text-xs ${completePaymentMode === 'upi' ? 'bg-gold/20 border-gold' : ''}`}
+                  onClick={() => applyWalletSelection('upi')}
+                >
+                  <Smartphone className="w-3.5 h-3.5 mr-1" />UPI
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  disabled={!walletInfo?.has_membership || (walletInfo?.wallet_balance || 0) <= 0}
+                  className={`h-9 text-xs ${completeWalletAmount === completeTokenTotal ? 'bg-gold/20 border-gold' : ''}`}
+                  onClick={() => applyWalletSelection('wallet_full')}
+                >
+                  <Wallet className="w-3.5 h-3.5 mr-1" />
+                  {(walletInfo?.wallet_balance || 0) >= completeTokenTotal ? 'Full Wallet' : 'Wallet (partial)'}
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  disabled={!walletInfo?.has_membership || (walletInfo?.wallet_balance || 0) <= 0}
+                  className={`h-9 text-xs ${completePaymentMode === 'split' ? 'bg-gold/20 border-gold' : ''}`}
+                  onClick={() => applyWalletSelection('wallet_partial')}
+                >
+                  Split Wallet + Cash
+                </Button>
+              </div>
+            </div>
+
+            {/* Manual split inputs */}
+            <div className="grid grid-cols-3 gap-2">
+              <div>
+                <Label className="text-[11px] text-muted-foreground">Wallet (₹)</Label>
+                <Input
+                  type="number"
+                  min="0"
+                  step="1"
+                  value={completeWalletAmount}
+                  max={walletInfo?.wallet_balance || 0}
+                  disabled={!walletInfo?.has_membership || (walletInfo?.wallet_balance || 0) <= 0}
+                  onChange={(e) => setCompleteWalletAmount(Number(e.target.value) || 0)}
+                  className="h-8 text-sm"
+                />
+              </div>
+              <div>
+                <Label className="text-[11px] text-muted-foreground">Cash (₹)</Label>
+                <Input
+                  type="number"
+                  min="0"
+                  step="1"
+                  value={completeCashAmount}
+                  onChange={(e) => setCompleteCashAmount(Number(e.target.value) || 0)}
+                  className="h-8 text-sm"
+                />
+              </div>
+              <div>
+                <Label className="text-[11px] text-muted-foreground">UPI (₹)</Label>
+                <Input
+                  type="number"
+                  min="0"
+                  step="1"
+                  value={completeUpiAmount}
+                  onChange={(e) => setCompleteUpiAmount(Number(e.target.value) || 0)}
+                  className="h-8 text-sm"
+                />
+              </div>
+            </div>
+
+            {/* Sum validation */}
+            {(() => {
+              const sum = Number(completeWalletAmount) + Number(completeCashAmount) + Number(completeUpiAmount);
+              const diff = sum - completeTokenTotal;
+              if (Math.abs(diff) < 1) {
+                return (
+                  <p className="text-xs text-green-600 flex items-center gap-1">
+                    <CheckCircle className="w-3 h-3" /> Total matches ₹{completeTokenTotal.toFixed(0)}
+                  </p>
+                );
+              }
+              return (
+                <p className="text-xs text-red-500">
+                  {diff > 0 ? `Over by ₹${diff.toFixed(0)}` : `Short by ₹${Math.abs(diff).toFixed(0)}`}
+                </p>
+              );
+            })()}
+
             <div className="flex gap-2 pt-3 border-t">
               <Button
                 onClick={handleConfirmPaymentAndComplete}

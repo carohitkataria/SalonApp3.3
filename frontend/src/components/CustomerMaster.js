@@ -13,6 +13,7 @@ import {
 import { motion, AnimatePresence } from 'framer-motion';
 import MembershipManagement from './MembershipManagement';
 import SellMembershipModal from './SellMembershipModal';
+import MembershipBadge from './MembershipBadge';
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
 const API = `${BACKEND_URL}/api`;
@@ -418,7 +419,10 @@ export default function CustomerMaster({ salonId, getAuthHeaders }) {
                   <Crown className="w-6 h-6 text-gold" />
                 </div>
                 <div>
-                  <h3 className="text-lg font-bold">{customerMembership.membership_name} Member</h3>
+                  <div className="flex items-center gap-2">
+                    <h3 className="text-lg font-bold">{customerMembership.membership_name} Member</h3>
+                    <MembershipBadge tier={customerMembership.tier} color={customerMembership.color} name={customerMembership.membership_name} size="sm" />
+                  </div>
                   <p className="text-sm text-muted-foreground">
                     Expires: {new Date(customerMembership.expiry_date).toLocaleDateString()}
                   </p>

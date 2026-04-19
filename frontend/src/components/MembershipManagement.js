@@ -22,8 +22,18 @@ export default function MembershipManagement({ salonId, getAuthHeaders }) {
     amount: '',
     credit: '',
     validity_months: '',
-    terms_conditions: ''
+    terms_conditions: '',
+    tier: 'Custom',
+    color: ''
   });
+
+  // Color-tier presets — applied automatically when tier is picked (can be overridden)
+  const TIER_PRESETS = {
+    Diamond: { color: '#38bdf8', textClass: 'text-sky-500', bgClass: 'bg-sky-100 border-sky-300' },
+    Gold:    { color: '#f59e0b', textClass: 'text-amber-500', bgClass: 'bg-amber-100 border-amber-300' },
+    Silver:  { color: '#94a3b8', textClass: 'text-slate-500', bgClass: 'bg-slate-100 border-slate-300' },
+    Custom:  { color: '#a855f7', textClass: 'text-purple-500', bgClass: 'bg-purple-100 border-purple-300' },
+  };
 
   useEffect(() => {
     if (salonId) {
@@ -56,7 +66,9 @@ export default function MembershipManagement({ salonId, getAuthHeaders }) {
         amount: parseFloat(formData.amount),
         credit: parseFloat(formData.credit),
         validity_months: parseInt(formData.validity_months),
-        terms_conditions: formData.terms_conditions || 'Standard terms and conditions apply.'
+        terms_conditions: formData.terms_conditions || 'Standard terms and conditions apply.',
+        tier: formData.tier || 'Custom',
+        color: formData.color || TIER_PRESETS[formData.tier || 'Custom'].color
       };
 
       await axios.post(`${API}/salons/${salonId}/membership-plans`, payload, {
@@ -77,7 +89,9 @@ export default function MembershipManagement({ salonId, getAuthHeaders }) {
       amount: '',
       credit: '',
       validity_months: '',
-      terms_conditions: ''
+      terms_conditions: '',
+      tier: 'Custom',
+      color: ''
     });
     setShowForm(false);
     setEditingPlan(null);
@@ -121,7 +135,9 @@ export default function MembershipManagement({ salonId, getAuthHeaders }) {
         amount: parseFloat(formData.amount),
         credit: parseFloat(formData.credit),
         validity_months: parseInt(formData.validity_months),
-        terms_conditions: formData.terms_conditions || 'Standard terms and conditions apply.'
+        terms_conditions: formData.terms_conditions || 'Standard terms and conditions apply.',
+        tier: formData.tier || 'Custom',
+        color: formData.color || TIER_PRESETS[formData.tier || 'Custom'].color
       };
 
       await axios.put(`${API}/salons/${salonId}/membership-plans/${editingPlan.id}`, payload, {
@@ -245,6 +261,49 @@ export default function MembershipManagement({ salonId, getAuthHeaders }) {
                 </div>
               </div>
 
+              {/* Tier/Color picker */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <Label>Badge Tier *</Label>
+                  <div className="flex flex-wrap gap-2 mt-2">
+                    {Object.keys(TIER_PRESETS).map((t) => {
+                      const active = (formData.tier || 'Custom') === t;
+                      const preset = TIER_PRESETS[t];
+                      return (
+                        <button
+                          key={t}
+                          type="button"
+                          onClick={() => setFormData({ ...formData, tier: t, color: preset.color })}
+                          className={`px-3 py-1.5 rounded-full text-xs font-semibold border-2 transition-all ${active ? preset.bgClass : 'bg-white border-gray-300 text-gray-600 hover:border-gray-400'}`}
+                          style={active ? { color: preset.color } : {}}
+                        >
+                          <span className="inline-block w-2.5 h-2.5 rounded-full mr-1.5 align-middle" style={{ backgroundColor: preset.color }} />
+                          {t}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                <div>
+                  <Label htmlFor="color">Badge Color (optional override)</Label>
+                  <div className="flex items-center gap-2 mt-1">
+                    <input
+                      id="color"
+                      type="color"
+                      value={formData.color || TIER_PRESETS[formData.tier || 'Custom'].color}
+                      onChange={(e) => setFormData({ ...formData, color: e.target.value })}
+                      className="h-10 w-14 cursor-pointer rounded border border-gray-300 bg-white"
+                    />
+                    <Input
+                      value={formData.color || TIER_PRESETS[formData.tier || 'Custom'].color}
+                      onChange={(e) => setFormData({ ...formData, color: e.target.value })}
+                      placeholder="#f59e0b"
+                    />
+                  </div>
+                </div>
+              </div>
+
               <div>
                 <Label htmlFor="tc">Terms & Conditions</Label>
                 <Textarea
@@ -311,7 +370,21 @@ export default function MembershipManagement({ salonId, getAuthHeaders }) {
               </div>
 
               <div className="mb-4">
-                <h3 className="text-xl font-bold text-foreground mb-1">{plan.name}</h3>
+                <div className="flex items-center gap-2 mb-1">
+                  <h3 className="text-xl font-bold text-foreground">{plan.name}</h3>
+                  {plan.tier && (
+                    <span
+                      className="text-[10px] px-2 py-0.5 rounded-full font-bold uppercase tracking-wider border"
+                      style={{
+                        color: plan.color || TIER_PRESETS[plan.tier || 'Custom'].color,
+                        borderColor: plan.color || TIER_PRESETS[plan.tier || 'Custom'].color,
+                        backgroundColor: (plan.color || TIER_PRESETS[plan.tier || 'Custom'].color) + '20'
+                      }}
+                    >
+                      {plan.tier}
+                    </span>
+                  )}
+                </div>
                 <p className="text-sm text-muted-foreground flex items-center gap-1">
                   <Calendar className="w-3 h-3" />
                   {plan.validity_months} month(s)
@@ -363,7 +436,9 @@ export default function MembershipManagement({ salonId, getAuthHeaders }) {
                       amount: plan.amount,
                       credit: plan.credit,
                       validity_months: plan.validity_months,
-                      terms_conditions: plan.terms_conditions || ''
+                      terms_conditions: plan.terms_conditions || '',
+                      tier: plan.tier || 'Custom',
+                      color: plan.color || TIER_PRESETS[plan.tier || 'Custom'].color
                     });
                     setShowForm(true);
                   }}

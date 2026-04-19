@@ -1226,6 +1226,7 @@ DEFAULT_CUSTOMER_NOTIFICATION_SETTINGS = {
     "turn_approaching": True,
     "manual_notify": True,
     "membership_added": True,
+    "membership_expiry": True,  # 30-day and 7-day reminders
     "booking_status_change": True,
     "custom_package": True,
     # WhatsApp toggles (independent on/off for whatsapp messages)
@@ -1233,6 +1234,7 @@ DEFAULT_CUSTOMER_NOTIFICATION_SETTINGS = {
     "whatsapp_turn_approaching": True,
     "whatsapp_manual_notify": True,
     "whatsapp_membership_added": True,
+    "whatsapp_membership_expiry": True,
     "whatsapp_booking_status_change": True,
     "whatsapp_booking_confirmation": True,
     "whatsapp_booking_cancelled": True,
@@ -3415,6 +3417,9 @@ class MembershipPlanCreate(BaseModel):
     credit: float  # Credit added to wallet
     validity_months: int  # Validity in months
     terms_conditions: str  # T&C text
+    # Color-tier badge (shown to customer as a colored badge)
+    tier: Optional[str] = "Custom"  # one of: Diamond, Gold, Silver, Custom
+    color: Optional[str] = None  # hex color override, optional
 
 class MembershipPlan(BaseModel):
     model_config = ConfigDict(extra="ignore")
@@ -3425,6 +3430,8 @@ class MembershipPlan(BaseModel):
     credit: float
     validity_months: int
     terms_conditions: str
+    tier: Optional[str] = "Custom"
+    color: Optional[str] = None
     is_active: bool = True
     created_at: str
 
@@ -3443,12 +3450,19 @@ class CustomerMembership(BaseModel):
     customer_name: str
     membership_plan_id: str
     membership_name: str
+    tier: Optional[str] = "Custom"
+    color: Optional[str] = None
     payment_mode: str
     paid_amount: float
     credit_added: float
     wallet_balance: float
     expiry_date: str
     is_active: bool = True
+    cancelled: Optional[bool] = False
+    cancelled_at: Optional[str] = None
+    cancel_reason: Optional[str] = None
+    notified_1m_expiry: Optional[bool] = False
+    notified_1w_expiry: Optional[bool] = False
     payment_confirmed: bool = True  # False for customer purchases until salon confirms
     purchased_at: str
 
@@ -3584,7 +3598,7 @@ async def update_membership_plan(
     existing = await db.membership_plans.find_one({"id": plan_id}, {"_id": 0})
     if not existing:
         raise HTTPException(status_code=404, detail="Membership plan not found")
-    
+
     # Update all fields but use existing price (locked)
     await db.membership_plans.update_one(
         {"id": plan_id},
@@ -3594,11 +3608,14 @@ async def update_membership_plan(
             "credit": plan.credit,
             "validity_months": plan.validity_months,
             "terms_conditions": plan.terms_conditions,
+            "tier": plan.tier or existing.get("tier", "Custom"),
+            "color": plan.color or existing.get("color"),
             "updated_at": datetime.now(timezone.utc).isoformat()
         }}
     )
-    
+
     updated = await db.membership_plans.find_one({"id": plan_id}, {"_id": 0})
+    return MembershipPlan(**updated)
 
 @api_router.get("/salons/{salon_id}/sold-memberships")
 async def get_sold_memberships(salon_id: str, current_user=Depends(get_current_salon_user)):
@@ -3624,6 +3641,56 @@ async def update_customer_membership(
     
     return {"message": "Membership updated successfully"}
 
+@api_router.post("/salons/{salon_id}/customer-memberships/{membership_id}/cancel")
+async def cancel_customer_membership(
+    salon_id: str,
+    membership_id: str,
+    body: Optional[dict] = None,
+    current_user=Depends(get_current_salon_user),
+):
+    """Soft-cancel a sold membership.
+
+    Sets is_active=False, cancelled=True, cancelled_at=now, and stores an optional
+    cancel_reason. The record is preserved for audit. Customer is notified.
+    """
+    body = body or {}
+    reason = (body.get("reason") or "").strip() or "Cancelled by salon"
+
+    m = await db.customer_memberships.find_one({"id": membership_id, "salon_id": salon_id}, {"_id": 0})
+    if not m:
+        raise HTTPException(status_code=404, detail="Membership not found")
+    if m.get("cancelled") or not m.get("is_active", True):
+        return {"message": "Membership already cancelled"}
+
+    now_iso = datetime.now(timezone.utc).isoformat()
+    await db.customer_memberships.update_one(
+        {"id": membership_id},
+        {"$set": {
+            "is_active": False,
+            "cancelled": True,
+            "cancelled_at": now_iso,
+            "cancel_reason": reason,
+        }}
+    )
+
+    # Notify customer
+    try:
+        if m.get("customer_phone"):
+            await create_in_app_notification(
+                user_type="customer",
+                user_id=m["customer_phone"],
+                title="Membership Cancelled",
+                message=f"Your '{m.get('membership_name','')}' membership has been cancelled by the salon. Reason: {reason}",
+                notification_type="membership_cancelled",
+                setting_key="membership_added",
+                salon_id=salon_id,
+                related_id=membership_id,
+            )
+    except Exception as e:
+        logger.error(f"Failed membership cancellation notification: {e}")
+
+    return {"message": "Membership cancelled", "membership_id": membership_id}
+
 @api_router.get("/salons/{salon_id}/customers/{phone}/membership")
 async def get_customer_membership_info(salon_id: str, phone: str):
     """Get customer's active membership info (no auth required for customer view)"""
@@ -3641,8 +3708,8 @@ async def get_customer_membership_info(salon_id: str, phone: str):
     
     return membership
 
-@api_router.get("/salons/{salon_id}/customers/{phone}/bookings")
-async def get_customer_bookings(salon_id: str, phone: str):
+@api_router.get("/salons/{salon_id}/customers/{phone}/bookings-public")
+async def get_customer_bookings_public(salon_id: str, phone: str):
     """Get customer's booking history (no auth required)"""
     if not phone.startswith("+91"):
         phone = f"+91{phone}"
@@ -3653,8 +3720,6 @@ async def get_customer_bookings(salon_id: str, phone: str):
     }, {"_id": 0}).sort("created_at", -1).limit(20).to_list(20)
     
     return {"bookings": bookings}
-
-    return updated
 
 @api_router.delete("/salons/{salon_id}/membership-plans/{plan_id}")
 async def delete_membership_plan(
@@ -3700,7 +3765,12 @@ async def sell_membership(salon_id: str, membership: CustomerMembershipCreate, c
             {"id": existing["id"]},
             {"$set": {
                 "wallet_balance": new_balance,
-                "expiry_date": expiry_date.isoformat()
+                "expiry_date": expiry_date.isoformat(),
+                "tier": plan.get("tier", existing.get("tier", "Custom")),
+                "color": plan.get("color") or existing.get("color"),
+                # Reset expiry-warning flags on renewal
+                "notified_1m_expiry": False,
+                "notified_1w_expiry": False,
             }}
         )
         
@@ -3726,17 +3796,24 @@ async def sell_membership(salon_id: str, membership: CustomerMembershipCreate, c
             "customer_name": membership.customer_name,
             "membership_plan_id": plan["id"],
             "membership_name": plan["name"],
+            "tier": plan.get("tier", "Custom"),
+            "color": plan.get("color"),
             "payment_mode": membership.payment_mode,
             "paid_amount": membership.paid_amount,
             "credit_added": plan["credit"],
             "wallet_balance": plan["credit"],
             "expiry_date": expiry_date.isoformat(),
             "is_active": True,
+            "cancelled": False,
+            "notified_1m_expiry": False,
+            "notified_1w_expiry": False,
             "payment_confirmed": True,  # Salon-side sells are auto-confirmed
             "purchased_at": datetime.now(timezone.utc).isoformat()
         }
         
         await db.customer_memberships.insert_one(membership_data)
+        # FastAPI can't serialize ObjectId; strip it after insert.
+        membership_data.pop("_id", None)
         
         # Record transaction
         await db.wallet_transactions.insert_one({
@@ -3818,12 +3895,17 @@ async def customer_buy_membership(
         "customer_name": membership.customer_name,
         "membership_plan_id": plan["id"],
         "membership_name": plan["name"],
+        "tier": plan.get("tier", "Custom"),
+        "color": plan.get("color"),
         "payment_mode": membership.payment_mode,
         "paid_amount": membership.paid_amount,
         "credit_added": plan["credit"],
         "wallet_balance": 0,  # No credit until confirmed
         "expiry_date": expiry_date.isoformat(),
         "is_active": True,
+        "cancelled": False,
+        "notified_1m_expiry": False,
+        "notified_1w_expiry": False,
         "payment_confirmed": False,  # Requires salon confirmation
         "purchased_at": datetime.now(timezone.utc).isoformat()
     }
@@ -4976,76 +5058,232 @@ async def update_token_amount(token_id: str, body: dict, current_salon=Depends(g
     return {"message": f"Amount updated to ₹{final_amount}", "token": TokenModel(**updated_token)}
 
 
+@api_router.get("/salons/{salon_id}/customers/{phone}/wallet")
+async def get_customer_wallet(salon_id: str, phone: str):
+    """Return customer's active wallet balance with this salon.
+
+    Returns 0 balance when the customer has no membership. This endpoint is public
+    (used by the salon's mark-payment UI and by the customer to view their wallet).
+    """
+    if not phone.startswith("+91"):
+        phone = f"+91{phone}"
+    m = await db.customer_memberships.find_one(
+        {"salon_id": salon_id, "customer_phone": phone, "is_active": True, "payment_confirmed": True},
+        {"_id": 0, "id": 1, "wallet_balance": 1, "membership_name": 1, "tier": 1, "color": 1, "expiry_date": 1},
+    )
+    if not m:
+        return {
+            "has_membership": False,
+            "wallet_balance": 0.0,
+            "membership_id": None,
+            "membership_name": None,
+            "tier": None,
+            "color": None,
+            "expiry_date": None,
+        }
+    return {
+        "has_membership": True,
+        "wallet_balance": float(m.get("wallet_balance", 0)),
+        "membership_id": m.get("id"),
+        "membership_name": m.get("membership_name"),
+        "tier": m.get("tier"),
+        "color": m.get("color"),
+        "expiry_date": m.get("expiry_date"),
+    }
+
+
 @api_router.post("/tokens/{token_id}/confirm-payment")
 async def confirm_token_payment(token_id: str, body: dict, current_salon=Depends(get_current_salon)):
-    """Salon confirms payment for a token. Can also change payment mode."""
+    """Salon confirms payment for a token. Supports full wallet, full cash/upi, or split.
+
+    Body shape:
+      - payment_mode: "cash" | "upi" | "wallet" | "split" | "card"
+      - wallet_amount (float, optional): portion paid from wallet (for "wallet" or "split")
+      - cash_amount (float, optional): portion paid in cash (for "split")
+      - upi_amount (float, optional): portion paid via UPI (for "split")
+
+    Rules:
+      - For "wallet", the customer's wallet_balance must be >= total_amount, else 400.
+      - For "split", wallet_amount must be <= wallet_balance AND
+        wallet_amount + cash_amount + upi_amount must equal total_amount (±1 tolerance).
+      - Wallet deduction is recorded on `customer_memberships.wallet_balance` and logged
+        in `wallet_transactions`. Cash/UPI portions are logged to `financial_transactions`.
+    """
     token = await db.tokens.find_one({"id": token_id}, {"_id": 0})
     if not token:
         raise HTTPException(status_code=404, detail="Token not found")
-    
     if token.get("status") == "completed":
         raise HTTPException(status_code=400, detail="Token is already completed")
-    
-    payment_mode = body.get("payment_mode", token.get("payment_mode", "cash"))
-    
+
+    already_confirmed = token.get("payment_confirmed", False)
+    total_amount = float(token.get("total_amount", 0))
+    payment_mode = (body.get("payment_mode") or token.get("payment_mode") or "cash").lower()
+
+    wallet_amount = float(body.get("wallet_amount") or 0)
+    cash_amount = float(body.get("cash_amount") or 0)
+    upi_amount = float(body.get("upi_amount") or 0)
+
+    # Backfill amounts from legacy body shapes when only payment_mode is provided
+    if payment_mode == "wallet" and wallet_amount <= 0:
+        wallet_amount = total_amount
+    elif payment_mode == "cash" and cash_amount <= 0 and wallet_amount <= 0 and upi_amount <= 0:
+        cash_amount = total_amount
+    elif payment_mode == "upi" and upi_amount <= 0 and wallet_amount <= 0 and cash_amount <= 0:
+        upi_amount = total_amount
+    elif payment_mode == "card" and cash_amount <= 0 and upi_amount <= 0 and wallet_amount <= 0:
+        # record card portion as cash bucket for now
+        cash_amount = total_amount
+
+    # Fetch wallet (active & confirmed membership only)
+    salon_id = token.get("salon_id", "")
+    phone = token.get("phone") or ""
+    wallet_doc = None
+    if phone:
+        wallet_doc = await db.customer_memberships.find_one(
+            {"salon_id": salon_id, "customer_phone": phone, "is_active": True, "payment_confirmed": True},
+            {"_id": 0, "id": 1, "wallet_balance": 1, "membership_name": 1},
+        )
+    wallet_balance = float(wallet_doc["wallet_balance"]) if wallet_doc else 0.0
+
+    # Validation
+    if wallet_amount < 0 or cash_amount < 0 or upi_amount < 0:
+        raise HTTPException(status_code=400, detail="Payment amounts cannot be negative")
+
+    if wallet_amount > 0 and not wallet_doc:
+        raise HTTPException(
+            status_code=400,
+            detail="Customer has no active wallet. Select cash or UPI instead.",
+        )
+    if wallet_amount > wallet_balance + 0.001:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Insufficient wallet balance. Available: ₹{wallet_balance:.2f}, "
+                f"attempted to use: ₹{wallet_amount:.2f}. Please pay the remainder via cash/UPI."
+            ),
+        )
+
+    total_paid = wallet_amount + cash_amount + upi_amount
+    if abs(total_paid - total_amount) > 1.0:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Payment total ₹{total_paid:.2f} does not match bill ₹{total_amount:.2f}. "
+                f"Please adjust amounts."
+            ),
+        )
+
+    # Determine effective payment_mode label
+    modes_used = []
+    if wallet_amount > 0:
+        modes_used.append("wallet")
+    if cash_amount > 0:
+        modes_used.append("cash")
+    if upi_amount > 0:
+        modes_used.append("upi")
+    if len(modes_used) == 1:
+        effective_mode = modes_used[0]
+    elif len(modes_used) > 1:
+        effective_mode = "split"
+    else:
+        effective_mode = payment_mode or "cash"
+
+    # Apply wallet deduction (first-time only)
+    new_wallet_balance = wallet_balance
+    if wallet_amount > 0 and not already_confirmed:
+        new_wallet_balance = wallet_balance - wallet_amount
+        await db.customer_memberships.update_one(
+            {"id": wallet_doc["id"]},
+            {"$set": {"wallet_balance": new_wallet_balance}},
+        )
+        await db.wallet_transactions.insert_one({
+            "id": str(uuid.uuid4()),
+            "customer_phone": phone,
+            "salon_id": salon_id,
+            "transaction_type": "debit",
+            "amount": wallet_amount,
+            "balance_after": new_wallet_balance,
+            "description": f"Service payment: Token {token.get('token_number','')} - {token.get('customer_name','')}",
+            "reference_type": "token",
+            "reference_id": token_id,
+            "created_at": datetime.now(timezone.utc).isoformat(),
+        })
+
+    # Update token
     update_data = {
         "payment_confirmed": True,
         "payment_status": "paid",
-        "payment_mode": payment_mode
+        "payment_mode": effective_mode,
+        "payment_breakdown": {
+            "wallet_amount": wallet_amount,
+            "cash_amount": cash_amount,
+            "upi_amount": upi_amount,
+        },
     }
-    
-    await db.tokens.update_one(
-        {"id": token_id},
-        {"$set": update_data}
-    )
-    
-    # Get updated token
+    await db.tokens.update_one({"id": token_id}, {"$set": update_data})
     updated_token = await db.tokens.find_one({"id": token_id}, {"_id": 0})
-    
-    # Create notification for customer
-    if token.get("phone"):
+
+    # Customer notification
+    if phone:
+        breakdown_bits = []
+        if wallet_amount > 0:
+            breakdown_bits.append(f"₹{wallet_amount:.0f} wallet")
+        if cash_amount > 0:
+            breakdown_bits.append(f"₹{cash_amount:.0f} cash")
+        if upi_amount > 0:
+            breakdown_bits.append(f"₹{upi_amount:.0f} UPI")
+        breakdown_str = " + ".join(breakdown_bits) if breakdown_bits else effective_mode
         await db.notifications.insert_one({
             "id": str(uuid.uuid4()),
             "user_type": "customer",
-            "user_id": token["phone"],
-            "salon_id": token.get("salon_id", ""),
+            "user_id": phone,
+            "salon_id": salon_id,
             "title": "Payment Confirmed",
-            "message": f"Payment of ₹{token.get('total_amount', 0)} for token {token.get('token_number', '')} has been confirmed by the salon via {payment_mode}.",
+            "message": f"Payment of ₹{total_amount:.0f} for token {token.get('token_number','')} confirmed ({breakdown_str}).",
             "type": "payment_confirmed",
             "related_id": token_id,
             "is_read": False,
-            "created_at": datetime.now(timezone.utc).isoformat()
+            "created_at": datetime.now(timezone.utc).isoformat(),
         })
-    
+
     await broadcast_update("token_updated", updated_token)
-    
-    # Record financial transaction only for FIRST confirmation (wallet payments don't impact cash flow)
-    already_confirmed = token.get("payment_confirmed", False)
-    if not already_confirmed and payment_mode != "wallet":
-        await db.financial_transactions.insert_one({
-            "id": str(uuid.uuid4()),
-            "salon_id": token.get("salon_id", ""),
-            "type": "inflow",
-            "category": "booking_payment",
-            "amount": float(token.get("total_amount", 0)),
-            "payment_mode": payment_mode,
-            "narration": f"Booking {token.get('token_number', '')} - {token.get('customer_name', '')}",
-            "reference_id": token_id,
-            "reference_type": "token",
-            "created_by": "system",
-            "date": datetime.now(timezone.utc).strftime("%Y-%m-%d"),
-            "created_at": datetime.now(timezone.utc).isoformat()
-        })
-    elif already_confirmed:
-        # Just update the payment_mode on existing financial transaction
-        await db.financial_transactions.update_one(
+
+    # Financial transactions — log each non-wallet portion
+    if not already_confirmed:
+        for mode_name, amt in (("cash", cash_amount), ("upi", upi_amount)):
+            if amt > 0:
+                await db.financial_transactions.insert_one({
+                    "id": str(uuid.uuid4()),
+                    "salon_id": salon_id,
+                    "type": "inflow",
+                    "category": "booking_payment",
+                    "amount": float(amt),
+                    "payment_mode": mode_name,
+                    "narration": f"Booking {token.get('token_number','')} - {token.get('customer_name','')}"
+                                + (" (split)" if effective_mode == "split" else ""),
+                    "reference_id": token_id,
+                    "reference_type": "token",
+                    "created_by": "system",
+                    "date": datetime.now(timezone.utc).strftime("%Y-%m-%d"),
+                    "created_at": datetime.now(timezone.utc).isoformat(),
+                })
+    else:
+        # Just update the payment_mode on existing financial transactions for this token
+        await db.financial_transactions.update_many(
             {"reference_id": token_id, "reference_type": "token"},
-            {"$set": {"payment_mode": payment_mode}}
+            {"$set": {"payment_mode": effective_mode}},
         )
     
     return {
         "message": "Payment confirmed successfully",
-        "token": TokenModel(**updated_token)
+        "token": TokenModel(**updated_token),
+        "payment": {
+            "mode": effective_mode,
+            "wallet_amount": wallet_amount,
+            "cash_amount": cash_amount,
+            "upi_amount": upi_amount,
+            "wallet_balance_after": new_wallet_balance,
+        },
     }
 
 @api_router.put("/tokens/{token_id}/change-barber")
@@ -6749,9 +6987,86 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# ============================================================================
+# MEMBERSHIP EXPIRY NOTIFICATIONS — runs daily to notify customers whose
+# membership expires in 30 or 7 days. Honors customer notification settings.
+# ============================================================================
+async def notify_expiring_memberships():
+    """Send 30-days-before and 7-days-before expiry reminders."""
+    try:
+        now = datetime.now(timezone.utc)
+        # Fetch all active, non-cancelled memberships with an expiry date
+        cursor = db.customer_memberships.find(
+            {"is_active": True, "$or": [{"cancelled": False}, {"cancelled": {"$exists": False}}]},
+            {"_id": 0},
+        )
+        async for m in cursor:
+            try:
+                expiry = datetime.fromisoformat(str(m["expiry_date"]).replace("Z", "+00:00"))
+            except Exception:
+                continue
+            days_left = (expiry - now).days
+            phone = m.get("customer_phone")
+            if not phone:
+                continue
+
+            # 30-day reminder
+            if 28 <= days_left <= 30 and not m.get("notified_1m_expiry"):
+                await _send_expiry_reminder(m, days_left, "1m")
+                await db.customer_memberships.update_one(
+                    {"id": m["id"]}, {"$set": {"notified_1m_expiry": True}}
+                )
+            # 7-day reminder
+            if 6 <= days_left <= 7 and not m.get("notified_1w_expiry"):
+                await _send_expiry_reminder(m, days_left, "1w")
+                await db.customer_memberships.update_one(
+                    {"id": m["id"]}, {"$set": {"notified_1w_expiry": True}}
+                )
+    except Exception as e:
+        logger.error(f"notify_expiring_memberships failed: {e}")
+
+
+async def _send_expiry_reminder(m: Dict[str, Any], days_left: int, key: str):
+    phone = m["customer_phone"]
+    salon_id = m.get("salon_id", "")
+    name = m.get("membership_name", "Membership")
+    label = "30 days" if key == "1m" else "7 days"
+    title = f"Your {name} membership expires in ~{label}"
+    body = (
+        f"Your {name} membership will expire in about {label}. "
+        f"Renew with the salon to keep your wallet benefits."
+    )
+    try:
+        await create_in_app_notification(
+            user_type="customer",
+            user_id=phone,
+            title=title,
+            message=body,
+            notification_type="membership_expiry",
+            setting_key="membership_expiry",
+            salon_id=salon_id,
+            related_id=m.get("id", ""),
+        )
+    except Exception as e:
+        logger.error(f"in-app expiry notification failed: {e}")
+
+    # WhatsApp (respects customer's whatsapp_membership_expiry setting)
+    try:
+        if await should_send_customer_whatsapp(phone, "whatsapp_membership_expiry"):
+            msg = (
+                f"Hi {m.get('customer_name','')}, your {name} membership expires in ~{label} "
+                f"(on {str(m.get('expiry_date',''))[:10]}). Please visit the salon to renew."
+            )
+            await send_whatsapp_notification(phone, msg, f"membership_expiry_{key}")
+    except Exception as e:
+        logger.error(f"whatsapp expiry notification failed: {e}")
+
+
 # Scheduler for token allocation
 scheduler = AsyncIOScheduler()
 scheduler.add_job(allocate_future_tokens, 'cron', hour=5, minute=30)  # Run at 5:30 AM daily
+# Membership expiry reminders (once daily at 9:00 AM UTC)
+scheduler.add_job(notify_expiring_memberships, 'cron', hour=9, minute=0)
 
 @app.on_event("startup")
 async def startup_event():

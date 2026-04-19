@@ -96,11 +96,21 @@ export default function SalonMainPage() {
     if (!user?.id) return;
     try {
       const response = await axios.get(`${API}/user/${user.id}/history`);
-      const activeStatuses = ['waiting', 'called', 'in_progress'];
-      const todayBookings = response.data.filter(b => 
+      const activeStatuses = ['waiting', 'called', 'in_progress', 'in_service'];
+      const todayBookings = response.data.filter(b =>
         b.salon_id === salonId && activeStatuses.includes(b.status)
       );
-      setUserBookings(todayBookings);
+      // Enrich each active booking with live queue status (barber-wise position,
+      // people before, estimated wait, currently serving for THIS barber).
+      const enriched = await Promise.all(todayBookings.map(async (b) => {
+        try {
+          const r = await axios.get(`${API}/tokens/${b.id}/queue-status`);
+          return { ...b, queue: r.data };
+        } catch (e) {
+          return b;
+        }
+      }));
+      setUserBookings(enriched);
     } catch (error) {
       console.error('Error fetching user bookings:', error);
     }
@@ -120,16 +130,31 @@ export default function SalonMainPage() {
   };
 
   const getStatusMessage = (booking) => {
+    const q = booking.queue;
+    if (q?.status_message) return q.status_message;
     switch (booking.status) {
-      case 'waiting':
-        return `You are #${booking.token_number} in queue`;
+      case 'waiting': {
+        const before = q?.people_before ?? 0;
+        if (before === 0) return "You're next!";
+        return `${before} customer${before === 1 ? '' : 's'} before you`;
+      }
       case 'called':
         return `Your turn! Please proceed to ${booking.barber_name}`;
       case 'in_progress':
+      case 'in_service':
         return `In progress with ${booking.barber_name}`;
       default:
         return 'Booking active';
     }
+  };
+
+  const formatWait = (mins) => {
+    if (mins == null) return null;
+    if (mins <= 0) return 'Next!';
+    if (mins < 60) return `${mins} min`;
+    const h = Math.floor(mins / 60);
+    const m = mins % 60;
+    return m ? `${h}h ${m}m` : `${h}h`;
   };
 
   if (loading) {
@@ -176,45 +201,85 @@ export default function SalonMainPage() {
 
   const renderDashboard = () => (
     <div className="space-y-6">
-      {/* Active Booking Status */}
+      {/* Active Booking Status — barber-specific live queue */}
       {userBookings.length > 0 && (
         <div className="space-y-3">
-          {userBookings.map((booking) => (
-            <motion.div
-              key={booking.id}
-              initial={{ opacity: 0, y: -10 }}
-              animate={{ opacity: 1, y: 0 }}
-              className={`p-4 rounded-xl border-2 ${
-                booking.status === 'called' 
-                  ? 'bg-blue-500/10 border-blue-500 animate-pulse' 
-                  : booking.status === 'in_progress'
-                  ? 'bg-green-500/10 border-green-500'
-                  : 'bg-gold/10 border-gold/50'
-              }`}
-            >
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-3">
-                  {getStatusIcon(booking.status)}
-                  <div>
-                    <p className="font-bold text-foreground">{getStatusMessage(booking)}</p>
-                    <p className="text-sm text-muted-foreground">
-                      Token: #{booking.token_number} • {booking.shift}
+          {userBookings.map((booking) => {
+            const q = booking.queue || {};
+            const peopleBefore = q.people_before ?? 0;
+            const position = q.position ?? (peopleBefore + 1);
+            const waitMin = q.estimated_wait_minutes;
+            const serving = q.currently_serving;
+            return (
+              <motion.div
+                key={booking.id}
+                initial={{ opacity: 0, y: -10 }}
+                animate={{ opacity: 1, y: 0 }}
+                className={`p-4 rounded-xl border-2 ${
+                  booking.status === 'called' || booking.status === 'in_progress' || booking.status === 'in_service'
+                    ? 'bg-green-500/10 border-green-500'
+                    : 'bg-gold/10 border-gold/50'
+                }`}
+              >
+                {/* Header: status + total token */}
+                <div className="flex items-start justify-between gap-3">
+                  <div className="flex items-center gap-3">
+                    {getStatusIcon(booking.status)}
+                    <div>
+                      <p className="font-bold text-foreground">{getStatusMessage(booking)}</p>
+                      <p className="text-sm text-muted-foreground">
+                        Barber: <span className="font-semibold text-foreground">{booking.barber_name}</span>
+                        {' '}• {booking.shift}
+                      </p>
+                    </div>
+                  </div>
+                  <div className="text-right shrink-0">
+                    <p className="text-[10px] uppercase tracking-wider text-muted-foreground">Total token</p>
+                    <p className="text-2xl font-bebas text-gold leading-none">{booking.token_number}</p>
+                  </div>
+                </div>
+
+                {/* Key metrics — position / people before / wait */}
+                <div className="mt-3 grid grid-cols-3 gap-2">
+                  <div className="bg-background/70 rounded-lg p-2 border border-border/50 text-center">
+                    <p className="text-[10px] uppercase text-muted-foreground">Your position</p>
+                    <p className="text-xl font-bold text-gold">#{position}</p>
+                  </div>
+                  <div className="bg-background/70 rounded-lg p-2 border border-border/50 text-center">
+                    <p className="text-[10px] uppercase text-muted-foreground">Before you</p>
+                    <p className="text-xl font-bold text-foreground">{peopleBefore}</p>
+                  </div>
+                  <div className="bg-background/70 rounded-lg p-2 border border-border/50 text-center">
+                    <p className="text-[10px] uppercase text-muted-foreground">Est. wait</p>
+                    <p className="text-xl font-bold text-foreground">
+                      {formatWait(waitMin) ?? '—'}
                     </p>
                   </div>
                 </div>
-                <div className="text-right">
-                  <p className="text-3xl font-bebas text-gold">#{booking.token_number}</p>
-                </div>
-              </div>
-              {booking.status === 'waiting' && liveStatus?.overall?.current_token && (
-                <div className="mt-3 pt-3 border-t border-border/50">
-                  <p className="text-sm text-muted-foreground">
-                    Currently serving: <span className="font-bold text-foreground">#{liveStatus.overall.current_token}</span>
-                  </p>
-                </div>
-              )}
-            </motion.div>
-          ))}
+
+                {/* Currently serving for THIS barber (not salon-wide) */}
+                {serving && serving.token_number && (
+                  <div className="mt-3 pt-3 border-t border-border/50 flex items-center justify-between gap-2">
+                    <p className="text-sm text-muted-foreground">
+                      <span className="uppercase tracking-wider text-[10px] block">
+                        Currently with {booking.barber_name}
+                      </span>
+                      <span className="font-bold text-foreground">Token {serving.token_number}</span>
+                      {Array.isArray(serving.services) && serving.services.length > 0 && (
+                        <span className="text-xs"> • {serving.services.join(', ')}</span>
+                      )}
+                    </p>
+                    {q.approx_finish_minutes != null && (
+                      <div className="text-right">
+                        <p className="text-[10px] uppercase text-muted-foreground">Finish in</p>
+                        <p className="text-sm font-bold text-foreground">{formatWait(q.approx_finish_minutes)}</p>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </motion.div>
+            );
+          })}
         </div>
       )}
 

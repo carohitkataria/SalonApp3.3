@@ -6,6 +6,7 @@ import { Label } from '@/components/ui/label';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { toast } from 'sonner';
 import { Edit2, XCircle, Calendar, Wallet, User, CheckCircle, Clock, Banknote, Smartphone, CreditCard } from 'lucide-react';
+import MembershipBadge from './MembershipBadge';
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
 const API = `${BACKEND_URL}/api`;
@@ -76,23 +77,25 @@ export default function SoldMembershipManagement({ salonId, getAuthHeaders }) {
   };
 
   const handleCancel = async (membershipId, customerName) => {
-    const confirmed = window.confirm(
+    const reason = window.prompt(
       `⚠️ Cancel membership for ${customerName}?\n\n` +
-      `This will deactivate the membership but retain wallet balance history.`
+      `This is a SOFT cancel — the record is preserved for history but the membership is deactivated.\n\n` +
+      `Enter a reason (optional):`,
+      ''
     );
 
-    if (!confirmed) return;
+    if (reason === null) return; // user cancelled the prompt
 
     try {
-      await axios.put(
-        `${API}/salons/${salonId}/customer-memberships/${membershipId}`,
-        { is_active: false },
+      await axios.post(
+        `${API}/salons/${salonId}/customer-memberships/${membershipId}/cancel`,
+        { reason: (reason || '').trim() },
         { headers: getAuthHeaders() }
       );
       toast.success('Membership cancelled');
       fetchSoldMemberships();
     } catch (error) {
-      toast.error('Failed to cancel membership');
+      toast.error(error.response?.data?.detail || 'Failed to cancel membership');
     }
   };
 
@@ -208,6 +211,7 @@ export default function SoldMembershipManagement({ salonId, getAuthHeaders }) {
                       <User className="w-4 h-4 text-gold" />
                       <span className="font-semibold">{membership.customer_name}</span>
                       <span className="text-sm text-muted-foreground">({membership.customer_phone})</span>
+                      <MembershipBadge tier={membership.tier} color={membership.color} name={membership.membership_name} size="xs" />
                       {!membership.is_active && (
                         <span className="px-2 py-0.5 text-xs bg-red-500/20 text-red-400 border border-red-500/30 rounded">
                           Cancelled
