@@ -8,7 +8,7 @@ import os
 BASE_URL = os.environ.get('REACT_APP_BACKEND_URL', 'https://barber-queue-hub.preview.emergentagent.com').rstrip('/')
 
 # Test salon credentials
-TEST_PHONE = "9876543210"
+TEST_PHONE = "7503070727"
 TEST_PASSWORD = "salon123"
 SALON_ID = "a9b1b6e7-482c-4dc0-904a-9fa50cc283d3"
 

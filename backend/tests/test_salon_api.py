@@ -65,7 +65,7 @@ class TestSalonRegistration:
         payload = {
             "salon_name": "Duplicate Test",
             "owner_name": "Test",
-            "phone": "9876543210",  # Seeded salon phone
+            "phone": "7503070727",  # Seeded salon phone
             "email": "",
             "address": "Test",
             "latitude": 12.9716,
@@ -83,7 +83,7 @@ class TestSalonOTPAuth:
     
     def test_send_otp(self):
         """Test sending OTP to salon phone"""
-        payload = {"phone": "9876543210"}  # Seeded salon phone
+        payload = {"phone": "7503070727"}  # Seeded salon phone
         
         response = requests.post(f"{API}/salon/send-otp", json=payload)
         assert response.status_code == 200
@@ -108,10 +108,10 @@ class TestSalonOTPAuth:
     def test_verify_otp_success(self):
         """Test OTP verification with correct OTP"""
         # First send OTP
-        requests.post(f"{API}/salon/send-otp", json={"phone": "9876543210"})
+        requests.post(f"{API}/salon/send-otp", json={"phone": "7503070727"})
         
         # Verify OTP
-        payload = {"phone": "9876543210", "otp": "123456"}
+        payload = {"phone": "7503070727", "otp": "123456"}
         response = requests.post(f"{API}/salon/verify-otp", json=payload)
         
         assert response.status_code == 200
@@ -124,10 +124,10 @@ class TestSalonOTPAuth:
     def test_verify_otp_invalid(self):
         """Test OTP verification with wrong OTP"""
         # First send OTP
-        requests.post(f"{API}/salon/send-otp", json={"phone": "9876543210"})
+        requests.post(f"{API}/salon/send-otp", json={"phone": "7503070727"})
         
         # Verify with wrong OTP
-        payload = {"phone": "9876543210", "otp": "000000"}
+        payload = {"phone": "7503070727", "otp": "000000"}
         response = requests.post(f"{API}/salon/verify-otp", json=payload)
         
         assert response.status_code == 400
@@ -374,11 +374,11 @@ class TestQueueManagement:
     def auth_headers(self):
         """Get authenticated headers for salon"""
         # Send OTP
-        requests.post(f"{API}/salon/send-otp", json={"phone": "9876543210"})
+        requests.post(f"{API}/salon/send-otp", json={"phone": "7503070727"})
         
         # Verify OTP
         response = requests.post(f"{API}/salon/verify-otp", json={
-            "phone": "9876543210",
+            "phone": "7503070727",
             "otp": "123456"
         })
         

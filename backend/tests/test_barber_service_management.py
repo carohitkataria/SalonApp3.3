@@ -12,7 +12,7 @@ API = f"{BASE_URL}/api"
 
 # Test data
 TEST_OTP = "123456"  # Hardcoded OTP for testing
-SALON_PHONE = "9876543210"
+SALON_PHONE = "7503070727"
 
 
 class TestAuthSetup:

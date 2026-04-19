@@ -16,7 +16,7 @@ def auth_headers():
     """Get authentication headers by logging in as salon admin"""
     # Login as salon admin
     response = requests.post(f"{BASE_URL}/api/salon/login", json={
-        "phone": "9876543210",
+        "phone": "7503070727",
         "password": "salon123"
     })
     if response.status_code == 200:
@@ -24,7 +24,7 @@ def auth_headers():
         return {"Authorization": f"Bearer {token}"}
     # Try legacy login
     response = requests.post(f"{BASE_URL}/api/salon/verify-otp", json={
-        "phone": "+919876543210",
+        "phone": "+917503070727",
         "otp": "123456"
     })
     if response.status_code == 200:
