@@ -7,6 +7,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Checkbox } from '@/components/ui/checkbox';
 import { toast } from 'sonner';
+import GenderBadge from '@/components/GenderBadge';
 import { 
   User, Plus, Save
 } from 'lucide-react';
@@ -45,6 +46,7 @@ export default function BarberManagement({ salonId, getAuthHeaders }) {
     experience: '',
     category: 'Junior',
     specialization: 'Haircut Specialist',
+    gender_specialization: '',
     customCategory: '',
     customSpecialization: '',
     mobile: '',
@@ -102,6 +104,7 @@ export default function BarberManagement({ salonId, getAuthHeaders }) {
           experience: parseInt(newBarber.experience) || 0,
           category: finalCategory,
           specialization: finalSpecialization,
+          gender_specialization: newBarber.gender_specialization || null,
           profile_image: newBarber.profile_image || null,
           on_leave: newBarber.on_leave || false,
           is_barber: newBarber.is_barber,
@@ -294,6 +297,24 @@ export default function BarberManagement({ salonId, getAuthHeaders }) {
               )}
             </div>
 
+            {/* Gender Specialization (for customer visibility) */}
+            <div>
+              <Label htmlFor="gender_specialization">Gender Specialization</Label>
+              <select
+                id="gender_specialization"
+                value={newBarber.gender_specialization}
+                onChange={(e) => setNewBarber({ ...newBarber, gender_specialization: e.target.value })}
+                className="w-full h-10 px-3 rounded-md border border-input bg-background text-foreground"
+              >
+                <option value="">Not Set</option>
+                <option value="Men">♂ Men</option>
+                <option value="Women">♀ Women</option>
+                <option value="Unisex">⚥ Unisex</option>
+                <option value="Kids">👶 Kids</option>
+              </select>
+              <p className="text-xs text-muted-foreground mt-1">Displayed as badge to customers during booking</p>
+            </div>
+
             {/* Profile Image URL */}
             <div>
               <Label htmlFor="profile_image">Profile Image URL (optional)</Label>
@@ -430,7 +451,12 @@ export default function BarberManagement({ salonId, getAuthHeaders }) {
           >
             <div className="flex items-start justify-between mb-3">
               <div className="flex-1">
-                <h4 className="font-semibold text-lg">{barber.name}</h4>
+                <h4 className="font-semibold text-lg flex items-center gap-2">
+                  {barber.name}
+                  {barber.gender_specialization && (
+                    <GenderBadge gender={barber.gender_specialization} size="xs" />
+                  )}
+                </h4>
                 <p className="text-sm text-muted-foreground">
                   {barber.designation || barber.category}
                 </p>

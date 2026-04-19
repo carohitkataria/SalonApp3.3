@@ -1,9 +1,10 @@
 import { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import axios from 'axios';
+import GenderBadge from '@/components/GenderBadge';
 import { 
   ArrowLeft, Calendar, Clock, User, Scissors, MapPin, 
-  CheckCircle, AlertCircle, XCircle, Phone, CreditCard
+  CheckCircle, AlertCircle, XCircle, Phone, CreditCard, Share2, Edit, Users
 } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { Button } from '@/components/ui/button';
@@ -17,6 +18,7 @@ export default function TokenDetailPage() {
   const navigate = useNavigate();
   const [token, setToken] = useState(null);
   const [salon, setSalon] = useState(null);
+  const [barber, setBarber] = useState(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -33,11 +35,34 @@ export default function TokenDetailPage() {
         const salonRes = await axios.get(`${API}/salons/${response.data.salon_id}`);
         setSalon(salonRes.data);
       }
+      
+      // Fetch barber details
+      if (response.data.barber_id) {
+        try {
+          const barberRes = await axios.get(`${API}/barbers/${response.data.barber_id}`);
+          setBarber(barberRes.data);
+        } catch (error) {
+          console.error('Error fetching barber:', error);
+        }
+      }
     } catch (error) {
       console.error('Error fetching token:', error);
       toast.error('Failed to load booking details');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleShare = () => {
+    if (navigator.share) {
+      navigator.share({
+        title: 'My Salon Booking',
+        text: `Token #${token.token_number} at ${salon?.salon_name}`,
+        url: window.location.href
+      }).catch(() => {});
+    } else {
+      navigator.clipboard.writeText(window.location.href);
+      toast.success('Link copied to clipboard!');
     }
   };
 
@@ -115,10 +140,99 @@ export default function TokenDetailPage() {
       </div>
 
       <div className="max-w-2xl mx-auto p-4 space-y-6">
+        {/* Large Token Number Display */}
+        <motion.div
+          initial={{ opacity: 0, scale: 0.9 }}
+          animate={{ opacity: 1, scale: 1 }}
+          className="bg-gradient-to-br from-pink-500 via-purple-500 to-blue-500 rounded-3xl p-8 text-center shadow-2xl"
+        >
+          <p className="text-white/80 text-sm font-semibold mb-2">YOUR TOKEN NUMBER</p>
+          <p className="text-white text-8xl font-extrabold mb-4">#{token.token_number}</p>
+          <div className={`inline-flex items-center gap-2 px-6 py-2 rounded-full ${statusConfig.bg} backdrop-blur-sm border border-white/20`}>
+            <StatusIcon className={`w-5 h-5 ${statusConfig.color}`} />
+            <span className={`font-bold ${statusConfig.color}`}>{statusConfig.label}</span>
+          </div>
+        </motion.div>
+
+        {/* Queue Progress */}
+        {token.status === 'waiting' && token.queue_position !== undefined && (
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.1 }}
+            className="bg-card rounded-2xl border border-border p-6"
+          >
+            <div className="flex items-center justify-between mb-4">
+              <div>
+                <p className="text-xs text-muted-foreground mb-1">Queue Position</p>
+                <p className="text-3xl font-bold text-foreground">{token.queue_position || 0}</p>
+                <p className="text-xs text-muted-foreground mt-1">people ahead of you</p>
+              </div>
+              <div className="text-right">
+                <p className="text-xs text-muted-foreground mb-1">Estimated Wait</p>
+                <p className="text-3xl font-bold text-pink-500">~{Math.max((token.queue_position || 0) * 15, 5)}m</p>
+                <p className="text-xs text-muted-foreground mt-1">approximate time</p>
+              </div>
+            </div>
+            
+            {/* Progress Bar */}
+            <div className="relative h-3 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden">
+              <div 
+                className="absolute top-0 left-0 h-full bg-gradient-to-r from-pink-500 to-purple-500 transition-all duration-500"
+                style={{ width: `${Math.min(((token.current_token || 0) / (token.token_number || 1)) * 100, 100)}%` }}
+              >
+                <div className="absolute inset-0 bg-white/30 animate-pulse"></div>
+              </div>
+            </div>
+            <div className="flex justify-between text-xs text-muted-foreground mt-2">
+              <span>Now Serving: #{token.current_token || token.token_number - (token.queue_position || 0)}</span>
+              <span>Your Turn: #{token.token_number}</span>
+            </div>
+          </motion.div>
+        )}
+
+        {/* Action Buttons */}
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.2 }}
+          className="flex gap-3"
+        >
+          <Button
+            onClick={handleShare}
+            variant="outline"
+            className="flex-1 border-purple-500 text-purple-600 hover:bg-purple-50 dark:hover:bg-purple-950"
+          >
+            <Share2 className="w-4 h-4 mr-2" />
+            Share
+          </Button>
+          {(token.status === 'waiting' || token.status === 'future') && (
+            <>
+              <Button
+                onClick={() => toast.info('Reschedule feature coming soon!')}
+                variant="outline"
+                className="flex-1 border-blue-500 text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-950"
+              >
+                <Edit className="w-4 h-4 mr-2" />
+                Reschedule
+              </Button>
+              <Button
+                onClick={handleCancel}
+                variant="outline"
+                className="flex-1 border-red-500 text-red-600 hover:bg-red-50 dark:hover:bg-red-950"
+              >
+                <XCircle className="w-4 h-4 mr-2" />
+                Cancel
+              </Button>
+            </>
+          )}
+        </motion.div>
+
         {/* Token Card */}
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.3 }}
           className="bg-card rounded-2xl border border-border overflow-hidden"
         >
           {/* Status Banner */}
@@ -176,7 +290,12 @@ export default function TokenDetailPage() {
                   <User className="w-4 h-4" />
                   <span className="text-xs">Barber</span>
                 </div>
-                <p className="font-bold text-foreground">{token.barber_name}</p>
+                <p className="font-bold text-foreground flex items-center gap-2">
+                  {token.barber_name}
+                  {barber?.gender_specialization && (
+                    <GenderBadge gender={barber.gender_specialization} size="xs" />
+                  )}
+                </p>
               </div>
 
               <div className="bg-background rounded-xl p-4 border border-border">

@@ -5,6 +5,7 @@ import axios from 'axios';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { toast } from 'sonner';
+import GenderBadge from '@/components/GenderBadge';
 import { Scissors, Calendar, User, CheckCircle, Star, Clock, ArrowLeft, Home, Zap, Check, ChevronDown, ChevronRight, Search, Package, Crown, History, Wallet, Banknote, Smartphone } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Input } from '@/components/ui/input';
@@ -143,7 +144,12 @@ const BarberChip = ({ barber, selected, onSelect, liveStatus, slotAvailability }
           )}
         </div>
         <div className="flex-1 min-w-0">
-          <p className="font-bold text-foreground text-sm truncate">{barber.name}</p>
+          <p className="font-bold text-foreground text-sm truncate flex items-center gap-1">
+            {barber.name}
+            {barber.gender_specialization && (
+              <GenderBadge gender={barber.gender_specialization} size="xs" />
+            )}
+          </p>
           <div className="flex items-center gap-2 mt-0.5">
             <Star className="w-3 h-3 text-yellow-500 fill-yellow-500" />
             <span className="text-xs text-muted-foreground">{barber.rating || '4.5'}</span>

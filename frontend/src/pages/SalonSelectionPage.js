@@ -6,6 +6,7 @@ import axios from 'axios';
 import { MapContainer, TileLayer, Marker, Popup, Tooltip, useMap } from 'react-leaflet';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import ActiveBookingTracker from '@/components/ActiveBookingTracker';
 import { 
   MapPin, List, Navigation, Scissors, Search, Star, ChevronLeft, ChevronRight, Map as MapIcon, Crosshair
 } from 'lucide-react';
@@ -138,6 +139,21 @@ export default function SalonSelectionPage() {
   const [searchType, setSearchType] = useState('nearby'); // 'nearby', 'name', 'city'
   const [citySearchQuery, setCitySearchQuery] = useState('');
   const [showCityDropdown, setShowCityDropdown] = useState(false);
+  
+  // Get user info from session
+  const [userInfo, setUserInfo] = useState(null);
+
+  useEffect(() => {
+    // Load user info from session
+    try {
+      const user = sessionStorage.getItem('user');
+      if (user) {
+        setUserInfo(JSON.parse(user));
+      }
+    } catch (error) {
+      console.error('Error loading user info:', error);
+    }
+  }, []);
 
   useEffect(() => {
     if (!isUserLoggedIn) {
@@ -525,6 +541,14 @@ export default function SalonSelectionPage() {
 
   return (
     <div className="min-h-screen bg-background">
+      {/* Active Booking Tracker */}
+      {userInfo && (
+        <ActiveBookingTracker 
+          userPhone={userInfo.phone} 
+          userName={userInfo.name}
+        />
+      )}
+      
       {/* Header */}
       <div className="bg-card border-b border-border sticky top-0 z-30 shadow-sm">
         <div className="max-w-7xl mx-auto p-4">
