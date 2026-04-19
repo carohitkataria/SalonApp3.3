@@ -1648,27 +1648,19 @@ async def toggle_service_for_salon(
     if not payload:
         raise HTTPException(status_code=401, detail="Invalid authentication")
     
-    # Check if salon_service entry exists
-    salon_service = await db.salon_services.find_one({
+    # Upsert: ensure a single entry per (salon_id, service_id).
+    # Clean up any pre-existing duplicates first.
+    await db.salon_services.delete_many({
         "salon_id": salon_id,
         "service_id": service_id
-    }, {"_id": 0})
-    
-    if salon_service:
-        # Update existing
-        await db.salon_services.update_one(
-            {"salon_id": salon_id, "service_id": service_id},
-            {"$set": {"is_enabled": is_enabled}}
-        )
-    else:
-        # Create new entry
-        await db.salon_services.insert_one({
-            "id": str(uuid.uuid4()),
-            "salon_id": salon_id,
-            "service_id": service_id,
-            "is_enabled": is_enabled,
-            "created_at": datetime.now(timezone.utc).isoformat()
-        })
+    })
+    await db.salon_services.insert_one({
+        "id": str(uuid.uuid4()),
+        "salon_id": salon_id,
+        "service_id": service_id,
+        "is_enabled": is_enabled,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    })
     
     return {"success": True, "is_enabled": is_enabled}
 
