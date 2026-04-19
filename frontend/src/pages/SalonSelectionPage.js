@@ -144,14 +144,18 @@ export default function SalonSelectionPage() {
   const [userInfo, setUserInfo] = useState(null);
 
   useEffect(() => {
-    // Load user info from session
+    // Load user info from localStorage (not sessionStorage)
     try {
-      const user = sessionStorage.getItem('user');
+      const user = localStorage.getItem('salon_user');
       if (user) {
-        setUserInfo(JSON.parse(user));
+        const parsedUser = JSON.parse(user);
+        console.log('[SalonSelectionPage] Loaded user from localStorage:', parsedUser);
+        setUserInfo(parsedUser);
+      } else {
+        console.log('[SalonSelectionPage] No user found in localStorage');
       }
     } catch (error) {
-      console.error('Error loading user info:', error);
+      console.error('[SalonSelectionPage] Error loading user info:', error);
     }
   }, []);
 

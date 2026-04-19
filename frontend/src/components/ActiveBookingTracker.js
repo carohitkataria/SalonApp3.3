@@ -63,7 +63,7 @@ export default function ActiveBookingTracker({ userPhone, userName }) {
   console.log('[ActiveBookingTracker] Rendering with', activeBookings.length, 'booking(s)');
 
   return (
-    <div className="w-full bg-gradient-to-br from-pink-500 via-purple-500 to-blue-500 p-6 rounded-b-3xl shadow-2xl">
+    <div className="w-full bg-gradient-to-br from-pink-500 via-purple-500 to-blue-500 p-6 rounded-b-3xl shadow-2xl" data-testid="active-booking-tracker">
       <div className="max-w-7xl mx-auto">
         {/* Greeting */}
         <motion.div
@@ -176,6 +176,7 @@ export default function ActiveBookingTracker({ userPhone, userName }) {
                 <Button
                   onClick={() => navigate(`/token/${booking.id}`)}
                   className="w-full bg-gradient-to-r from-pink-500 to-purple-600 hover:from-pink-600 hover:to-purple-700 text-white font-bold py-3 rounded-xl shadow-lg hover:shadow-xl transition-all duration-300 flex items-center justify-center gap-2"
+                  data-testid="track-my-token-btn"
                 >
                   <Eye size={20} />
                   Track My Token
