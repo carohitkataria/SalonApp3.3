@@ -263,6 +263,7 @@ class BarberCreate(BaseModel):
     experience: int
     category: str
     specialization: Optional[str] = None
+    gender_specialization: Optional[str] = None  # Men/Women/Unisex/Kids
     mobile: str
     profile_image: Optional[str] = None
     is_barber: bool = True  # True if staff is a barber (visible to customers)
@@ -281,6 +282,7 @@ class BarberUpdate(BaseModel):
     experience: Optional[int] = None
     category: Optional[str] = None
     specialization: Optional[str] = None
+    gender_specialization: Optional[str] = None  # Men/Women/Unisex/Kids
     mobile: Optional[str] = None
     queue_status: Optional[str] = None
     profile_image: Optional[str] = None
@@ -307,6 +309,7 @@ class Barber(BaseModel):
     experience: int
     category: str
     specialization: Optional[str] = None
+    gender_specialization: Optional[str] = None  # Men/Women/Unisex/Kids
     mobile: str
     profile_image: Optional[str] = None
     photo_url: Optional[str] = None  # Alias for profile_image
@@ -3709,6 +3712,38 @@ async def create_booking(booking: BookingCreate):
     if not phone.startswith("+91"):
         phone = f"+91{phone}"
     
+    # Check booking limit: Max 2 active bookings per customer per day (1 for self + 1 for others)
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    active_bookings = await db.tokens.find({
+        "phone": phone,
+        "date": today,
+        "status": {"$in": ["waiting", "in_service"]},
+        "$or": [{"cancelled": False}, {"cancelled": {"$exists": False}}]
+    }, {"_id": 0}).to_list(10)
+    
+    # Count bookings for self and others
+    bookings_for_self = sum(1 for b in active_bookings if b.get("booking_for_self", True))
+    bookings_for_others = len(active_bookings) - bookings_for_self
+    
+    # Enforce limits: max 1 for self + max 1 for others
+    if booking.booking_for_self and bookings_for_self >= 1:
+        raise HTTPException(
+            status_code=400,
+            detail="You already have an active booking for yourself today. Please complete or cancel it before booking again."
+        )
+    
+    if not booking.booking_for_self and bookings_for_others >= 1:
+        raise HTTPException(
+            status_code=400,
+            detail="You already have an active booking for someone else today. Maximum 2 bookings allowed per day (1 for self + 1 for others)."
+        )
+    
+    if len(active_bookings) >= 2:
+        raise HTTPException(
+            status_code=400,
+            detail="You have reached the maximum limit of 2 active bookings per day. Please complete or cancel an existing booking."
+        )
+    
     # Get barber details
     if booking.barber_id != "any":
         barber = await db.barbers.find_one({"id": booking.barber_id}, {"_id": 0})
@@ -5980,6 +6015,40 @@ async def get_user_active_bookings(user_id: str):
         {"_id": 0}
     ).sort("date", 1).to_list(10)
     return tokens
+
+@api_router.get("/customers/{phone}/active-bookings")
+async def get_customer_active_bookings(phone: str):
+    """Get active bookings for a customer by phone"""
+    # Normalize phone
+    if not phone.startswith("+91"):
+        phone = f"+91{phone}"
+    
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    
+    # Get active bookings (waiting or in_service)
+    tokens = await db.tokens.find(
+        {
+            "phone": phone,
+            "date": today,
+            "status": {"$in": ["waiting", "in_service"]},
+            "$or": [{"cancelled": False}, {"cancelled": {"$exists": False}}]
+        },
+        {"_id": 0}
+    ).sort("created_at", 1).to_list(10)
+    
+    # Enrich with salon details
+    for token in tokens:
+        salon = await db.salons.find_one({"id": token["salon_id"]}, {"_id": 0})
+        if salon:
+            token["salon_details"] = {
+                "salon_name": salon.get("salon_name"),
+                "address": salon.get("address"),
+                "city": salon.get("city"),
+                "logo_url": salon.get("logo_url")
+            }
+    
+    return {"active_bookings": tokens, "count": len(tokens)}
+
 
 # ============ INVOICE ROUTES ============
 
