@@ -1,6 +1,6 @@
 from fastapi import FastAPI, APIRouter, HTTPException, Depends, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
-from fastapi.responses import Response
+from fastapi.responses import Response, HTMLResponse
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
@@ -719,6 +719,130 @@ async def broadcast_update(event_type: str, data: dict):
     """Broadcast updates via WebSocket"""
     await sio.emit(event_type, data)
 
+# ============ NOTIFICATION SETTINGS ============
+
+# Default notification preferences
+DEFAULT_SALON_NOTIFICATION_SETTINGS = {
+    "new_booking": True,
+    "booking_change": True,
+    "membership_purchase": True,
+    "review_added": True,
+}
+
+DEFAULT_CUSTOMER_NOTIFICATION_SETTINGS = {
+    # In-app toggles
+    "payment_confirmation": True,
+    "turn_approaching": True,
+    "manual_notify": True,
+    "membership_added": True,
+    "booking_status_change": True,
+    "custom_package": True,
+    # WhatsApp toggles (independent on/off for whatsapp messages)
+    "whatsapp_payment_confirmation": True,
+    "whatsapp_turn_approaching": True,
+    "whatsapp_manual_notify": True,
+    "whatsapp_membership_added": True,
+    "whatsapp_booking_status_change": True,
+    "whatsapp_booking_confirmation": True,
+    "whatsapp_booking_cancelled": True,
+    "whatsapp_booking_rescheduled": True,
+}
+
+
+async def get_salon_notification_settings(salon_id: str) -> dict:
+    """Get salon notification settings, creating defaults if missing."""
+    settings = await db.salon_notification_settings.find_one({"salon_id": salon_id}, {"_id": 0})
+    if not settings:
+        return {**DEFAULT_SALON_NOTIFICATION_SETTINGS, "salon_id": salon_id}
+    # Merge with defaults to ensure new keys default to True
+    merged = {**DEFAULT_SALON_NOTIFICATION_SETTINGS, **settings}
+    return merged
+
+
+async def get_customer_notification_settings(phone: str) -> dict:
+    """Get customer notification settings, creating defaults if missing."""
+    if not phone.startswith("+91"):
+        phone = f"+91{phone}"
+    settings = await db.customer_notification_settings.find_one({"phone": phone}, {"_id": 0})
+    if not settings:
+        return {**DEFAULT_CUSTOMER_NOTIFICATION_SETTINGS, "phone": phone}
+    merged = {**DEFAULT_CUSTOMER_NOTIFICATION_SETTINGS, **settings}
+    return merged
+
+
+async def create_in_app_notification(
+    user_type: str,
+    user_id: str,
+    title: str,
+    message: str,
+    notification_type: str,
+    setting_key: str,
+    salon_id: str = "",
+    related_id: str = "",
+):
+    """Create an in-app notification, respecting user's notification preferences."""
+    try:
+        # Normalize phone for customer
+        if user_type == "customer" and not user_id.startswith("+91"):
+            user_id = f"+91{user_id}"
+
+        # Check user preferences
+        if user_type == "salon":
+            settings = await get_salon_notification_settings(user_id)
+        else:
+            settings = await get_customer_notification_settings(user_id)
+
+        if not settings.get(setting_key, True):
+            logger.info(f"In-app notification suppressed for {user_type}/{user_id} (setting {setting_key} is OFF)")
+            return None
+
+        notification = {
+            "id": str(uuid.uuid4()),
+            "user_type": user_type,
+            "user_id": user_id,
+            "salon_id": salon_id,
+            "title": title,
+            "message": message,
+            "type": notification_type,
+            "related_id": related_id,
+            "is_read": False,
+            "created_at": datetime.now(timezone.utc).isoformat(),
+        }
+        await db.notifications.insert_one(notification)
+        # Best-effort live broadcast (non-blocking)
+        try:
+            await sio.emit("notification_created", {
+                "user_type": user_type,
+                "user_id": user_id,
+                "notification": {**notification},
+            })
+        except Exception:
+            pass
+        return notification
+    except Exception as e:
+        logger.error(f"Failed to create in-app notification: {e}")
+        return None
+
+
+async def should_send_customer_whatsapp(phone: str, setting_key: str) -> bool:
+    """Check if customer has WhatsApp notifications enabled for given key."""
+    settings = await get_customer_notification_settings(phone)
+    return bool(settings.get(setting_key, True))
+
+
+def build_action_links(token_id: str, salon_id: str) -> str:
+    """Build clickable Reschedule and Cancel action links for WhatsApp messages."""
+    base = os.getenv("FRONTEND_BASE_URL") or os.getenv("REACT_APP_BACKEND_URL", "")
+    if not base:
+        return ""
+    base = base.rstrip("/")
+    api_base = base
+    # Use relative API path for cancel that returns confirmation HTML
+    reschedule_url = f"{base}/book/{salon_id}?modify={token_id}"
+    cancel_url = f"{api_base}/api/tokens/{token_id}/cancel-link"
+    return f"\n\n🔁 *Reschedule:* {reschedule_url}\n❌ *Cancel:* {cancel_url}"
+
+
 async def send_booking_notification(token_data: dict, notification_type: str):
     """Send WhatsApp notification for booking events"""
     try:
@@ -734,6 +858,11 @@ async def send_booking_notification(token_data: dict, notification_type: str):
         salon_name = salon.get('salon_name', 'The Looks Salon') if salon else 'The Looks Salon'
         
         message = None
+        whatsapp_setting_key = None
+        action_links = ""
+
+        token_id = token_data.get('id')
+        salon_id_for_links = token_data.get('salon_id', '')
         
         if notification_type == 'booking_confirmation':
             message = format_booking_confirmation(
@@ -744,28 +873,56 @@ async def send_booking_notification(token_data: dict, notification_type: str):
                 barber_name=token_data.get('barber_name'),
                 salon_name=salon_name
             )
+            whatsapp_setting_key = 'whatsapp_booking_confirmation'
+            if token_id and salon_id_for_links:
+                action_links = build_action_links(token_id, salon_id_for_links)
         elif notification_type == 'token_called':
             message = format_token_called(
                 customer_name=customer_name,
                 token_number=token_data.get('token_number'),
                 barber_name=token_data.get('barber_name')
             )
+            whatsapp_setting_key = 'whatsapp_turn_approaching'
         elif notification_type == 'token_cancelled':
             message = format_token_cancelled(
                 customer_name=customer_name,
                 token_number=token_data.get('token_number'),
                 reason=token_data.get('cancellation_reason')
             )
+            whatsapp_setting_key = 'whatsapp_booking_cancelled'
+        elif notification_type == 'token_rescheduled':
+            message = format_token_rescheduled(
+                customer_name=customer_name,
+                old_date=token_data.get('old_date', ''),
+                new_date=token_data.get('date', ''),
+                new_slot=token_data.get('time_slot', ''),
+                token_number=token_data.get('token_number', 0)
+            )
+            whatsapp_setting_key = 'whatsapp_booking_rescheduled'
+            if token_id and salon_id_for_links:
+                action_links = build_action_links(token_id, salon_id_for_links)
+        elif notification_type == 'token_skipped':
+            message = format_token_cancelled(
+                customer_name=customer_name,
+                token_number=token_data.get('token_number'),
+                reason="Skipped"
+            )
+            whatsapp_setting_key = 'whatsapp_booking_status_change'
         
         if message:
-            result = await send_whatsapp_notification(phone, message, notification_type)
+            # Check customer WhatsApp preference (default ON)
+            if whatsapp_setting_key and not await should_send_customer_whatsapp(phone, whatsapp_setting_key):
+                logger.info(f"WhatsApp notification suppressed for {phone} (setting {whatsapp_setting_key} is OFF)")
+                return
+            full_message = message + action_links if action_links else message
+            result = await send_whatsapp_notification(phone, full_message, notification_type)
             logger.info(f"Notification sent: {notification_type} to {phone}, status: {result.get('status')}")
             
     except Exception as e:
         logger.error(f"Failed to send notification {notification_type}: {str(e)}")
 
 async def check_and_notify_nearby_tokens(salon_id: str, barber_id: str, date: str, current_token_number: str):
-    """Check and notify customers who are 3 or 1 token away"""
+    """Check and notify customers who are 3, 2 or 1 token away (in-app + WhatsApp)."""
     try:
         # Get all waiting tokens for this barber
         waiting_tokens = await db.tokens.find(
@@ -779,21 +936,53 @@ async def check_and_notify_nearby_tokens(salon_id: str, barber_id: str, date: st
             token_number = token.get('token_number')
             token_seq = extract_token_sequence(token_number)
             tokens_away = token_seq - current_seq
+            phone = token.get('phone')
             
-            # Notify if 3 tokens away or 1 token away
-            if tokens_away == 3 or tokens_away == 1:
-                message = format_token_near(
-                    customer_name=token.get('customer_name'),
-                    user_token=token_number,
-                    tokens_away=tokens_away
+            # Notify if 3, 2 or 1 tokens away
+            if tokens_away in (3, 2, 1) and phone:
+                # Track which tokens have been notified to avoid duplicates
+                notified_field = f"notified_{tokens_away}_away"
+                if token.get(notified_field):
+                    continue
+
+                # In-app notification
+                title = f"You're {tokens_away} token{'s' if tokens_away != 1 else ''} away!" if tokens_away > 1 else "You're next!"
+                msg_body = (
+                    f"Your token #{token_number} is {tokens_away} away. Please be ready."
+                    if tokens_away > 1 else
+                    f"Your token #{token_number} is next. Please proceed to the salon."
                 )
-                
-                await send_whatsapp_notification(
-                    token.get('phone'), 
-                    message, 
-                    f'token_{tokens_away}_away'
+                await create_in_app_notification(
+                    user_type="customer",
+                    user_id=phone,
+                    title=title,
+                    message=msg_body,
+                    notification_type=f"turn_{tokens_away}_away",
+                    setting_key="turn_approaching",
+                    salon_id=salon_id,
+                    related_id=token.get('id', ''),
                 )
-                
+
+                # WhatsApp notification (if enabled)
+                if await should_send_customer_whatsapp(phone, 'whatsapp_turn_approaching'):
+                    message = format_token_near(
+                        customer_name=token.get('customer_name'),
+                        user_token=token_number,
+                        tokens_away=tokens_away
+                    )
+                    action_links = build_action_links(token.get('id', ''), salon_id) if tokens_away >= 2 else ""
+                    full_message = (message + action_links) if action_links else message
+                    await send_whatsapp_notification(
+                        phone,
+                        full_message,
+                        f'token_{tokens_away}_away'
+                    )
+
+                # Mark as notified
+                await db.tokens.update_one(
+                    {"id": token.get('id')},
+                    {"$set": {notified_field: True}}
+                )
                 logger.info(f"Notified token #{token_number} ({tokens_away} away)")
                 
     except Exception as e:
@@ -2676,6 +2865,21 @@ async def create_customer_package(salon_id: str, package: CustomerPackageCreate,
     package_dict["created_at"] = datetime.now(timezone.utc).isoformat()
     
     await db.customer_packages.insert_one(package_dict)
+
+    # Notify customer (in-app) about new custom package
+    customer_phone = package_dict.get("customer_phone", "")
+    if customer_phone:
+        await create_in_app_notification(
+            user_type="customer",
+            user_id=customer_phone,
+            title="Special Package Created for You",
+            message=f"A custom package '{package_dict.get('name','Package')}' has been created for you. Check it out in your packages.",
+            notification_type="custom_package",
+            setting_key="custom_package",
+            salon_id=salon_id,
+            related_id=package_dict["id"],
+        )
+
     return CustomerPackage(**package_dict)
 
 @api_router.get("/salons/{salon_id}/customer-packages/{phone}")
@@ -2935,7 +3139,27 @@ async def sell_membership(salon_id: str, membership: CustomerMembershipCreate, c
                 "date": datetime.now(timezone.utc).strftime("%Y-%m-%d"),
                 "created_at": datetime.now(timezone.utc).isoformat()
             })
-        
+
+        # Notify customer (in-app + WhatsApp)
+        await create_in_app_notification(
+            user_type="customer",
+            user_id=phone,
+            title="Membership Added",
+            message=f"You have been enrolled in {plan['name']} membership. Wallet credit: ₹{plan['credit']}.",
+            notification_type="membership_added",
+            setting_key="membership_added",
+            salon_id=salon_id,
+            related_id=membership_data["id"],
+        )
+        if await should_send_customer_whatsapp(phone, "whatsapp_membership_added"):
+            wa_msg = (
+                f"🎉 *Membership Added!*\n\nHello {membership.customer_name},\n\n"
+                f"You have been enrolled in *{plan['name']}* membership.\n"
+                f"💳 Wallet Credit: ₹{plan['credit']}\n"
+                f"📅 Valid for: {plan['validity_months']} months\n\n_SalonHub_"
+            )
+            await send_whatsapp_notification(phone, wa_msg, "membership_added")
+
         return {"message": "Membership created", "membership": membership_data}
 async def customer_buy_membership(
     salon_id: str, 
@@ -3453,6 +3677,19 @@ async def create_booking(booking: BookingCreate):
     # Send booking confirmation via WhatsApp
     await send_booking_notification(token_dict, 'booking_confirmation')
     
+    # Notify salon (in-app) about new booking
+    if token_dict.get("salon_id"):
+        await create_in_app_notification(
+            user_type="salon",
+            user_id=token_dict["salon_id"],
+            title="New Booking Received",
+            message=f"{token_dict.get('customer_name','Customer')} booked Token #{token_dict.get('token_number','')} on {token_dict.get('date','')} ({token_dict.get('time_slot','')}).",
+            notification_type="new_booking",
+            setting_key="new_booking",
+            salon_id=token_dict["salon_id"],
+            related_id=token_dict.get("id", ""),
+        )
+    
     return token
 
 # Slot availability endpoint
@@ -3553,7 +3790,20 @@ async def call_next_token(salon_id: str, barber_id: str, current_salon=Depends(g
         # Send WhatsApp notification that token is called
         await send_booking_notification(next_token, 'token_called')
         
-        # Check and notify tokens that are near (3 away and 1 away)
+        # In-app notification for customer (your turn now)
+        if next_token.get("phone"):
+            await create_in_app_notification(
+                user_type="customer",
+                user_id=next_token["phone"],
+                title="It's Your Turn!",
+                message=f"Your token #{next_token.get('token_number','')} is being called. Please proceed to {next_token.get('barber_name','your barber')}.",
+                notification_type="turn_now",
+                setting_key="booking_status_change",
+                salon_id=salon_id,
+                related_id=next_token.get("id", ""),
+            )
+        
+        # Check and notify tokens that are near (3, 2, 1 away)
         await check_and_notify_nearby_tokens(salon_id, barber_id, date, next_token["token_number"])
         
         return updated
@@ -3580,6 +3830,19 @@ async def complete_token(token_id: str, current_salon=Depends(get_current_salon)
         {"id": token_id},
         {"$set": {"status": "completed", "completed_at": datetime.now(timezone.utc).isoformat()}}
     )
+
+    # Notify customer of status change (in-app)
+    if token.get("phone"):
+        await create_in_app_notification(
+            user_type="customer",
+            user_id=token["phone"],
+            title="Service Completed",
+            message=f"Your service (Token #{token.get('token_number','')}) has been completed. Thank you!",
+            notification_type="booking_completed",
+            setting_key="booking_status_change",
+            salon_id=token.get("salon_id", ""),
+            related_id=token_id,
+        )
     
     # Check and apply loyalty reward
     loyalty_reward = None
@@ -3751,6 +4014,19 @@ async def cancel_token(token_id: str, current_salon=Depends(get_current_salon)):
     
     # Send cancellation notification
     await send_booking_notification(token, 'token_cancelled')
+
+    # Customer in-app notification
+    if token.get("phone"):
+        await create_in_app_notification(
+            user_type="customer",
+            user_id=token["phone"],
+            title="Booking Cancelled",
+            message=f"Your booking (Token #{token.get('token_number','')}) was cancelled by the salon.",
+            notification_type="booking_cancelled",
+            setting_key="booking_status_change",
+            salon_id=token.get("salon_id", ""),
+            related_id=token_id,
+        )
     
     return {"message": "Token cancelled"}
 
@@ -3800,6 +4076,31 @@ async def customer_cancel_token(token_id: str):
     await broadcast_update("token_cancelled", {"token_id": token_id})
     
     await send_booking_notification(token, 'token_cancelled')
+
+    # Customer in-app notification
+    if token.get("phone"):
+        await create_in_app_notification(
+            user_type="customer",
+            user_id=token["phone"],
+            title="Booking Cancelled",
+            message=f"Your booking (Token #{token.get('token_number','')}) has been cancelled.",
+            notification_type="booking_cancelled",
+            setting_key="booking_status_change",
+            salon_id=token.get("salon_id", ""),
+            related_id=token_id,
+        )
+    # Salon in-app notification
+    if token.get("salon_id"):
+        await create_in_app_notification(
+            user_type="salon",
+            user_id=token["salon_id"],
+            title="Booking Cancelled by Customer",
+            message=f"{token.get('customer_name','Customer')} cancelled booking (Token #{token.get('token_number','')}).",
+            notification_type="booking_cancelled",
+            setting_key="booking_change",
+            salon_id=token["salon_id"],
+            related_id=token_id,
+        )
     
     return {"message": "Booking cancelled successfully"}
 
@@ -4569,6 +4870,189 @@ async def mark_all_notifications_read(user_type: str, user_id: str):
     return {"message": "All notifications marked as read"}
 
 
+# ============ NOTIFICATION SETTINGS ============
+
+@api_router.get("/salons/{salon_id}/notification-settings")
+async def get_salon_notif_settings(salon_id: str):
+    """Get salon notification preferences (defaults all True if not set)."""
+    settings = await get_salon_notification_settings(salon_id)
+    return settings
+
+
+@api_router.put("/salons/{salon_id}/notification-settings")
+async def update_salon_notif_settings(
+    salon_id: str,
+    body: dict,
+    current_user=Depends(get_current_salon_user),
+):
+    """Update salon notification preferences."""
+    update_doc = {k: bool(v) for k, v in body.items() if k in DEFAULT_SALON_NOTIFICATION_SETTINGS}
+    update_doc["salon_id"] = salon_id
+    update_doc["updated_at"] = datetime.now(timezone.utc).isoformat()
+
+    await db.salon_notification_settings.update_one(
+        {"salon_id": salon_id},
+        {"$set": update_doc},
+        upsert=True,
+    )
+    settings = await get_salon_notification_settings(salon_id)
+    return settings
+
+
+@api_router.get("/customers/{phone}/notification-settings")
+async def get_customer_notif_settings(phone: str):
+    """Get customer notification preferences (defaults all True)."""
+    if not phone.startswith("+91"):
+        phone = f"+91{phone}"
+    settings = await get_customer_notification_settings(phone)
+    return settings
+
+
+@api_router.put("/customers/{phone}/notification-settings")
+async def update_customer_notif_settings(phone: str, body: dict):
+    """Update customer notification preferences (in-app + WhatsApp toggles)."""
+    if not phone.startswith("+91"):
+        phone = f"+91{phone}"
+    update_doc = {k: bool(v) for k, v in body.items() if k in DEFAULT_CUSTOMER_NOTIFICATION_SETTINGS}
+    update_doc["phone"] = phone
+    update_doc["updated_at"] = datetime.now(timezone.utc).isoformat()
+
+    await db.customer_notification_settings.update_one(
+        {"phone": phone},
+        {"$set": update_doc},
+        upsert=True,
+    )
+    settings = await get_customer_notification_settings(phone)
+    return settings
+
+
+# ============ CANCEL VIA WHATSAPP LINK ============
+
+@api_router.get("/tokens/{token_id}/cancel-link", response_class=HTMLResponse)
+async def cancel_token_via_link(token_id: str):
+    """
+    Cancel a booking via direct link (used in WhatsApp messages).
+    Returns a styled HTML confirmation page. No app login required.
+    """
+    token = await db.tokens.find_one({"id": token_id}, {"_id": 0})
+    if not token:
+        return HTMLResponse(content=_render_cancel_page(success=False, message="Booking not found."), status_code=404)
+
+    # If already cancelled/completed, show appropriate page
+    current_status = token.get("status")
+    if current_status == "cancelled":
+        return HTMLResponse(content=_render_cancel_page(
+            success=True,
+            message=f"Your booking (Token #{token.get('token_number','')}) is already cancelled."
+        ))
+    if current_status in ("completed", "in_service", "called"):
+        return HTMLResponse(content=_render_cancel_page(
+            success=False,
+            message=f"This booking cannot be cancelled (status: {current_status})."
+        ), status_code=400)
+
+    # Refund wallet if paid via wallet
+    if token.get("payment_mode") == "wallet" and token.get("payment_status") == "paid":
+        wallet_phone = token.get("phone", "")
+        if wallet_phone and not wallet_phone.startswith("+91"):
+            wallet_phone = f"+91{wallet_phone}"
+        membership = await db.customer_memberships.find_one({
+            "salon_id": token.get("salon_id"),
+            "customer_phone": wallet_phone,
+            "is_active": True,
+        }, {"_id": 0})
+        if membership:
+            refund_amount = token.get("total_amount", 0) or 0
+            new_balance = (membership.get("wallet_balance", 0) or 0) + refund_amount
+            await db.customer_memberships.update_one(
+                {"id": membership["id"]},
+                {"$set": {"wallet_balance": new_balance}},
+            )
+            await db.wallet_transactions.insert_one({
+                "id": str(uuid.uuid4()),
+                "customer_phone": wallet_phone,
+                "salon_id": token.get("salon_id"),
+                "transaction_type": "credit",
+                "amount": refund_amount,
+                "balance_after": new_balance,
+                "description": f"Refund - Cancelled via WhatsApp (Token {token.get('token_number','')})",
+                "created_at": datetime.now(timezone.utc).isoformat(),
+            })
+
+    # Cancel the booking
+    await db.tokens.update_one({"id": token_id}, {"$set": {"status": "cancelled"}})
+    await broadcast_update("token_cancelled", {"token_id": token_id})
+
+    # Notify customer (in-app + whatsapp)
+    if token.get("phone"):
+        await create_in_app_notification(
+            user_type="customer",
+            user_id=token["phone"],
+            title="Booking Cancelled",
+            message=f"Your booking (Token #{token.get('token_number','')}) has been cancelled via WhatsApp.",
+            notification_type="booking_cancelled",
+            setting_key="booking_status_change",
+            salon_id=token.get("salon_id", ""),
+            related_id=token_id,
+        )
+    await send_booking_notification(token, "token_cancelled")
+
+    # Notify salon (in-app)
+    if token.get("salon_id"):
+        await create_in_app_notification(
+            user_type="salon",
+            user_id=token["salon_id"],
+            title="Booking Cancelled by Customer",
+            message=f"{token.get('customer_name','Customer')} cancelled booking (Token #{token.get('token_number','')}) via WhatsApp.",
+            notification_type="booking_cancelled",
+            setting_key="booking_change",
+            salon_id=token["salon_id"],
+            related_id=token_id,
+        )
+
+    return HTMLResponse(content=_render_cancel_page(
+        success=True,
+        message=f"Your booking (Token #{token.get('token_number','')}) has been cancelled successfully."
+    ))
+
+
+def _render_cancel_page(success: bool, message: str) -> str:
+    icon = "✅" if success else "❌"
+    color = "#16a34a" if success else "#dc2626"
+    title = "Cancellation Confirmed" if success else "Cancellation Failed"
+    return f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>{title}</title>
+<style>
+  body {{ margin:0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+         background: linear-gradient(135deg,#1f2937 0%, #111827 100%); min-height: 100vh;
+         display:flex; align-items:center; justify-content:center; color:#fff; padding:20px; }}
+  .card {{ background:#1f2937; border:1px solid rgba(184,134,11,0.3); border-radius:16px;
+         padding:36px 28px; max-width:420px; width:100%; box-shadow:0 20px 50px rgba(0,0,0,0.4);
+         text-align:center; }}
+  .icon {{ font-size:64px; line-height:1; margin-bottom:12px; }}
+  h1 {{ color:{color}; margin:0 0 12px 0; font-size:22px; }}
+  p {{ color:#cbd5e1; margin:8px 0 24px; line-height:1.5; }}
+  .btn {{ display:inline-block; padding:12px 24px; border-radius:8px;
+         background:#b8860b; color:#000; text-decoration:none; font-weight:700; }}
+  .small {{ color:#94a3b8; font-size:12px; margin-top:18px; }}
+</style>
+</head>
+<body>
+<div class="card">
+  <div class="icon">{icon}</div>
+  <h1>{title}</h1>
+  <p>{message}</p>
+  <a class="btn" href="/salons">Book Another Appointment</a>
+  <div class="small">SalonHub · You can close this tab.</div>
+</div>
+</body>
+</html>"""
+
+
 
 @api_router.get("/users/last-salon")
 async def get_last_salon_by_phone(phone: str):
@@ -4750,6 +5234,20 @@ async def create_rating(rating_data: RatingCreate):
     
     # Update barber's average rating
     await update_barber_average_rating(rating_data.barber_id)
+
+    # Notify salon (in-app) about new review
+    if rating_data.salon_id:
+        stars = "⭐" * int(rating_data.rating)
+        await create_in_app_notification(
+            user_type="salon",
+            user_id=rating_data.salon_id,
+            title=f"New Review ({rating_data.rating}/5)",
+            message=f"{user_name} rated {barber_name} {stars}: {(rating_data.review or '')[:100]}",
+            notification_type="review_added",
+            setting_key="review_added",
+            salon_id=rating_data.salon_id,
+            related_id=rating_dict["id"],
+        )
     
     return RatingResponse(**rating_dict)
 

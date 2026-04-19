@@ -15,6 +15,7 @@ import CustomerMaster from '@/components/CustomerMaster';
 import OfferingsModule from '@/components/OfferingsModule';
 import FinancialsModule from '@/components/FinancialsModule';
 import MyProfile from '@/components/MyProfile';
+import SalonNotificationSettings from '@/components/SalonNotificationSettings';
 import Analytics from '@/components/Analytics';
 import { getSession, clearSession } from '@/utils/sessionManager';
 import { 
@@ -1416,12 +1417,18 @@ export default function EnhancedSalonDashboard() {
         )}
 
         {activeTab === 'salon' && (
-          <MyProfile 
-            salon={salon}
-            onUpdate={(updatedSalon) => setSalon(updatedSalon)}
-            getAuthHeaders={getAuthHeaders}
-            onDeleteSalon={handleLogout}
-          />
+          <div className="space-y-6">
+            <MyProfile 
+              salon={salon}
+              onUpdate={(updatedSalon) => setSalon(updatedSalon)}
+              getAuthHeaders={getAuthHeaders}
+              onDeleteSalon={handleLogout}
+            />
+            <SalonNotificationSettings
+              salonId={salonId}
+              getAuthHeaders={getAuthHeaders}
+            />
+          </div>
         )}
 
         {activeTab === 'notifications' && salonId && (

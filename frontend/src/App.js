@@ -20,6 +20,7 @@ import TokenDetailPage from '@/pages/TokenDetailPage';
 import SalonRatingsPage from '@/pages/SalonRatingsPage';
 import CustomerWalletPage from '@/pages/CustomerWalletPage';
 import CustomerNotificationsPage from '@/pages/CustomerNotificationsPage';
+import CustomerProfilePage from '@/pages/CustomerProfilePage';
 
 // Salon Pages
 import OTPLoginPage from '@/pages/OTPLoginPage';
@@ -45,7 +46,7 @@ function App() {
                 {/* Customer Routes with Layout */}
                 <Route path="/salons" element={<CustomerLayout><SalonSelectionPage /></CustomerLayout>} />
                 <Route path="/history" element={<CustomerLayout><HistoryPage /></CustomerLayout>} />
-                <Route path="/profile" element={<CustomerLayout><div className="p-8 text-center">Profile Page Coming Soon</div></CustomerLayout>} />
+                <Route path="/profile" element={<CustomerLayout><CustomerProfilePage /></CustomerLayout>} />
                 
                 {/* Salon Main Page - New Hub after selecting a salon */}
                 <Route path="/salon/:salonId" element={<CustomerLayout><SalonMainPage /></CustomerLayout>} />

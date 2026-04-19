@@ -495,9 +495,9 @@ export default function SalonSelectionPage() {
       {/* Header */}
       <div className="bg-card border-b border-border sticky top-0 z-30 shadow-sm">
         <div className="max-w-7xl mx-auto p-4">
-          <div className="flex items-center justify-between mb-4 ml-14">
+          <div className="flex items-center justify-between mb-4 ml-14 mr-14">
             <SalonHubLogo size={36} showText={true} />
-            <div className="flex space-x-1">
+            <div className="flex space-x-1 flex-wrap justify-end gap-y-1">
               <Button
                 variant={view === 'list' ? 'default' : 'outline'}
                 size="sm"
