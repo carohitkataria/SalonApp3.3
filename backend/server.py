@@ -409,7 +409,7 @@ class TokenModel(BaseModel):
     model_config = ConfigDict(extra="ignore")
     id: str
     salon_id: str
-    token_number: str  # Now string format: M001, N001, E001
+    token_number: str  # Global/salon-wide token: M1, M2, N1, E1...
     customer_name: str
     phone: str
     user_id: Optional[str] = None
@@ -420,6 +420,9 @@ class TokenModel(BaseModel):
     barber_name: str
     selected_services: List[str]
     total_amount: float
+    # 75%-rule capacity tracking
+    total_service_minutes: Optional[int] = None
+    blocked_minutes: Optional[int] = None
     status: str = "waiting"  # waiting | called | completed | skipped
     payment_status: str = "pending"
     payment_mode: Optional[str] = None
@@ -638,27 +641,31 @@ def extract_token_sequence(token_number: str) -> int:
     except (ValueError, IndexError):
         return 0
 
-async def get_next_token_number(salon_id: str, barber_id: str, date: str, shift: str) -> str:
-    """Get next token number for specific salon/barber/date/shift"""
+async def get_next_token_number(salon_id: str, date: str, shift: str) -> str:
+    """Get next SALON-WIDE token number for date/shift.
+
+    Token format: {shift_prefix}{seq} where seq is a salon-wide sequence per shift.
+    Example: M1, M2, N1, E1, ...
+    This is the GLOBAL (total) token number visible to customer & salon.
+    Barber-wise position is computed separately (see compute_barber_queue_position).
+    """
     prefix = get_shift_prefix(shift)
-    
-    # Find all tokens for this shift (tokens starting with the shift prefix)
+
     tokens = await db.tokens.find(
-        {"salon_id": salon_id, "barber_id": barber_id, "date": date},
+        {"salon_id": salon_id, "date": date, "shift": shift},
         {"_id": 0, "token_number": 1}
-    ).to_list(1000)
-    
-    # Filter tokens for this shift and get max sequence
+    ).to_list(5000)
+
+    # Only consider tokens starting with this prefix
     shift_tokens = [t for t in tokens if t.get("token_number", "").startswith(prefix)]
-    
     if shift_tokens:
         max_seq = max([extract_token_sequence(t["token_number"]) for t in shift_tokens])
         next_seq = max_seq + 1
     else:
         next_seq = 1
-    
-    # Format as prefix + 3-digit number (e.g., M001, N042)
-    return f"{prefix}{next_seq:03d}"
+
+    # No zero-padding; customers see M12, N3 etc. (matches PRD examples like M12)
+    return f"{prefix}{next_seq}"
 
 def generate_2hour_slots():
     """DEPRECATED: Generate 2-hour time slots (kept for backward compatibility)"""
@@ -671,6 +678,446 @@ def generate_2hour_slots():
         slots.append(slot)
     
     return slots
+
+
+# ============================================================================
+# ADVANCED TOKEN MANAGEMENT — Shift capacity, 75% rule, barber-wise queue
+# ============================================================================
+
+# Token system tuning constants
+BLOCKING_FACTOR = 0.75  # 75% rule: blocked time = service duration × 0.75
+DEFAULT_SERVICE_DURATION = 30  # fallback minutes if service has no duration
+
+# Default shift window when salon has no operational_hours configured
+DEFAULT_OPEN_HOUR = 9
+DEFAULT_CLOSE_HOUR = 21
+
+
+def _parse_hour(hhmm: Optional[str], default_h: int) -> int:
+    """Return integer hour portion of 'HH:MM'. Defaults if empty/malformed."""
+    try:
+        if not hhmm:
+            return default_h
+        return int(hhmm.split(":")[0])
+    except Exception:
+        return default_h
+
+
+def _weekday_key(date_str: str) -> str:
+    """Return lowercase day name (monday..sunday) for a date string YYYY-MM-DD."""
+    try:
+        return datetime.fromisoformat(date_str).strftime("%A").lower()
+    except Exception:
+        return datetime.now(timezone.utc).strftime("%A").lower()
+
+
+async def get_salon_shift_windows(salon_id: str, date: str) -> Dict[str, Dict[str, int]]:
+    """
+    Compute shift windows for a salon on a given date based on its operational hours.
+
+    Rules (per user spec):
+      - Base: 4 hours per shift (Morning, Noon, Evening) = 12h baseline.
+      - Shift durations derived from salon's opening/closing time.
+      - Extra hours go to Morning first, then Evening (lunch counts as part of Evening).
+      - All hours kept as whole numbers.
+
+    Returns:
+        {
+          "Morning": {"start": 7, "end": 11, "duration_hours": 4, "duration_minutes": 240},
+          "Noon":    {"start": 11, "end": 15, ...},
+          "Evening": {"start": 15, "end": 19, ...},
+        }
+    """
+    salon = await db.salons.find_one({"id": salon_id}, {"_id": 0}) or {}
+    op_hours = salon.get("operational_hours") or {}
+
+    day_key = _weekday_key(date)
+    day_hours = op_hours.get(day_key) if isinstance(op_hours, dict) else None
+
+    if isinstance(day_hours, dict) and not day_hours.get("is_holiday"):
+        open_h = _parse_hour(day_hours.get("opening_time"), DEFAULT_OPEN_HOUR)
+        close_h = _parse_hour(day_hours.get("closing_time"), DEFAULT_CLOSE_HOUR)
+    else:
+        open_h, close_h = DEFAULT_OPEN_HOUR, DEFAULT_CLOSE_HOUR
+
+    if close_h <= open_h:
+        # fall back to defaults if malformed
+        open_h, close_h = DEFAULT_OPEN_HOUR, DEFAULT_CLOSE_HOUR
+
+    total_hours = close_h - open_h
+
+    # Distribute hours: base even split, then extras -> Morning, then Evening
+    base = total_hours // 3
+    extras = total_hours % 3
+    durations = [base, base, base]  # [M, N, E]
+    if extras >= 1:
+        durations[0] += 1  # morning
+    if extras >= 2:
+        durations[2] += 1  # evening (lunch stays in evening window)
+    # (extras==3 not possible since %3)
+
+    m_start = open_h
+    m_end = m_start + durations[0]
+    n_start = m_end
+    n_end = n_start + durations[1]
+    e_start = n_end
+    e_end = e_start + durations[2]
+
+    return {
+        "Morning": {
+            "start": m_start, "end": m_end,
+            "duration_hours": durations[0],
+            "duration_minutes": durations[0] * 60,
+        },
+        "Noon": {
+            "start": n_start, "end": n_end,
+            "duration_hours": durations[1],
+            "duration_minutes": durations[1] * 60,
+        },
+        "Evening": {
+            "start": e_start, "end": e_end,
+            "duration_hours": durations[2],
+            "duration_minutes": durations[2] * 60,
+        },
+    }
+
+
+async def calc_service_total_minutes(service_ids: List[str]) -> int:
+    """Sum default_duration of provided services in minutes. Unknown services get DEFAULT_SERVICE_DURATION."""
+    if not service_ids:
+        return 0
+    total = 0
+    for sid in service_ids:
+        svc = await db.services.find_one({"id": sid}, {"_id": 0, "default_duration": 1})
+        if svc and svc.get("default_duration"):
+            total += int(svc["default_duration"])
+        else:
+            total += DEFAULT_SERVICE_DURATION
+    return total
+
+
+def calc_blocked_minutes_from_total(total_minutes: int) -> int:
+    """Apply 75% rule. Ceil so partial minutes always count toward capacity."""
+    if total_minutes <= 0:
+        return 0
+    return math.ceil(total_minutes * BLOCKING_FACTOR)
+
+
+async def get_barber_blocked_minutes_used(salon_id: str, barber_id: str, date: str, shift: str) -> int:
+    """Sum blocked minutes of tokens assigned to this barber for this shift.
+    Completed bookings still count (they used capacity). Cancelled/skipped do NOT count.
+    """
+    if barber_id == "any":
+        return 0
+    tokens = await db.tokens.find(
+        {
+            "salon_id": salon_id,
+            "barber_id": barber_id,
+            "date": date,
+            "shift": shift,
+            "status": {"$nin": ["cancelled", "skipped"]},
+        },
+        {"_id": 0, "selected_services": 1, "blocked_minutes": 1, "total_service_minutes": 1},
+    ).to_list(1000)
+
+    used = 0
+    for t in tokens:
+        if t.get("blocked_minutes") is not None:
+            used += int(t["blocked_minutes"])
+        else:
+            mins = await calc_service_total_minutes(t.get("selected_services", []))
+            used += calc_blocked_minutes_from_total(mins)
+    return used
+
+
+async def can_fit_in_barber_shift(
+    salon_id: str, barber_id: str, date: str, shift: str, new_blocked_minutes: int
+) -> Dict[str, Any]:
+    """Shift-availability check per the user's rounding rule:
+
+      Shift is declared FULL once the cumulative blocked time crosses the shift duration.
+      The booking that causes the crossover is still allowed (last one may cross).
+      The next booking is blocked.
+
+    Returns dict with: allowed, used_before, used_after, capacity_minutes, is_full_after
+    """
+    windows = await get_salon_shift_windows(salon_id, date)
+    shift_info = windows.get(shift) or {}
+    capacity = int(shift_info.get("duration_minutes", 0))
+
+    used_before = await get_barber_blocked_minutes_used(salon_id, barber_id, date, shift)
+
+    # Not allowed if the shift was ALREADY full before this booking
+    already_full = used_before >= capacity if capacity > 0 else False
+    allowed = (not already_full) and capacity > 0
+
+    used_after = used_before + (new_blocked_minutes if allowed else 0)
+    is_full_after = used_after >= capacity if capacity > 0 else True
+
+    return {
+        "allowed": allowed,
+        "used_before": used_before,
+        "used_after": used_after,
+        "capacity_minutes": capacity,
+        "is_full_before": already_full,
+        "is_full_after": is_full_after,
+    }
+
+
+async def pick_fastest_barber(
+    salon_id: str, date: str, shift: str, required_blocked_minutes: int,
+    customer_gender: Optional[str] = None
+) -> Optional[Dict[str, Any]]:
+    """Auto-assign the 'fastest' barber using the priority rules.
+
+    Priority 1: Barber with shortest ACTIVE queue today (waiting + called),
+                AND enough capacity in this shift.
+    Priority 2: Barber with fewest bookings YESTERDAY, with enough capacity.
+    Priority 3: Any random active barber with enough capacity.
+
+    Returns the chosen barber doc or None if no barber has capacity.
+    """
+    barbers = await db.barbers.find(
+        {
+            "salon_id": salon_id,
+            "is_active": True,
+            "$or": [{"on_leave": False}, {"on_leave": None}, {"on_leave": {"$exists": False}}],
+        },
+        {"_id": 0},
+    ).to_list(500)
+
+    if not barbers:
+        return None
+
+    # Filter barbers with capacity for this shift
+    eligible = []
+    for b in barbers:
+        fit = await can_fit_in_barber_shift(salon_id, b["id"], date, shift, required_blocked_minutes)
+        if fit["allowed"]:
+            eligible.append(b)
+
+    if not eligible:
+        return None
+
+    # Priority 1: shortest active queue today
+    today_counts = []
+    for b in eligible:
+        cnt = await db.tokens.count_documents({
+            "salon_id": salon_id,
+            "barber_id": b["id"],
+            "date": date,
+            "status": {"$in": ["waiting", "called", "in_progress", "in_service"]},
+        })
+        today_counts.append((cnt, b))
+
+    if today_counts:
+        min_today = min(c for c, _ in today_counts)
+        # If there are barbers with zero/low counts, pick any among those.
+        # If ALL are zero (no data today), fall to priority 2.
+        if min_today > 0 or any(c > 0 for c, _ in today_counts):
+            tied = [b for c, b in today_counts if c == min_today]
+            return random.choice(tied)
+
+    # Priority 2: fewest bookings YESTERDAY
+    try:
+        yest = (datetime.fromisoformat(date) - timedelta(days=1)).strftime("%Y-%m-%d")
+    except Exception:
+        yest = (datetime.now(timezone.utc) - timedelta(days=1)).strftime("%Y-%m-%d")
+
+    yest_counts = []
+    for b in eligible:
+        cnt = await db.tokens.count_documents({
+            "salon_id": salon_id,
+            "barber_id": b["id"],
+            "date": yest,
+            "status": {"$nin": ["cancelled", "skipped"]},
+        })
+        yest_counts.append((cnt, b))
+
+    if yest_counts and any(c > 0 for c, _ in yest_counts):
+        min_yest = min(c for c, _ in yest_counts)
+        tied = [b for c, b in yest_counts if c == min_yest]
+        return random.choice(tied)
+
+    # Priority 3: random active barber
+    return random.choice(eligible)
+
+
+async def compute_barber_queue_snapshot(salon_id: str, barber_id: str, date: str) -> Dict[str, Any]:
+    """Return barber queue context used for position & wait calculations.
+
+    Shape:
+      {
+        "currently_serving": {token_number, customer_name, id, blocked_minutes, ...} | None,
+        "waiting_queue": [token, ...] ordered by created_at ascending,
+        "remaining_current_minutes": int (75%-rule residual for the token being served)
+      }
+    """
+    if not barber_id or barber_id == "any":
+        return {"currently_serving": None, "waiting_queue": [], "remaining_current_minutes": 0}
+
+    # Currently serving: status 'called' or 'in_progress'/'in_service'
+    serving = await db.tokens.find_one(
+        {
+            "salon_id": salon_id,
+            "barber_id": barber_id,
+            "date": date,
+            "status": {"$in": ["called", "in_progress", "in_service"]},
+        },
+        {"_id": 0},
+        sort=[("called_at", -1)],
+    )
+
+    remaining = 0
+    if serving:
+        if serving.get("blocked_minutes") is not None:
+            remaining = int(serving["blocked_minutes"])
+        else:
+            mins = await calc_service_total_minutes(serving.get("selected_services", []))
+            remaining = calc_blocked_minutes_from_total(mins)
+        # If called_at present, subtract elapsed; floor at 0
+        try:
+            if serving.get("called_at"):
+                called_dt = datetime.fromisoformat(serving["called_at"].replace("Z", "+00:00"))
+                elapsed = (datetime.now(timezone.utc) - called_dt).total_seconds() / 60
+                remaining = max(0, int(remaining - elapsed))
+        except Exception:
+            pass
+
+    waiting = await db.tokens.find(
+        {
+            "salon_id": salon_id,
+            "barber_id": barber_id,
+            "date": date,
+            "status": "waiting",
+        },
+        {"_id": 0},
+    ).sort("created_at", 1).to_list(1000)
+
+    return {
+        "currently_serving": serving,
+        "waiting_queue": waiting,
+        "remaining_current_minutes": remaining,
+    }
+
+
+async def compute_queue_status_for_token(token: Dict[str, Any]) -> Dict[str, Any]:
+    """Build customer-facing queue view for a single token.
+
+    Returns:
+      {
+        total_token, barber_name, barber_id,
+        position, people_before, estimated_wait_minutes,
+        currently_serving_token, currently_serving_services, approx_finish_time_minutes,
+        status_message, is_current (True when THIS customer is being served)
+      }
+    """
+    salon_id = token.get("salon_id")
+    barber_id = token.get("barber_id")
+    date = token.get("date")
+    token_id = token.get("id")
+
+    snapshot = await compute_barber_queue_snapshot(salon_id, barber_id, date)
+    serving = snapshot["currently_serving"]
+    waiting = snapshot["waiting_queue"]
+    remaining_current = snapshot["remaining_current_minutes"]
+
+    status = token.get("status")
+    is_current_customer = bool(serving and serving.get("id") == token_id)
+
+    position = 0
+    people_before = 0
+    wait_minutes = 0
+    status_message = ""
+
+    if is_current_customer:
+        position = 1
+        people_before = 0
+        wait_minutes = 0
+        status_message = "It's your turn — you're being served now."
+    elif status in ("called", "in_progress", "in_service"):
+        # Called but maybe not the 'serving' lookup returned them — treat as current
+        position = 1
+        people_before = 0
+        wait_minutes = 0
+        status_message = "Please proceed to the salon chair."
+    elif status == "waiting":
+        # Find index in waiting queue (FIFO by created_at)
+        idx = next((i for i, t in enumerate(waiting) if t.get("id") == token_id), None)
+        if idx is None:
+            position = 1
+            people_before = 0
+        else:
+            people_before = idx + (1 if serving else 0)
+            position = people_before + 1
+        # wait = remaining_current + blocked minutes of all waiting tokens ahead
+        wait_minutes = remaining_current
+        if idx is not None:
+            for t in waiting[:idx]:
+                if t.get("blocked_minutes") is not None:
+                    wait_minutes += int(t["blocked_minutes"])
+                else:
+                    mins = await calc_service_total_minutes(t.get("selected_services", []))
+                    wait_minutes += calc_blocked_minutes_from_total(mins)
+
+        if people_before >= 3:
+            status_message = f"{people_before} customers before you."
+        elif people_before == 2:
+            status_message = "Your turn is coming soon. Please be ready."
+        elif people_before == 1:
+            status_message = "Please proceed to the salon chair."
+        else:
+            status_message = "You're next!"
+    elif status == "completed":
+        status_message = "Service completed."
+    elif status == "cancelled":
+        status_message = "Booking cancelled."
+    elif status == "skipped":
+        status_message = "Booking skipped."
+    else:
+        status_message = "Waiting for the salon to start the shift."
+
+    # Currently-serving info (for Live Chair Status section)
+    serving_payload = None
+    approx_finish = None
+    if serving:
+        # Fetch service names briefly
+        svc_names = []
+        for sid in serving.get("selected_services", []) or []:
+            svc = await db.services.find_one({"id": sid}, {"_id": 0, "service_name": 1})
+            if svc:
+                svc_names.append(svc.get("service_name"))
+        serving_payload = {
+            "token_number": serving.get("token_number"),
+            "customer_name_masked": _mask_name(serving.get("customer_name")),
+            "services": svc_names,
+            "started_at": serving.get("called_at"),
+        }
+        approx_finish = remaining_current
+
+    return {
+        "total_token": token.get("token_number"),
+        "barber_id": barber_id,
+        "barber_name": token.get("barber_name"),
+        "position": position,
+        "people_before": people_before,
+        "estimated_wait_minutes": wait_minutes,
+        "currently_serving": serving_payload,
+        "approx_finish_minutes": approx_finish,
+        "status": status,
+        "is_current_customer": is_current_customer,
+        "status_message": status_message,
+    }
+
+
+def _mask_name(name: Optional[str]) -> str:
+    """Privacy: show first name only or initials to avoid leaking identities."""
+    if not name:
+        return ""
+    first = name.strip().split(" ")[0]
+    if len(first) <= 2:
+        return first
+    return first[0] + "*" * (len(first) - 2) + first[-1]
 
 async def check_and_apply_loyalty_reward(salon_id: str, customer_phone: str, booking_amount: float):
     """Check if customer qualifies for loyalty reward and auto top-up wallet (Multi-Tier with individual periods)"""
@@ -966,69 +1413,69 @@ async def send_booking_notification(token_data: dict, notification_type: str):
         logger.error(f"Failed to send notification {notification_type}: {str(e)}")
 
 async def check_and_notify_nearby_tokens(salon_id: str, barber_id: str, date: str, current_token_number: str):
-    """Check and notify customers who are 3, 2 or 1 token away (in-app + WhatsApp)."""
+    """Check and notify customers who are 3, 2 or 1 tokens away in THIS barber's queue (in-app + WhatsApp).
+
+    Note: With salon-wide token numbering, 'tokens_away' is computed by barber-queue FIFO position
+    (waiting + called), NOT by raw numeric token sequence.
+    """
     try:
-        # Get all waiting tokens for this barber
         waiting_tokens = await db.tokens.find(
             {"salon_id": salon_id, "barber_id": barber_id, "date": date, "status": "waiting"},
             {"_id": 0}
-        ).sort("token_number", 1).to_list(100)
-        
-        current_seq = extract_token_sequence(current_token_number)
-        
-        for token in waiting_tokens:
-            token_number = token.get('token_number')
-            token_seq = extract_token_sequence(token_number)
-            tokens_away = token_seq - current_seq
+        ).sort("created_at", 1).to_list(100)
+
+        for idx, token in enumerate(waiting_tokens):
+            # Position in barber's queue (1-indexed), where 1 is "next up"
+            # idx==0 means next in line → 1 away, idx==1 → 2 away, idx==2 → 3 away
+            tokens_away = idx + 1
             phone = token.get('phone')
-            
-            # Notify if 3, 2 or 1 tokens away
-            if tokens_away in (3, 2, 1) and phone:
-                # Track which tokens have been notified to avoid duplicates
-                notified_field = f"notified_{tokens_away}_away"
-                if token.get(notified_field):
-                    continue
+            token_number = token.get('token_number')
 
-                # In-app notification
-                title = f"You're {tokens_away} token{'s' if tokens_away != 1 else ''} away!" if tokens_away > 1 else "You're next!"
-                msg_body = (
-                    f"Your token #{token_number} is {tokens_away} away. Please be ready."
-                    if tokens_away > 1 else
-                    f"Your token #{token_number} is next. Please proceed to the salon."
-                )
-                await create_in_app_notification(
-                    user_type="customer",
-                    user_id=phone,
-                    title=title,
-                    message=msg_body,
-                    notification_type=f"turn_{tokens_away}_away",
-                    setting_key="turn_approaching",
-                    salon_id=salon_id,
-                    related_id=token.get('id', ''),
-                )
+            if tokens_away not in (3, 2, 1) or not phone:
+                continue
 
-                # WhatsApp notification (if enabled)
-                if await should_send_customer_whatsapp(phone, 'whatsapp_turn_approaching'):
-                    message = format_token_near(
-                        customer_name=token.get('customer_name'),
-                        user_token=token_number,
-                        tokens_away=tokens_away
-                    )
-                    action_links = build_action_links(token.get('id', ''), salon_id) if tokens_away >= 2 else ""
-                    full_message = (message + action_links) if action_links else message
-                    await send_whatsapp_notification(
-                        phone,
-                        full_message,
-                        f'token_{tokens_away}_away'
-                    )
+            notified_field = f"notified_{tokens_away}_away"
+            if token.get(notified_field):
+                continue
 
-                # Mark as notified
-                await db.tokens.update_one(
-                    {"id": token.get('id')},
-                    {"$set": {notified_field: True}}
+            # Message text matches PRD
+            if tokens_away == 1:
+                title = "Please proceed to the salon chair"
+                msg_body = "Please proceed to the salon chair. You're up next."
+            elif tokens_away == 2:
+                title = "Your turn is coming soon"
+                msg_body = "Your turn is coming soon. Please be ready."
+            else:
+                title = "You're 3 customers away"
+                msg_body = f"You are 3 customers away. Your token {token_number} will be called shortly."
+
+            await create_in_app_notification(
+                user_type="customer",
+                user_id=phone,
+                title=title,
+                message=msg_body,
+                notification_type=f"turn_{tokens_away}_away",
+                setting_key="turn_approaching",
+                salon_id=salon_id,
+                related_id=token.get('id', ''),
+            )
+
+            if await should_send_customer_whatsapp(phone, 'whatsapp_turn_approaching'):
+                message = format_token_near(
+                    customer_name=token.get('customer_name'),
+                    user_token=token_number,
+                    tokens_away=tokens_away
                 )
-                logger.info(f"Notified token #{token_number} ({tokens_away} away)")
-                
+                action_links = build_action_links(token.get('id', ''), salon_id) if tokens_away >= 2 else ""
+                full_message = (message + action_links) if action_links else message
+                await send_whatsapp_notification(phone, full_message, f'token_{tokens_away}_away')
+
+            await db.tokens.update_one(
+                {"id": token.get('id')},
+                {"$set": {notified_field: True}}
+            )
+            logger.info(f"Notified token #{token_number} ({tokens_away} away) via barber queue position")
+
     except Exception as e:
         logger.error(f"Failed to check nearby tokens: {str(e)}")
 
@@ -3744,65 +4191,54 @@ async def create_booking(booking: BookingCreate):
             detail="You have reached the maximum limit of 2 active bookings per day. Please complete or cancel an existing booking."
         )
     
-    # Get barber details
-    if booking.barber_id != "any":
+    # Get barber details (with Fastest-Barber auto-assignment support)
+    # Compute required blocked minutes for the 75% rule
+    service_total_minutes = await calc_service_total_minutes(booking.selected_services)
+    required_blocked = calc_blocked_minutes_from_total(service_total_minutes)
+
+    if booking.barber_id == "any":
+        # Fastest Barber Auto Assignment
+        chosen = await pick_fastest_barber(
+            salon_id=booking.salon_id,
+            date=booking.date,
+            shift=booking.shift,
+            required_blocked_minutes=required_blocked,
+            customer_gender=booking.customer_gender,
+        )
+        if not chosen:
+            raise HTTPException(
+                status_code=400,
+                detail=f"All barbers are fully booked for {booking.shift} shift. Please choose another shift or date."
+            )
+        booking.barber_id = chosen["id"]
+        barber_name = chosen["name"]
+        barber = chosen
+    else:
         barber = await db.barbers.find_one({"id": booking.barber_id}, {"_id": 0})
         if not barber:
             raise HTTPException(status_code=404, detail="Barber not found")
         barber_name = barber["name"]
-        
-        # Check slot availability - limit 10 tokens per barber per slot
-        existing_count = await db.tokens.count_documents({
-            "salon_id": booking.salon_id,
-            "barber_id": booking.barber_id,
-            "date": booking.date,
-            "shift": booking.shift,
-            "status": {"$nin": ["cancelled"]}
-        })
-        
-        if existing_count >= 10:
+
+        # 75% rule capacity check
+        fit = await can_fit_in_barber_shift(
+            salon_id=booking.salon_id,
+            barber_id=booking.barber_id,
+            date=booking.date,
+            shift=booking.shift,
+            new_blocked_minutes=required_blocked,
+        )
+        if not fit["allowed"]:
             raise HTTPException(
-                status_code=400, 
-                detail=f"All slots are booked for this barber in {booking.shift} shift. Please select another barber or time slot."
-            )
-    else:
-        barber_name = "Any Available"
-        
-        # For "any" barber, check if any barber has availability
-        barbers = await db.barbers.find(
-            {
-                "salon_id": booking.salon_id, 
-                "is_active": True, 
-                "$or": [{"on_leave": False}, {"on_leave": None}, {"on_leave": {"$exists": False}}]
-            }, 
-            {"_id": 0}
-        ).to_list(100)
-        
-        has_availability = False
-        for b in barbers:
-            count = await db.tokens.count_documents({
-                "salon_id": booking.salon_id,
-                "barber_id": b["id"],
-                "date": booking.date,
-                "shift": booking.shift,
-                "status": {"$nin": ["cancelled"]}
-            })
-            if count < 10:
-                has_availability = True
-                break
-        
-        if not has_availability and barbers:
-            raise HTTPException(
-                status_code=400, 
-                detail=f"All slots are booked for {booking.shift} shift. Please select another time slot."
+                status_code=400,
+                detail=f"{barber_name}'s {booking.shift} shift is full. Please pick another barber or shift."
             )
     
-    # Calculate total amount
+    # Calculate total amount (barber is now always a real barber after fastest-barber assignment)
     total_amount = 0
-    if booking.barber_id != "any":
+    if booking.barber_id and booking.barber_id != "any":
         total_amount = await calculate_booking_total(booking.selected_services, booking.barber_id)
-    else:
-        # For "any" barber, calculate using base prices
+    # Fallback to base prices if nothing was found
+    if total_amount == 0:
         for service_id in booking.selected_services:
             service = await db.services.find_one({"id": service_id}, {"_id": 0})
             if service:
@@ -3854,9 +4290,9 @@ async def create_booking(booking: BookingCreate):
         
         payment_status = "paid"
     
-    # Get token number - always assign immediately (even for future bookings)
-    token_number = await get_next_token_number(booking.salon_id, booking.barber_id, booking.date, booking.shift)
-    
+    # Get GLOBAL (salon-wide) token number — salon+date+shift sequence
+    token_number = await get_next_token_number(booking.salon_id, booking.date, booking.shift)
+
     # Create token
     token_dict = {
         "id": str(uuid.uuid4()),
@@ -3872,6 +4308,9 @@ async def create_booking(booking: BookingCreate):
         "barber_name": barber_name,
         "selected_services": booking.selected_services,
         "total_amount": total_amount,
+        # 75%-rule bookkeeping (stored for consistent capacity math)
+        "total_service_minutes": service_total_minutes,
+        "blocked_minutes": required_blocked,
         "status": "waiting" if booking.booking_type == "instant" else "future",
         "payment_status": payment_status,
         "payment_mode": payment_mode,
@@ -3909,44 +4348,76 @@ async def create_booking(booking: BookingCreate):
 
 # Slot availability endpoint
 @api_router.get("/salons/{salon_id}/slot-availability")
-async def get_slot_availability(salon_id: str, date: str, shift: str):
-    """Check slot availability per barber for a given date and shift"""
-    # Find active barbers (on_leave can be False, None, or missing)
+async def get_slot_availability(
+    salon_id: str, date: str, shift: str, service_ids: Optional[str] = None
+):
+    """Check per-barber capacity for a given date and shift using the 75%-rule.
+
+    Query params:
+      - service_ids (optional, comma-separated) — if provided, compute whether each barber
+        can accommodate those specific services (more accurate display).
+    """
+    # Compute shift window for salon
+    windows = await get_salon_shift_windows(salon_id, date)
+    shift_info = windows.get(shift, {})
+    capacity = int(shift_info.get("duration_minutes", 0))
+
+    # Optional services → required blocked minutes
+    required_blocked = 0
+    if service_ids:
+        sid_list = [s for s in service_ids.split(",") if s]
+        total_mins = await calc_service_total_minutes(sid_list)
+        required_blocked = calc_blocked_minutes_from_total(total_mins)
+
+    # Find active barbers
     barbers = await db.barbers.find(
         {
-            "salon_id": salon_id, 
-            "is_active": True, 
-            "$or": [{"on_leave": False}, {"on_leave": None}, {"on_leave": {"$exists": False}}]
-        }, 
-        {"_id": 0, "id": 1, "name": 1}
+            "salon_id": salon_id,
+            "is_active": True,
+            "$or": [{"on_leave": False}, {"on_leave": None}, {"on_leave": {"$exists": False}}],
+        },
+        {"_id": 0, "id": 1, "name": 1},
     ).to_list(100)
-    
+
     result = []
     for barber in barbers:
+        used = await get_barber_blocked_minutes_used(salon_id, barber["id"], date, shift)
+        remaining = max(0, capacity - used)
+        # If required_blocked specified, barber is full when it can't take this booking
+        already_full = used >= capacity if capacity > 0 else True
+        cant_fit_new = required_blocked > 0 and remaining <= 0
+        is_full = already_full or cant_fit_new
+        # count of live bookings (for display)
         count = await db.tokens.count_documents({
             "salon_id": salon_id,
             "barber_id": barber["id"],
             "date": date,
             "shift": shift,
-            "status": {"$nin": ["cancelled"]}
+            "status": {"$nin": ["cancelled", "skipped"]},
         })
         result.append({
             "barber_id": barber["id"],
             "barber_name": barber["name"],
             "booked": count,
-            "available": max(0, 10 - count),
-            "is_full": count >= 10
+            "capacity_minutes": capacity,
+            "used_minutes": used,
+            "remaining_minutes": remaining,
+            # "available" kept for backward compatibility: approximate slots left (remaining / avg 30 min service with 75% rule ≈ 22.5m)
+            "available": max(0, int(remaining / 22)) if remaining > 0 else 0,
+            "is_full": is_full,
         })
-    
-    # Check if all slots are full - only true if we have barbers AND all are full
+
     all_full = all(b["is_full"] for b in result) if result else False
-    
+
     return {
         "date": date,
         "shift": shift,
+        "shift_window": shift_info,
+        "capacity_minutes": capacity,
         "barbers": result,
         "all_slots_full": all_full,
-        "max_per_slot": 10
+        # Kept for backward compat but no longer the source of truth
+        "max_per_slot": 10,
     }
 
 @api_router.get("/salons/{salon_id}/barbers/{barber_id}/queue", response_model=List[TokenModel])
@@ -3982,11 +4453,11 @@ async def call_next_token(salon_id: str, barber_id: str, current_salon=Depends(g
     
     # DON'T auto-complete previous tokens - barber must manually complete
     
-    # Get next waiting token
+    # Get next waiting token (FIFO by creation time — lexicographic sort on M1,M2,M10 is unsafe)
     next_token = await db.tokens.find_one(
         {"salon_id": salon_id, "barber_id": barber_id, "date": date, "status": "waiting"},
         {"_id": 0},
-        sort=[("token_number", 1)]
+        sort=[("created_at", 1)]
     )
     
     if next_token:
@@ -4579,7 +5050,14 @@ async def confirm_token_payment(token_id: str, body: dict, current_salon=Depends
 
 @api_router.put("/tokens/{token_id}/change-barber")
 async def change_token_barber(token_id: str, body: dict, current_salon=Depends(get_current_salon)):
-    """Change the barber assigned to a token and recalculate total."""
+    """Change the barber assigned to a token and recalculate total + capacity.
+
+    Validations:
+      - Target barber must have capacity for this token in the same shift (75% rule).
+    Side effects:
+      - Recalculates total_amount using new barber's pricing.
+      - Sends customer notification: "Your service will now be provided by Barber X".
+    """
     token = await db.tokens.find_one({"id": token_id}, {"_id": 0})
     if not token:
         raise HTTPException(status_code=404, detail="Token not found")
@@ -4590,41 +5068,96 @@ async def change_token_barber(token_id: str, body: dict, current_salon=Depends(g
     new_barber_id = body.get("barber_id")
     if not new_barber_id:
         raise HTTPException(status_code=400, detail="barber_id is required")
-    
-    # Get new barber details
-    new_barber_name = "Any Available"
-    if new_barber_id != "any":
+
+    old_barber_id = token.get("barber_id")
+
+    # Resolve new barber (supports auto-assign via "any")
+    if new_barber_id == "any":
+        # Use fastest-barber logic, passing this token's blocked minutes
+        required_blocked = int(token.get("blocked_minutes") or 0)
+        if required_blocked <= 0:
+            required_blocked = calc_blocked_minutes_from_total(
+                await calc_service_total_minutes(token.get("selected_services", []))
+            )
+        chosen = await pick_fastest_barber(
+            salon_id=token["salon_id"],
+            date=token["date"],
+            shift=token.get("shift", "Morning"),
+            required_blocked_minutes=required_blocked,
+        )
+        if not chosen:
+            raise HTTPException(status_code=400, detail="No barber has capacity for this shift.")
+        new_barber_id = chosen["id"]
+        new_barber_name = chosen["name"]
+    else:
         barber = await db.barbers.find_one({"id": new_barber_id}, {"_id": 0})
         if not barber:
             raise HTTPException(status_code=404, detail="Barber not found")
         new_barber_name = barber.get("name", "Unknown")
-    
+
+        # Capacity check (skip if same barber as before)
+        if new_barber_id != old_barber_id:
+            required_blocked = int(token.get("blocked_minutes") or 0)
+            if required_blocked <= 0:
+                required_blocked = calc_blocked_minutes_from_total(
+                    await calc_service_total_minutes(token.get("selected_services", []))
+                )
+            fit = await can_fit_in_barber_shift(
+                salon_id=token["salon_id"],
+                barber_id=new_barber_id,
+                date=token["date"],
+                shift=token.get("shift", "Morning"),
+                new_blocked_minutes=required_blocked,
+            )
+            if not fit["allowed"]:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"{new_barber_name}'s shift is full. Please choose another barber."
+                )
+
     # Recalculate total amount based on new barber's pricing
     selected_services = token.get("selected_services", [])
-    total_amount = 0
-    if new_barber_id != "any":
-        total_amount = await calculate_booking_total(selected_services, new_barber_id)
-    else:
+    total_amount = await calculate_booking_total(selected_services, new_barber_id)
+    if total_amount == 0:
         for service_id in selected_services:
             service = await db.services.find_one({"id": service_id}, {"_id": 0})
             if service:
                 total_amount += service.get("base_price", 0)
-    
-    # Update token
+
+    # Update token — also RESET near-notification flags so the new barber's queue re-triggers them
     await db.tokens.update_one(
         {"id": token_id},
         {"$set": {
             "barber_id": new_barber_id,
             "barber_name": new_barber_name,
-            "total_amount": total_amount
+            "total_amount": total_amount,
+            "notified_3_away": False,
+            "notified_2_away": False,
+            "notified_1_away": False,
         }}
     )
-    
+
     # Get updated token
     updated_token = await db.tokens.find_one({"id": token_id}, {"_id": 0})
-    
+
     await broadcast_update("token_updated", updated_token)
-    
+
+    # Notify customer of barber change
+    try:
+        if updated_token.get("phone") and new_barber_id != old_barber_id:
+            await create_in_app_notification(
+                user_type="customer",
+                user_id=updated_token["phone"],
+                title="Barber Changed",
+                message=f"Your service will now be provided by Barber {new_barber_name}.",
+                notification_type="barber_changed",
+                setting_key="booking_status_change",
+                salon_id=updated_token.get("salon_id", ""),
+                related_id=token_id,
+            )
+    except Exception as e:
+        logger.error(f"Failed to send barber-change notification: {e}")
+
     return {
         "message": f"Barber changed to {new_barber_name}. Total recalculated: ₹{total_amount}",
         "token": TokenModel(**updated_token)
@@ -5374,7 +5907,7 @@ async def get_salon_token_status(salon_id: str, shift: Optional[str] = None):
         ).to_list(1000)
         
         barber_called = await db.tokens.find_one(
-            {**barber_query, "status": "called"},
+            {**barber_query, "status": {"$in": ["called", "in_progress", "in_service"]}},
             {"_id": 0},
             sort=[("called_at", -1)]
         )
@@ -5386,7 +5919,42 @@ async def get_salon_token_status(salon_id: str, shift: Optional[str] = None):
             "date": today
         }
         total_tokens_today = await db.tokens.count_documents(total_tokens_query)
-        
+
+        # Compute approx finish time for the currently-serving token using 75% rule residual
+        approx_finish_minutes = None
+        currently_serving_payload = None
+        if barber_called:
+            try:
+                remaining = None
+                if barber_called.get("blocked_minutes") is not None:
+                    remaining = int(barber_called["blocked_minutes"])
+                else:
+                    mins = await calc_service_total_minutes(barber_called.get("selected_services", []))
+                    remaining = calc_blocked_minutes_from_total(mins)
+                # Subtract elapsed since called_at
+                if barber_called.get("called_at"):
+                    try:
+                        called_dt = datetime.fromisoformat(str(barber_called["called_at"]).replace("Z", "+00:00"))
+                        elapsed = (datetime.now(timezone.utc) - called_dt).total_seconds() / 60
+                        remaining = max(0, int(remaining - elapsed))
+                    except Exception:
+                        pass
+                approx_finish_minutes = remaining
+                # Service names (not sensitive)
+                svc_names = []
+                for sid in barber_called.get("selected_services", []) or []:
+                    svc = await db.services.find_one({"id": sid}, {"_id": 0, "service_name": 1})
+                    if svc:
+                        svc_names.append(svc.get("service_name"))
+                currently_serving_payload = {
+                    "token_number": barber_called.get("token_number"),
+                    "services": svc_names,
+                    "started_at": barber_called.get("called_at"),
+                    "approx_finish_minutes": approx_finish_minutes,
+                }
+            except Exception as e:
+                logger.error(f"live-status finish calc failed: {e}")
+
         result["barbers"].append({
             "barber_id": barber["id"],
             "barber_name": barber["name"],
@@ -5395,7 +5963,9 @@ async def get_salon_token_status(salon_id: str, shift: Optional[str] = None):
             "current_token": barber_called.get("token_number") if barber_called else None,
             "waiting_count": len(barber_waiting),
             "total_tokens_today": total_tokens_today,
-            "queue_status": barber.get("queue_status", "available")
+            "queue_status": barber.get("queue_status", "available"),
+            "currently_serving": currently_serving_payload,
+            "approx_finish_minutes": approx_finish_minutes,
         })
     
     return result
@@ -6018,7 +6588,7 @@ async def get_user_active_bookings(user_id: str):
 
 @api_router.get("/customers/{phone}/active-bookings")
 async def get_customer_active_bookings(phone: str):
-    """Get active bookings for a customer by phone"""
+    """Get active bookings for a customer by phone, enriched with live queue context."""
     # Normalize phone
     if not phone.startswith("+91"):
         phone = f"+91{phone}"
@@ -6030,13 +6600,13 @@ async def get_customer_active_bookings(phone: str):
         {
             "phone": phone,
             "date": today,
-            "status": {"$in": ["waiting", "in_service"]},
+            "status": {"$in": ["waiting", "called", "in_progress", "in_service"]},
             "$or": [{"cancelled": False}, {"cancelled": {"$exists": False}}]
         },
         {"_id": 0}
     ).sort("created_at", 1).to_list(10)
     
-    # Enrich with salon details
+    # Enrich with salon + live queue details
     for token in tokens:
         salon = await db.salons.find_one({"id": token["salon_id"]}, {"_id": 0})
         if salon:
@@ -6046,8 +6616,39 @@ async def get_customer_active_bookings(phone: str):
                 "city": salon.get("city"),
                 "logo_url": salon.get("logo_url")
             }
-    
+        # Live queue context (customer-facing only)
+        try:
+            q = await compute_queue_status_for_token(token)
+            # Inject fields the frontend already reads, plus new ones
+            token["queue_position"] = q["people_before"]       # "N ahead of you"
+            token["people_before"] = q["people_before"]
+            token["barber_position"] = q["position"]            # 1-indexed, #3 style
+            token["estimated_wait_minutes"] = q["estimated_wait_minutes"]
+            token["queue_status_message"] = q["status_message"]
+            token["currently_serving"] = q["currently_serving"]
+            token["approx_finish_minutes"] = q["approx_finish_minutes"]
+        except Exception as e:
+            logger.error(f"Queue enrichment failed for token {token.get('id')}: {e}")
+
     return {"active_bookings": tokens, "count": len(tokens)}
+
+
+@api_router.get("/tokens/{token_id}/queue-status")
+async def get_token_queue_status(token_id: str):
+    """Customer-facing queue status for a single token.
+
+    Returns total token, barber name, barber-queue position, people before,
+    estimated wait time (75% rule), live serving info, and a status message.
+    """
+    token = await db.tokens.find_one({"id": token_id}, {"_id": 0})
+    if not token:
+        raise HTTPException(status_code=404, detail="Token not found")
+    try:
+        q = await compute_queue_status_for_token(token)
+    except Exception as e:
+        logger.error(f"Error computing queue status: {e}")
+        raise HTTPException(status_code=500, detail="Unable to compute queue status")
+    return q
 
 
 # ============ INVOICE ROUTES ============

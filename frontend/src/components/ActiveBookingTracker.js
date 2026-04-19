@@ -43,9 +43,20 @@ export default function ActiveBookingTracker({ userPhone, userName }) {
   };
 
   const calculateWaitTime = (token) => {
-    // Rough estimate: 15 mins per token ahead
-    const tokensAhead = token.queue_position || 0;
+    // Prefer backend-computed wait (75% rule); fall back to 15m/token
+    if (typeof token.estimated_wait_minutes === 'number') {
+      return Math.max(0, token.estimated_wait_minutes);
+    }
+    const tokensAhead = token.people_before ?? token.queue_position ?? 0;
     return Math.max(tokensAhead * 15, 5);
+  };
+
+  const formatWait = (m) => {
+    if (m === 0) return 'Next!';
+    if (m < 60) return `${m}m`;
+    const h = Math.floor(m / 60);
+    const mm = m % 60;
+    return mm ? `${h}h ${mm}m` : `${h}h`;
   };
 
   console.log('[ActiveBookingTracker] Render state:', { loading, activeBookings: activeBookings.length, userPhone });
@@ -107,10 +118,10 @@ export default function ActiveBookingTracker({ userPhone, userName }) {
                   </div>
                   <div className="text-right">
                     <div className="bg-white/20 text-white px-3 py-1 rounded-full text-sm font-bold border border-white/30">
-                      {booking.queue_position || 0} In Queue
+                      {booking.people_before ?? booking.queue_position ?? 0} ahead of you
                     </div>
                     <div className="bg-white/20 text-white px-3 py-1 rounded-full text-xs font-semibold mt-2 border border-white/30">
-                      ~{calculateWaitTime(booking)}m Wait
+                      ~{formatWait(calculateWaitTime(booking))} Wait
                     </div>
                   </div>
                 </div>
@@ -126,21 +137,17 @@ export default function ActiveBookingTracker({ userPhone, userName }) {
                     <span className="text-amber-600 font-semibold">Active Booking</span>
                   </div>
                   <div className="bg-amber-100 text-amber-700 px-3 py-1 rounded-full text-sm font-bold">
-                    Token #{booking.token_number}
+                    Total Token {booking.token_number}
                   </div>
                 </div>
 
-                <div className="grid grid-cols-2 gap-3">
-                  <div className="bg-gray-50 p-3 rounded-lg">
-                    <div className="flex items-center gap-2 text-gray-600 text-xs mb-1">
-                      <Scissors size={14} />
-                      <span>Service</span>
-                    </div>
-                    <p className="font-semibold text-gray-900 text-sm">
-                      {booking.selected_services?.length || 0} service(s)
-                    </p>
+                {booking.queue_status_message && (
+                  <div className="px-3 py-2 rounded-lg bg-amber-50 border border-amber-200 text-amber-800 text-sm font-semibold">
+                    {booking.queue_status_message}
                   </div>
+                )}
 
+                <div className="grid grid-cols-2 gap-3">
                   <div className="bg-gray-50 p-3 rounded-lg">
                     <div className="flex items-center gap-2 text-gray-600 text-xs mb-1">
                       <Users size={14} />
@@ -151,23 +158,36 @@ export default function ActiveBookingTracker({ userPhone, userName }) {
                     </p>
                   </div>
 
-                  <div className="bg-amber-50 p-3 rounded-lg">
-                    <div className="flex items-center gap-2 text-amber-600 text-xs mb-1">
-                      <Clock size={14} />
-                      <span>Wait Time</span>
+                  <div className="bg-gray-50 p-3 rounded-lg">
+                    <div className="flex items-center gap-2 text-gray-600 text-xs mb-1">
+                      <Scissors size={14} />
+                      <span>Services</span>
                     </div>
-                    <p className="font-bold text-amber-600 text-sm">
-                      ~{calculateWaitTime(booking)} min wait
+                    <p className="font-semibold text-gray-900 text-sm">
+                      {booking.selected_services?.length || 0} service(s)
                     </p>
                   </div>
 
                   <div className="bg-amber-50 p-3 rounded-lg">
                     <div className="flex items-center gap-2 text-amber-600 text-xs mb-1">
                       <Users size={14} />
-                      <span>Queue Position</span>
+                      <span>Your Position</span>
                     </div>
                     <p className="font-bold text-amber-600 text-sm">
-                      {booking.queue_position || 0} ahead of you
+                      #{booking.barber_position ?? ((booking.people_before ?? 0) + 1)}
+                      <span className="ml-1 font-normal text-amber-600/70">
+                        ({booking.people_before ?? 0} before you)
+                      </span>
+                    </p>
+                  </div>
+
+                  <div className="bg-amber-50 p-3 rounded-lg">
+                    <div className="flex items-center gap-2 text-amber-600 text-xs mb-1">
+                      <Clock size={14} />
+                      <span>Estimated Wait</span>
+                    </div>
+                    <p className="font-bold text-amber-600 text-sm">
+                      {formatWait(calculateWaitTime(booking))}
                     </p>
                   </div>
                 </div>
