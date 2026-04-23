@@ -19,6 +19,12 @@ import SalonNotificationSettings from '@/components/SalonNotificationSettings';
 import OperationalHoursModule from '@/components/OperationalHoursModule';
 import Analytics from '@/components/Analytics';
 import { getSession, clearSession } from '@/utils/sessionManager';
+import {
+  requestNotificationPermission,
+  showBrowserNotification,
+  getSeenIds,
+  setSeenIds,
+} from '@/utils/browserNotifications';
 import { 
   Scissors, LogOut, ChevronRight, SkipForward, RotateCcw, XCircle,
   Clock, User, Phone, Bell, MapPin, Settings, CheckCircle, Calendar,
@@ -57,7 +63,15 @@ export default function EnhancedSalonDashboard() {
   const [tokens, setTokens] = useState([]);
   const [selectedBarber, setSelectedBarber] = useState('all');
   const [filter, setFilter] = useState('all');
-  const [date] = useState(new Date().toISOString().split('T')[0]);
+  // Today/Tomorrow date state — used for queue + home dashboard
+  const getISTDateOffset = (daysOffset = 0) => {
+    const now = new Date();
+    const istMs = now.getTime() + now.getTimezoneOffset() * 60000 + 5.5 * 3600000;
+    const ist = new Date(istMs + daysOffset * 86400000);
+    return ist.toISOString().split('T')[0];
+  };
+  const [dateMode, setDateMode] = useState('today'); // 'today' | 'tomorrow'
+  const date = dateMode === 'today' ? getISTDateOffset(0) : getISTDateOffset(1);
   const [menuOpen, setMenuOpen] = useState(false);
   const [menuPinned, setMenuPinned] = useState(() => {
     return localStorage.getItem('menu_pinned') === 'true';
@@ -148,10 +162,56 @@ export default function EnhancedSalonDashboard() {
     };
   }, [filter, selectedBarber]);
 
+  // Re-fetch tokens when date mode (today/tomorrow) toggles
+  useEffect(() => {
+    if (salonId) {
+      fetchTokens(salonId);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dateMode, salonId]);
+
   // Save active tab to localStorage whenever it changes
   useEffect(() => {
     localStorage.setItem('salon_active_tab', activeTab);
   }, [activeTab]);
+
+  // Browser notifications: detect new unread notifications and show native popup + sound
+  useEffect(() => {
+    if (!salonId) return;
+    requestNotificationPermission();
+    const storageKey = `seen_notif_salon_${salonId}`;
+    let initialised = false;
+
+    const pollNotifs = async () => {
+      try {
+        const res = await axios.get(`${API}/notifications/salon/${salonId}`);
+        const notifs = Array.isArray(res.data) ? res.data : (res.data?.notifications || []);
+        const seen = getSeenIds(storageKey);
+        if (!initialised) {
+          notifs.forEach(n => { if (n.id) seen.add(n.id); });
+          setSeenIds(storageKey, seen);
+          initialised = true;
+          return;
+        }
+        const sorted = [...notifs].sort((a, b) => new Date(a.created_at || 0) - new Date(b.created_at || 0));
+        sorted.forEach(n => {
+          if (!n.id || seen.has(n.id)) return;
+          seen.add(n.id);
+          if (n.is_read === false || n.read === false || n.is_read === undefined) {
+            showBrowserNotification(
+              n.title || 'New Salon Notification',
+              n.message || n.body || '',
+              { tag: `salon-${n.id}` }
+            );
+          }
+        });
+        setSeenIds(storageKey, seen);
+      } catch (e) { /* silent */ }
+    };
+    pollNotifs();
+    const interval = setInterval(pollNotifs, 30000);
+    return () => clearInterval(interval);
+  }, [salonId]);
 
   const getAuthHeaders = () => {
     // Try new multi-user auth first, fall back to legacy
@@ -891,12 +951,31 @@ export default function EnhancedSalonDashboard() {
         {activeTab === 'home' && (
           <div className="space-y-6">
             {/* Welcome Header */}
-            <div className="flex items-center justify-between">
+            <div className="flex items-center justify-between flex-wrap gap-3">
               <div>
                 <h2 className="text-2xl font-playfair font-bold text-foreground">{salon?.salon_name || salon?.name || 'Salon'}</h2>
                 <p className="text-sm text-muted-foreground">{new Date().toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}</p>
               </div>
               <div className="flex items-center gap-3">
+                {/* Today / Tomorrow Toggle */}
+                <div className="inline-flex rounded-lg border border-border bg-card p-1">
+                  <button
+                    onClick={() => setDateMode('today')}
+                    className={`px-3 py-1.5 text-xs font-semibold rounded-md transition-colors ${
+                      dateMode === 'today' ? 'bg-gold text-black' : 'text-foreground hover:bg-muted'
+                    }`}
+                  >
+                    Today
+                  </button>
+                  <button
+                    onClick={() => setDateMode('tomorrow')}
+                    className={`px-3 py-1.5 text-xs font-semibold rounded-md transition-colors ${
+                      dateMode === 'tomorrow' ? 'bg-gold text-black' : 'text-foreground hover:bg-muted'
+                    }`}
+                  >
+                    Tomorrow
+                  </button>
+                </div>
                 {/* Manual Toggle Status Badge */}
                 {salon?.manual_toggle?.is_overridden && (
                   <div className={`flex items-center gap-2 px-3 py-1.5 rounded-full ${
@@ -932,7 +1011,7 @@ export default function EnhancedSalonDashboard() {
                   <div className="p-2 rounded-lg bg-blue-500/10"><Calendar className="w-5 h-5 text-blue-500" /></div>
                 </div>
                 <p className="text-2xl font-bold text-foreground">{tokens.length}</p>
-                <p className="text-xs text-muted-foreground">Total Tokens Today</p>
+                <p className="text-xs text-muted-foreground">Total Tokens {dateMode === 'today' ? 'Today' : 'Tomorrow'}</p>
               </div>
               <div 
                 className="bg-card border border-border rounded-xl p-4 hover:border-gold/30 transition-colors cursor-pointer"
@@ -1081,6 +1160,30 @@ export default function EnhancedSalonDashboard() {
 
         {activeTab === 'queue' && (
           <div className="space-y-6">
+            {/* Date Toggle: Today / Tomorrow */}
+            <div className="flex items-center justify-between flex-wrap gap-3">
+              <div className="inline-flex rounded-lg border border-border bg-card p-1">
+                <button
+                  onClick={() => setDateMode('today')}
+                  className={`px-4 py-1.5 text-sm font-semibold rounded-md transition-colors ${
+                    dateMode === 'today' ? 'bg-gold text-black' : 'text-foreground hover:bg-muted'
+                  }`}
+                >
+                  Today
+                </button>
+                <button
+                  onClick={() => setDateMode('tomorrow')}
+                  className={`px-4 py-1.5 text-sm font-semibold rounded-md transition-colors ${
+                    dateMode === 'tomorrow' ? 'bg-gold text-black' : 'text-foreground hover:bg-muted'
+                  }`}
+                >
+                  Tomorrow
+                </button>
+              </div>
+              <div className="text-xs text-muted-foreground">
+                Viewing bookings for <span className="font-semibold text-foreground">{new Date(date).toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric', month: 'short' })}</span>
+              </div>
+            </div>
             {/* Barber Filter */}
             <div className="flex items-center space-x-2 overflow-x-auto pb-2 scrollbar-hide">
               <button

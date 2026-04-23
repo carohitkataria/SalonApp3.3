@@ -22,6 +22,16 @@ export default function TokenDashboard() {
   const [tokenStatus, setTokenStatus] = useState(null);
   const [selectedShift, setSelectedShift] = useState('Morning');
   const [loading, setLoading] = useState(true);
+  const [shiftList, setShiftList] = useState([]); // dynamic shifts from salon operational hours
+  // Today / Tomorrow toggle
+  const getISTDateOffset = (daysOffset = 0) => {
+    const now = new Date();
+    const istMs = now.getTime() + now.getTimezoneOffset() * 60000 + 5.5 * 3600000;
+    const ist = new Date(istMs + daysOffset * 86400000);
+    return ist.toISOString().split('T')[0];
+  };
+  const [dateMode, setDateMode] = useState('today');
+  const date = dateMode === 'today' ? getISTDateOffset(0) : getISTDateOffset(1);
 
   const shifts = ['Morning', 'Noon', 'Evening'];
 
@@ -49,7 +59,22 @@ export default function TokenDashboard() {
     if (selectedShift) {
       fetchTokenStatus();
     }
-  }, [selectedShift]);
+  }, [selectedShift, dateMode]);
+
+  // Fetch salon-specific shift windows for the selected date
+  useEffect(() => {
+    const fetchShiftWindows = async () => {
+      try {
+        const res = await axios.get(`${API}/salons/${salonId}/shift-windows`, {
+          params: { date }
+        });
+        setShiftList(res.data.shifts || []);
+      } catch (e) {
+        console.error('Error fetching shift windows:', e);
+      }
+    };
+    if (salonId) fetchShiftWindows();
+  }, [salonId, dateMode]);
 
   useEffect(() => {
     if (socket) {
@@ -82,7 +107,7 @@ export default function TokenDashboard() {
   const fetchTokenStatus = async () => {
     try {
       setLoading(true);
-      const response = await axios.get(`${API}/salons/${salonId}/token-status?shift=${selectedShift}`);
+      const response = await axios.get(`${API}/salons/${salonId}/token-status?shift=${selectedShift}&date=${date}`);
       setTokenStatus(response.data);
     } catch (error) {
       console.error('Error fetching token status:', error);
@@ -93,6 +118,9 @@ export default function TokenDashboard() {
   };
 
   const getShiftTime = (shift) => {
+    // Prefer dynamic shift windows from salon operational hours
+    const dyn = shiftList.find(s => s.id === shift);
+    if (dyn && dyn.time) return dyn.time;
     const times = {
       'Morning': '7 AM - 11 AM',
       'Noon': '11 AM - 4 PM',
@@ -166,6 +194,28 @@ export default function TokenDashboard() {
           <div className="text-center mb-4">
             <h1 className="text-2xl font-playfair font-bold text-foreground">Live Queue Status</h1>
             {salon && <p className="text-sm text-muted-foreground">{salon.salon_name}</p>}
+          </div>
+
+          {/* Today / Tomorrow Toggle */}
+          <div className="flex justify-center mb-3">
+            <div className="inline-flex rounded-lg border border-border bg-background p-1">
+              <button
+                onClick={() => setDateMode('today')}
+                className={`px-4 py-1.5 text-sm font-semibold rounded-md transition-colors ${
+                  dateMode === 'today' ? 'bg-gold text-black' : 'text-foreground hover:bg-muted'
+                }`}
+              >
+                Today
+              </button>
+              <button
+                onClick={() => setDateMode('tomorrow')}
+                className={`px-4 py-1.5 text-sm font-semibold rounded-md transition-colors ${
+                  dateMode === 'tomorrow' ? 'bg-gold text-black' : 'text-foreground hover:bg-muted'
+                }`}
+              >
+                Tomorrow
+              </button>
+            </div>
           </div>
 
           {/* Shift Selector */}

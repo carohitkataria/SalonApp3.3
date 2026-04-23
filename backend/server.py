@@ -4220,6 +4220,49 @@ async def get_available_shifts():
     """Get available shifts for booking"""
     return {"shifts": get_shifts()}
 
+
+def _fmt_hour_label(h: int) -> str:
+    """Convert 24h integer to '7 AM' / '4 PM' style label."""
+    try:
+        h = int(h)
+    except Exception:
+        return ""
+    if h == 0:
+        return "12 AM"
+    if h == 12:
+        return "12 PM"
+    if h < 12:
+        return f"{h} AM"
+    return f"{h - 12} PM"
+
+
+@api_router.get("/salons/{salon_id}/shift-windows")
+async def get_salon_shift_windows_api(salon_id: str, date: Optional[str] = None):
+    """Return shift windows for a salon on a given date computed from its operational_hours."""
+    if not date:
+        date = datetime.now(timezone.utc).date().isoformat()
+    windows = await get_salon_shift_windows(salon_id, date)
+    shifts = []
+    for shift_id in ["Morning", "Noon", "Evening"]:
+        w = windows.get(shift_id, {}) or {}
+        start_h = w.get("start")
+        end_h = w.get("end")
+        duration_hours = w.get("duration_hours", 0) or 0
+        start_label = _fmt_hour_label(start_h) if start_h is not None else ""
+        end_label = _fmt_hour_label(end_h) if end_h is not None else ""
+        time_label = f"{start_label} - {end_label}" if start_label and end_label else ""
+        shifts.append({
+            "id": shift_id,
+            "name": shift_id,
+            "start": start_h,
+            "end": end_h,
+            "time": time_label,
+            "duration_hours": duration_hours,
+            "duration_minutes": w.get("duration_minutes", 0),
+            "is_available": bool(duration_hours and duration_hours > 0),
+        })
+    return {"date": date, "shifts": shifts}
+
 @api_router.get("/slots")
 async def get_available_slots(date: Optional[str] = None):
     """DEPRECATED: Get 2-hour time slots (kept for backward compatibility)"""
@@ -6093,9 +6136,9 @@ async def get_user_recent_services(user_id: str):
     return {"services": []}
 
 @api_router.get("/salons/{salon_id}/token-status")
-async def get_salon_token_status(salon_id: str, shift: Optional[str] = None):
+async def get_salon_token_status(salon_id: str, shift: Optional[str] = None, date: Optional[str] = None):
     """Get current token status for salon (overall and per barber)"""
-    today = datetime.now().date().isoformat()
+    today = date or datetime.now().date().isoformat()
     
     # Get all barbers for this salon
     barbers = await db.barbers.find(
@@ -6209,9 +6252,9 @@ async def get_salon_token_status(salon_id: str, shift: Optional[str] = None):
     return result
 
 @api_router.get("/salons/{salon_id}/live-status")
-async def get_salon_live_status(salon_id: str, shift: Optional[str] = None):
+async def get_salon_live_status(salon_id: str, shift: Optional[str] = None, date: Optional[str] = None):
     """Get current live status for salon (alias for token-status)"""
-    return await get_salon_token_status(salon_id, shift)
+    return await get_salon_token_status(salon_id, shift, date)
 
 # ============ RATING/REVIEW ROUTES ============
 

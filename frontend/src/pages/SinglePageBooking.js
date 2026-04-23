@@ -297,6 +297,14 @@ export default function SinglePageBooking() {
     return () => clearInterval(interval);
   }, [isUserLoggedIn, salonId]);
 
+  // Refetch shift windows when selected date changes (operational-hour driven)
+  useEffect(() => {
+    if (salonId && formData.date) {
+      fetchShifts();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [formData.date, salonId]);
+
   // Fetch barber services when barber changes
   useEffect(() => {
     if (formData.barberId !== 'any' && !fastestAvailable) {
@@ -341,10 +349,20 @@ export default function SinglePageBooking() {
 
   const fetchShifts = async () => {
     try {
-      const response = await axios.get(`${API}/shifts`);
-      setShifts(response.data.shifts);
+      // Prefer salon-specific shift windows derived from operational hours
+      const dateForShifts = formData.date || getTodayIST();
+      const response = await axios.get(`${API}/salons/${salonId}/shift-windows`, {
+        params: { date: dateForShifts }
+      });
+      setShifts(response.data.shifts || []);
     } catch (error) {
-      console.error('Error fetching shifts:', error);
+      console.error('Error fetching shift windows, falling back to defaults:', error);
+      try {
+        const fallback = await axios.get(`${API}/shifts`);
+        setShifts(fallback.data.shifts);
+      } catch (e) {
+        console.error('Fallback /shifts also failed:', e);
+      }
     }
   };
 
@@ -1193,19 +1211,41 @@ export default function SinglePageBooking() {
           {/* Time Slot Chips - Always visible, greyed if unavailable */}
           <div>
             <p className="text-sm font-medium text-muted-foreground mb-2">Time Slot</p>
-            <div className="flex gap-2 flex-wrap">
+            <div className="grid grid-cols-3 gap-2 sm:flex sm:flex-wrap">
               {shifts.map(shift => {
-                const isAvailable = getShiftAvailability(shift.id);
+                const isAvailable = getShiftAvailability(shift.id) && (shift.is_available !== false);
+                const isSelected = formData.shift === shift.id;
                 return (
-                  <SelectChip
+                  <button
                     key={shift.id}
-                    selected={formData.shift === shift.id}
-                    onClick={() => setFormData(prev => ({ ...prev, shift: shift.id }))}
-                    icon={Clock}
+                    type="button"
+                    onClick={() => isAvailable && setFormData(prev => ({ ...prev, shift: shift.id }))}
                     disabled={!isAvailable}
+                    className={`relative flex flex-col items-center justify-center px-3 py-2 rounded-xl border-2 transition-all ${
+                      !isAvailable
+                        ? 'bg-muted/50 text-muted-foreground/50 border-border/50 cursor-not-allowed opacity-50'
+                        : isSelected
+                        ? 'bg-gold text-black border-gold shadow-lg shadow-gold/20'
+                        : 'bg-background text-foreground border-border hover:border-gold/50 active:scale-[0.98]'
+                    }`}
                   >
-                    {shift.name}
-                  </SelectChip>
+                    <span className="flex items-center gap-1.5 text-sm font-semibold leading-tight">
+                      <Clock className="w-3.5 h-3.5" />
+                      {shift.name}
+                    </span>
+                    {shift.time && (
+                      <span className={`text-[10px] mt-0.5 leading-none ${
+                        isSelected ? 'text-black/75' : 'text-muted-foreground'
+                      }`}>
+                        {shift.time}
+                      </span>
+                    )}
+                    {isSelected && isAvailable && (
+                      <span className="absolute -top-1.5 -right-1.5 w-4 h-4 bg-green-500 rounded-full flex items-center justify-center">
+                        <Check className="w-2.5 h-2.5 text-white" />
+                      </span>
+                    )}
+                  </button>
                 );
               })}
             </div>

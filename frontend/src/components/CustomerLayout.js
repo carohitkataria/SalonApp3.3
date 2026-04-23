@@ -10,6 +10,12 @@ import { toast } from 'sonner';
 import { motion, AnimatePresence } from 'framer-motion';
 import axios from 'axios';
 import SalonHubLogo from './SalonHubLogo';
+import {
+  requestNotificationPermission,
+  showBrowserNotification,
+  getSeenIds,
+  setSeenIds,
+} from '@/utils/browserNotifications';
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
 const API = `${BACKEND_URL}/api`;
@@ -71,20 +77,55 @@ export default function CustomerLayout({ children }) {
     }
   };
 
-  // Fetch notification count
+  // Fetch notification count + browser notification on new notifications
   useEffect(() => {
     const userPhone = user?.phone?.replace('+91', '') || '';
     if (userPhone) {
-      const fetchNotifCount = async () => {
+      // Ask for browser notification permission once
+      requestNotificationPermission();
+
+      const storageKey = `seen_notif_customer_${userPhone}`;
+      let initialised = false;
+
+      const fetchNotifData = async () => {
         try {
-          const response = await axios.get(`${API}/notifications/customer/${userPhone}/unread-count`);
-          setUnreadNotifCount(response.data.unread_count || 0);
+          const countRes = await axios.get(`${API}/notifications/customer/${userPhone}/unread-count`);
+          setUnreadNotifCount(countRes.data.unread_count || 0);
         } catch (error) {
           console.error('Error fetching notification count:', error);
         }
+        try {
+          const listRes = await axios.get(`${API}/notifications/customer/${userPhone}`);
+          const notifs = Array.isArray(listRes.data) ? listRes.data : (listRes.data?.notifications || []);
+          const seen = getSeenIds(storageKey);
+          if (!initialised) {
+            // First pass: mark all current as seen so we don't spam on first load
+            notifs.forEach(n => { if (n.id) seen.add(n.id); });
+            setSeenIds(storageKey, seen);
+            initialised = true;
+            return;
+          }
+          // Sort oldest first, fire for new unread
+          const sorted = [...notifs].sort((a, b) => new Date(a.created_at || 0) - new Date(b.created_at || 0));
+          sorted.forEach(n => {
+            if (!n.id || seen.has(n.id)) return;
+            seen.add(n.id);
+            // Only ring for unread notifications
+            if (n.is_read === false || n.read === false || n.is_read === undefined) {
+              showBrowserNotification(
+                n.title || 'New Notification',
+                n.message || n.body || '',
+                { tag: `cust-${n.id}` }
+              );
+            }
+          });
+          setSeenIds(storageKey, seen);
+        } catch (error) {
+          // silent
+        }
       };
-      fetchNotifCount();
-      const interval = setInterval(fetchNotifCount, 30000); // Refresh every 30s
+      fetchNotifData();
+      const interval = setInterval(fetchNotifData, 30000); // Refresh every 30s
       return () => clearInterval(interval);
     }
   }, [user]);
