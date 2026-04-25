@@ -4688,7 +4688,19 @@ async def complete_token(token_id: str, current_salon=Depends(get_current_salon)
         if loyalty_reward:
             response["loyalty_reward"] = loyalty_reward
             response["message"] += f" - Loyalty reward of ₹{loyalty_reward['topup_amount']:.2f} added to wallet!"
-        
+
+        # Recompute the barber's incentive payout for the booking month so the
+        # Reward Plan dashboard always reflects the latest sales.
+        try:
+            barber_id = token.get("barber_id")
+            booking_date = token.get("booking_date") or datetime.now(timezone.utc).strftime("%Y-%m-%d")
+            year_month = booking_date[:7]
+            salon_id_for_token = token.get("salon_id")
+            if barber_id and salon_id_for_token and year_month:
+                await _recompute_incentive_payout(salon_id_for_token, barber_id, year_month)
+        except Exception as e:
+            logger.error(f"Incentive recompute failed for token {token_id}: {e}")
+
         return response
     except Exception as e:
         logger.error(f"Error generating invoice: {e}")
@@ -6568,6 +6580,392 @@ async def create_barber_review(barber_id: str, review_data: DirectBarberReview):
     return {"message": "Review submitted successfully", "review_id": review["id"]}
 
 # ============ ANALYTICS ROUTES ============
+
+# ============ EMPLOYEE REWARD PLAN (INCENTIVES) ============
+
+class IncentiveSlab(BaseModel):
+    from_pct: float = Field(ge=0)
+    to_pct: float = Field(ge=0)        # use 9999 for "+" / open-ended
+    type: str                           # "total_pct" | "additional_pct" | "fixed_amount"
+    value: float = Field(ge=0)
+
+class IncentivePlanConfig(BaseModel):
+    target_type: str = "salary_multiplier"  # "salary_multiplier" | "manual"
+    multiplier: Optional[float] = None
+    manual_target: Optional[float] = None
+    slabs: List[IncentiveSlab] = []
+
+class RewardPlanCreate(BaseModel):
+    mode: str  # "all" | "individual" | "partial"
+    global_plan: Optional[IncentivePlanConfig] = None
+    assigned_barber_ids: List[str] = []
+    individual_plans: Dict[str, IncentivePlanConfig] = {}
+
+class IncentivePayoutStatusUpdate(BaseModel):
+    status: str  # "Pending" | "Approved" | "Paid" | "Hold"
+    payment_method: Optional[str] = None  # "cash" | "upi" | "bank"
+    notes: Optional[str] = None
+
+
+def _compute_incentive_amount(plan_config: dict, target: float, actual_sales: float) -> dict:
+    """Calculate incentive earned based on plan slabs.
+
+    Slab types:
+    - additional_pct: % applied only on the incremental sale within that slab range (cumulative)
+    - total_pct:      % applied on the FULL actual_sales (only the matching range applies)
+    - fixed_amount:   flat ₹ bonus when achievement reaches from_pct (additive)
+    """
+    target = float(target or 0)
+    actual_sales = float(actual_sales or 0)
+    if target <= 0:
+        return {"earned": 0.0, "achievement_pct": 0.0, "breakdown": []}
+
+    achievement_pct = (actual_sales / target) * 100.0
+    slabs = sorted(plan_config.get("slabs", []) or [], key=lambda s: float(s.get("from_pct", 0)))
+
+    earned = 0.0
+    breakdown = []
+
+    # 1) Additional % slabs (cumulative)
+    for slab in slabs:
+        if slab.get("type") != "additional_pct":
+            continue
+        from_pct = float(slab.get("from_pct", 0))
+        to_pct = float(slab.get("to_pct", 9999))
+        rate = float(slab.get("value", 0))
+        if achievement_pct < from_pct:
+            continue
+        slab_lower_amt = (from_pct / 100.0) * target
+        slab_upper_amt = (to_pct / 100.0) * target
+        applicable = min(actual_sales, slab_upper_amt) - slab_lower_amt
+        if applicable > 0:
+            amt = applicable * (rate / 100.0)
+            earned += amt
+            breakdown.append({
+                "slab": f"{from_pct:g}%-{to_pct:g}%",
+                "type": "% of Additional Sale",
+                "applied_on": round(applicable, 2),
+                "rate": f"{rate:g}%",
+                "amount": round(amt, 2),
+            })
+
+    # 2) Total % slab (only the single matching range applies)
+    for slab in slabs:
+        if slab.get("type") != "total_pct":
+            continue
+        from_pct = float(slab.get("from_pct", 0))
+        to_pct = float(slab.get("to_pct", 9999))
+        rate = float(slab.get("value", 0))
+        if from_pct <= achievement_pct < to_pct or (achievement_pct >= from_pct and to_pct >= 9999):
+            amt = actual_sales * (rate / 100.0)
+            earned += amt
+            breakdown.append({
+                "slab": f"{from_pct:g}%-{to_pct:g}%",
+                "type": "% of Total Sale",
+                "applied_on": round(actual_sales, 2),
+                "rate": f"{rate:g}%",
+                "amount": round(amt, 2),
+            })
+            break
+
+    # 3) Fixed bonuses (additive when achievement crosses from_pct)
+    for slab in slabs:
+        if slab.get("type") != "fixed_amount":
+            continue
+        from_pct = float(slab.get("from_pct", 0))
+        amount = float(slab.get("value", 0))
+        if achievement_pct >= from_pct:
+            earned += amount
+            breakdown.append({
+                "slab": f"{from_pct:g}%+",
+                "type": "Fixed Bonus",
+                "applied_on": "—",
+                "rate": "—",
+                "amount": round(amount, 2),
+            })
+
+    return {
+        "earned": round(earned, 2),
+        "achievement_pct": round(achievement_pct, 2),
+        "breakdown": breakdown,
+    }
+
+
+async def _get_effective_plan_for_barber(salon_id: str, barber_id: str) -> Optional[dict]:
+    """Return the incentive plan config that applies to this barber.
+
+    Override priority: individual_plans[barber_id] > global_plan (if barber is
+    assigned/all). Returns None if no plan applies.
+    """
+    config = await db.salon_reward_plans.find_one({"salon_id": salon_id}, {"_id": 0})
+    if not config:
+        return None
+    individual_plans = config.get("individual_plans") or {}
+    if barber_id in individual_plans and individual_plans[barber_id]:
+        return individual_plans[barber_id]
+    mode = config.get("mode", "all")
+    if mode == "individual":
+        return None
+    assigned = config.get("assigned_barber_ids") or []
+    # If empty assigned_barber_ids in "all" mode, treat as "applies to everyone"
+    if mode == "all" and not assigned:
+        return config.get("global_plan")
+    if barber_id in assigned:
+        return config.get("global_plan")
+    return None
+
+
+async def _get_barber_target(plan_config: dict, barber: dict) -> float:
+    """Compute monthly target from plan + barber salary."""
+    target_type = (plan_config or {}).get("target_type", "salary_multiplier")
+    if target_type == "manual":
+        return float(plan_config.get("manual_target") or 0)
+    salary = float(barber.get("compensation") or 0)
+    multiplier = float(plan_config.get("multiplier") or 0)
+    return salary * multiplier
+
+
+async def _get_barber_actual_sales(salon_id: str, barber_id: str, year_month: str) -> float:
+    """Sum of total_amount on completed tokens for this barber in the given month (YYYY-MM)."""
+    start = f"{year_month}-01"
+    # Compute end of month
+    try:
+        y, m = year_month.split("-")
+        y_i, m_i = int(y), int(m)
+        if m_i == 12:
+            next_first = f"{y_i + 1}-01-01"
+        else:
+            next_first = f"{y_i}-{m_i + 1:02d}-01"
+    except Exception:
+        return 0.0
+
+    cursor = db.tokens.find({
+        "salon_id": salon_id,
+        "barber_id": barber_id,
+        "status": "completed",
+        "booking_date": {"$gte": start, "$lt": next_first}
+    }, {"_id": 0, "total_amount": 1})
+
+    total = 0.0
+    async for tok in cursor:
+        total += float(tok.get("total_amount") or 0)
+    return total
+
+
+async def _recompute_incentive_payout(salon_id: str, barber_id: str, year_month: str) -> Optional[dict]:
+    """Recompute and upsert the incentive_payouts row for a barber+month. Preserves status."""
+    plan = await _get_effective_plan_for_barber(salon_id, barber_id)
+    if not plan:
+        return None
+
+    barber = await db.barbers.find_one({"id": barber_id, "salon_id": salon_id}, {"_id": 0})
+    if not barber:
+        return None
+
+    target = await _get_barber_target(plan, barber)
+    actual_sales = await _get_barber_actual_sales(salon_id, barber_id, year_month)
+    calc = _compute_incentive_amount(plan, target, actual_sales)
+
+    existing = await db.incentive_payouts.find_one(
+        {"salon_id": salon_id, "barber_id": barber_id, "month": year_month}, {"_id": 0}
+    )
+
+    payout = {
+        "id": existing.get("id") if existing else str(uuid.uuid4()),
+        "salon_id": salon_id,
+        "barber_id": barber_id,
+        "barber_name": barber.get("name", ""),
+        "month": year_month,
+        "salary": float(barber.get("compensation") or 0),
+        "target": round(float(target), 2),
+        "actual_sales": round(actual_sales, 2),
+        "achievement_pct": calc["achievement_pct"],
+        "incentive_earned": calc["earned"],
+        "breakdown": calc["breakdown"],
+        "status": (existing or {}).get("status") or ("Pending" if calc["earned"] > 0 else "Pending"),
+        "payment_method": (existing or {}).get("payment_method"),
+        "paid_at": (existing or {}).get("paid_at"),
+        "linked_expense_id": (existing or {}).get("linked_expense_id"),
+        "notes": (existing or {}).get("notes", ""),
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+        "created_at": (existing or {}).get("created_at") or datetime.now(timezone.utc).isoformat(),
+    }
+    await db.incentive_payouts.update_one(
+        {"salon_id": salon_id, "barber_id": barber_id, "month": year_month},
+        {"$set": payout},
+        upsert=True,
+    )
+    return payout
+
+
+@api_router.get("/salons/{salon_id}/reward-plan")
+async def get_reward_plan(salon_id: str, current_user=Depends(get_current_salon_user)):
+    config = await db.salon_reward_plans.find_one({"salon_id": salon_id}, {"_id": 0})
+    if not config:
+        return {
+            "salon_id": salon_id,
+            "mode": "all",
+            "global_plan": None,
+            "assigned_barber_ids": [],
+            "individual_plans": {},
+        }
+    return config
+
+
+@api_router.post("/salons/{salon_id}/reward-plan")
+async def save_reward_plan(salon_id: str, body: RewardPlanCreate, current_user=Depends(get_current_salon_user)):
+    """Save the salon's reward plan configuration (admin only)."""
+    role = (current_user or {}).get("role")
+    if role not in ("admin", "salon", "salon_admin"):
+        raise HTTPException(status_code=403, detail="Only admin can configure reward plan")
+
+    if body.mode not in ("all", "individual", "partial"):
+        raise HTTPException(status_code=400, detail="mode must be one of: all, individual, partial")
+
+    doc = {
+        "salon_id": salon_id,
+        "mode": body.mode,
+        "global_plan": body.global_plan.dict() if body.global_plan else None,
+        "assigned_barber_ids": body.assigned_barber_ids or [],
+        "individual_plans": {bid: cfg.dict() for bid, cfg in (body.individual_plans or {}).items()},
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+    }
+    await db.salon_reward_plans.update_one(
+        {"salon_id": salon_id}, {"$set": doc}, upsert=True
+    )
+    return {"message": "Reward plan saved", "config": doc}
+
+
+@api_router.get("/salons/{salon_id}/reward-plan/eligible-barbers")
+async def get_eligible_barbers(salon_id: str, current_user=Depends(get_current_salon_user)):
+    """List barbers that can be assigned to a reward plan (those marked Visible to Customers)."""
+    cursor = db.barbers.find(
+        {"salon_id": salon_id, "is_barber": True},
+        {"_id": 0, "id": 1, "name": 1, "compensation": 1, "is_barber": 1, "designation": 1}
+    )
+    items = []
+    async for b in cursor:
+        items.append(b)
+    return {"barbers": items}
+
+
+@api_router.get("/salons/{salon_id}/reward-plan/incentives")
+async def list_incentives(
+    salon_id: str,
+    month: Optional[str] = None,    # YYYY-MM
+    barber_id: Optional[str] = None,
+    current_user=Depends(get_current_salon_user),
+):
+    """Recompute all eligible barbers for the month and return the latest payout rows.
+
+    This computes on demand so the dashboard always reflects the latest sales.
+    """
+    if not month:
+        month = datetime.now(timezone.utc).strftime("%Y-%m")
+
+    # Get all eligible (is_barber=True) members
+    barber_filter = {"salon_id": salon_id, "is_barber": True}
+    if barber_id:
+        barber_filter["id"] = barber_id
+
+    barbers_cursor = db.barbers.find(barber_filter, {"_id": 0})
+    rows = []
+    async for b in barbers_cursor:
+        payout = await _recompute_incentive_payout(salon_id, b["id"], month)
+        if payout:
+            rows.append(payout)
+
+    # Also include any barbers who have payouts saved historically but might not be in barber_filter
+    if not barber_id:
+        existing_cursor = db.incentive_payouts.find(
+            {"salon_id": salon_id, "month": month}, {"_id": 0}
+        )
+        seen = {r["barber_id"] for r in rows}
+        async for p in existing_cursor:
+            if p["barber_id"] not in seen:
+                rows.append(p)
+
+    return {"month": month, "incentives": rows}
+
+
+@api_router.put("/salons/{salon_id}/reward-plan/incentives/{barber_id}/{month}/status")
+async def update_incentive_status(
+    salon_id: str,
+    barber_id: str,
+    month: str,
+    body: IncentivePayoutStatusUpdate,
+    current_user=Depends(get_current_salon_user),
+):
+    """Update payout status. On 'Paid', creates a financial expense entry and links it."""
+    if body.status not in ("Pending", "Approved", "Paid", "Hold"):
+        raise HTTPException(status_code=400, detail="Invalid status")
+
+    # Only admin may change status
+    role = (current_user or {}).get("role")
+    if role not in ("admin", "salon", "salon_admin"):
+        raise HTTPException(status_code=403, detail="Only admin can change payout status")
+
+    payout = await db.incentive_payouts.find_one(
+        {"salon_id": salon_id, "barber_id": barber_id, "month": month}, {"_id": 0}
+    )
+    if not payout:
+        # Recompute if missing
+        payout = await _recompute_incentive_payout(salon_id, barber_id, month)
+        if not payout:
+            raise HTTPException(status_code=404, detail="No incentive computed for this barber+month")
+
+    update = {
+        "status": body.status,
+        "notes": body.notes if body.notes is not None else payout.get("notes", ""),
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+    # Handle "Paid" — must have payment_method, create expense entry
+    if body.status == "Paid":
+        if not body.payment_method:
+            raise HTTPException(status_code=400, detail="payment_method is required when marking Paid")
+        if body.payment_method not in ("cash", "upi", "bank"):
+            raise HTTPException(status_code=400, detail="payment_method must be cash, upi or bank")
+
+        # Avoid double-booking: only create expense if not already linked
+        if not payout.get("linked_expense_id"):
+            amount = float(payout.get("incentive_earned") or 0)
+            if amount > 0:
+                txn = {
+                    "id": str(uuid.uuid4()),
+                    "salon_id": salon_id,
+                    "type": "outflow",
+                    "category": "staff_incentive",
+                    "amount": amount,
+                    "payment_mode": body.payment_method,
+                    "narration": f"Incentive payout to {payout.get('barber_name', '')} for {month}",
+                    "reference_id": payout.get("id"),
+                    "reference_type": "incentive_payout",
+                    "created_by": current_user.get("id") if isinstance(current_user, dict) else "admin",
+                    "date": datetime.now(timezone.utc).strftime("%Y-%m-%d"),
+                    "created_at": datetime.now(timezone.utc).isoformat(),
+                }
+                await db.financial_transactions.insert_one(txn)
+                update["linked_expense_id"] = txn["id"]
+
+        update["payment_method"] = body.payment_method
+        update["paid_at"] = datetime.now(timezone.utc).isoformat()
+    else:
+        # Reset paid fields if moved away from Paid
+        if payout.get("status") == "Paid":
+            # Keep linked expense (admin can manually delete it from Financials if needed)
+            pass
+
+    await db.incentive_payouts.update_one(
+        {"salon_id": salon_id, "barber_id": barber_id, "month": month}, {"$set": update}
+    )
+    fresh = await db.incentive_payouts.find_one(
+        {"salon_id": salon_id, "barber_id": barber_id, "month": month}, {"_id": 0}
+    )
+    return {"message": "Status updated", "payout": fresh}
+
+
+# ============ ANALYTICS ROUTES (continued) ============
 
 @api_router.get("/analytics/day-wise-sales")
 async def get_day_wise_sales(

@@ -18,6 +18,7 @@ import MyProfile from '@/components/MyProfile';
 import SalonNotificationSettings from '@/components/SalonNotificationSettings';
 import OperationalHoursModule from '@/components/OperationalHoursModule';
 import Analytics from '@/components/Analytics';
+import EmployeeRewardPlan from '@/components/EmployeeRewardPlan';
 import { getSession, clearSession } from '@/utils/sessionManager';
 import {
   requestNotificationPermission,
@@ -1501,7 +1502,14 @@ export default function EnhancedSalonDashboard() {
         )}
 
         {activeTab === 'staff' && salonId && (
-          <BarberManagement salonId={salonId} getAuthHeaders={getAuthHeaders} />
+          <div className="space-y-6">
+            <BarberManagement salonId={salonId} getAuthHeaders={getAuthHeaders} />
+            <EmployeeRewardPlan
+              salonId={salonId}
+              getAuthHeaders={getAuthHeaders}
+              isAdmin={checkIsAdmin()}
+            />
+          </div>
         )}
 
         {activeTab === 'customer-master' && (
