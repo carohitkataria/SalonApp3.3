@@ -488,6 +488,7 @@ class BarberRatingSummary(BaseModel):
 class SalonUserPermissions(BaseModel):
     can_edit_salon: bool = False
     can_access_analytics: bool = False
+    can_access_financials: bool = False
     can_delete_salon: bool = False
 
 class SalonUserCreate(BaseModel):
@@ -2903,8 +2904,14 @@ async def salon_user_login(credentials: SalonUserLogin):
     permissions = salon_user.get("permissions", {
         "can_edit_salon": False,
         "can_access_analytics": False,
+        "can_access_financials": False,
         "can_delete_salon": False
     })
+    # Ensure newly added keys default to False if missing on legacy records
+    permissions.setdefault("can_access_financials", False)
+    permissions.setdefault("can_access_analytics", False)
+    permissions.setdefault("can_edit_salon", False)
+    permissions.setdefault("can_delete_salon", False)
     
     token = create_access_token({
         "sub": salon_user["id"],
@@ -2964,12 +2971,14 @@ async def create_salon_user(user_data: SalonUserCreate, current_user=Depends(get
         permissions = {
             "can_edit_salon": False,
             "can_access_analytics": False,
+            "can_access_financials": False,
             "can_delete_salon": False
         }
     else:
         permissions = user_data.permissions.dict() if user_data.permissions else {
             "can_edit_salon": False,
             "can_access_analytics": False,
+            "can_access_financials": False,
             "can_delete_salon": False
         }
     

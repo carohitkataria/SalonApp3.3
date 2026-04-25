@@ -8,10 +8,23 @@ import { Label } from '@/components/ui/label';
 import { toast } from 'sonner';
 import { Scissors, Lock, Smartphone, Eye, EyeOff } from 'lucide-react';
 import { motion } from 'framer-motion';
-import { saveSession, getSession, isSessionValid } from '@/utils/sessionManager';
+import { saveSession, getSession, isSessionValid, clearSession } from '@/utils/sessionManager';
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
 const API = `${BACKEND_URL}/api`;
+
+// Clear ALL salon auth data (legacy + multi-user) — call this BEFORE storing new
+// auth so we never carry over stale permissions/role between login sessions on
+// the same browser. Critical for multi-user access security.
+const purgeAllSalonAuthData = () => {
+  try {
+    localStorage.removeItem('salon_admin_token');
+    localStorage.removeItem('salon_user_auth');
+    localStorage.removeItem('salon_id');
+    localStorage.removeItem('salon_active_tab');
+    clearSession();
+  } catch (e) { /* ignore */ }
+};
 
 export default function OTPLoginPage() {
   const navigate = useNavigate();
@@ -69,6 +82,9 @@ export default function OTPLoginPage() {
       });
       console.log('[LOGIN] API response received:', response.status);
 
+      // SECURITY: Purge any stale auth data from previous session before storing new
+      purgeAllSalonAuthData();
+
       // Store auth data
       const authData = {
         token: response.data.access_token,
@@ -103,7 +119,10 @@ export default function OTPLoginPage() {
             phone,
             password
           });
-          
+
+          // SECURITY: Purge any stale auth data from previous session before storing new
+          purgeAllSalonAuthData();
+
           // Store legacy session
           saveSession(
             legacyResponse.data.access_token,
@@ -203,6 +222,9 @@ export default function OTPLoginPage() {
         phone,
         otp
       });
+
+      // SECURITY: Purge any stale auth data from previous session before storing new
+      purgeAllSalonAuthData();
 
       localStorage.setItem('salon_admin_token', response.data.access_token);
       localStorage.setItem('salon_id', response.data.salon_id);

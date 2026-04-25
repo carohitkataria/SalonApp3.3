@@ -170,6 +170,18 @@ export default function EnhancedSalonDashboard() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [dateMode, salonId]);
 
+  // SECURITY: Reset active tab to 'home' if it's not in the menuItems list
+  // (e.g., a staff user with a stale `salon_active_tab=financials` from a previous
+  // admin session must not silently land on a forbidden tab).
+  useEffect(() => {
+    const allowedIds = menuItems.map(m => m.id);
+    if (activeTab && !allowedIds.includes(activeTab)) {
+      setActiveTab('home');
+      try { localStorage.setItem('salon_active_tab', 'home'); } catch (e) {}
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [salonUser, salonId]);
+
   // Save active tab to localStorage whenever it changes
   useEffect(() => {
     localStorage.setItem('salon_active_tab', activeTab);
@@ -719,30 +731,57 @@ export default function EnhancedSalonDashboard() {
   };
 
   const handleLogout = () => {
+    // SECURITY: Purge ALL salon auth data so the next user (especially staff)
+    // can't inherit admin privileges from a stale legacy token in localStorage.
+    try {
+      localStorage.removeItem('salon_admin_token');
+      localStorage.removeItem('salon_user_auth');
+      localStorage.removeItem('salon_id');
+      localStorage.removeItem('salon_active_tab');
+    } catch (e) { /* ignore */ }
     clearSession();  // Clear all session data using session manager
     navigate('/salon/login');
     toast.success('Logged out successfully');
   };
 
-  // Check if user is admin (supports both new multi-user and legacy login)
+  // Check if user is admin. SECURITY: prefer multi-user auth over legacy.
+  // If a multi-user auth is present (salon_user_auth), the legacy token MUST be
+  // ignored — this prevents stale admin tokens from a previous session from
+  // granting elevated access to a freshly logged-in staff user on the same browser.
   const checkIsAdmin = () => {
-    // If using multi-user auth
-    if (salonUser) {
-      return salonUser.role === 'admin';
+    // Read from localStorage directly to avoid race conditions with React state
+    let storedSalonUser = null;
+    try {
+      const raw = localStorage.getItem('salon_user_auth');
+      if (raw) storedSalonUser = JSON.parse(raw);
+    } catch (e) { storedSalonUser = null; }
+
+    if (storedSalonUser || salonUser) {
+      const u = storedSalonUser || salonUser;
+      return u?.role === 'admin';
     }
-    // If using legacy salon login, treat as admin
+    // Only if NO multi-user auth, fall back to legacy salon login (treated as admin)
     const legacyToken = localStorage.getItem('salon_admin_token');
     return !!legacyToken;
   };
 
   const checkHasPermission = (permission) => {
-    // Legacy login has all permissions
+    // Read multi-user auth from localStorage to be strict
+    let storedSalonUser = null;
+    try {
+      const raw = localStorage.getItem('salon_user_auth');
+      if (raw) storedSalonUser = JSON.parse(raw);
+    } catch (e) { storedSalonUser = null; }
+
+    const u = storedSalonUser || salonUser;
+    if (u) {
+      if (u.role === 'admin') return true;
+      return !!u.permissions?.[permission];
+    }
+    // Legacy login (no multi-user auth at all) has all permissions
     const legacyToken = localStorage.getItem('salon_admin_token');
-    if (legacyToken && !salonUser) return true;
-    
-    // Multi-user auth
-    if (salonUser?.role === 'admin') return true;
-    return salonUser?.permissions?.[permission] || false;
+    if (legacyToken) return true;
+    return false;
   };
 
   // Define menu items with role-based visibility
@@ -751,7 +790,7 @@ export default function EnhancedSalonDashboard() {
     { id: 'queue', label: 'Token Queue', icon: Calendar, show: true },
     { id: 'staff', label: 'Staff Management', icon: Users, show: checkIsAdmin() },
     { id: 'services', label: 'Services & Offerings', icon: Scissors, show: true },
-    { id: 'financials', label: 'Financials', icon: DollarSign, show: checkIsAdmin() },
+    { id: 'financials', label: 'Financials', icon: DollarSign, show: checkIsAdmin() || checkHasPermission('can_access_financials') },
     { id: 'customer-master', label: 'Customer Master', icon: Database, show: true },
     { id: 'analytics', label: 'Analytics', icon: TrendingUp, show: checkIsAdmin() || checkHasPermission('can_access_analytics') },
     { id: 'gallery', label: 'Gallery', icon: FileText, show: true },
@@ -1129,15 +1168,15 @@ export default function EnhancedSalonDashboard() {
               <h3 className="text-lg font-bold mb-3">Quick Actions</h3>
               <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
                 {[
-                  { id: 'queue', label: 'Token Queue', icon: Calendar, color: 'bg-blue-500/10 text-blue-500', desc: 'Manage live queue' },
-                  { id: 'customer-master', label: 'Customers', icon: Database, color: 'bg-purple-500/10 text-purple-500', desc: 'Customer records' },
-                  { id: 'services', label: 'Services', icon: Scissors, color: 'bg-emerald-500/10 text-emerald-500', desc: 'Offerings & memberships' },
-                  { id: 'staff', label: 'Staff', icon: Users, color: 'bg-orange-500/10 text-orange-500', desc: 'Manage barbers' },
-                  { id: 'financials', label: 'Financials', icon: DollarSign, color: 'bg-gold/10 text-gold', desc: 'Cash flow & reports' },
-                  { id: 'analytics', label: 'Analytics', icon: TrendingUp, color: 'bg-cyan-500/10 text-cyan-500', desc: 'Performance stats' },
-                  { id: 'gallery', label: 'Gallery', icon: FileText, color: 'bg-pink-500/10 text-pink-500', desc: 'Salon portfolio' },
-                  { id: 'salon', label: 'Settings', icon: Settings, color: 'bg-gray-500/10 text-gray-400', desc: 'Salon profile' },
-                ].map(item => {
+                  { id: 'queue', label: 'Token Queue', icon: Calendar, color: 'bg-blue-500/10 text-blue-500', desc: 'Manage live queue', show: true },
+                  { id: 'customer-master', label: 'Customers', icon: Database, color: 'bg-purple-500/10 text-purple-500', desc: 'Customer records', show: true },
+                  { id: 'services', label: 'Services', icon: Scissors, color: 'bg-emerald-500/10 text-emerald-500', desc: 'Offerings & memberships', show: true },
+                  { id: 'staff', label: 'Staff', icon: Users, color: 'bg-orange-500/10 text-orange-500', desc: 'Manage barbers', show: checkIsAdmin() },
+                  { id: 'financials', label: 'Financials', icon: DollarSign, color: 'bg-gold/10 text-gold', desc: 'Cash flow & reports', show: checkIsAdmin() || checkHasPermission('can_access_financials') },
+                  { id: 'analytics', label: 'Analytics', icon: TrendingUp, color: 'bg-cyan-500/10 text-cyan-500', desc: 'Performance stats', show: checkIsAdmin() || checkHasPermission('can_access_analytics') },
+                  { id: 'gallery', label: 'Gallery', icon: FileText, color: 'bg-pink-500/10 text-pink-500', desc: 'Salon portfolio', show: true },
+                  { id: 'salon', label: 'Settings', icon: Settings, color: 'bg-gray-500/10 text-gray-400', desc: 'Salon profile', show: checkIsAdmin() || checkHasPermission('can_edit_salon') },
+                ].filter(item => item.show).map(item => {
                   const Icon = item.icon;
                   return (
                     <button
@@ -1484,7 +1523,17 @@ export default function EnhancedSalonDashboard() {
         {activeTab === 'services' && (
           <OfferingsModule 
             salonId={salonId} 
-            token={localStorage.getItem('salon_admin_token')}
+            token={(() => {
+              // Prefer multi-user token, fall back to legacy admin token
+              try {
+                const raw = localStorage.getItem('salon_user_auth');
+                if (raw) {
+                  const parsed = JSON.parse(raw);
+                  if (parsed?.token) return parsed.token;
+                }
+              } catch (e) { /* ignore */ }
+              return localStorage.getItem('salon_admin_token');
+            })()}
           />
         )}
 

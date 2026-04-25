@@ -31,6 +31,7 @@ export default function StaffAccessManagement() {
     permissions: {
       can_edit_salon: false,
       can_access_analytics: false,
+      can_access_financials: false,
       can_delete_salon: false
     }
   });
@@ -131,16 +132,19 @@ export default function StaffAccessManagement() {
 
   const handleEdit = (user) => {
     setEditingUser(user);
+    // Normalize permissions object — ensure all keys are present (handles legacy users)
+    const perms = user.permissions || {};
     setFormData({
       name: user.name,
       mobile: user.mobile,
       login_id: user.login_id,
       password: '',
       staff_id: user.staff_id || '',
-      permissions: user.permissions || {
-        can_edit_salon: false,
-        can_access_analytics: false,
-        can_delete_salon: false
+      permissions: {
+        can_edit_salon: !!perms.can_edit_salon,
+        can_access_analytics: !!perms.can_access_analytics,
+        can_access_financials: !!perms.can_access_financials,
+        can_delete_salon: !!perms.can_delete_salon
       }
     });
     setShowAddForm(true);
@@ -170,6 +174,7 @@ export default function StaffAccessManagement() {
       permissions: {
         can_edit_salon: false,
         can_access_analytics: false,
+        can_access_financials: false,
         can_delete_salon: false
       }
     });
@@ -337,6 +342,18 @@ export default function StaffAccessManagement() {
 
                   <div className="flex items-center space-x-2">
                     <Checkbox
+                      id="can_access_financials"
+                      checked={formData.permissions.can_access_financials}
+                      onCheckedChange={(checked) => handlePermissionChange('can_access_financials', checked)}
+                      className="data-[state=checked]:bg-gold data-[state=checked]:border-gold"
+                    />
+                    <Label htmlFor="can_access_financials" className="cursor-pointer">
+                      Can access financials
+                    </Label>
+                  </div>
+
+                  <div className="flex items-center space-x-2">
+                    <Checkbox
                       id="can_delete_salon"
                       checked={formData.permissions.can_delete_salon}
                       onCheckedChange={(checked) => handlePermissionChange('can_delete_salon', checked)}
@@ -350,6 +367,8 @@ export default function StaffAccessManagement() {
                 <p className="text-xs text-muted-foreground mt-3">
                   By default, staff can view/update tokens and handle walk-ins. 
                   They cannot access Settings, Analytics, Financials, or Reports unless granted above.
+                  Services & Offerings is always visible — staff can view all services and choose
+                  which ones they personally provide (when linked to a staff member).
                 </p>
               </div>
 
@@ -430,11 +449,15 @@ export default function StaffAccessManagement() {
                         {user.permissions?.can_access_analytics && (
                           <span className="text-xs px-2 py-1 bg-muted rounded">Analytics</span>
                         )}
+                        {user.permissions?.can_access_financials && (
+                          <span className="text-xs px-2 py-1 bg-muted rounded">Financials</span>
+                        )}
                         {user.permissions?.can_delete_salon && (
                           <span className="text-xs px-2 py-1 bg-muted rounded">Delete Salon</span>
                         )}
-                        {!user.permissions?.can_edit_salon && 
-                         !user.permissions?.can_access_analytics && 
+                        {!user.permissions?.can_edit_salon &&
+                         !user.permissions?.can_access_analytics &&
+                         !user.permissions?.can_access_financials &&
                          !user.permissions?.can_delete_salon && (
                           <span className="text-xs text-muted-foreground">Default permissions only</span>
                         )}
