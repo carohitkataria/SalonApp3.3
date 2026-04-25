@@ -26,6 +26,12 @@ const purgeAllSalonAuthData = () => {
   } catch (e) { /* ignore */ }
 };
 
+// Notify AuthContext (and any other listeners) to re-read localStorage so React
+// state stays in sync with the just-changed auth keys.
+const broadcastAuthChange = () => {
+  try { window.dispatchEvent(new Event('salon-auth-changed')); } catch (e) {}
+};
+
 export default function OTPLoginPage() {
   const navigate = useNavigate();
   const [loginMethod, setLoginMethod] = useState('password'); // 'password' or 'otp'
@@ -105,7 +111,10 @@ export default function OTPLoginPage() {
         response.data.user_id,
         response.data.permissions
       );
-      
+
+      // Notify AuthContext to re-read localStorage so dashboard updates immediately
+      broadcastAuthChange();
+
       console.log('[LOGIN] Navigating to dashboard...');
       toast.success('Login successful!');
       navigate('/salon/dashboard');
@@ -133,7 +142,10 @@ export default function OTPLoginPage() {
           
           localStorage.setItem('salon_admin_token', legacyResponse.data.access_token);
           localStorage.setItem('salon_id', legacyResponse.data.salon_id);
-          
+
+          // Notify AuthContext to re-read localStorage so dashboard updates immediately
+          broadcastAuthChange();
+
           toast.success('Login successful!');
           navigate('/salon/dashboard');
           return;
@@ -228,7 +240,10 @@ export default function OTPLoginPage() {
 
       localStorage.setItem('salon_admin_token', response.data.access_token);
       localStorage.setItem('salon_id', response.data.salon_id);
-      
+
+      // Notify AuthContext to re-read localStorage so dashboard updates immediately
+      broadcastAuthChange();
+
       toast.success('Login successful!');
       navigate('/salon/dashboard');
     } catch (error) {

@@ -740,6 +740,8 @@ export default function EnhancedSalonDashboard() {
       localStorage.removeItem('salon_active_tab');
     } catch (e) { /* ignore */ }
     clearSession();  // Clear all session data using session manager
+    // Notify AuthContext to flush in-memory state so the next login renders cleanly
+    try { window.dispatchEvent(new Event('salon-auth-changed')); } catch (e) {}
     navigate('/salon/login');
     toast.success('Logged out successfully');
   };

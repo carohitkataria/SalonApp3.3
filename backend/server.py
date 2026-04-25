@@ -6574,7 +6574,7 @@ async def get_day_wise_sales(
     salon_id: str,
     start_date: str,
     end_date: Optional[str] = None,
-    current_salon=Depends(get_current_salon)
+    current_salon=Depends(get_current_salon_user)
 ):
     """Get day-wise sales for the salon"""
     if not end_date:
@@ -6612,7 +6612,7 @@ async def get_barber_wise_sales(
     salon_id: str,
     start_date: str,
     end_date: str,
-    current_salon=Depends(get_current_salon)
+    current_salon=Depends(get_current_salon_user)
 ):
     """Get barber-wise sales for the salon"""
     # Get all completed tokens in date range
@@ -6647,7 +6647,7 @@ async def get_service_wise_sales(
     salon_id: str,
     start_date: str,
     end_date: str,
-    current_salon=Depends(get_current_salon)
+    current_salon=Depends(get_current_salon_user)
 ):
     """Get top 10 services by sales"""
     # Get all completed tokens in date range
@@ -6692,7 +6692,7 @@ async def get_gender_distribution(
     salon_id: str,
     start_date: str,
     end_date: str,
-    current_salon=Depends(get_current_salon)
+    current_salon=Depends(get_current_salon_user)
 ):
     """Get gender distribution of customers"""
     # Get all completed tokens in date range
@@ -6734,7 +6734,7 @@ async def get_detailed_report(
     salon_id: str,
     start_date: str,
     end_date: str,
-    current_salon=Depends(get_current_salon)
+    current_salon=Depends(get_current_salon_user)
 ):
     """Get detailed booking report for export"""
     # Get all tokens in date range

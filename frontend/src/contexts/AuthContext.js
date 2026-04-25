@@ -13,25 +13,33 @@ export const AuthProvider = ({ children }) => {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    // Load user from localStorage
-    const storedUser = localStorage.getItem('salon_user');
-    if (storedUser) {
-      setUser(JSON.parse(storedUser));
-    }
+    const refreshAuth = () => {
+      // User
+      const storedUser = localStorage.getItem('salon_user');
+      setUser(storedUser ? JSON.parse(storedUser) : null);
 
-    // Load admin token from localStorage (legacy)
-    const adminToken = localStorage.getItem('salon_admin_token');
-    if (adminToken) {
-      setAdmin({ token: adminToken });
-    }
+      // Legacy admin token
+      const adminToken = localStorage.getItem('salon_admin_token');
+      setAdmin(adminToken ? { token: adminToken } : null);
 
-    // Load salon user (multi-user auth)
-    const storedSalonUser = localStorage.getItem('salon_user_auth');
-    if (storedSalonUser) {
-      setSalonUser(JSON.parse(storedSalonUser));
-    }
-
+      // Multi-user salon auth
+      const storedSalonUser = localStorage.getItem('salon_user_auth');
+      setSalonUser(storedSalonUser ? JSON.parse(storedSalonUser) : null);
+    };
+    refreshAuth();
     setLoading(false);
+
+    // Listen for in-app auth-change events (login/logout from any component)
+    // and cross-tab `storage` events. This keeps `salonUser` / `admin` in sync
+    // with localStorage, preventing stale dashboard state when an admin logs in
+    // right after a staff logout (or vice versa) on the same browser.
+    const handler = () => refreshAuth();
+    window.addEventListener('salon-auth-changed', handler);
+    window.addEventListener('storage', handler);
+    return () => {
+      window.removeEventListener('salon-auth-changed', handler);
+      window.removeEventListener('storage', handler);
+    };
   }, []);
 
   const loginUser = async (name, phone, gender = null) => {
