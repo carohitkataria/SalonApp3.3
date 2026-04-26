@@ -13,6 +13,7 @@ from typing import List, Optional, Dict, Any
 from enum import Enum
 import uuid
 from datetime import datetime, timezone, time, timedelta
+import calendar
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 import io
 import base64
@@ -7976,7 +7977,7 @@ async def calculate_barber_attendance_for_date(salon_id: str, barber_id: str, da
     }
 
 
-@api_router.get("/salons/{salon_id}/attendance/{month}")
+@api_router.get("/salons/{salon_id}/staff-attendance/month/{month}")
 async def get_monthly_attendance(
     salon_id: str, 
     month: str,  # YYYY-MM format
@@ -8025,7 +8026,7 @@ async def get_monthly_attendance(
     return response
 
 
-@api_router.post("/salons/{salon_id}/attendance/calculate/{date}")
+@api_router.post("/salons/{salon_id}/staff-attendance/calculate/{date}")
 async def calculate_daily_attendance(
     salon_id: str,
     date: str,  # YYYY-MM-DD format
@@ -8086,7 +8087,7 @@ async def calculate_daily_attendance(
     return {"date": date, "attendance": results}
 
 
-@api_router.put("/salons/{salon_id}/attendance/{barber_id}/{date}")
+@api_router.put("/salons/{salon_id}/staff-attendance/override/{barber_id}/{date}")
 async def override_attendance(
     salon_id: str,
     barber_id: str,
@@ -8145,7 +8146,7 @@ async def override_attendance(
     return updated
 
 
-@api_router.get("/salons/{salon_id}/salary/{month}")
+@api_router.get("/salons/{salon_id}/staff-salary/month/{month}")
 async def get_monthly_salary(
     salon_id: str,
     month: str,  # YYYY-MM format
@@ -8160,7 +8161,6 @@ async def get_monthly_salary(
         raise HTTPException(status_code=400, detail="Invalid month format. Use YYYY-MM")
     
     # Get working days in month (excluding Sundays as default holidays)
-    import calendar
     num_days = calendar.monthrange(year, mon)[1]
     
     # Get barbers
@@ -8258,7 +8258,7 @@ async def get_monthly_salary(
     return {"month": month, "salary_records": results}
 
 
-@api_router.post("/salons/{salon_id}/salary/{barber_id}/{month}/pay")
+@api_router.post("/salons/{salon_id}/staff-salary/pay/{barber_id}/{month}")
 async def mark_salary_paid(
     salon_id: str,
     barber_id: str,
@@ -8326,7 +8326,7 @@ async def mark_salary_paid(
     return updated
 
 
-@api_router.get("/salons/{salon_id}/holidays")
+@api_router.get("/salons/{salon_id}/staff-holidays")
 async def get_salon_holidays(salon_id: str, year: Optional[int] = None):
     """Get marked holidays for a salon."""
     if not year:
@@ -8340,7 +8340,7 @@ async def get_salon_holidays(salon_id: str, year: Optional[int] = None):
     return {"year": year, "holidays": holidays}
 
 
-@api_router.post("/salons/{salon_id}/holidays")
+@api_router.post("/salons/{salon_id}/staff-holidays")
 async def add_salon_holiday(
     salon_id: str,
     date: str,  # YYYY-MM-DD
@@ -8393,7 +8393,7 @@ async def add_salon_holiday(
     return holiday
 
 
-@api_router.delete("/salons/{salon_id}/holidays/{date}")
+@api_router.delete("/salons/{salon_id}/staff-holidays/{date}")
 async def remove_salon_holiday(
     salon_id: str,
     date: str,

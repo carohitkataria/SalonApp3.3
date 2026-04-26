@@ -61,7 +61,7 @@ export default function StaffAttendanceTab({ salonId, barberId, barberName, comp
     setLoading(true);
     try {
       const response = await axios.get(
-        `${API}/salons/${salonId}/attendance/${currentMonth}?barber_id=${barberId}`,
+        `${API}/salons/${salonId}/staff-attendance/month/${currentMonth}?barber_id=${barberId}`,
         { headers: { Authorization: `Bearer ${token}` } }
       );
       const barberData = response.data.barbers?.find(b => b.barber_id === barberId);
@@ -77,7 +77,7 @@ export default function StaffAttendanceTab({ salonId, barberId, barberName, comp
     if (!salonId || !barberId) return;
     try {
       const response = await axios.get(
-        `${API}/salons/${salonId}/salary/${currentMonth}?barber_id=${barberId}`,
+        `${API}/salons/${salonId}/staff-salary/month/${currentMonth}?barber_id=${barberId}`,
         { headers: { Authorization: `Bearer ${token}` } }
       );
       const salaryRecord = response.data.salary_records?.find(s => s.barber_id === barberId);
@@ -96,7 +96,7 @@ export default function StaffAttendanceTab({ salonId, barberId, barberName, comp
       for (let day = 1; day <= endDay; day++) {
         const dateStr = `${currentMonth}-${String(day).padStart(2, '0')}`;
         await axios.post(
-          `${API}/salons/${salonId}/attendance/calculate/${dateStr}`,
+          `${API}/salons/${salonId}/staff-attendance/calculate/${dateStr}`,
           {},
           { headers: { Authorization: `Bearer ${token}` } }
         );
@@ -119,7 +119,7 @@ export default function StaffAttendanceTab({ salonId, barberId, barberName, comp
     
     try {
       await axios.put(
-        `${API}/salons/${salonId}/attendance/${barberId}/${dateStr}`,
+        `${API}/salons/${salonId}/staff-attendance/override/${barberId}/${dateStr}`,
         { status: newStatus },
         { headers: { Authorization: `Bearer ${token}` } }
       );
@@ -134,7 +134,7 @@ export default function StaffAttendanceTab({ salonId, barberId, barberName, comp
   const handlePaySalary = async () => {
     try {
       await axios.post(
-        `${API}/salons/${salonId}/salary/${barberId}/${currentMonth}/pay`,
+        `${API}/salons/${salonId}/staff-salary/pay/${barberId}/${currentMonth}`,
         { payment_method: paymentMethod, note: paymentNote },
         { headers: { Authorization: `Bearer ${token}` } }
       );
