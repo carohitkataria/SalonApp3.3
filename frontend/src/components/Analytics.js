@@ -6,15 +6,17 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { toast } from 'sonner';
 import { BarChart, Bar, PieChart, Pie, Cell, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
-import { TrendingUp, Users, Scissors, Download, Calendar } from 'lucide-react';
+import { TrendingUp, Users, Scissors, Download, Calendar, Award, BarChart3 } from 'lucide-react';
 import { motion } from 'framer-motion';
+import IncentiveDashboard from './IncentiveDashboard';
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
 const API = `${BACKEND_URL}/api`;
 
 const COLORS = ['#D4AF37', '#FFD700', '#B8860B', '#DAA520', '#F0E68C'];
 
-export default function Analytics({ salonId, getAuthHeaders }) {
+export default function Analytics({ salonId, getAuthHeaders, isAdmin = true }) {
+  const [section, setSection] = useState('performance');
   const [dateRange, setDateRange] = useState({
     start: new Date(Date.now() - 10 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
     end: new Date().toISOString().split('T')[0]
@@ -105,7 +107,66 @@ export default function Analytics({ salonId, getAuthHeaders }) {
 
   return (
     <div className="space-y-6">
-      {/* Header with Date Range */}
+      {/* Sub-section tabs */}
+      <div className="flex gap-2 border-b border-gold/20 pb-3">
+        <button
+          onClick={() => setSection('performance')}
+          className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition ${
+            section === 'performance'
+              ? 'bg-gold/15 text-gold border border-gold/40'
+              : 'text-muted-foreground hover:text-foreground'
+          }`}
+          data-testid="analytics-tab-performance"
+        >
+          <BarChart3 className="w-4 h-4" /> Performance
+        </button>
+        <button
+          onClick={() => setSection('incentives')}
+          className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition ${
+            section === 'incentives'
+              ? 'bg-gold/15 text-gold border border-gold/40'
+              : 'text-muted-foreground hover:text-foreground'
+          }`}
+          data-testid="analytics-tab-incentives"
+        >
+          <Award className="w-4 h-4" /> Incentives
+        </button>
+      </div>
+
+      {section === 'incentives' ? (
+        <IncentiveDashboard
+          salonId={salonId}
+          getAuthHeaders={getAuthHeaders}
+          isAdmin={isAdmin}
+        />
+      ) : (
+        <PerformanceSection
+          dateRange={dateRange}
+          setDateRange={setDateRange}
+          dayWiseSales={dayWiseSales}
+          barberWiseSales={barberWiseSales}
+          serviceWiseSales={serviceWiseSales}
+          genderDistribution={genderDistribution}
+          detailedReport={detailedReport}
+          loading={loading}
+          fetchAnalytics={fetchAnalytics}
+          exportToCSV={exportToCSV}
+          exportToPDF={exportToPDF}
+          totalSales={totalSales}
+          totalBookings={totalBookings}
+        />
+      )}
+    </div>
+  );
+}
+
+function PerformanceSection({
+  dateRange, setDateRange, dayWiseSales, barberWiseSales, serviceWiseSales,
+  genderDistribution, detailedReport, loading, fetchAnalytics, exportToCSV,
+  exportToPDF, totalSales, totalBookings
+}) {
+  return (
+    <div className="space-y-6">
       <div className="bg-card/50 backdrop-blur-sm border border-gold/20 rounded-2xl p-6 shadow-xl">
         <div className="flex items-center justify-between mb-6">
           <div>

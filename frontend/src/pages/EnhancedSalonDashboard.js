@@ -1684,6 +1684,7 @@ export default function EnhancedSalonDashboard() {
           <Analytics 
             salonId={salonId}
             getAuthHeaders={getAuthHeaders}
+            isAdmin={checkIsAdmin()}
           />
         )}
 
