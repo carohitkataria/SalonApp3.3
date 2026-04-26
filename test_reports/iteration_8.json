@@ -1,0 +1,36 @@
+{
+  "summary": "Phase 2 Incentive Dashboard with manual_amount override + Approve/Paid split: BACKEND 10/10 passed (1 skipped, expected). FRONTEND e2e flow passed end-to-end: Approve dialog prefill, manual override (5000), Auto+Adjusted badge pair, Pay dialog effective-amount prefill, UPI Mark Paid, single ₹5,000 financial txn, idempotent re-Paid, lookup-by-reference idempotency when linked_expense_id is null.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "Salon Dashboard → Analytics", "issues": ["Dev-mode React error overlay flashes a benign 'ResizeObserver loop completed with undelivered notifications' warning (commonly from Recharts in StrictMode). It does not affect functionality but is visible to users in dev builds. Suppress via CRA setupTests/handleError or upgrade Recharts in production."]}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_incentive_dashboard.py",
+    "/app/test_reports/pytest/incentive_dashboard.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "server.py update_incentive_status (lines 6890-7008): manual_amount=None body field cannot CLEAR a previously stored override (only 'is not None' branch persists it). Once set to 5000, sending status update without manual_amount will keep it. If admin needs to revert to auto, there is no API path; consider treating an explicit empty-string/sentinel or accepting `manual_amount: None` with a separate `clear_manual_amount: true` flag.",
+    "server.py update_incentive_status: when status moves AWAY from Paid (e.g., Approved/Hold/Pending after Paid), linked_expense_id is intentionally retained (comment says 'admin can manually delete from Financials'). This leaves orphan financial txns when the payout is no longer Paid. Recommend an explicit reverse entry or auto-delete to keep books accurate.",
+    "_recompute_incentive_payout: ensure manual_amount is preserved across recomputes (verified by tests, but worth documenting in code comment).",
+    "IncentiveDashboard.js: when row already has manual_amount set and admin clicks Approve again, the approve-amount-input is prefilled with the existing manual_amount (good). But there is no UI affordance to RESET back to 'Auto' (e.g., a 'Use Auto' button in the dialog) — pairs with the backend gap above.",
+    "Bulk Approve sends no manual_amount (verified by code). UX: a tooltip/notice 'Bulk approve uses Auto amounts' would help admins."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_incentive_dashboard.py"
+  ],
+  "success_rate": {"backend": "100% (10/10 executed; 1 conditional skip)", "frontend": "100% — full Approve→Pay→Financials flow verified"},
+  "test_credentials": "phone=+917503070727 password=salon123 salon_id=2dad5cd9-5dda-4398-bbb5-a4d12aae7915 imran_barber_id=5d7d3064-2580-4a43-ae3e-73cdcaefd9de",
+  "seed_data_creation": "Seeded ONE completed token with _user_test=true (total_amount=41250, booking_date=current-month-15, barber=Imran). All seed/test artifacts CLEANED UP at end: 1 token + 1 financial_transaction + 1 incentive_payouts row reset to Pending.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Imran salary=25000, target=37500 (multiplier=1.5x at the moment OR salary multiplier reflects backend computation). Plan slabs are 100-120% total_pct=20% and 120-150% total_pct=30%. To hit Imran's auto-earned > 0, seed total_amount between 37500-56250 (e.g., 41250 → 110% ach → earned=8250). New testids: approve-dialog, approve-amount-input (prefills auto when first opened, persisted manual on reopen), approve-confirm-btn, approve-cancel-btn, pay-amount-input (prefills effective = manual ?? auto), auto-{barber_id} only rendered when manual_amount IS set. After Paid, single financial_transactions row with reference_type=incentive_payout, reference_id=payout.id, amount=effective. Re-Paid is idempotent including when linked_expense_id is null (server falls back to reference_id+type lookup).",
+  "rca_of_the_issue": "N/A — feature delivered correctly. Original 480% Achievement bug (stale ₹1.2L _seed_test token) is resolved (token deleted; multiple stale ₹1000 financials cleaned)."
+}

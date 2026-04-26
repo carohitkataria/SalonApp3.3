@@ -6605,6 +6605,9 @@ class IncentivePayoutStatusUpdate(BaseModel):
     status: str  # "Pending" | "Approved" | "Paid" | "Hold"
     payment_method: Optional[str] = None  # "cash" | "upi" | "bank"
     notes: Optional[str] = None
+    # Admin-overridden incentive amount (used when approving / paying out).
+    # If null, the auto-calculated incentive_earned is used.
+    manual_amount: Optional[float] = None
 
 
 def _compute_incentive_amount(plan_config: dict, target: float, actual_sales: float) -> dict:
@@ -6786,6 +6789,7 @@ async def _recompute_incentive_payout(salon_id: str, barber_id: str, year_month:
         "payment_method": (existing or {}).get("payment_method"),
         "paid_at": (existing or {}).get("paid_at"),
         "linked_expense_id": (existing or {}).get("linked_expense_id"),
+        "manual_amount": (existing or {}).get("manual_amount"),
         "notes": (existing or {}).get("notes", ""),
         "updated_at": datetime.now(timezone.utc).isoformat(),
         "created_at": (existing or {}).get("created_at") or datetime.now(timezone.utc).isoformat(),
@@ -6920,6 +6924,28 @@ async def update_incentive_status(
         "updated_at": datetime.now(timezone.utc).isoformat(),
     }
 
+    # If the admin passed a manual_amount, persist it (None = clear back to auto).
+    # Allowed only for Approved / Paid / Pending — not Hold.
+    if body.manual_amount is not None:
+        if float(body.manual_amount) < 0:
+            raise HTTPException(status_code=400, detail="manual_amount cannot be negative")
+        update["manual_amount"] = float(body.manual_amount)
+    elif body.status in ("Approved", "Paid"):
+        # Keep whatever was previously stored
+        pass
+
+    # Effective payout amount = manual override (if set) else auto-calculated
+    effective_manual = (
+        update.get("manual_amount")
+        if "manual_amount" in update
+        else payout.get("manual_amount")
+    )
+    effective_amount = (
+        float(effective_manual)
+        if effective_manual is not None
+        else float(payout.get("incentive_earned") or 0)
+    )
+
     # Handle "Paid" — must have payment_method, create expense entry
     if body.status == "Paid":
         if not body.payment_method:
@@ -6927,26 +6953,43 @@ async def update_incentive_status(
         if body.payment_method not in ("cash", "upi", "bank"):
             raise HTTPException(status_code=400, detail="payment_method must be cash, upi or bank")
 
-        # Avoid double-booking: only create expense if not already linked
-        if not payout.get("linked_expense_id"):
-            amount = float(payout.get("incentive_earned") or 0)
-            if amount > 0:
-                txn = {
-                    "id": str(uuid.uuid4()),
+        # Strict idempotency: never create more than ONE financial txn per payout.id.
+        # Even if linked_expense_id was somehow lost, look up by reference_id+type.
+        existing_txn = None
+        if payout.get("linked_expense_id"):
+            existing_txn = await db.financial_transactions.find_one(
+                {"id": payout["linked_expense_id"], "salon_id": salon_id}, {"_id": 0}
+            )
+        if not existing_txn:
+            existing_txn = await db.financial_transactions.find_one(
+                {
                     "salon_id": salon_id,
-                    "type": "outflow",
-                    "category": "staff_incentive",
-                    "amount": amount,
-                    "payment_mode": body.payment_method,
-                    "narration": f"Incentive payout to {payout.get('barber_name', '')} for {month}",
-                    "reference_id": payout.get("id"),
                     "reference_type": "incentive_payout",
-                    "created_by": current_user.get("id") if isinstance(current_user, dict) else "admin",
-                    "date": datetime.now(timezone.utc).strftime("%Y-%m-%d"),
-                    "created_at": datetime.now(timezone.utc).isoformat(),
-                }
-                await db.financial_transactions.insert_one(txn)
-                update["linked_expense_id"] = txn["id"]
+                    "reference_id": payout.get("id"),
+                },
+                {"_id": 0},
+            )
+
+        if existing_txn:
+            # Already booked — keep the existing entry; ensure the payout points at it.
+            update["linked_expense_id"] = existing_txn["id"]
+        elif effective_amount > 0:
+            txn = {
+                "id": str(uuid.uuid4()),
+                "salon_id": salon_id,
+                "type": "outflow",
+                "category": "staff_incentive",
+                "amount": effective_amount,
+                "payment_mode": body.payment_method,
+                "narration": f"Incentive payout to {payout.get('barber_name', '')} for {month}",
+                "reference_id": payout.get("id"),
+                "reference_type": "incentive_payout",
+                "created_by": current_user.get("id") if isinstance(current_user, dict) else "admin",
+                "date": datetime.now(timezone.utc).strftime("%Y-%m-%d"),
+                "created_at": datetime.now(timezone.utc).isoformat(),
+            }
+            await db.financial_transactions.insert_one(txn)
+            update["linked_expense_id"] = txn["id"]
 
         update["payment_method"] = body.payment_method
         update["paid_at"] = datetime.now(timezone.utc).isoformat()

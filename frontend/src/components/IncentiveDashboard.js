@@ -62,7 +62,8 @@ export default function IncentiveDashboard({ salonId, getAuthHeaders, isAdmin = 
   const [eligibleBarbers, setEligibleBarbers] = useState([]);
   const [loading, setLoading] = useState(false);
   const [selected, setSelected] = useState(new Set());
-  const [payDialog, setPayDialog] = useState({ open: false, row: null, method: 'cash' });
+  const [payDialog, setPayDialog] = useState({ open: false, row: null, method: 'cash', amount: '' });
+  const [approveDialog, setApproveDialog] = useState({ open: false, row: null, amount: '' });
   const [exporting, setExporting] = useState(false);
   const [exportRange, setExportRange] = useState({ start: todayMonth(), end: todayMonth() });
 
@@ -104,12 +105,13 @@ export default function IncentiveDashboard({ salonId, getAuthHeaders, isAdmin = 
   useEffect(() => { loadIncentives(); }, [loadIncentives]);
 
   const summary = useMemo(() => {
-    const total = rows.reduce((a, r) => a + (r.incentive_earned || 0), 0);
-    const paid = rows.filter(r => r.status === 'Paid').reduce((a, r) => a + (r.incentive_earned || 0), 0);
-    const approved = rows.filter(r => r.status === 'Approved').reduce((a, r) => a + (r.incentive_earned || 0), 0);
-    const pending = rows.filter(r => r.status === 'Pending').reduce((a, r) => a + (r.incentive_earned || 0), 0);
-    const onHold = rows.filter(r => r.status === 'Hold').reduce((a, r) => a + (r.incentive_earned || 0), 0);
-    const eligibleCount = rows.filter(r => (r.incentive_earned || 0) > 0).length;
+    const eff = (r) => (r.manual_amount != null ? r.manual_amount : r.incentive_earned) || 0;
+    const total = rows.reduce((a, r) => a + eff(r), 0);
+    const paid = rows.filter(r => r.status === 'Paid').reduce((a, r) => a + eff(r), 0);
+    const approved = rows.filter(r => r.status === 'Approved').reduce((a, r) => a + eff(r), 0);
+    const pending = rows.filter(r => r.status === 'Pending').reduce((a, r) => a + eff(r), 0);
+    const onHold = rows.filter(r => r.status === 'Hold').reduce((a, r) => a + eff(r), 0);
+    const eligibleCount = rows.filter(r => eff(r) > 0).length;
     const avgAch = rows.length
       ? rows.reduce((a, r) => a + (r.achievement_pct || 0), 0) / rows.length
       : 0;
@@ -147,9 +149,16 @@ export default function IncentiveDashboard({ salonId, getAuthHeaders, isAdmin = 
       toast.error('Only admin can change status');
       return;
     }
+    if (status === 'Approved') {
+      // Open approve dialog so admin can adjust the amount before approving
+      const current = (row.manual_amount != null ? row.manual_amount : row.incentive_earned) || 0;
+      setApproveDialog({ open: true, row, amount: String(current) });
+      return;
+    }
     if (status === 'Paid') {
-      // open dialog for payment method
-      setPayDialog({ open: true, row, method: 'cash' });
+      // Pre-fill with current effective amount (manual override or auto)
+      const current = (row.manual_amount != null ? row.manual_amount : row.incentive_earned) || 0;
+      setPayDialog({ open: true, row, method: 'cash', amount: String(current) });
       return;
     }
     try {
@@ -160,13 +169,46 @@ export default function IncentiveDashboard({ salonId, getAuthHeaders, isAdmin = 
     }
   };
 
-  const confirmPay = async () => {
-    const { row, method } = payDialog;
+  const confirmApprove = async () => {
+    const { row, amount } = approveDialog;
     if (!row) return;
+    const num = parseFloat(amount);
+    if (Number.isNaN(num) || num < 0) {
+      toast.error('Enter a valid incentive amount');
+      return;
+    }
     try {
-      await updateStatus(row.barber_id, row.month, { status: 'Paid', payment_method: method });
+      const payload = { status: 'Approved' };
+      // Send manual override only when admin changed the amount
+      const auto = Number(row.incentive_earned || 0);
+      if (Math.abs(num - auto) > 0.001 || row.manual_amount != null) {
+        payload.manual_amount = num;
+      }
+      await updateStatus(row.barber_id, row.month, payload);
+      setApproveDialog({ open: false, row: null, amount: '' });
+      await loadIncentives();
+    } catch (err) {
+      toast.error(err?.response?.data?.detail || 'Failed to approve');
+    }
+  };
+
+  const confirmPay = async () => {
+    const { row, method, amount } = payDialog;
+    if (!row) return;
+    const num = parseFloat(amount);
+    if (Number.isNaN(num) || num <= 0) {
+      toast.error('Enter a valid payout amount');
+      return;
+    }
+    try {
+      const payload = { status: 'Paid', payment_method: method };
+      const auto = Number(row.incentive_earned || 0);
+      if (Math.abs(num - auto) > 0.001 || row.manual_amount != null) {
+        payload.manual_amount = num;
+      }
+      await updateStatus(row.barber_id, row.month, payload);
       toast.success(`Paid via ${method.toUpperCase()} — synced to Financials`);
-      setPayDialog({ open: false, row: null, method: 'cash' });
+      setPayDialog({ open: false, row: null, method: 'cash', amount: '' });
       await loadIncentives();
     } catch (err) {
       toast.error(err?.response?.data?.detail || 'Failed to mark Paid');
@@ -229,24 +271,31 @@ export default function IncentiveDashboard({ salonId, getAuthHeaders, isAdmin = 
       }
       const headers = [
         'Month', 'Employee', 'Salary', 'Target', 'Actual Sales',
-        'Achievement %', 'Incentive Earned', 'Status', 'Payment Method',
-        'Paid At', 'Notes'
+        'Achievement %', 'Auto Incentive', 'Adjusted Incentive', 'Effective Payout',
+        'Status', 'Payment Method', 'Paid At', 'Notes'
       ];
       const csv = [
         headers.join(','),
-        ...all.map(r => [
-          r.month,
-          `"${(r.barber_name || '').replace(/"/g, '""')}"`,
-          r.salary || 0,
-          r.target || 0,
-          r.actual_sales || 0,
-          (r.achievement_pct || 0).toFixed(2),
-          r.incentive_earned || 0,
-          r.status || 'Pending',
-          r.payment_method || '',
-          r.paid_at || '',
-          `"${(r.notes || '').replace(/"/g, '""')}"`,
-        ].join(','))
+        ...all.map(r => {
+          const auto = r.incentive_earned || 0;
+          const adjusted = r.manual_amount != null ? r.manual_amount : '';
+          const effective = r.manual_amount != null ? r.manual_amount : auto;
+          return [
+            r.month,
+            `"${(r.barber_name || '').replace(/"/g, '""')}"`,
+            r.salary || 0,
+            r.target || 0,
+            r.actual_sales || 0,
+            (r.achievement_pct || 0).toFixed(2),
+            auto,
+            adjusted,
+            effective,
+            r.status || 'Pending',
+            r.payment_method || '',
+            r.paid_at || '',
+            `"${(r.notes || '').replace(/"/g, '""')}"`,
+          ].join(',');
+        })
       ].join('\n');
       const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
       const link = document.createElement('a');
@@ -484,13 +533,30 @@ export default function IncentiveDashboard({ salonId, getAuthHeaders, isAdmin = 
                   testid={`ach-${r.barber_id}`}
                   tone={(r.achievement_pct || 0) >= 100 ? 'green' : 'yellow'}
                 />
-                <Badge
-                  label="Earned"
-                  value={fmtINR(r.incentive_earned)}
-                  testid={`earned-${r.barber_id}`}
-                  tone="gold"
-                  emphasis
-                />
+                {r.manual_amount != null ? (
+                  <>
+                    <Badge
+                      label="Auto"
+                      value={fmtINR(r.incentive_earned)}
+                      testid={`auto-${r.barber_id}`}
+                    />
+                    <Badge
+                      label="Adjusted"
+                      value={fmtINR(r.manual_amount)}
+                      testid={`earned-${r.barber_id}`}
+                      tone="gold"
+                      emphasis
+                    />
+                  </>
+                ) : (
+                  <Badge
+                    label="Earned"
+                    value={fmtINR(r.incentive_earned)}
+                    testid={`earned-${r.barber_id}`}
+                    tone="gold"
+                    emphasis
+                  />
+                )}
               </div>
 
               {/* Row 3 — actions */}
@@ -511,7 +577,7 @@ export default function IncentiveDashboard({ salonId, getAuthHeaders, isAdmin = 
                     variant="outline"
                     className="border-green-500/40 text-green-400 hover:bg-green-500/10"
                     onClick={() => handleSingleStatus(r, 'Paid')}
-                    disabled={r.status === 'Paid' || (r.incentive_earned || 0) <= 0}
+                    disabled={r.status === 'Paid'}
                     data-testid={`pay-${r.barber_id}`}
                   >
                     <IndianRupee className="w-3 h-3 mr-1" /> Mark Paid
@@ -556,33 +622,50 @@ export default function IncentiveDashboard({ salonId, getAuthHeaders, isAdmin = 
             <DialogDescription>
               {payDialog.row && (
                 <span>
-                  Pay <b>{fmtINR(payDialog.row.incentive_earned)}</b> to{' '}
-                  <b>{payDialog.row.barber_name}</b> for <b>{payDialog.row.month}</b>.
+                  Pay <b>{payDialog.row.barber_name}</b> for <b>{payDialog.row.month}</b>.
                   This will create a linked expense entry in Financials.
                 </span>
               )}
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-3">
-            <Label className="text-xs">Payment Method</Label>
-            <Select
-              value={payDialog.method}
-              onValueChange={(v) => setPayDialog(p => ({ ...p, method: v }))}
-            >
-              <SelectTrigger data-testid="pay-method-select">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="cash">Cash</SelectItem>
-                <SelectItem value="upi">UPI</SelectItem>
-                <SelectItem value="bank">Bank Transfer</SelectItem>
-              </SelectContent>
-            </Select>
+            <div>
+              <Label className="text-xs">Payout Amount (₹)</Label>
+              <Input
+                type="number"
+                min="0"
+                step="0.01"
+                value={payDialog.amount}
+                onChange={(e) => setPayDialog(p => ({ ...p, amount: e.target.value }))}
+                data-testid="pay-amount-input"
+              />
+              {payDialog.row && (
+                <p className="text-xs text-muted-foreground mt-1">
+                  Auto-calculated: {fmtINR(payDialog.row.incentive_earned)}. You may adjust before paying.
+                </p>
+              )}
+            </div>
+            <div>
+              <Label className="text-xs">Payment Method</Label>
+              <Select
+                value={payDialog.method}
+                onValueChange={(v) => setPayDialog(p => ({ ...p, method: v }))}
+              >
+                <SelectTrigger data-testid="pay-method-select">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="cash">Cash</SelectItem>
+                  <SelectItem value="upi">UPI</SelectItem>
+                  <SelectItem value="bank">Bank Transfer</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
           </div>
           <DialogFooter>
             <Button
               variant="outline"
-              onClick={() => setPayDialog({ open: false, row: null, method: 'cash' })}
+              onClick={() => setPayDialog({ open: false, row: null, method: 'cash', amount: '' })}
               data-testid="pay-cancel-btn"
             >
               Cancel
@@ -593,6 +676,56 @@ export default function IncentiveDashboard({ salonId, getAuthHeaders, isAdmin = 
               data-testid="pay-confirm-btn"
             >
               <IndianRupee className="w-4 h-4 mr-1" /> Confirm Payment
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Approve Dialog (with manual amount adjustment) */}
+      <Dialog open={approveDialog.open} onOpenChange={(o) => setApproveDialog(p => ({ ...p, open: o }))}>
+        <DialogContent data-testid="approve-dialog">
+          <DialogHeader>
+            <DialogTitle>Approve Incentive</DialogTitle>
+            <DialogDescription>
+              {approveDialog.row && (
+                <span>
+                  Approve incentive for <b>{approveDialog.row.barber_name}</b> ({approveDialog.row.month}).
+                  Adjust the amount if needed before approving.
+                </span>
+              )}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-2">
+            <Label className="text-xs">Approved Amount (₹)</Label>
+            <Input
+              type="number"
+              min="0"
+              step="0.01"
+              value={approveDialog.amount}
+              onChange={(e) => setApproveDialog(p => ({ ...p, amount: e.target.value }))}
+              data-testid="approve-amount-input"
+            />
+            {approveDialog.row && (
+              <p className="text-xs text-muted-foreground">
+                Auto-calculated: {fmtINR(approveDialog.row.incentive_earned)}. Approving here only locks the
+                amount — Financials entry is created when you mark it Paid.
+              </p>
+            )}
+          </div>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setApproveDialog({ open: false, row: null, amount: '' })}
+              data-testid="approve-cancel-btn"
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={confirmApprove}
+              className="bg-blue-500/80 text-white hover:bg-blue-500"
+              data-testid="approve-confirm-btn"
+            >
+              <CheckCircle2 className="w-4 h-4 mr-1" /> Approve
             </Button>
           </DialogFooter>
         </DialogContent>
