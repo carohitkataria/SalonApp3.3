@@ -247,7 +247,9 @@ export default function SinglePageBooking() {
   const [showMembershipShop, setShowMembershipShop] = useState(false);
   const [membershipPlans, setMembershipPlans] = useState([]);
   const [activeTab, setActiveTab] = useState('services');
-  const [serviceTab, setServiceTab] = useState('recent'); // recent / services / packages
+  const [serviceTab, setServiceTab] = useState('services'); // favorites / services / packages
+  const [selectedCategory, setSelectedCategory] = useState('favorites'); // Category filter
+  const [categories, setCategories] = useState([]); // Categories with thumbnails
   const [customerBookings, setCustomerBookings] = useState([]);
   const [recentServices, setRecentServices] = useState([]);
   const [availablePackages, setAvailablePackages] = useState({ public: [], customer: [] });
@@ -335,14 +337,44 @@ export default function SinglePageBooking() {
 
   const fetchSalonData = async () => {
     try {
-      const [salonRes, barbersRes, servicesRes] = await Promise.all([
+      const [salonRes, barbersRes, servicesRes, categoriesRes] = await Promise.all([
         axios.get(`${API}/salons/${salonId}`),
         axios.get(`${API}/salons/${salonId}/barbers?available_only=true`),
-        axios.get(`${API}/salons/${salonId}/services/enabled`)
+        axios.get(`${API}/salons/${salonId}/services/enabled`),
+        axios.get(`${API}/services/categories`)
       ]);
       setSalon(salonRes.data);
       setBarbers(barbersRes.data);
       setSalonServices(servicesRes.data);
+      
+      // Set categories with default thumbnails
+      const defaultThumbnails = {
+        "Favorites": "https://images.unsplash.com/photo-1634449571010-02389ed0f9b0?w=200&h=200&fit=crop",
+        "General": "https://images.unsplash.com/photo-1634449571010-02389ed0f9b0?w=200&h=200&fit=crop",
+        "Packages": "https://images.unsplash.com/photo-1633681926035-ec1ac984418a?w=200&h=200&fit=crop"
+      };
+      
+      // Build category list: Favorites first, then General, then Packages, then others
+      const rawCategories = categoriesRes.data.categories || [];
+      const orderedCategories = [
+        { name: "Favorites", thumbnail_url: defaultThumbnails["Favorites"] }
+      ];
+      
+      // Add General first if exists
+      const general = rawCategories.find(c => c.name === "General");
+      if (general) orderedCategories.push(general);
+      
+      // Add Packages
+      orderedCategories.push({ name: "Packages", thumbnail_url: defaultThumbnails["Packages"] });
+      
+      // Add remaining categories (excluding General and any duplicates)
+      rawCategories.forEach(cat => {
+        if (cat.name !== "General" && !orderedCategories.find(c => c.name === cat.name)) {
+          orderedCategories.push(cat);
+        }
+      });
+      
+      setCategories(orderedCategories);
     } catch (error) {
       console.error('Error fetching salon data:', error);
       toast.error('Failed to load salon information');
@@ -1311,10 +1343,10 @@ export default function SinglePageBooking() {
           )}
         </div>
 
-        {/* Section 3: Services with Tabs (Recent / Services / Packages) */}
-        <div className="space-y-3">
+        {/* Section 3: Services with Horizontal Category Filter */}
+        <div className="space-y-4">
           <div className="flex items-center justify-between">
-            <p className="text-sm font-medium text-muted-foreground">What would you like?</p>
+            <p className="text-lg font-bold text-foreground">Select Services</p>
             {formData.selectedServices.length > 0 && (
               <span className="text-xs bg-gold/20 text-gold px-2 py-1 rounded-full">
                 {formData.selectedServices.length} selected
@@ -1322,206 +1354,199 @@ export default function SinglePageBooking() {
             )}
           </div>
           
-          {/* Tab Switcher */}
-          <div className="flex bg-muted rounded-xl p-1 gap-1">
-            {[
-              { id: 'recent', label: 'Recent', icon: History },
-              { id: 'services', label: 'Services', icon: Scissors },
-              { id: 'packages', label: 'Packages', icon: Package }
-            ].map(tab => (
-              <button
-                key={tab.id}
-                type="button"
-                onClick={() => setServiceTab(tab.id)}
-                className={`flex-1 flex items-center justify-center gap-1.5 py-2 px-3 rounded-lg text-sm font-medium transition-all ${
-                  serviceTab === tab.id
-                    ? 'bg-gold text-black shadow-sm'
-                    : 'text-muted-foreground hover:text-foreground'
-                }`}
-              >
-                <tab.icon className="w-4 h-4" />
-                {tab.label}
-              </button>
-            ))}
+          {/* Horizontal Scrollable Category Filter with Thumbnails */}
+          <div className="relative">
+            <div className="flex gap-3 overflow-x-auto pb-2 scrollbar-hide" style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}>
+              {categories.map((cat, idx) => (
+                <button
+                  key={cat.name}
+                  type="button"
+                  onClick={() => setSelectedCategory(cat.name)}
+                  className={`flex-shrink-0 flex flex-col items-center gap-1 min-w-[80px] transition-all ${
+                    selectedCategory === cat.name ? 'opacity-100' : 'opacity-70 hover:opacity-100'
+                  }`}
+                >
+                  <div className={`w-16 h-16 rounded-full overflow-hidden border-2 transition-all ${
+                    selectedCategory === cat.name 
+                      ? 'border-gold shadow-lg shadow-gold/20 bg-blue-100' 
+                      : 'border-border/50'
+                  }`}>
+                    <img 
+                      src={cat.thumbnail_url} 
+                      alt={cat.name}
+                      className="w-full h-full object-cover"
+                      onError={(e) => {
+                        e.target.src = 'https://images.unsplash.com/photo-1634449571010-02389ed0f9b0?w=200&h=200&fit=crop';
+                      }}
+                    />
+                  </div>
+                  <span className={`text-xs font-medium text-center leading-tight max-w-[80px] ${
+                    selectedCategory === cat.name ? 'text-foreground' : 'text-muted-foreground'
+                  }`}>
+                    {cat.name}
+                  </span>
+                  {selectedCategory === cat.name && (
+                    <div className="w-8 h-0.5 bg-gold rounded-full" />
+                  )}
+                </button>
+              ))}
+            </div>
           </div>
 
-          {/* Recent Services Tab */}
-          {serviceTab === 'recent' && (
-            <div className="space-y-2">
-              {(() => {
-                // Filter recent services by gender too
+          {/* Category Title with Search and Filter */}
+          <div className="flex items-center justify-between">
+            <h3 className="text-lg font-semibold text-foreground">{selectedCategory}</h3>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                className="p-2 rounded-full border border-border hover:border-gold/50 transition-colors"
+                onClick={() => document.getElementById('serviceSearch')?.focus()}
+              >
+                <Search className="w-4 h-4 text-muted-foreground" />
+              </button>
+            </div>
+          </div>
+
+          {/* Search Input (hidden by default, shown when search icon clicked) */}
+          <div className="relative">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+            <Input
+              id="serviceSearch"
+              placeholder="Search services..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="pl-10 h-10"
+            />
+          </div>
+
+          {/* Services List for Selected Category */}
+          <div className="space-y-2">
+            {(() => {
+              let displayServices = [];
+              
+              if (selectedCategory === 'Favorites') {
+                // Show favorite/recent services
                 const filteredRecent = recentServices.filter(s => {
                   const tag = (s.gender_tag || 'Unisex').toLowerCase();
                   if (tag === 'unisex') return true;
                   if (!customerGender) return true;
                   return tag.toLowerCase() === customerGender.toLowerCase();
                 });
+                displayServices = filteredRecent;
                 
-                return filteredRecent.length > 0 ? (
-                <>
-                  <p className="text-xs text-muted-foreground">Your recently used services</p>
-                  {filteredRecent.map(service => (
-                    <ServiceCard
-                      key={service.id}
-                      service={service}
-                      selected={formData.selectedServices.includes(service.id)}
-                      onToggle={() => handleServiceToggle(service.id)}
-                      price={getServicePrice(service)}
-                    />
-                  ))}
-                </>
-              ) : (
-                <div className="text-center py-8 bg-card border border-border rounded-xl">
-                  <History className="w-12 h-12 text-muted-foreground/30 mx-auto mb-2" />
-                  <p className="text-muted-foreground text-sm">No recent services</p>
-                  <p className="text-xs text-muted-foreground mt-1">Your recently used services will appear here</p>
-                  <button
-                    type="button"
-                    onClick={() => setServiceTab('services')}
-                    className="mt-3 text-sm text-gold font-medium hover:underline"
-                  >
-                    Browse Services →
-                  </button>
-                </div>
-              );
-              })()}
-            </div>
-          )}
-
-          {/* Services Tab */}
-          {serviceTab === 'services' && (
-            <div className="space-y-3">
-              {/* Search */}
-              <div className="relative">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-                <Input
-                  placeholder="Search services..."
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  className="pl-10 h-10"
-                />
-              </div>
-
-              {/* Categorized Services */}
-              <div className="space-y-2">
-                {Object.keys(groupedServices).length > 0 ? (
-                  Object.entries(groupedServices).map(([category, categoryServices]) => (
-                    <CategorySection
-                      key={category}
-                      category={category}
-                      services={categoryServices}
-                      selectedServices={formData.selectedServices}
-                      onToggle={handleServiceToggle}
-                      priceGetter={getServicePrice}
-                      isOpen={openCategories[category] || false}
-                      onToggleOpen={() => setOpenCategories(prev => ({ ...prev, [category]: !prev[category] }))}
-                    />
-                  ))
+                if (displayServices.length === 0) {
+                  return (
+                    <div className="text-center py-8 bg-card border border-border rounded-xl">
+                      <History className="w-12 h-12 text-muted-foreground/30 mx-auto mb-2" />
+                      <p className="text-muted-foreground text-sm">No favorites yet</p>
+                      <p className="text-xs text-muted-foreground mt-1">Your frequently used services will appear here</p>
+                    </div>
+                  );
+                }
+              } else if (selectedCategory === 'Packages') {
+                // Show packages
+                return packages.length > 0 ? (
+                  <>
+                    {selectedPackage && (
+                      <div className="text-xs bg-gold/20 text-gold px-3 py-1.5 rounded-lg text-center font-medium">
+                        Package Selected: {selectedPackage.package_name}
+                      </div>
+                    )}
+                    {packages.map(pkg => {
+                      const pkgPrice = pkg.total_price || pkg.total_discounted || pkg.package_price || 0;
+                      const pkgOriginalPrice = pkg.total_original || pkg.original_price || null;
+                      const isCustom = pkg.is_custom;
+                      
+                      return (
+                        <motion.div
+                          key={pkg.id}
+                          whileHover={{ scale: 1.01 }}
+                          whileTap={{ scale: 0.99 }}
+                          onClick={() => handlePackageSelect(pkg)}
+                          className={`relative p-4 rounded-xl cursor-pointer transition-all border-2 ${
+                            selectedPackage?.id === pkg.id
+                              ? 'bg-gold/10 border-gold shadow-md'
+                              : isCustom
+                              ? 'bg-gradient-to-br from-gold/5 to-gold/10 border-gold/40 hover:border-gold'
+                              : 'bg-card border-border hover:border-gold/40'
+                          }`}
+                        >
+                          <div className="flex items-start justify-between">
+                            <div className="flex-1">
+                              <div className="flex items-center gap-2">
+                                <Package className="w-4 h-4 text-gold" />
+                                <h4 className="font-bold text-foreground">{pkg.package_name}</h4>
+                                {isCustom && (
+                                  <span className="text-[10px] bg-gold text-black px-1.5 py-0.5 rounded-full font-bold">
+                                    FOR YOU
+                                  </span>
+                                )}
+                              </div>
+                              <p className="text-xs text-muted-foreground mt-1 line-clamp-2">
+                                {pkg.description || pkg.services?.map(s => s.service_name || s.name).join(', ')}
+                              </p>
+                            </div>
+                            <div className="text-right">
+                              <p className="text-lg font-bold text-gold">₹{pkgPrice}</p>
+                              {pkgOriginalPrice && pkgOriginalPrice > pkgPrice && (
+                                <p className="text-xs text-muted-foreground line-through">₹{pkgOriginalPrice}</p>
+                              )}
+                            </div>
+                          </div>
+                          {selectedPackage?.id === pkg.id && (
+                            <motion.div
+                              initial={{ scale: 0 }}
+                              animate={{ scale: 1 }}
+                              className="absolute top-3 right-3 w-6 h-6 bg-gold rounded-full flex items-center justify-center"
+                            >
+                              <Check className="w-4 h-4 text-black" />
+                            </motion.div>
+                          )}
+                        </motion.div>
+                      );
+                    })}
+                  </>
                 ) : (
                   <div className="text-center py-8 bg-card border border-border rounded-xl">
-                    <Scissors className="w-12 h-12 text-muted-foreground/30 mx-auto mb-2" />
-                    <p className="text-muted-foreground text-sm">
-                      {searchQuery ? 'No services match your search' : 'No services available'}
-                    </p>
+                    <Package className="w-12 h-12 text-muted-foreground/30 mx-auto mb-2" />
+                    <p className="text-muted-foreground text-sm">No packages available</p>
                   </div>
-                )}
-              </div>
-            </div>
-          )}
-
-          {/* Packages Tab */}
-          {serviceTab === 'packages' && (
-            <div className="space-y-2">
-              {packages.length > 0 ? (
-                <>
-                  {selectedPackage && (
-                    <div className="text-xs bg-gold/20 text-gold px-3 py-1.5 rounded-lg text-center font-medium">
-                      Package Selected: {selectedPackage.package_name}
+                );
+              } else {
+                // Show services for selected category
+                displayServices = filteredServices.filter(s => s.category === selectedCategory);
+                
+                // Apply search filter
+                if (searchQuery) {
+                  displayServices = displayServices.filter(s => 
+                    s.service_name.toLowerCase().includes(searchQuery.toLowerCase())
+                  );
+                }
+                
+                if (displayServices.length === 0) {
+                  return (
+                    <div className="text-center py-8 bg-card border border-border rounded-xl">
+                      <Scissors className="w-12 h-12 text-muted-foreground/30 mx-auto mb-2" />
+                      <p className="text-muted-foreground text-sm">
+                        {searchQuery ? 'No services match your search' : 'No services in this category'}
+                      </p>
                     </div>
-                  )}
-                  {packages.map(pkg => {
-                    // Normalize price fields: SalonPackage uses total_price, CustomerPackage uses total_discounted
-                    const pkgPrice = pkg.total_price || pkg.total_discounted || pkg.package_price || 0;
-                    const pkgOriginalPrice = pkg.total_original || pkg.original_price || null;
-                    const isCustom = pkg.is_custom;
-                    
-                    return (
-                    <motion.div
-                      key={pkg.id}
-                      whileHover={{ scale: 1.01 }}
-                      whileTap={{ scale: 0.99 }}
-                      onClick={() => handlePackageSelect(pkg)}
-                      className={`relative p-4 rounded-xl cursor-pointer transition-all border-2 ${
-                        selectedPackage?.id === pkg.id
-                          ? 'bg-gold/10 border-gold shadow-md'
-                          : isCustom
-                          ? 'bg-gradient-to-br from-gold/5 to-gold/10 border-gold/40 hover:border-gold'
-                          : 'bg-card border-border hover:border-gold/40'
-                      }`}
-                    >
-                      {isCustom && (
-                        <div className="mb-2">
-                          <span className="px-2 py-0.5 text-xs font-bold bg-gold text-black rounded-full">
-                            ✨ Your Custom Package
-                          </span>
-                        </div>
-                      )}
-                      <div className="flex justify-between items-start mb-2">
-                        <div className="flex-1">
-                          <h4 className="font-bold text-foreground">{pkg.package_name}</h4>
-                          <p className="text-xs text-muted-foreground mt-1">
-                            {pkg.services?.length || 0} services {pkg.gender_tag ? `• ${pkg.gender_tag}` : ''}
-                          </p>
-                        </div>
-                        <div className="text-right">
-                          <p className="text-xl font-bold text-gold">₹{pkgPrice}</p>
-                          {pkgOriginalPrice && pkgOriginalPrice > pkgPrice && (
-                            <p className="text-xs line-through text-muted-foreground">₹{pkgOriginalPrice}</p>
-                          )}
-                          {isCustom && pkg.discount_percentage > 0 && (
-                            <p className="text-xs text-green-600 font-semibold">{pkg.discount_percentage}% OFF</p>
-                          )}
-                        </div>
-                      </div>
-                      
-                      {pkg.description && (
-                        <p className="text-sm text-muted-foreground mb-2">{pkg.description}</p>
-                      )}
-                      
-                      {pkg.services && pkg.services.length > 0 && (
-                        <div className="mt-3 pt-3 border-t border-border">
-                          <p className="text-xs font-semibold text-muted-foreground mb-2">Includes:</p>
-                          <div className="flex flex-wrap gap-1">
-                            {pkg.services.map((service, idx) => (
-                              <span key={idx} className="text-xs bg-muted px-2 py-1 rounded">
-                                {service.service_name}
-                              </span>
-                            ))}
-                          </div>
-                        </div>
-                      )}
-                      
-                      {selectedPackage?.id === pkg.id && (
-                        <motion.div
-                          initial={{ scale: 0 }}
-                          animate={{ scale: 1 }}
-                          className="absolute top-3 right-3 w-6 h-6 bg-gold rounded-full flex items-center justify-center"
-                        >
-                          <Check className="w-4 h-4 text-black" />
-                        </motion.div>
-                      )}
-                    </motion.div>
-                    );
-                  })}
-                </>
-              ) : (
-                <div className="text-center py-8 bg-card border border-border rounded-xl">
-                  <Package className="w-12 h-12 text-muted-foreground/30 mx-auto mb-2" />
-                  <p className="text-muted-foreground text-sm">No packages available</p>
-                </div>
-              )}
-            </div>
-          )}
+                  );
+                }
+              }
+              
+              // Render service cards
+              return displayServices.map(service => (
+                <ServiceCard
+                  key={service.id}
+                  service={service}
+                  selected={formData.selectedServices.includes(service.id)}
+                  onToggle={() => handleServiceToggle(service.id)}
+                  price={getServicePrice(service)}
+                />
+              ));
+            })()}
+          </div>
         </div>
 
         {/* Section 4: Payment Mode - REMOVED, moved to separate step */}

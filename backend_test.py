@@ -1,449 +1,417 @@
 #!/usr/bin/env python3
 """
-Backend API Testing Script for Salon Management System
-Tests the continuation tasks: OTP verification, loyalty rewards, and staff access control
+Backend Testing Script for Staff Attendance System
+Tests all attendance and salary management endpoints
 """
 
 import requests
 import json
-import time
-from datetime import datetime
+from datetime import datetime, timedelta
+import sys
 
 # Configuration
 BASE_URL = "https://loyalty-wallet-fix.preview.emergentagent.com/api"
-SALON_ID = "91a8e87d-d687-49ea-b3e5-460cc55cf3de"  # Updated to working salon ID
+SALON_ID = "2dad5cd9-5dda-4398-bbb5-a4d12aae7915"
 ADMIN_PHONE = "+917503070727"
 ADMIN_PASSWORD = "salon123"
-TEST_CUSTOMER_PHONE = "9876543210"
-EXISTING_CUSTOMER_PHONE = "7503070727"
 
-class BackendTester:
+# Test data
+TEST_MONTH = "2026-04"
+TEST_DATE = "2026-04-26"
+
+class AttendanceSystemTester:
     def __init__(self):
+        self.session = requests.Session()
         self.admin_token = None
-        self.staff_token = None
-        self.staff_user_id = None
+        self.test_barber_id = None
+        self.test_barber_name = None
         
-    def log(self, message):
-        """Log test messages with timestamp"""
+    def log(self, message, level="INFO"):
+        """Log test messages"""
         timestamp = datetime.now().strftime("%H:%M:%S")
-        print(f"[{timestamp}] {message}")
+        print(f"[{timestamp}] {level}: {message}")
         
-    def make_request(self, method, endpoint, data=None, headers=None, params=None):
-        """Make HTTP request with error handling"""
-        url = f"{BASE_URL}{endpoint}"
-        try:
-            if method.upper() == "GET":
-                response = requests.get(url, headers=headers, params=params, timeout=30)
-            elif method.upper() == "POST":
-                response = requests.post(url, json=data, headers=headers, params=params, timeout=30)
-            elif method.upper() == "PUT":
-                response = requests.put(url, json=data, headers=headers, params=params, timeout=30)
-            elif method.upper() == "DELETE":
-                response = requests.delete(url, headers=headers, params=params, timeout=30)
-            else:
-                raise ValueError(f"Unsupported method: {method}")
-                
-            self.log(f"{method} {endpoint} -> {response.status_code}")
-            
-            # Try to parse JSON response
-            try:
-                response_data = response.json()
-            except:
-                response_data = {"text": response.text}
-                
-            return {
-                "status_code": response.status_code,
-                "data": response_data,
-                "success": 200 <= response.status_code < 300
-            }
-        except Exception as e:
-            self.log(f"ERROR: {method} {endpoint} failed: {str(e)}")
-            return {
-                "status_code": 0,
-                "data": {"error": str(e)},
-                "success": False
-            }
-    
-    def authenticate_admin(self):
-        """Authenticate as admin user"""
-        self.log("=== ADMIN AUTHENTICATION ===")
+    def login_admin(self):
+        """Login as admin to get authentication token"""
+        self.log("🔐 Attempting admin login...")
         
-        # Try to get fresh OTP and authenticate
-        self.log("Getting fresh OTP for authentication...")
-        otp_response = self.make_request("POST", "/salon/send-otp", {
-            "phone": ADMIN_PHONE
-        })
-        
-        if otp_response["success"]:
-            self.log(f"OTP sent successfully: {otp_response['data']}")
-            
-            # Get OTP from logs
-            import subprocess
-            import time
-            time.sleep(2)  # Wait for log to be written
-            
-            try:
-                result = subprocess.run(['tail', '-n', '50', '/var/log/supervisor/backend.err.log'], 
-                                      capture_output=True, text=True)
-                lines = result.stdout.split('\n')
-                otp = None
-                for line in reversed(lines):
-                    if f"Generated OTP for {ADMIN_PHONE}:" in line:
-                        otp = line.split(': ')[-1].strip()
-                        break
-                
-                if otp:
-                    self.log(f"Found OTP in logs: {otp}")
-                    
-                    # Verify OTP
-                    verify_response = self.make_request("POST", "/salon/verify-otp", {
-                        "phone": ADMIN_PHONE,
-                        "otp": otp
-                    })
-                    
-                    if verify_response["success"] and "access_token" in verify_response["data"]:
-                        self.admin_token = verify_response["data"]["access_token"]
-                        actual_salon_id = verify_response["data"].get("salon_id")
-                        self.log(f"✅ Admin authenticated successfully (OTP login)")
-                        self.log(f"   Token: {self.admin_token[:20]}...")
-                        self.log(f"   Salon ID: {actual_salon_id}")
-                        
-                        # Update salon ID if different
-                        global SALON_ID
-                        if actual_salon_id and actual_salon_id != SALON_ID:
-                            self.log(f"   Updating SALON_ID from {SALON_ID} to {actual_salon_id}")
-                            SALON_ID = actual_salon_id
-                        
-                        return True
-                    else:
-                        self.log(f"❌ OTP verification failed: {verify_response['data']}")
-                else:
-                    self.log("❌ Could not find OTP in logs")
-            except Exception as e:
-                self.log(f"❌ Error getting OTP from logs: {e}")
-        else:
-            self.log(f"❌ Failed to send OTP: {otp_response['data']}")
-        
-        # Fallback attempts
-        self.log("Trying salon password login...")
-        response = self.make_request("POST", "/salon/password-login", {
-            "phone": ADMIN_PHONE,
+        login_data = {
+            "identifier": ADMIN_PHONE,
             "password": ADMIN_PASSWORD
-        })
-        
-        if response["success"] and "access_token" in response["data"]:
-            self.admin_token = response["data"]["access_token"]
-            self.log(f"✅ Admin authenticated successfully (salon password login)")
-            self.log(f"   Token: {self.admin_token[:20]}...")
-            self.log(f"   Salon ID: {response['data'].get('salon_id')}")
-            return True
-        else:
-            self.log(f"❌ Salon password login failed: {response['data']}")
-            
-            # Try salon user login as fallback
-            self.log("Trying salon user login...")
-            response = self.make_request("POST", "/salon/users/login", {
-                "identifier": ADMIN_PHONE,
-                "password": ADMIN_PASSWORD
-            })
-            
-            if response["success"] and "access_token" in response["data"]:
-                self.admin_token = response["data"]["access_token"]
-                self.log(f"✅ Admin authenticated successfully (salon user login)")
-                self.log(f"   Token: {self.admin_token[:20]}...")
-                self.log(f"   Salon ID: {response['data'].get('salon_id')}")
-                return True
-            else:
-                self.log(f"❌ Salon user login also failed: {response['data']}")
-                self.log("⚠️  Continuing without authentication to test public endpoints")
-                return False
-    
-    def test_customer_otp_flow(self):
-        """Test Customer OTP Verification Flow"""
-        self.log("\n=== CUSTOMER OTP VERIFICATION FLOW ===")
-        
-        # First, login the customer to create/get user record
-        self.log("0. Customer login to create user record")
-        login_response = self.make_request("POST", "/user/login", {
-            "name": "Test Customer",
-            "phone": TEST_CUSTOMER_PHONE,
-            "gender": "Male"
-        })
-        
-        if login_response["success"]:
-            self.log(f"✅ Customer login successful")
-            self.log(f"   User ID: {login_response['data'].get('id')}")
-        else:
-            self.log(f"❌ Customer login failed: {login_response['data']}")
-        
-        # Test 1: Send OTP
-        self.log("1. Testing POST /customer/send-otp")
-        response = self.make_request("POST", "/customer/send-otp", {
-            "phone": TEST_CUSTOMER_PHONE
-        })
-        
-        send_otp_success = False
-        actual_otp = None
-        if response["success"]:
-            self.log(f"✅ OTP send request successful")
-            self.log(f"   Response: {response['data']}")
-            send_otp_success = True
-            # Extract OTP if provided in response (for testing when WhatsApp fails)
-            actual_otp = response['data'].get('otp')
-        else:
-            self.log(f"❌ OTP send failed: {response['data']}")
-            
-        # Test 2: Check OTP status
-        self.log("2. Testing GET /customer/{phone}/otp-status")
-        response = self.make_request("GET", f"/customer/{TEST_CUSTOMER_PHONE}/otp-status")
-        
-        otp_status_success = False
-        if response["success"]:
-            self.log(f"✅ OTP status check successful")
-            self.log(f"   Response: {response['data']}")
-            otp_status = response['data']
-            otp_status_success = True
-        else:
-            self.log(f"❌ OTP status check failed: {response['data']}")
-            otp_status = {}
-            
-        # Test 3: Verify OTP (try with actual OTP if available, otherwise test OTP)
-        self.log("3. Testing POST /customer/verify-otp")
-        test_otp = actual_otp if actual_otp else "123456"
-        self.log(f"   Using OTP: {test_otp}")
-        
-        response = self.make_request("POST", "/customer/verify-otp", {
-            "phone": TEST_CUSTOMER_PHONE,
-            "otp": test_otp
-        })
-        
-        verify_endpoint_exists = response["status_code"] != 404
-        verify_success = False
-        if response["success"]:
-            self.log(f"✅ OTP verification successful")
-            self.log(f"   Response: {response['data']}")
-            verify_success = True
-        else:
-            self.log(f"❌ OTP verification failed: {response['data']}")
-            
-        # Test 4: Check OTP status after verification (if verification was successful)
-        if verify_success:
-            self.log("4. Testing OTP status after verification")
-            response = self.make_request("GET", f"/customer/{TEST_CUSTOMER_PHONE}/otp-status")
-            if response["success"]:
-                self.log(f"✅ Post-verification status check successful")
-                self.log(f"   Response: {response['data']}")
-            else:
-                self.log(f"❌ Post-verification status check failed: {response['data']}")
-            
-        return {
-            "send_otp": send_otp_success,
-            "check_status": otp_status_success,
-            "verify_endpoint_exists": verify_endpoint_exists,
-            "verify_success": verify_success
-        }
-    
-    def test_loyalty_reward_logic(self):
-        """Test Loyalty Reward Logic"""
-        self.log("\n=== LOYALTY REWARD LOGIC ===")
-        
-        # Test combined wallet balance endpoint
-        self.log("Testing GET /salons/{salon_id}/customers/{phone}/wallet")
-        response = self.make_request("GET", f"/salons/{SALON_ID}/customers/{EXISTING_CUSTOMER_PHONE}/wallet")
-        
-        if response["success"]:
-            self.log(f"✅ Wallet balance endpoint working")
-            wallet_data = response['data']
-            self.log(f"   Has membership: {wallet_data.get('has_membership')}")
-            self.log(f"   Has loyalty wallet: {wallet_data.get('has_loyalty_wallet')}")
-            self.log(f"   Total wallet balance: {wallet_data.get('wallet_balance')}")
-            self.log(f"   Membership balance: {wallet_data.get('membership_balance')}")
-            self.log(f"   Loyalty balance: {wallet_data.get('loyalty_balance')}")
-            
-            # Verify required fields are present
-            required_fields = ['has_membership', 'has_loyalty_wallet', 'wallet_balance', 'membership_balance', 'loyalty_balance']
-            missing_fields = [field for field in required_fields if field not in wallet_data]
-            
-            if missing_fields:
-                self.log(f"⚠️  Missing required fields: {missing_fields}")
-                return False
-            else:
-                self.log(f"✅ All required fields present in response")
-                return True
-        else:
-            self.log(f"❌ Wallet balance endpoint failed: {response['data']}")
-            return False
-    
-    def test_staff_access_control(self):
-        """Test Staff Access Control (can_access_financials)"""
-        self.log("\n=== STAFF ACCESS CONTROL ===")
-        
-        if not self.admin_token:
-            self.log("❌ Admin token required for staff management")
-            return False
-            
-        headers = {"Authorization": f"Bearer {self.admin_token}"}
-        
-        # Test 1: Create staff user with can_access_financials: true
-        self.log("1. Creating staff user with can_access_financials: true")
-        staff_data = {
-            "salon_id": SALON_ID,
-            "name": "Test Staff Financial",
-            "mobile": "+919876543210",
-            "login_id": "teststaff_financial",
-            "password": "staff123",
-            "role": "staff",
-            "permissions": {
-                "can_edit_salon": False,
-                "can_access_analytics": False,
-                "can_access_financials": True,
-                "can_delete_salon": False
-            }
         }
         
-        response = self.make_request("POST", "/salon/users", staff_data, headers)
-        
-        if response["success"]:
-            self.log(f"✅ Staff user created successfully")
-            staff_user = response['data']
-            self.staff_user_id = staff_user.get('id')
-            self.log(f"   Staff ID: {self.staff_user_id}")
-            self.log(f"   Permissions: {staff_user.get('permissions')}")
-        else:
-            self.log(f"❌ Staff user creation failed: {response['data']}")
-            return False
+        try:
+            response = self.session.post(f"{BASE_URL}/salon/users/login", json=login_data)
+            self.log(f"Login response status: {response.status_code}")
             
-        # Test 2: Login as staff user
-        self.log("2. Testing staff login")
-        response = self.make_request("POST", "/salon/users/login", {
-            "identifier": "teststaff_financial",
-            "password": "staff123"
-        })
-        
-        if response["success"] and "access_token" in response["data"]:
-            self.staff_token = response["data"]["access_token"]
-            staff_permissions = response["data"].get("permissions", {})
-            self.log(f"✅ Staff login successful")
-            self.log(f"   Token: {self.staff_token[:20]}...")
-            self.log(f"   can_access_financials: {staff_permissions.get('can_access_financials')}")
-            
-            # Verify permission is present and true
-            if staff_permissions.get('can_access_financials') is True:
-                self.log(f"✅ can_access_financials permission correctly set to True")
-                staff_login_success = True
-            else:
-                self.log(f"❌ can_access_financials permission not set correctly")
-                staff_login_success = False
-        else:
-            self.log(f"❌ Staff login failed: {response['data']}")
-            staff_login_success = False
-            
-        # Test 3: Create staff user WITHOUT can_access_financials
-        self.log("3. Creating staff user WITHOUT can_access_financials")
-        staff_data_no_financial = {
-            "salon_id": SALON_ID,
-            "name": "Test Staff No Financial",
-            "mobile": "+919876543211",
-            "login_id": "teststaff_no_financial",
-            "password": "staff123",
-            "role": "staff",
-            "permissions": {
-                "can_edit_salon": False,
-                "can_access_analytics": True,
-                "can_access_financials": False,
-                "can_delete_salon": False
-            }
-        }
-        
-        response = self.make_request("POST", "/salon/users", staff_data_no_financial, headers)
-        
-        if response["success"]:
-            self.log(f"✅ Staff user (no financial access) created successfully")
-            
-            # Login as this staff user
-            response = self.make_request("POST", "/salon/users/login", {
-                "identifier": "teststaff_no_financial",
-                "password": "staff123"
-            })
-            
-            if response["success"]:
-                no_financial_permissions = response["data"].get("permissions", {})
-                self.log(f"✅ Staff (no financial) login successful")
-                self.log(f"   can_access_financials: {no_financial_permissions.get('can_access_financials')}")
-                
-                if no_financial_permissions.get('can_access_financials') is False:
-                    self.log(f"✅ can_access_financials correctly set to False")
-                    no_financial_test_success = True
+            if response.status_code == 200:
+                data = response.json()
+                self.admin_token = data.get("access_token")
+                if self.admin_token:
+                    self.session.headers.update({"Authorization": f"Bearer {self.admin_token}"})
+                    self.log("✅ Admin login successful")
+                    return True
                 else:
-                    self.log(f"❌ can_access_financials should be False")
-                    no_financial_test_success = False
+                    self.log("❌ No access token in response", "ERROR")
+                    return False
             else:
-                self.log(f"❌ Staff (no financial) login failed: {response['data']}")
-                no_financial_test_success = False
-        else:
-            self.log(f"❌ Staff user (no financial) creation failed: {response['data']}")
-            no_financial_test_success = False
+                self.log(f"❌ Login failed: {response.text}", "ERROR")
+                return False
+                
+        except Exception as e:
+            self.log(f"❌ Login error: {str(e)}", "ERROR")
+            return False
+    
+    def get_barbers(self):
+        """Get list of barbers to use for testing"""
+        self.log("👥 Getting barbers list...")
+        
+        try:
+            response = self.session.get(f"{BASE_URL}/salons/{SALON_ID}/barbers")
+            self.log(f"Barbers response status: {response.status_code}")
             
-        return {
-            "staff_creation": response["success"] if 'response' in locals() else False,
-            "staff_login_with_financials": staff_login_success,
-            "staff_without_financials": no_financial_test_success
+            if response.status_code == 200:
+                data = response.json()
+                barbers = data.get("barbers", [])
+                
+                # Find first active barber
+                for barber in barbers:
+                    if barber.get("is_barber") and barber.get("is_active"):
+                        self.test_barber_id = barber.get("id")
+                        self.test_barber_name = barber.get("name")
+                        self.log(f"✅ Using test barber: {self.test_barber_name} (ID: {self.test_barber_id})")
+                        return True
+                
+                self.log("❌ No active barbers found", "ERROR")
+                return False
+            else:
+                self.log(f"❌ Failed to get barbers: {response.text}", "ERROR")
+                return False
+                
+        except Exception as e:
+            self.log(f"❌ Error getting barbers: {str(e)}", "ERROR")
+            return False
+    
+    def test_get_monthly_attendance(self):
+        """Test GET /api/salons/{salon_id}/attendance/{month}"""
+        self.log(f"📅 Testing GET monthly attendance for {TEST_MONTH}...")
+        
+        try:
+            response = self.session.get(f"{BASE_URL}/salons/{SALON_ID}/attendance/{TEST_MONTH}")
+            self.log(f"Monthly attendance response status: {response.status_code}")
+            
+            if response.status_code == 200:
+                data = response.json()
+                self.log(f"✅ Monthly attendance retrieved successfully")
+                self.log(f"   Month: {data.get('month')}")
+                self.log(f"   Barbers count: {len(data.get('barbers', []))}")
+                
+                # Check structure
+                barbers = data.get("barbers", [])
+                if barbers:
+                    first_barber = barbers[0]
+                    required_fields = ["barber_id", "barber_name", "compensation", "attendance"]
+                    missing_fields = [field for field in required_fields if field not in first_barber]
+                    
+                    if missing_fields:
+                        self.log(f"⚠️ Missing fields in barber data: {missing_fields}", "WARNING")
+                    else:
+                        self.log("✅ All required fields present in barber data")
+                        
+                    attendance_records = first_barber.get("attendance", [])
+                    self.log(f"   Attendance records for {first_barber.get('barber_name')}: {len(attendance_records)}")
+                
+                return True
+            else:
+                self.log(f"❌ Failed to get monthly attendance: {response.text}", "ERROR")
+                return False
+                
+        except Exception as e:
+            self.log(f"❌ Error testing monthly attendance: {str(e)}", "ERROR")
+            return False
+    
+    def test_calculate_daily_attendance(self):
+        """Test POST /api/salons/{salon_id}/attendance/calculate/{date}"""
+        self.log(f"🧮 Testing POST calculate attendance for {TEST_DATE}...")
+        
+        try:
+            response = self.session.post(f"{BASE_URL}/salons/{SALON_ID}/attendance/calculate/{TEST_DATE}")
+            self.log(f"Calculate attendance response status: {response.status_code}")
+            
+            if response.status_code == 200:
+                data = response.json()
+                self.log(f"✅ Daily attendance calculated successfully")
+                self.log(f"   Date: {data.get('date')}")
+                self.log(f"   Attendance records: {len(data.get('attendance', []))}")
+                
+                # Check attendance structure
+                attendance_records = data.get("attendance", [])
+                if attendance_records:
+                    first_record = attendance_records[0]
+                    required_fields = ["id", "salon_id", "barber_id", "date", "status", "auto_calculated"]
+                    missing_fields = [field for field in required_fields if field not in first_record]
+                    
+                    if missing_fields:
+                        self.log(f"⚠️ Missing fields in attendance record: {missing_fields}", "WARNING")
+                    else:
+                        self.log("✅ All required fields present in attendance record")
+                        self.log(f"   Sample status: {first_record.get('status')}")
+                        self.log(f"   Auto calculated: {first_record.get('auto_calculated')}")
+                
+                return True
+            elif response.status_code == 403:
+                self.log("❌ Admin access required for calculate attendance", "ERROR")
+                return False
+            else:
+                self.log(f"❌ Failed to calculate attendance: {response.text}", "ERROR")
+                return False
+                
+        except Exception as e:
+            self.log(f"❌ Error testing calculate attendance: {str(e)}", "ERROR")
+            return False
+    
+    def test_override_attendance(self):
+        """Test PUT /api/salons/{salon_id}/attendance/{barber_id}/{date}"""
+        if not self.test_barber_id:
+            self.log("❌ No test barber available for override test", "ERROR")
+            return False
+            
+        self.log(f"✏️ Testing PUT override attendance for barber {self.test_barber_name}...")
+        
+        override_data = {
+            "status": "present",
+            "note": "Manual override for testing"
         }
+        
+        try:
+            response = self.session.put(
+                f"{BASE_URL}/salons/{SALON_ID}/attendance/{self.test_barber_id}/{TEST_DATE}",
+                json=override_data
+            )
+            self.log(f"Override attendance response status: {response.status_code}")
+            
+            if response.status_code == 200:
+                data = response.json()
+                self.log(f"✅ Attendance override successful")
+                self.log(f"   Status: {data.get('status')}")
+                self.log(f"   Auto calculated: {data.get('auto_calculated')}")
+                self.log(f"   Override note: {data.get('override_note')}")
+                
+                # Verify it's marked as manual override
+                if data.get("auto_calculated") == False:
+                    self.log("✅ Correctly marked as manual override")
+                else:
+                    self.log("⚠️ Should be marked as manual override", "WARNING")
+                
+                return True
+            elif response.status_code == 403:
+                self.log("❌ Admin access required for attendance override", "ERROR")
+                return False
+            else:
+                self.log(f"❌ Failed to override attendance: {response.text}", "ERROR")
+                return False
+                
+        except Exception as e:
+            self.log(f"❌ Error testing attendance override: {str(e)}", "ERROR")
+            return False
+    
+    def test_get_monthly_salary(self):
+        """Test GET /api/salons/{salon_id}/salary/{month}"""
+        self.log(f"💰 Testing GET monthly salary for {TEST_MONTH}...")
+        
+        try:
+            response = self.session.get(f"{BASE_URL}/salons/{SALON_ID}/salary/{TEST_MONTH}")
+            self.log(f"Monthly salary response status: {response.status_code}")
+            
+            if response.status_code == 200:
+                data = response.json()
+                self.log(f"✅ Monthly salary retrieved successfully")
+                self.log(f"   Month: {data.get('month')}")
+                self.log(f"   Salary records: {len(data.get('salary_records', []))}")
+                
+                # Check salary structure
+                salary_records = data.get("salary_records", [])
+                if salary_records:
+                    first_record = salary_records[0]
+                    required_fields = ["id", "salon_id", "barber_id", "barber_name", "month", 
+                                     "base_salary", "present_days", "half_days", "calculated_salary"]
+                    missing_fields = [field for field in required_fields if field not in first_record]
+                    
+                    if missing_fields:
+                        self.log(f"⚠️ Missing fields in salary record: {missing_fields}", "WARNING")
+                    else:
+                        self.log("✅ All required fields present in salary record")
+                        self.log(f"   Sample barber: {first_record.get('barber_name')}")
+                        self.log(f"   Base salary: ₹{first_record.get('base_salary')}")
+                        self.log(f"   Present days: {first_record.get('present_days')}")
+                        self.log(f"   Half days: {first_record.get('half_days')}")
+                        self.log(f"   Calculated salary: ₹{first_record.get('calculated_salary')}")
+                        self.log(f"   Is paid: {first_record.get('is_paid')}")
+                
+                return True
+            else:
+                self.log(f"❌ Failed to get monthly salary: {response.text}", "ERROR")
+                return False
+                
+        except Exception as e:
+            self.log(f"❌ Error testing monthly salary: {str(e)}", "ERROR")
+            return False
+    
+    def test_mark_salary_paid(self):
+        """Test POST /api/salons/{salon_id}/salary/{barber_id}/{month}/pay"""
+        if not self.test_barber_id:
+            self.log("❌ No test barber available for salary payment test", "ERROR")
+            return False
+            
+        self.log(f"💳 Testing POST mark salary paid for barber {self.test_barber_name}...")
+        
+        payment_data = {
+            "payment_method": "cash",
+            "note": "Test salary payment"
+        }
+        
+        try:
+            response = self.session.post(
+                f"{BASE_URL}/salons/{SALON_ID}/salary/{self.test_barber_id}/{TEST_MONTH}/pay",
+                json=payment_data
+            )
+            self.log(f"Mark salary paid response status: {response.status_code}")
+            
+            if response.status_code == 200:
+                data = response.json()
+                self.log(f"✅ Salary payment marked successfully")
+                self.log(f"   Is paid: {data.get('is_paid')}")
+                self.log(f"   Payment method: {data.get('payment_method')}")
+                self.log(f"   Total payable: ₹{data.get('total_payable')}")
+                
+                # Check if financial transaction was created
+                transaction = data.get("transaction")
+                if transaction:
+                    self.log("✅ Financial transaction created")
+                    self.log(f"   Transaction ID: {transaction.get('id')}")
+                    self.log(f"   Category: {transaction.get('category')}")
+                    self.log(f"   Amount: ₹{transaction.get('amount')}")
+                else:
+                    self.log("⚠️ No financial transaction in response", "WARNING")
+                
+                return True
+            elif response.status_code == 403:
+                self.log("❌ Admin access required for salary payment", "ERROR")
+                return False
+            elif response.status_code == 400:
+                self.log(f"⚠️ Salary payment validation error: {response.text}", "WARNING")
+                # This might be expected if salary is already paid
+                return True
+            else:
+                self.log(f"❌ Failed to mark salary paid: {response.text}", "ERROR")
+                return False
+                
+        except Exception as e:
+            self.log(f"❌ Error testing salary payment: {str(e)}", "ERROR")
+            return False
+    
+    def test_service_categories_with_thumbnails(self):
+        """Test GET /api/services/categories"""
+        self.log("🖼️ Testing GET service categories with thumbnails...")
+        
+        try:
+            response = self.session.get(f"{BASE_URL}/services/categories")
+            self.log(f"Service categories response status: {response.status_code}")
+            
+            if response.status_code == 200:
+                data = response.json()
+                self.log(f"✅ Service categories retrieved successfully")
+                
+                categories = data.get("categories", [])
+                self.log(f"   Categories count: {len(categories)}")
+                
+                if categories:
+                    # Check structure
+                    first_category = categories[0]
+                    required_fields = ["name", "thumbnail_url"]
+                    missing_fields = [field for field in required_fields if field not in first_category]
+                    
+                    if missing_fields:
+                        self.log(f"⚠️ Missing fields in category: {missing_fields}", "WARNING")
+                    else:
+                        self.log("✅ All required fields present in categories")
+                        
+                    # Show sample categories
+                    for i, cat in enumerate(categories[:3]):
+                        self.log(f"   Category {i+1}: {cat.get('name')} - {cat.get('thumbnail_url')[:50]}...")
+                
+                return True
+            else:
+                self.log(f"❌ Failed to get service categories: {response.text}", "ERROR")
+                return False
+                
+        except Exception as e:
+            self.log(f"❌ Error testing service categories: {str(e)}", "ERROR")
+            return False
     
     def run_all_tests(self):
-        """Run all backend tests"""
-        self.log("🚀 Starting Backend API Tests")
-        self.log(f"Base URL: {BASE_URL}")
-        self.log(f"Salon ID: {SALON_ID}")
+        """Run all attendance system tests"""
+        self.log("🚀 Starting Staff Attendance System Backend Tests")
+        self.log("=" * 60)
         
-        results = {}
+        # Track test results
+        test_results = {}
         
-        # Try to authenticate admin (but continue even if it fails)
-        auth_success = self.authenticate_admin()
-            
-        # Test 1: Customer OTP Verification Flow (doesn't require auth)
-        results["otp_flow"] = self.test_customer_otp_flow()
+        # Step 1: Login
+        if not self.login_admin():
+            self.log("❌ Cannot proceed without admin authentication", "ERROR")
+            return False
         
-        # Test 2: Loyalty Reward Logic (doesn't require auth)
-        results["loyalty_rewards"] = self.test_loyalty_reward_logic()
+        # Step 2: Get barbers for testing
+        if not self.get_barbers():
+            self.log("❌ Cannot proceed without test barber data", "ERROR")
+            return False
         
-        # Test 3: Staff Access Control (requires auth)
-        if auth_success:
-            results["staff_access_control"] = self.test_staff_access_control()
-        else:
-            self.log("\n=== STAFF ACCESS CONTROL ===")
-            self.log("❌ Skipping staff access control tests - admin authentication required")
-            results["staff_access_control"] = {"skipped": True, "reason": "No admin authentication"}
+        # Step 3: Test all endpoints
+        tests = [
+            ("Monthly Attendance", self.test_get_monthly_attendance),
+            ("Calculate Daily Attendance", self.test_calculate_daily_attendance),
+            ("Override Attendance", self.test_override_attendance),
+            ("Monthly Salary", self.test_get_monthly_salary),
+            ("Mark Salary Paid", self.test_mark_salary_paid),
+            ("Service Categories with Thumbnails", self.test_service_categories_with_thumbnails)
+        ]
+        
+        for test_name, test_func in tests:
+            self.log(f"\n--- Testing {test_name} ---")
+            try:
+                result = test_func()
+                test_results[test_name] = result
+                if result:
+                    self.log(f"✅ {test_name} - PASSED")
+                else:
+                    self.log(f"❌ {test_name} - FAILED")
+            except Exception as e:
+                self.log(f"❌ {test_name} - ERROR: {str(e)}", "ERROR")
+                test_results[test_name] = False
         
         # Summary
-        self.log("\n" + "="*50)
+        self.log("\n" + "=" * 60)
         self.log("📊 TEST SUMMARY")
-        self.log("="*50)
+        self.log("=" * 60)
         
-        # OTP Flow Summary
-        otp_results = results.get("otp_flow", {})
-        self.log(f"🔐 Customer OTP Flow:")
-        self.log(f"   Send OTP endpoint: {'✅' if otp_results.get('send_otp') else '❌'}")
-        self.log(f"   OTP status endpoint: {'✅' if otp_results.get('check_status') else '❌'}")
-        self.log(f"   Verify OTP endpoint: {'✅' if otp_results.get('verify_endpoint_exists') else '❌'}")
-        self.log(f"   OTP verification: {'✅' if otp_results.get('verify_success') else '❌'}")
+        passed = sum(1 for result in test_results.values() if result)
+        total = len(test_results)
         
-        # Loyalty Rewards Summary
-        loyalty_success = results.get("loyalty_rewards", False)
-        self.log(f"💰 Loyalty Rewards: {'✅' if loyalty_success else '❌'}")
+        for test_name, result in test_results.items():
+            status = "✅ PASSED" if result else "❌ FAILED"
+            self.log(f"{test_name}: {status}")
         
-        # Staff Access Control Summary
-        staff_results = results.get("staff_access_control", {})
-        if staff_results.get("skipped"):
-            self.log(f"👥 Staff Access Control: ⚠️  SKIPPED ({staff_results.get('reason')})")
+        self.log(f"\nOverall: {passed}/{total} tests passed")
+        
+        if passed == total:
+            self.log("🎉 ALL TESTS PASSED! Staff Attendance System is working correctly.")
+            return True
         else:
-            self.log(f"👥 Staff Access Control:")
-            self.log(f"   Staff creation: {'✅' if staff_results.get('staff_creation') else '❌'}")
-            self.log(f"   Login with financials: {'✅' if staff_results.get('staff_login_with_financials') else '❌'}")
-            self.log(f"   Login without financials: {'✅' if staff_results.get('staff_without_financials') else '❌'}")
-        
-        return results
+            self.log(f"⚠️ {total - passed} test(s) failed. Please review the issues above.")
+            return False
 
 if __name__ == "__main__":
-    tester = BackendTester()
-    results = tester.run_all_tests()
+    tester = AttendanceSystemTester()
+    success = tester.run_all_tests()
+    sys.exit(0 if success else 1)

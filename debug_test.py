@@ -1,78 +1,95 @@
 #!/usr/bin/env python3
 """
-Simple test to debug the ObjectId issue
+Test script to check if the attendance system endpoints work with authentication
 """
 
 import requests
 import json
+from datetime import datetime
 
 BASE_URL = "https://loyalty-wallet-fix.preview.emergentagent.com/api"
-SALON_ID = "a356c4e6-274f-40e7-9a37-66d3a4613d17"
-ADMIN_PHONE = "+917503070727"
-ADMIN_PASSWORD = "salon123"
-TEST_CUSTOMER_PHONE = "7503070727"
+SALON_ID = "91a8e87d-d687-49ea-b3e5-460cc55cf3de"
 
-def test_buy_membership():
-    # Login first
-    login_response = requests.post(
-        f"{BASE_URL}/salon/password-login",
-        json={"phone": ADMIN_PHONE, "password": ADMIN_PASSWORD}
-    )
+def log(message):
+    timestamp = datetime.now().strftime("%H:%M:%S")
+    print(f"[{timestamp}] {message}")
+
+def test_with_different_salon():
+    """Test with the salon ID from the review request"""
+    review_salon_id = "2dad5cd9-5dda-4398-bbb5-a4d12aae7915"
     
-    if login_response.status_code != 200:
-        print(f"Login failed: {login_response.text}")
-        return
+    log(f"Testing with review salon ID: {review_salon_id}")
     
-    token = login_response.json().get("access_token")
-    headers = {"Authorization": f"Bearer {token}"}
+    # Check if this salon exists
+    response = requests.get(f"{BASE_URL}/salons/{review_salon_id}")
+    log(f"Salon check status: {response.status_code}")
     
-    # Create plan
-    plan_response = requests.post(
-        f"{BASE_URL}/salons/{SALON_ID}/membership-plans",
-        json={
-            "salon_id": SALON_ID,
-            "name": "Debug Plan",
-            "amount": 100,
-            "credit": 120,
-            "validity_months": 6,
-            "terms_conditions": "Debug T&C"
-        },
-        headers=headers
-    )
-    
-    if plan_response.status_code != 200:
-        print(f"Plan creation failed: {plan_response.text}")
-        return
-    
-    plan_id = plan_response.json().get("id")
-    print(f"Created plan: {plan_id}")
-    
-    # Buy membership (no auth)
-    membership_response = requests.post(
-        f"{BASE_URL}/salons/{SALON_ID}/customers/{TEST_CUSTOMER_PHONE}/buy-membership",
-        json={
-            "customer_name": "Debug User",
-            "customer_phone": TEST_CUSTOMER_PHONE,
-            "membership_plan_id": plan_id,
-            "payment_mode": "cash",
-            "paid_amount": 100
-        }
-    )
-    
-    print(f"Buy membership status: {membership_response.status_code}")
-    print(f"Response: {json.dumps(membership_response.json(), indent=2)}")
-    
-    # Check for _id in response
-    response_text = membership_response.text
-    if "_id" in response_text:
-        print("❌ FOUND _id in response - ObjectId serialization issue!")
-        # Find where _id appears
-        lines = response_text.split('\n')
-        for i, line in enumerate(lines):
-            if '_id' in line:
-                print(f"Line {i}: {line}")
+    if response.status_code == 200:
+        salon_data = response.json()
+        log(f"Found salon: {salon_data.get('salon_name')}")
+        
+        # Test attendance endpoint
+        response = requests.get(f"{BASE_URL}/salons/{review_salon_id}/attendance/2026-04")
+        log(f"Attendance endpoint status: {response.status_code}")
+        
+        if response.status_code == 200:
+            data = response.json()
+            log(f"✅ Attendance endpoint working! Barbers: {len(data.get('barbers', []))}")
+            return True
+        else:
+            log(f"❌ Attendance endpoint failed: {response.text}")
+            return False
     else:
-        print("✅ No _id found in response")
+        log(f"❌ Salon not found: {response.text}")
+        return False
+
+def test_service_categories():
+    """Test the working service categories endpoint"""
+    log("Testing service categories endpoint...")
+    
+    response = requests.get(f"{BASE_URL}/services/categories")
+    log(f"Service categories status: {response.status_code}")
+    
+    if response.status_code == 200:
+        data = response.json()
+        categories = data.get("categories", [])
+        log(f"✅ Service categories working! Found {len(categories)} categories")
+        
+        # Show first few categories
+        for i, cat in enumerate(categories[:3]):
+            log(f"   Category {i+1}: {cat.get('name')} - {cat.get('thumbnail_url')[:50]}...")
+        
+        return True
+    else:
+        log(f"❌ Service categories failed: {response.text}")
+        return False
+
+def main():
+    log("🚀 Testing Staff Attendance System - Debugging Version")
+    log("=" * 60)
+    
+    # Test 1: Service categories (known working)
+    log("\n--- Test 1: Service Categories ---")
+    categories_result = test_service_categories()
+    
+    # Test 2: Try with different salon ID
+    log("\n--- Test 2: Different Salon ID ---")
+    salon_result = test_with_different_salon()
+    
+    # Summary
+    log("\n" + "=" * 60)
+    log("📊 SUMMARY")
+    log("=" * 60)
+    
+    log(f"Service Categories: {'✅ PASSED' if categories_result else '❌ FAILED'}")
+    log(f"Attendance System: {'✅ PASSED' if salon_result else '❌ FAILED'}")
+    
+    if categories_result and salon_result:
+        log("🎉 Both tests passed!")
+    elif categories_result:
+        log("⚠️ Service categories work, but attendance system has issues")
+    else:
+        log("❌ Multiple system failures detected")
 
 if __name__ == "__main__":
-    test_buy_membership()
+    main()

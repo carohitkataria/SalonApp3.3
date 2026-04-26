@@ -10,6 +10,7 @@ import logging
 from pathlib import Path
 from pydantic import BaseModel, Field, ConfigDict
 from typing import List, Optional, Dict, Any
+from enum import Enum
 import uuid
 from datetime import datetime, timezone, time, timedelta
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
@@ -164,6 +165,7 @@ class ServiceCreate(BaseModel):
     base_price: float = 0
     price_type: str = "fixed"  # fixed/onwards
     images: List[str] = []  # List of image URLs
+    thumbnail_url: Optional[str] = None  # Circular thumbnail for category display
     is_favorite: bool = False
     is_enabled: bool = True  # Salon can enable/disable
     available_at_home: bool = False  # Can be delivered at home
@@ -177,6 +179,7 @@ class ServiceUpdate(BaseModel):
     base_price: Optional[float] = None
     price_type: Optional[str] = None
     images: Optional[List[str]] = None
+    thumbnail_url: Optional[str] = None
     is_favorite: Optional[bool] = None
     favorite_order: Optional[int] = None
     is_enabled: Optional[bool] = None
@@ -193,6 +196,7 @@ class Service(BaseModel):
     base_price: float
     price_type: str = "fixed"
     images: List[str] = []
+    thumbnail_url: Optional[str] = None  # Circular thumbnail for category display
     is_favorite: bool = False
     favorite_order: Optional[int] = None
     is_active: bool = True
@@ -2403,10 +2407,37 @@ async def delete_service(service_id: str, current_salon=Depends(get_current_salo
 
 @api_router.get("/services/categories")
 async def get_service_categories():
-    """Get all unique service categories"""
-    services = await db.services.find({"is_active": True}, {"_id": 0, "category": 1}).to_list(1000)
-    categories = list(set([s.get("category", "General") for s in services]))
-    return {"categories": sorted(categories)}
+    """Get all unique service categories with thumbnails"""
+    services = await db.services.find({"is_active": True}, {"_id": 0, "category": 1, "thumbnail_url": 1}).to_list(1000)
+    
+    # Group by category and get first thumbnail for each
+    category_thumbnails = {}
+    for s in services:
+        cat = s.get("category", "General")
+        if cat not in category_thumbnails:
+            category_thumbnails[cat] = s.get("thumbnail_url")
+    
+    # Default thumbnails for categories without one
+    default_thumbnails = {
+        "Hair Treatments": "https://images.unsplash.com/photo-1593702275687-f8b402bf1fb5?w=200&h=200&fit=crop",
+        "Massage & Spa": "https://images.unsplash.com/photo-1639162906614-0603b0ae95fd?w=200&h=200&fit=crop",
+        "Men's Grooming": "https://images.unsplash.com/photo-1700760934268-8aa0ef52ce0a?w=200&h=200&fit=crop",
+        "Manicure & Pedicure": "https://images.unsplash.com/photo-1632345031435-8727f6897d53?w=200&h=200&fit=crop",
+        "Waxing & Threading": "https://images.pexels.com/photos/16120497/pexels-photo-16120497.jpeg?w=200&h=200&fit=crop",
+        "General": "https://images.unsplash.com/photo-1634449571010-02389ed0f9b0?w=200&h=200&fit=crop",
+        "Packages": "https://images.unsplash.com/photo-1633681926035-ec1ac984418a?w=200&h=200&fit=crop",
+        "Facial": "https://images.pexels.com/photos/16120497/pexels-photo-16120497.jpeg?w=200&h=200&fit=crop",
+        "Favorites": "https://images.unsplash.com/photo-1634449571010-02389ed0f9b0?w=200&h=200&fit=crop"
+    }
+    
+    categories = []
+    for cat in sorted(category_thumbnails.keys()):
+        categories.append({
+            "name": cat,
+            "thumbnail_url": category_thumbnails[cat] or default_thumbnails.get(cat, default_thumbnails["General"])
+        })
+    
+    return {"categories": categories}
 
 @api_router.get("/services/by-category")
 async def get_services_by_category(gender: Optional[str] = None):
@@ -6867,6 +6898,61 @@ class IncentivePayoutStatusUpdate(BaseModel):
     manual_amount: Optional[float] = None
 
 
+# ============ STAFF ATTENDANCE MODELS ============
+
+class AttendanceStatus(str, Enum):
+    PRESENT = "present"
+    HALF_DAY = "half_day"
+    ABSENT = "absent"
+    HOLIDAY = "holiday"
+
+class AttendanceRecord(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    id: str
+    salon_id: str
+    barber_id: str
+    date: str  # YYYY-MM-DD
+    status: str  # present/half_day/absent/holiday
+    auto_calculated: bool = True  # True if system calculated, False if admin override
+    morning_shift_completed: bool = False
+    noon_evening_shift_completed: bool = False
+    bookings_count: int = 0
+    created_at: str
+    updated_at: str
+    override_by: Optional[str] = None  # Admin user ID who overrode
+    override_note: Optional[str] = None
+
+class AttendanceOverride(BaseModel):
+    status: str  # present/half_day/absent/holiday
+    note: Optional[str] = None
+
+class SalaryPaymentRequest(BaseModel):
+    payment_method: str  # cash/upi/bank
+    note: Optional[str] = None
+
+class SalaryRecord(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    id: str
+    salon_id: str
+    barber_id: str
+    month: str  # YYYY-MM
+    base_salary: float
+    working_days: int
+    present_days: int
+    half_days: int
+    absent_days: int
+    holidays: int
+    calculated_salary: float
+    incentive_amount: float = 0
+    total_payable: float
+    is_paid: bool = False
+    paid_at: Optional[str] = None
+    payment_method: Optional[str] = None
+    financial_transaction_id: Optional[str] = None
+    created_at: str
+    updated_at: str
+
+
 def _compute_incentive_amount(plan_config: dict, target: float, actual_sales: float) -> dict:
     """Calculate incentive earned based on plan slabs.
 
@@ -7839,6 +7925,493 @@ async def _send_expiry_reminder(m: Dict[str, Any], days_left: int, key: str):
             await send_whatsapp_notification(phone, msg, f"membership_expiry_{key}")
     except Exception as e:
         logger.error(f"whatsapp expiry notification failed: {e}")
+
+
+# ============ STAFF ATTENDANCE ENDPOINTS ============
+
+async def calculate_barber_attendance_for_date(salon_id: str, barber_id: str, date_str: str) -> dict:
+    """Calculate attendance for a barber on a specific date based on completed bookings.
+    
+    Rules:
+    - Present: 2+ bookings in different shifts (morning + noon/evening)
+    - Half Day: Bookings completed in only 1 shift
+    - Absent: No bookings or less than required
+    """
+    # Get completed bookings for this barber on this date
+    start_of_day = f"{date_str}T00:00:00"
+    end_of_day = f"{date_str}T23:59:59"
+    
+    completed_bookings = await db.tokens.find({
+        "salon_id": salon_id,
+        "barber_id": barber_id,
+        "status": "completed",
+        "completed_at": {"$gte": start_of_day, "$lte": end_of_day}
+    }, {"_id": 0, "shift": 1, "token_number": 1}).to_list(100)
+    
+    bookings_count = len(completed_bookings)
+    
+    # Check which shifts have bookings
+    shifts_with_bookings = set()
+    for booking in completed_bookings:
+        shift = booking.get("shift", "").lower()
+        if shift:
+            shifts_with_bookings.add(shift)
+    
+    morning_shift = "morning" in shifts_with_bookings
+    noon_evening_shift = "noon" in shifts_with_bookings or "evening" in shifts_with_bookings
+    
+    # Determine attendance status
+    if bookings_count >= 2 and morning_shift and noon_evening_shift:
+        status = "present"
+    elif bookings_count >= 1 and len(shifts_with_bookings) >= 1:
+        status = "half_day"
+    else:
+        status = "absent"
+    
+    return {
+        "status": status,
+        "bookings_count": bookings_count,
+        "morning_shift_completed": morning_shift,
+        "noon_evening_shift_completed": noon_evening_shift
+    }
+
+
+@api_router.get("/salons/{salon_id}/attendance/{month}")
+async def get_monthly_attendance(
+    salon_id: str, 
+    month: str,  # YYYY-MM format
+    barber_id: Optional[str] = None
+):
+    """Get attendance records for a month. If barber_id specified, returns only that barber's records."""
+    # Validate month format
+    try:
+        year, mon = month.split("-")
+        year, mon = int(year), int(mon)
+    except:
+        raise HTTPException(status_code=400, detail="Invalid month format. Use YYYY-MM")
+    
+    # Get all barbers for this salon if no specific barber requested
+    query = {"salon_id": salon_id}
+    if barber_id:
+        query["barber_id"] = barber_id
+    
+    # Get existing attendance records
+    records = await db.attendance.find({
+        **query,
+        "date": {"$regex": f"^{month}"}
+    }, {"_id": 0}).to_list(1000)
+    
+    # Get barbers
+    barber_query = {"salon_id": salon_id, "is_barber": True, "is_active": True}
+    if barber_id:
+        barber_query["id"] = barber_id
+    barbers = await db.barbers.find(barber_query, {"_id": 0, "id": 1, "name": 1, "compensation": 1}).to_list(100)
+    
+    # Build response
+    response = {
+        "month": month,
+        "barbers": []
+    }
+    
+    for barber in barbers:
+        barber_records = [r for r in records if r.get("barber_id") == barber["id"]]
+        response["barbers"].append({
+            "barber_id": barber["id"],
+            "barber_name": barber["name"],
+            "compensation": barber.get("compensation", 0),
+            "attendance": barber_records
+        })
+    
+    return response
+
+
+@api_router.post("/salons/{salon_id}/attendance/calculate/{date}")
+async def calculate_daily_attendance(
+    salon_id: str,
+    date: str,  # YYYY-MM-DD format
+    current_user=Depends(get_current_salon_user)
+):
+    """Calculate attendance for all barbers for a specific date based on completed bookings."""
+    # Verify admin
+    if current_user.get("role") != "admin":
+        raise HTTPException(status_code=403, detail="Admin access required")
+    
+    # Get all active barbers
+    barbers = await db.barbers.find({
+        "salon_id": salon_id,
+        "is_barber": True,
+        "is_active": True
+    }, {"_id": 0, "id": 1, "name": 1}).to_list(100)
+    
+    results = []
+    for barber in barbers:
+        # Check if already has an override
+        existing = await db.attendance.find_one({
+            "salon_id": salon_id,
+            "barber_id": barber["id"],
+            "date": date,
+            "auto_calculated": False  # Manual override exists
+        }, {"_id": 0})
+        
+        if existing:
+            results.append(existing)
+            continue
+        
+        # Calculate attendance
+        calc = await calculate_barber_attendance_for_date(salon_id, barber["id"], date)
+        
+        # Create or update record
+        record_id = f"{salon_id}_{barber['id']}_{date}"
+        record = {
+            "id": record_id,
+            "salon_id": salon_id,
+            "barber_id": barber["id"],
+            "date": date,
+            "status": calc["status"],
+            "auto_calculated": True,
+            "morning_shift_completed": calc["morning_shift_completed"],
+            "noon_evening_shift_completed": calc["noon_evening_shift_completed"],
+            "bookings_count": calc["bookings_count"],
+            "created_at": datetime.now(timezone.utc).isoformat(),
+            "updated_at": datetime.now(timezone.utc).isoformat()
+        }
+        
+        await db.attendance.update_one(
+            {"id": record_id},
+            {"$set": record},
+            upsert=True
+        )
+        results.append(record)
+    
+    return {"date": date, "attendance": results}
+
+
+@api_router.put("/salons/{salon_id}/attendance/{barber_id}/{date}")
+async def override_attendance(
+    salon_id: str,
+    barber_id: str,
+    date: str,  # YYYY-MM-DD format
+    body: AttendanceOverride,
+    current_user=Depends(get_current_salon_user)
+):
+    """Admin override for attendance. Click on calendar date to change status."""
+    # Verify admin
+    if current_user.get("role") != "admin":
+        raise HTTPException(status_code=403, detail="Admin access required")
+    
+    # Validate status
+    if body.status not in ["present", "half_day", "absent", "holiday"]:
+        raise HTTPException(status_code=400, detail="Invalid status. Use: present, half_day, absent, holiday")
+    
+    record_id = f"{salon_id}_{barber_id}_{date}"
+    
+    # Check if record exists
+    existing = await db.attendance.find_one({"id": record_id}, {"_id": 0})
+    
+    now = datetime.now(timezone.utc).isoformat()
+    
+    if existing:
+        # Update existing record
+        await db.attendance.update_one(
+            {"id": record_id},
+            {"$set": {
+                "status": body.status,
+                "auto_calculated": False,
+                "override_by": current_user.get("id"),
+                "override_note": body.note,
+                "updated_at": now
+            }}
+        )
+    else:
+        # Create new record
+        record = {
+            "id": record_id,
+            "salon_id": salon_id,
+            "barber_id": barber_id,
+            "date": date,
+            "status": body.status,
+            "auto_calculated": False,
+            "morning_shift_completed": False,
+            "noon_evening_shift_completed": False,
+            "bookings_count": 0,
+            "override_by": current_user.get("id"),
+            "override_note": body.note,
+            "created_at": now,
+            "updated_at": now
+        }
+        await db.attendance.insert_one(record)
+    
+    updated = await db.attendance.find_one({"id": record_id}, {"_id": 0})
+    return updated
+
+
+@api_router.get("/salons/{salon_id}/salary/{month}")
+async def get_monthly_salary(
+    salon_id: str,
+    month: str,  # YYYY-MM format
+    barber_id: Optional[str] = None
+):
+    """Calculate and return salary for all barbers for a month based on attendance."""
+    # Validate month format
+    try:
+        year, mon = month.split("-")
+        year, mon = int(year), int(mon)
+    except:
+        raise HTTPException(status_code=400, detail="Invalid month format. Use YYYY-MM")
+    
+    # Get working days in month (excluding Sundays as default holidays)
+    import calendar
+    num_days = calendar.monthrange(year, mon)[1]
+    
+    # Get barbers
+    barber_query = {"salon_id": salon_id, "is_barber": True, "is_active": True}
+    if barber_id:
+        barber_query["id"] = barber_id
+    barbers = await db.barbers.find(barber_query, {"_id": 0, "id": 1, "name": 1, "compensation": 1}).to_list(100)
+    
+    results = []
+    for barber in barbers:
+        # Get attendance records for this month
+        attendance_records = await db.attendance.find({
+            "salon_id": salon_id,
+            "barber_id": barber["id"],
+            "date": {"$regex": f"^{month}"}
+        }, {"_id": 0}).to_list(100)
+        
+        # Count attendance
+        present_days = sum(1 for r in attendance_records if r.get("status") == "present")
+        half_days = sum(1 for r in attendance_records if r.get("status") == "half_day")
+        absent_days = sum(1 for r in attendance_records if r.get("status") == "absent")
+        holidays = sum(1 for r in attendance_records if r.get("status") == "holiday")
+        
+        # Calculate working days (total days - holidays)
+        working_days = num_days - holidays
+        
+        # Calculate salary
+        base_salary = float(barber.get("compensation", 0))
+        daily_rate = base_salary / num_days if num_days > 0 else 0
+        
+        # Present = full day, Half day = 0.5 day
+        effective_days = present_days + (half_days * 0.5)
+        calculated_salary = round(daily_rate * effective_days, 2)
+        
+        # Get incentive amount for this month
+        incentive = await db.incentive_payouts.find_one({
+            "salon_id": salon_id,
+            "barber_id": barber["id"],
+            "month": month,
+            "status": {"$in": ["Approved", "Paid"]}
+        }, {"_id": 0, "incentive_earned": 1})
+        incentive_amount = incentive.get("incentive_earned", 0) if incentive else 0
+        
+        total_payable = calculated_salary + incentive_amount
+        
+        # Check if salary record exists
+        salary_record = await db.salary_records.find_one({
+            "salon_id": salon_id,
+            "barber_id": barber["id"],
+            "month": month
+        }, {"_id": 0})
+        
+        # Create or get salary record
+        salary_id = f"{salon_id}_{barber['id']}_{month}"
+        if not salary_record:
+            salary_record = {
+                "id": salary_id,
+                "salon_id": salon_id,
+                "barber_id": barber["id"],
+                "barber_name": barber["name"],
+                "month": month,
+                "base_salary": base_salary,
+                "working_days": working_days,
+                "present_days": present_days,
+                "half_days": half_days,
+                "absent_days": absent_days,
+                "holidays": holidays,
+                "calculated_salary": calculated_salary,
+                "incentive_amount": incentive_amount,
+                "total_payable": total_payable,
+                "is_paid": False,
+                "created_at": datetime.now(timezone.utc).isoformat(),
+                "updated_at": datetime.now(timezone.utc).isoformat()
+            }
+            await db.salary_records.insert_one(salary_record)
+        else:
+            # Update calculated values
+            salary_record.update({
+                "base_salary": base_salary,
+                "working_days": working_days,
+                "present_days": present_days,
+                "half_days": half_days,
+                "absent_days": absent_days,
+                "holidays": holidays,
+                "calculated_salary": calculated_salary,
+                "incentive_amount": incentive_amount,
+                "total_payable": total_payable if not salary_record.get("is_paid") else salary_record.get("total_payable"),
+                "updated_at": datetime.now(timezone.utc).isoformat()
+            })
+            await db.salary_records.update_one({"id": salary_id}, {"$set": salary_record})
+        
+        salary_record["barber_name"] = barber["name"]
+        results.append(salary_record)
+    
+    return {"month": month, "salary_records": results}
+
+
+@api_router.post("/salons/{salon_id}/salary/{barber_id}/{month}/pay")
+async def mark_salary_paid(
+    salon_id: str,
+    barber_id: str,
+    month: str,
+    body: SalaryPaymentRequest,
+    current_user=Depends(get_current_salon_user)
+):
+    """Mark salary as paid and create financial transaction."""
+    # Verify admin
+    if current_user.get("role") != "admin":
+        raise HTTPException(status_code=403, detail="Admin access required")
+    
+    if body.payment_method not in ["cash", "upi", "bank"]:
+        raise HTTPException(status_code=400, detail="Invalid payment method. Use: cash, upi, bank")
+    
+    salary_id = f"{salon_id}_{barber_id}_{month}"
+    
+    # Get salary record
+    salary_record = await db.salary_records.find_one({"id": salary_id}, {"_id": 0})
+    if not salary_record:
+        raise HTTPException(status_code=404, detail="Salary record not found. Calculate salary first.")
+    
+    if salary_record.get("is_paid"):
+        raise HTTPException(status_code=400, detail="Salary already paid")
+    
+    # Get barber name for narration
+    barber = await db.barbers.find_one({"id": barber_id}, {"_id": 0, "name": 1})
+    barber_name = barber.get("name", "Unknown") if barber else "Unknown"
+    
+    now = datetime.now(timezone.utc).isoformat()
+    
+    # Create financial transaction
+    transaction_id = str(uuid.uuid4())
+    transaction = {
+        "id": transaction_id,
+        "salon_id": salon_id,
+        "type": "expense",
+        "category": "staff_salary",
+        "amount": salary_record["total_payable"],
+        "payment_method": body.payment_method,
+        "description": f"Salary payment for {barber_name} - {month}",
+        "narration": f"Monthly salary paid to {barber_name} for {month}. Base: ₹{salary_record['calculated_salary']}, Incentive: ₹{salary_record['incentive_amount']}",
+        "linked_salary_id": salary_id,
+        "created_at": now,
+        "updated_at": now
+    }
+    await db.financial_transactions.insert_one(transaction)
+    
+    # Update salary record
+    await db.salary_records.update_one(
+        {"id": salary_id},
+        {"$set": {
+            "is_paid": True,
+            "paid_at": now,
+            "payment_method": body.payment_method,
+            "financial_transaction_id": transaction_id,
+            "updated_at": now
+        }}
+    )
+    
+    updated = await db.salary_records.find_one({"id": salary_id}, {"_id": 0})
+    updated["barber_name"] = barber_name
+    updated["transaction"] = transaction
+    
+    return updated
+
+
+@api_router.get("/salons/{salon_id}/holidays")
+async def get_salon_holidays(salon_id: str, year: Optional[int] = None):
+    """Get marked holidays for a salon."""
+    if not year:
+        year = datetime.now().year
+    
+    holidays = await db.salon_holidays.find({
+        "salon_id": salon_id,
+        "date": {"$regex": f"^{year}"}
+    }, {"_id": 0}).to_list(365)
+    
+    return {"year": year, "holidays": holidays}
+
+
+@api_router.post("/salons/{salon_id}/holidays")
+async def add_salon_holiday(
+    salon_id: str,
+    date: str,  # YYYY-MM-DD
+    description: Optional[str] = None,
+    current_user=Depends(get_current_salon_user)
+):
+    """Add a holiday for the salon."""
+    if current_user.get("role") != "admin":
+        raise HTTPException(status_code=403, detail="Admin access required")
+    
+    holiday_id = f"{salon_id}_{date}"
+    
+    holiday = {
+        "id": holiday_id,
+        "salon_id": salon_id,
+        "date": date,
+        "description": description or "Holiday",
+        "created_at": datetime.now(timezone.utc).isoformat()
+    }
+    
+    await db.salon_holidays.update_one(
+        {"id": holiday_id},
+        {"$set": holiday},
+        upsert=True
+    )
+    
+    # Also mark all barbers as holiday for this date
+    barbers = await db.barbers.find({
+        "salon_id": salon_id,
+        "is_barber": True,
+        "is_active": True
+    }, {"_id": 0, "id": 1}).to_list(100)
+    
+    for barber in barbers:
+        record_id = f"{salon_id}_{barber['id']}_{date}"
+        await db.attendance.update_one(
+            {"id": record_id},
+            {"$set": {
+                "id": record_id,
+                "salon_id": salon_id,
+                "barber_id": barber["id"],
+                "date": date,
+                "status": "holiday",
+                "auto_calculated": False,
+                "updated_at": datetime.now(timezone.utc).isoformat()
+            }},
+            upsert=True
+        )
+    
+    return holiday
+
+
+@api_router.delete("/salons/{salon_id}/holidays/{date}")
+async def remove_salon_holiday(
+    salon_id: str,
+    date: str,
+    current_user=Depends(get_current_salon_user)
+):
+    """Remove a holiday."""
+    if current_user.get("role") != "admin":
+        raise HTTPException(status_code=403, detail="Admin access required")
+    
+    await db.salon_holidays.delete_one({"id": f"{salon_id}_{date}"})
+    
+    # Remove holiday status from attendance records
+    await db.attendance.update_many(
+        {"salon_id": salon_id, "date": date, "status": "holiday"},
+        {"$set": {"status": "absent", "auto_calculated": True, "updated_at": datetime.now(timezone.utc).isoformat()}}
+    )
+    
+    return {"message": "Holiday removed"}
 
 
 # Scheduler for token allocation

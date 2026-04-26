@@ -8,9 +8,12 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { toast } from 'sonner';
 import { 
   ArrowLeft, User, Save, Scissors, Shield, Edit2, Phone, Calendar, 
-  Briefcase, CreditCard, FileText, X
+  Briefcase, CreditCard, FileText, X, Trophy, ChevronLeft, ChevronRight,
+  Check, Loader2, DollarSign, Clock
 } from 'lucide-react';
 import { motion } from 'framer-motion';
+import StaffAttendanceTab from '@/components/StaffAttendanceTab';
+import StaffRewardsTab from '@/components/StaffRewardsTab';
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
 const API = `${BACKEND_URL}/api`;
@@ -393,18 +396,20 @@ export default function StaffProfilePage() {
           </div>
 
           {/* Tabs */}
-          <div className="flex gap-2 mt-4">
+          <div className="flex gap-2 mt-4 overflow-x-auto">
             {[
               { id: 'profile', label: 'Profile', icon: User },
+              { id: 'attendance', label: 'Attendance', icon: Calendar },
               { id: 'services', label: 'Services', icon: Scissors },
-              { id: 'access', label: 'Access Control', icon: Shield }
+              { id: 'rewards', label: 'Rewards', icon: Trophy },
+              { id: 'access', label: 'Access', icon: Shield }
             ].map(tab => {
               const Icon = tab.icon;
               return (
                 <button
                   key={tab.id}
                   onClick={() => setActiveTab(tab.id)}
-                  className={`flex items-center gap-2 px-4 py-2 rounded-lg transition-all ${
+                  className={`flex items-center gap-2 px-4 py-2 rounded-lg transition-all whitespace-nowrap ${
                     activeTab === tab.id
                       ? 'bg-gold text-black font-semibold'
                       : 'text-muted-foreground hover:bg-muted'
@@ -577,6 +582,16 @@ export default function StaffProfilePage() {
           </motion.div>
         )}
 
+        {/* Attendance Tab */}
+        {activeTab === 'attendance' && (
+          <StaffAttendanceTab 
+            salonId={localStorage.getItem('salon_id')} 
+            barberId={staffId} 
+            barberName={staff?.name}
+            compensation={staff?.compensation || 0}
+          />
+        )}
+
         {/* Services Tab */}
         {activeTab === 'services' && (
           <motion.div
@@ -585,35 +600,102 @@ export default function StaffProfilePage() {
             className="space-y-6"
           >
             <div className="bg-card border border-border rounded-lg p-6">
-              <h3 className="text-lg font-semibold mb-4">Service Assignments</h3>
-              <p className="text-sm text-muted-foreground mb-6">
-                Enable/disable services this staff member can provide
-              </p>
+              <div className="flex items-center justify-between mb-4">
+                <div>
+                  <h3 className="text-lg font-semibold">Service Assignments</h3>
+                  <p className="text-sm text-muted-foreground">
+                    Enable/disable services this staff member can provide
+                  </p>
+                </div>
+                {/* Select All / Deselect All Button */}
+                {services.length > 0 && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={async () => {
+                      const allSelected = services.every(s => s.is_available);
+                      const newState = !allSelected;
+                      // Toggle all services
+                      for (const service of services) {
+                        if (service.is_available !== newState) {
+                          await handleServiceToggle(service.id, newState);
+                        }
+                      }
+                    }}
+                    className="text-xs"
+                  >
+                    {services.every(s => s.is_available) ? 'Deselect All' : 'Select All'}
+                  </Button>
+                )}
+              </div>
 
-              <div className="space-y-3">
+              {/* Group services by category */}
+              <div className="space-y-4">
                 {services.length === 0 ? (
                   <p className="text-center text-muted-foreground py-8">
                     No services available. Enable services in Services & Offerings section first.
                   </p>
                 ) : (
-                  services.map(service => (
-                    <div
-                      key={service.id}
-                      className="flex items-center justify-between p-4 border border-border rounded-lg hover:border-gold/50 transition-all"
-                    >
-                      <div className="flex-1">
-                        <h4 className="font-semibold">{service.service_name}</h4>
-                        <p className="text-sm text-muted-foreground">
-                          ₹{service.barber_price || service.base_price}
-                        </p>
+                  (() => {
+                    // Group services by category
+                    const groupedServices = services.reduce((acc, service) => {
+                      const category = service.category || 'General';
+                      if (!acc[category]) acc[category] = [];
+                      acc[category].push(service);
+                      return acc;
+                    }, {});
+
+                    return Object.entries(groupedServices).map(([category, categoryServices]) => (
+                      <div key={category} className="border border-border rounded-lg overflow-hidden">
+                        {/* Category Header with Select All */}
+                        <div className="flex items-center justify-between p-3 bg-muted/50">
+                          <span className="font-semibold text-foreground">{category}</span>
+                          <div className="flex items-center gap-2">
+                            <span className="text-xs text-muted-foreground">
+                              {categoryServices.filter(s => s.is_available).length}/{categoryServices.length}
+                            </span>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={async () => {
+                                const allSelected = categoryServices.every(s => s.is_available);
+                                const newState = !allSelected;
+                                for (const service of categoryServices) {
+                                  if (service.is_available !== newState) {
+                                    await handleServiceToggle(service.id, newState);
+                                  }
+                                }
+                              }}
+                              className="text-xs h-7 px-2 text-gold hover:text-gold"
+                            >
+                              {categoryServices.every(s => s.is_available) ? 'Deselect All' : 'Select All'}
+                            </Button>
+                          </div>
+                        </div>
+                        {/* Services in category */}
+                        <div className="p-3 space-y-2">
+                          {categoryServices.map(service => (
+                            <div
+                              key={service.id}
+                              className="flex items-center justify-between p-3 border border-border rounded-lg hover:border-gold/50 transition-all"
+                            >
+                              <div className="flex-1">
+                                <h4 className="font-semibold text-sm">{service.service_name}</h4>
+                                <p className="text-xs text-muted-foreground">
+                                  ₹{service.barber_price || service.base_price}
+                                </p>
+                              </div>
+                              <Checkbox
+                                checked={service.is_available || false}
+                                onCheckedChange={(checked) => handleServiceToggle(service.id, checked)}
+                                className="data-[state=checked]:bg-gold data-[state=checked]:border-gold"
+                              />
+                            </div>
+                          ))}
+                        </div>
                       </div>
-                      <Checkbox
-                        checked={service.is_available || false}
-                        onCheckedChange={(checked) => handleServiceToggle(service.id, checked)}
-                        className="data-[state=checked]:bg-gold data-[state=checked]:border-gold"
-                      />
-                    </div>
-                  ))
+                    ));
+                  })()
                 )}
               </div>
             </div>
@@ -747,6 +829,15 @@ export default function StaffProfilePage() {
               )}
             </div>
           </motion.div>
+        )}
+
+        {/* Rewards Tab */}
+        {activeTab === 'rewards' && (
+          <StaffRewardsTab 
+            salonId={localStorage.getItem('salon_id')} 
+            barberId={staffId} 
+            barberName={staff?.name}
+          />
         )}
       </div>
     </div>

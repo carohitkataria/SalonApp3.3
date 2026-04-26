@@ -135,6 +135,48 @@ backend:
           agent: "testing"
           comment: "✅ CUSTOMER OTP VERIFICATION FLOW FULLY TESTED AND WORKING: Comprehensive testing completed successfully for all 3 endpoints. RESULTS: 1) POST /api/customer/send-otp - WORKING (successfully sends OTP via WhatsApp, returns OTP in response when WhatsApp delivery fails for testing), 2) GET /api/customer/{phone}/otp-status - WORKING (returns verification status with is_otp_verified and otp_verified_at fields), 3) POST /api/customer/verify-otp - WORKING (successfully verifies OTP and updates user record with is_otp_verified: true and otp_verified_at timestamp). Complete OTP flow tested: customer login → send OTP → check status → verify OTP → check updated status. All endpoints working correctly with proper phone number normalization (+91 prefix). Customer OTP verification system is production-ready."
 
+  - task: "Staff Attendance System - Auto-calculate and manual override"
+    implemented: true
+    working: false
+    file: "/app/backend/server.py"
+    stuck_count: 1
+    priority: "high"
+    needs_retesting: false
+    status_history:
+        - working: "NA"
+          agent: "main"
+          comment: "NEW: Added comprehensive staff attendance system. Backend: AttendanceRecord, SalaryRecord models. Auto-calculate logic: Present if 2+ bookings in different shifts (morning + noon/evening), Half-day if bookings in only 1 shift. Endpoints: GET /salons/{id}/attendance/{month} (get attendance records), POST /salons/{id}/attendance/calculate/{date} (auto-calculate for a day), PUT /salons/{id}/attendance/{barber_id}/{date} (admin override), GET /salons/{id}/salary/{month} (get salary calculation), POST /salons/{id}/salary/{barber_id}/{month}/pay (mark paid + create financial transaction). Salary calculation: daily_rate = base_salary / days_in_month, effective_days = present_days + (half_days * 0.5). Payment creates financial_transaction with category='staff_salary' and narration with employee name. Frontend: StaffAttendanceTab component with calendar UI, click to cycle status (present → half_day → absent → holiday), salary summary, payment dialog."
+        - working: false
+          agent: "testing"
+          comment: "❌ CRITICAL BUG: All Staff Attendance System endpoints failing with 500 Internal Server Error due to RecursionError in error handling middleware. TESTED ENDPOINTS: 1) GET /api/salons/{salon_id}/attendance/{month} - FAILING (500 error), 2) GET /api/salons/{salon_id}/salary/{month} - FAILING (500 error), 3) POST /api/salons/{salon_id}/attendance/calculate/{date} - FAILING (500 error), 4) PUT /api/salons/{salon_id}/attendance/{barber_id}/{date} - FAILING (500 error), 5) POST /api/salons/{salon_id}/salary/{barber_id}/{month}/pay - FAILING (500 error). ROOT CAUSE: RecursionError maximum recursion depth exceeded in Starlette error handling middleware, suggesting infinite loop in attendance endpoint logic or response serialization. AUTHENTICATION ISSUE: Admin login failing with 404 'User not found or inactive' for provided credentials (+917503070727/salon123). WORKING COMPONENTS: Barbers endpoint returns 2 active barbers (Imran, Abdul), salon data accessible. URGENT FIX NEEDED: Debug recursion error in attendance endpoints before system can be tested properly."
+
+  - task: "Service Thumbnails and Horizontal Category Filter"
+    implemented: true
+    working: true
+    file: "/app/backend/server.py, /app/frontend/src/pages/SinglePageBooking.js"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+        - working: "NA"
+          agent: "main"
+          comment: "NEW: Added thumbnail_url field to Service model. Updated services/categories endpoint to return thumbnails with default fallbacks. Frontend: Redesigned SinglePageBooking services section with horizontal scrollable category filter with circular thumbnails. Category order: Favorites → General → Packages → Other categories. Each category shows thumbnail image and name. Below shows services for selected category. Updated existing sample services with category thumbnails via update script."
+        - working: true
+          agent: "testing"
+          comment: "✅ SERVICE CATEGORIES WITH THUMBNAILS FULLY TESTED AND WORKING: GET /api/services/categories endpoint working perfectly. VERIFIED: 1) Returns proper structure with 'categories' array containing 19 categories, 2) All required fields present (name, thumbnail_url), 3) Thumbnail URLs properly formatted with default fallbacks, 4) Sample categories include: Advance/Hydra Facial, Bleach, Body Care, Clean Up, etc., 5) All thumbnails use proper Unsplash/Pexels URLs with correct dimensions (200x200), 6) Response format exactly matches expected structure. Service categories feature is production-ready and working correctly."
+
+  - task: "Select All for Barber Service Assignment"
+    implemented: true
+    working: "NA"
+    file: "/app/frontend/src/pages/StaffProfilePage.js"
+    stuck_count: 0
+    priority: "medium"
+    needs_retesting: true
+    status_history:
+        - working: "NA"
+          agent: "main"
+          comment: "NEW: Redesigned Services tab in StaffProfilePage. Services now grouped by category with collapsible sections. Added 'Select All' / 'Deselect All' button at top for all services. Added per-category 'Select All' / 'Deselect All' button in each category header. Shows selection count (X/Y) per category."
+
   - task: "Employee Reward Plan (Phase 1) — backend models, calc engine, APIs, and incentive recompute on token completion"
     implemented: true
     working: true
@@ -943,8 +985,9 @@ metadata:
 
 test_plan:
   current_focus:
-    - "Loyalty Plan Fix - Credit wallet without membership, only count non-wallet payments"
-    - "Customer OTP Verification Endpoints"
+    - "Staff Attendance System - Auto-calculate and manual override"
+    - "Service Thumbnails and Horizontal Category Filter"
+    - "Select All for Barber Service Assignment"
   stuck_tasks: []
   test_all: false
   test_priority: "high_first"
@@ -1008,3 +1051,5 @@ agent_communication:
       message: "Implementing continuation tasks. (1) LOYALTY FIX: Rewrote check_and_apply_loyalty_reward to create customer_wallets collection (independent of membership), only count bookings with payment_mode NOT 'wallet', send WhatsApp notification via send_whatsapp_notification when loyalty bonus credited. Updated get_customer_wallet endpoint to return combined balance from membership + loyalty wallets. (2) STAFF ACCESS CONTROL: Added can_access_financials checkbox to StaffProfilePage. Hardened activeTab initialization and URL param handler in EnhancedSalonDashboard to validate permissions before setting tab - staff cannot access 'staff', 'financials', 'analytics', 'salon' tabs unless permitted. (3) CUSTOMER HOME PAGE: Replaced Queue/Serving cards with My Wallet/My History on SalonMainPage - both clickable (wallet goes to /salon/{id}/wallet, history goes to /history). Added fetchWalletBalance function. (4) CUSTOMER SALON CONTEXT: Updated CustomerLayout to persist salon ID in localStorage and only clear when user goes to /salons (Find New Salon). History/Profile navigation maintains salon context. (5) CUSTOMER OTP FLOW: Added CustomerOtpVerification component with banner and card modes. Added OTP endpoints (POST /customer/send-otp, POST /customer/verify-otp, GET /customer/{phone}/otp-status). Updated User model with is_otp_verified, otp_verified_at. Updated AuthContext with isUserOtpVerified, updateUserOtpStatus. Wallet, History, Profile pages now require OTP verification. Wallet payment mode requires OTP. Please test backend endpoints first: customer OTP flow, loyalty reward logic with non-wallet payments, staff access control. Salon ID: 2dad5cd9-5dda-4398-bbb5-a4d12aae7915."
     - agent: "testing"
       message: "✅ CONTINUATION TASKS TESTING COMPLETE (Customer OTP, Loyalty Rewards, Staff Access Control): Comprehensive testing of all 3 requested backend features completed successfully. AUTHENTICATION: Successfully authenticated as admin using OTP login (salon ID: 91a8e87d-d687-49ea-b3e5-460cc55cf3de). RESULTS: 1) CUSTOMER OTP VERIFICATION FLOW - FULLY WORKING (POST /api/customer/send-otp sends OTP via WhatsApp with fallback response including OTP for testing, GET /api/customer/{phone}/otp-status returns verification status, POST /api/customer/verify-otp successfully verifies and updates user record with is_otp_verified: true), 2) LOYALTY REWARD LOGIC - FULLY WORKING (GET /api/salons/{salon_id}/customers/{phone}/wallet returns all required fields: has_membership, has_loyalty_wallet, wallet_balance, membership_balance, loyalty_balance - tested with both salon IDs 91a8e87d-d687-49ea-b3e5-460cc55cf3de and 2dad5cd9-5dda-4398-bbb5-a4d12aae7915), 3) STAFF ACCESS CONTROL - FULLY WORKING (created staff user with can_access_financials: true, verified login returns correct permission, created staff user with can_access_financials: false, verified permission correctly set to false). ALL CONTINUATION TASKS ARE PRODUCTION-READY. Phone number normalization working correctly throughout. Complete OTP flow tested end-to-end with actual OTP verification."
+    - agent: "testing"
+      message: "❌ CRITICAL STAFF ATTENDANCE SYSTEM FAILURE: Comprehensive testing attempted for Staff Attendance System but encountered critical system failure. ISSUE: All attendance endpoints (GET /attendance/{month}, GET /salary/{month}, POST /attendance/calculate/{date}, PUT /attendance/{barber_id}/{date}, POST /salary/{barber_id}/{month}/pay) returning 500 Internal Server Error due to RecursionError in Starlette error handling middleware. ROOT CAUSE: Maximum recursion depth exceeded in error handling, indicating infinite loop in attendance endpoint logic or response serialization. AUTHENTICATION BLOCKED: Admin login failing with 404 'User not found or inactive' for provided credentials (+917503070727/salon123), preventing testing of admin-only endpoints. WORKING COMPONENTS: ✅ Service Categories with Thumbnails (19 categories with proper thumbnail URLs), ✅ Barbers endpoint (2 active barbers: Imran, Abdul), ✅ Basic salon data access. SALON ID ISSUE: Review request salon ID (2dad5cd9-5dda-4398-bbb5-a4d12aae7915) does not exist, testing performed on available salon (91a8e87d-d687-49ea-b3e5-460cc55cf3de). URGENT ACTION REQUIRED: Debug and fix recursion error in attendance system before endpoints can be properly tested. Staff Attendance System is currently non-functional due to critical backend bug."
