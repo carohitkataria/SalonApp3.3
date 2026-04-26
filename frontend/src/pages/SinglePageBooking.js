@@ -349,9 +349,14 @@ export default function SinglePageBooking() {
       
       // Set categories with default thumbnails
       const defaultThumbnails = {
-        "Favorites": "https://images.unsplash.com/photo-1634449571010-02389ed0f9b0?w=200&h=200&fit=crop",
-        "General": "https://images.unsplash.com/photo-1634449571010-02389ed0f9b0?w=200&h=200&fit=crop",
-        "Packages": "https://images.unsplash.com/photo-1633681926035-ec1ac984418a?w=200&h=200&fit=crop"
+        "Favorites": "https://images.pexels.com/photos/7755651/pexels-photo-7755651.jpeg?w=200&h=200&fit=crop",
+        "General": "https://images.pexels.com/photos/7781850/pexels-photo-7781850.jpeg?w=200&h=200&fit=crop",
+        "Packages": "https://images.pexels.com/photos/3065171/pexels-photo-3065171.jpeg?w=200&h=200&fit=crop",
+        "Facial": "https://images.pexels.com/photos/3985325/pexels-photo-3985325.jpeg?w=200&h=200&fit=crop",
+        "Hair Color": "https://images.pexels.com/photos/3993146/pexels-photo-3993146.jpeg?w=200&h=200&fit=crop",
+        "Massage & Spa": "https://images.pexels.com/photos/3757952/pexels-photo-3757952.jpeg?w=200&h=200&fit=crop",
+        "Men's Grooming": "https://images.pexels.com/photos/9992819/pexels-photo-9992819.jpeg?w=200&h=200&fit=crop",
+        "Manicure & Pedicure": "https://images.pexels.com/photos/3997379/pexels-photo-3997379.jpeg?w=200&h=200&fit=crop"
       };
       
       // Build category list: Favorites first, then General, then Packages, then others

@@ -613,6 +613,29 @@ def check_permission(user_payload: dict, permission: str) -> bool:
     permissions = user_payload.get("permissions", {})
     return permissions.get(permission, False)
 
+
+# Optional authentication dependencies (don't raise if no auth)
+async def get_current_salon_user_optional(credentials: Optional[HTTPAuthorizationCredentials] = Depends(HTTPBearer(auto_error=False))):
+    """Get current authenticated salon user if present, otherwise return None"""
+    if not credentials:
+        return None
+    token = credentials.credentials
+    payload = verify_token(token)
+    if not payload or payload.get("role") not in ["salon_admin", "salon_staff", "salon"]:
+        return None
+    return payload
+
+
+async def get_current_salon_optional(credentials: Optional[HTTPAuthorizationCredentials] = Depends(HTTPBearer(auto_error=False))):
+    """Get current authenticated salon if present, otherwise return None"""
+    if not credentials:
+        return None
+    token = credentials.credentials
+    payload = verify_token(token)
+    if not payload or payload.get("role") != "salon":
+        return None
+    return payload
+
 # ============ HELPER FUNCTIONS ============
 
 def generate_otp():
@@ -2138,15 +2161,32 @@ async def get_operational_hours(salon_id: str):
     }
 
 @api_router.put("/salons/{salon_id}/operational-hours")
-async def update_operational_hours(salon_id: str, hours: OperationalHours, current_salon=Depends(get_current_salon)):
+async def update_operational_hours(
+    salon_id: str, 
+    hours: OperationalHours, 
+    current_user: Optional[dict] = Depends(get_current_salon_user_optional),
+    current_salon: Optional[dict] = Depends(get_current_salon_optional)
+):
     """Update operational hours for a salon"""
     existing = await db.salons.find_one({"id": salon_id}, {"_id": 0})
     if not existing:
         raise HTTPException(status_code=404, detail="Salon not found")
     
-    # Verify ownership (JWT payload uses "sub" for salon ID)
-    salon_id_from_token = current_salon.get("sub") or current_salon.get("id")
-    if salon_id_from_token != salon_id:
+    # Allow if admin/staff user with edit permission OR salon owner
+    is_authorized = False
+    
+    if current_user:
+        if current_user.get("role") == "admin":
+            is_authorized = True
+        elif current_user.get("permissions", {}).get("can_edit_salon"):
+            is_authorized = True
+    
+    if current_salon:
+        salon_id_from_token = current_salon.get("sub") or current_salon.get("id")
+        if salon_id_from_token == salon_id:
+            is_authorized = True
+    
+    if not is_authorized:
         raise HTTPException(status_code=403, detail="Unauthorized")
     
     await db.salons.update_one(
@@ -2418,17 +2458,27 @@ async def get_service_categories():
         if cat not in category_thumbnails:
             category_thumbnails[cat] = s.get("thumbnail_url")
     
-    # Default thumbnails for categories without one
+    # Updated default thumbnails with highly relevant images for each category
     default_thumbnails = {
-        "Hair Treatments": "https://images.unsplash.com/photo-1593702275687-f8b402bf1fb5?w=200&h=200&fit=crop",
-        "Massage & Spa": "https://images.unsplash.com/photo-1639162906614-0603b0ae95fd?w=200&h=200&fit=crop",
-        "Men's Grooming": "https://images.unsplash.com/photo-1700760934268-8aa0ef52ce0a?w=200&h=200&fit=crop",
-        "Manicure & Pedicure": "https://images.unsplash.com/photo-1632345031435-8727f6897d53?w=200&h=200&fit=crop",
-        "Waxing & Threading": "https://images.pexels.com/photos/16120497/pexels-photo-16120497.jpeg?w=200&h=200&fit=crop",
-        "General": "https://images.unsplash.com/photo-1634449571010-02389ed0f9b0?w=200&h=200&fit=crop",
-        "Packages": "https://images.unsplash.com/photo-1633681926035-ec1ac984418a?w=200&h=200&fit=crop",
-        "Facial": "https://images.pexels.com/photos/16120497/pexels-photo-16120497.jpeg?w=200&h=200&fit=crop",
-        "Favorites": "https://images.unsplash.com/photo-1634449571010-02389ed0f9b0?w=200&h=200&fit=crop"
+        "General": "https://images.pexels.com/photos/7781850/pexels-photo-7781850.jpeg?w=200&h=200&fit=crop",
+        "Hair Treatments": "https://images.pexels.com/photos/3993146/pexels-photo-3993146.jpeg?w=200&h=200&fit=crop",
+        "Hair Color": "https://images.pexels.com/photos/3993146/pexels-photo-3993146.jpeg?w=200&h=200&fit=crop",
+        "Massage & Spa": "https://images.pexels.com/photos/3757952/pexels-photo-3757952.jpeg?w=200&h=200&fit=crop",
+        "Men's Grooming": "https://images.pexels.com/photos/9992819/pexels-photo-9992819.jpeg?w=200&h=200&fit=crop",
+        "Manicure & Pedicure": "https://images.pexels.com/photos/3997379/pexels-photo-3997379.jpeg?w=200&h=200&fit=crop",
+        "Waxing & Threading": "https://images.pexels.com/photos/6135615/pexels-photo-6135615.jpeg?w=200&h=200&fit=crop",
+        "Packages": "https://images.pexels.com/photos/3065171/pexels-photo-3065171.jpeg?w=200&h=200&fit=crop",
+        "Bridal": "https://images.pexels.com/photos/3065171/pexels-photo-3065171.jpeg?w=200&h=200&fit=crop",
+        "Facial": "https://images.pexels.com/photos/3985325/pexels-photo-3985325.jpeg?w=200&h=200&fit=crop",
+        "Advance/Hydra Facial": "https://images.pexels.com/photos/3985325/pexels-photo-3985325.jpeg?w=200&h=200&fit=crop",
+        "Favorites": "https://images.pexels.com/photos/7755651/pexels-photo-7755651.jpeg?w=200&h=200&fit=crop",
+        "Bleach": "https://images.pexels.com/photos/3993146/pexels-photo-3993146.jpeg?w=200&h=200&fit=crop",
+        "Body Care": "https://images.pexels.com/photos/3757952/pexels-photo-3757952.jpeg?w=200&h=200&fit=crop",
+        "Nail Art": "https://images.pexels.com/photos/3997379/pexels-photo-3997379.jpeg?w=200&h=200&fit=crop",
+        "Hair Spa": "https://images.pexels.com/photos/3993146/pexels-photo-3993146.jpeg?w=200&h=200&fit=crop",
+        "Keratin": "https://images.pexels.com/photos/3993146/pexels-photo-3993146.jpeg?w=200&h=200&fit=crop",
+        "Smoothening": "https://images.pexels.com/photos/3993146/pexels-photo-3993146.jpeg?w=200&h=200&fit=crop",
+        "Threading": "https://images.pexels.com/photos/6135615/pexels-photo-6135615.jpeg?w=200&h=200&fit=crop"
     }
     
     categories = []
@@ -4580,6 +4630,29 @@ async def create_booking(booking: BookingCreate):
             status_code=400,
             detail="You have reached the maximum limit of 2 active bookings per day. Please complete or cancel an existing booking."
         )
+    
+    # Check if salon is on holiday for the booking date
+    booking_date = booking.date or today
+    salon_holiday = await db.salon_holidays.find_one({
+        "salon_id": booking.salon_id,
+        "date": booking_date
+    })
+    if salon_holiday:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Salon is closed on {booking_date}. Please select another date."
+        )
+    
+    # Check if day is marked as holiday in operational hours
+    salon_for_hours = await db.salons.find_one({"id": booking.salon_id}, {"_id": 0, "operational_hours": 1})
+    if salon_for_hours and salon_for_hours.get("operational_hours"):
+        booking_weekday = datetime.fromisoformat(booking_date).strftime("%A").lower()
+        day_hours = salon_for_hours["operational_hours"].get(booking_weekday, {})
+        if day_hours.get("is_holiday"):
+            raise HTTPException(
+                status_code=400,
+                detail=f"Salon is closed on {booking_weekday.capitalize()}s. Please select another date."
+            )
     
     # Get barber details (with Fastest-Barber auto-assignment support)
     # Compute required blocked minutes for the 75% rule
@@ -8337,6 +8410,44 @@ async def get_salon_holidays(salon_id: str, year: Optional[int] = None):
     }, {"_id": 0}).to_list(365)
     
     return {"year": year, "holidays": holidays}
+
+
+@api_router.get("/salons/{salon_id}/check-holiday/{date}")
+async def check_salon_holiday(salon_id: str, date: str):
+    """Check if a salon is closed/holiday on a specific date - for customer booking UI"""
+    # Check explicit holiday
+    holiday = await db.salon_holidays.find_one({
+        "salon_id": salon_id,
+        "date": date
+    }, {"_id": 0})
+    
+    if holiday:
+        return {
+            "is_closed": True,
+            "reason": holiday.get("description", "Holiday"),
+            "type": "holiday"
+        }
+    
+    # Check operational hours for that day
+    salon = await db.salons.find_one({"id": salon_id}, {"_id": 0, "operational_hours": 1})
+    if salon and salon.get("operational_hours"):
+        try:
+            weekday = datetime.fromisoformat(date).strftime("%A").lower()
+            day_hours = salon["operational_hours"].get(weekday, {})
+            if day_hours.get("is_holiday"):
+                return {
+                    "is_closed": True,
+                    "reason": f"Closed on {weekday.capitalize()}s",
+                    "type": "weekly_off"
+                }
+        except:
+            pass
+    
+    return {
+        "is_closed": False,
+        "reason": None,
+        "type": None
+    }
 
 
 @api_router.post("/salons/{salon_id}/staff-holidays")
