@@ -18,6 +18,12 @@ A multi-tenant salon management SaaS (React + FastAPI + MongoDB). Most recent fe
 - Frontend: React + Tailwind + shadcn/ui at `/app/frontend/src/`
 
 ## Implemented (CHANGELOG)
+### Feb 2026 — Booking capacity + Incentive correctness fixes (Iteration 9)
+- ✅ **Capacity rule**: `get_barber_blocked_minutes_used` now excludes `completed` (in addition to `cancelled` / `skipped`). When Imran finishes a booking, the slot is freed within the same shift — he can take another booking immediately if duration permits.
+- ✅ **Actual sales bug**: `_get_barber_actual_sales` was matching on `booking_date`, but tokens are stored with `date`. Fixed via `$or` on `date` / `booking_date` / `created_at` fallback. Imran's 4 real tokens now sum correctly to ₹63,360.
+- ✅ **Slab over-achievement**: When achievement % exceeds the highest defined slab's `to_pct`, the highest **crossed** slab still applies (no penalty for over-performance). Imran at 168.96% now earns 30% of ₹63,360 = ₹19,008 via the 120-150% slab.
+- ✅ Token complete handler picks up `date` first (with `booking_date` legacy fallback) when triggering incentive recompute.
+
 ### Feb 2026 — Phase 2 of Employee Reward Plan + Manual Adjustment
 - ✅ New `IncentiveDashboard.js` mounted as a sub-tab inside Analytics ("Performance" / "Incentives")
 - ✅ Single-row badge layout per employee (Salary / Target / Actual / Achievement / Earned) + status pill
