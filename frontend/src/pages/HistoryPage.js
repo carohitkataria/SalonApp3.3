@@ -6,6 +6,7 @@ import { Scissors, Calendar, Clock, User, CheckCircle, XCircle, AlertCircle, Sta
 import { motion, AnimatePresence } from 'framer-motion';
 import ThemeToggle from '@/components/ThemeToggle';
 import RatingModal from '@/components/RatingModal';
+import CustomerOtpVerification from '@/components/CustomerOtpVerification';
 import { Button } from '@/components/ui/button';
 import { toast } from 'sonner';
 import SalonHubLogo from '@/components/SalonHubLogo';
@@ -15,7 +16,7 @@ const API = `${BACKEND_URL}/api`;
 
 export default function HistoryPage() {
   const navigate = useNavigate();
-  const { user, isUserLoggedIn } = useAuth();
+  const { user, isUserLoggedIn, isUserOtpVerified } = useAuth();
   const [history, setHistory] = useState([]);
   const [loading, setLoading] = useState(true);
   const [ratedTokens, setRatedTokens] = useState(new Set());
@@ -30,10 +31,10 @@ export default function HistoryPage() {
       return;
     }
 
-    if (user) {
+    if (user && isUserOtpVerified) {
       fetchHistory();
     }
-  }, [user, isUserLoggedIn]);
+  }, [user, isUserLoggedIn, isUserOtpVerified]);
 
   const fetchHistory = async () => {
     try {
@@ -159,6 +160,36 @@ export default function HistoryPage() {
 
   if (!isUserLoggedIn || !user) {
     return null;
+  }
+
+  // Require OTP verification for history access
+  if (!isUserOtpVerified) {
+    return (
+      <div className="min-h-screen bg-background">
+        <div className="border-b border-border p-4 sticky top-0 bg-background z-10">
+          <div className="max-w-2xl mx-auto">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <button 
+                  onClick={() => navigate('/salons')}
+                  className="p-2 rounded-full hover:bg-muted transition-colors"
+                >
+                  <ArrowLeft className="w-5 h-5 text-foreground" />
+                </button>
+                <div>
+                  <h1 className="text-xl font-playfair font-bold text-foreground">My Bookings</h1>
+                  <p className="text-xs text-muted-foreground">View & manage your appointments</p>
+                </div>
+              </div>
+              <ThemeToggle />
+            </div>
+          </div>
+        </div>
+        <div className="max-w-md mx-auto p-4 pt-8">
+          <CustomerOtpVerification showAs="card" onVerified={fetchHistory} />
+        </div>
+      </div>
+    );
   }
 
   return (

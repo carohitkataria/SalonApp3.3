@@ -5,9 +5,10 @@ import axios from 'axios';
 import { Button } from '@/components/ui/button';
 import { toast } from 'sonner';
 import CustomerBookingStatus from '@/components/CustomerBookingStatus';
+import CustomerOtpVerification from '@/components/CustomerOtpVerification';
 import { 
   Scissors, Calendar, User, MapPin, Star, Clock, 
-  ArrowLeft, Users, CheckCircle, AlertCircle, ChevronRight, X
+  ArrowLeft, Users, CheckCircle, AlertCircle, ChevronRight, X, Wallet, History
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
@@ -31,6 +32,7 @@ export default function SalonMainPage() {
   const [loading, setLoading] = useState(true);
   const [liveStatus, setLiveStatus] = useState(null);
   const [userBookings, setUserBookings] = useState([]);
+  const [walletBalance, setWalletBalance] = useState(0);
   const [activeTab, setActiveTab] = useState(() => searchParams.get('tab') || 'dashboard');
   const [showLiveQueue, setShowLiveQueue] = useState(false);
 
@@ -49,10 +51,12 @@ export default function SalonMainPage() {
     fetchSalonData();
     fetchLiveStatus();
     fetchUserBookings();
+    fetchWalletBalance();
     
     const interval = setInterval(() => {
       fetchLiveStatus();
       fetchUserBookings();
+      fetchWalletBalance();
     }, 30000);
     return () => clearInterval(interval);
   }, [isUserLoggedIn, salonId]);
@@ -113,6 +117,17 @@ export default function SalonMainPage() {
       setUserBookings(enriched);
     } catch (error) {
       console.error('Error fetching user bookings:', error);
+    }
+  };
+
+  const fetchWalletBalance = async () => {
+    if (!user?.phone) return;
+    try {
+      const phone = user.phone.replace('+91', '');
+      const response = await axios.get(`${API}/salons/${salonId}/customers/${phone}/wallet`);
+      setWalletBalance(response.data.wallet_balance || 0);
+    } catch (error) {
+      console.error('Error fetching wallet balance:', error);
     }
   };
 
@@ -295,6 +310,9 @@ export default function SalonMainPage() {
         </div>
       )}
 
+      {/* OTP Verification Banner - Show after welcome banner */}
+      <CustomerOtpVerification showAs="banner" />
+
       {/* Quick Actions - Three Cards like the image */}
       <div className="grid grid-cols-3 gap-3">
         <button
@@ -327,29 +345,35 @@ export default function SalonMainPage() {
 
       {/* Live Status Summary Cards */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-        <div className="bg-card rounded-xl p-4 border border-border">
+        <div 
+          className="bg-card rounded-xl p-4 border border-border cursor-pointer hover:border-gold/50 transition-colors"
+          onClick={() => navigate(`/salon/${salonId}/wallet`)}
+        >
           <div className="flex items-center gap-3">
-            <div className="p-2 bg-blue-500/10 rounded-lg">
-              <Users className="w-5 h-5 text-blue-500" />
+            <div className="p-2 bg-green-500/10 rounded-lg">
+              <Wallet className="w-5 h-5 text-green-500" />
             </div>
             <div>
-              <p className="text-xs text-muted-foreground">Queue</p>
+              <p className="text-xs text-muted-foreground">My Wallet</p>
               <p className="text-2xl font-bold text-foreground">
-                {liveStatus?.overall?.waiting_count || 0}
+                ₹{walletBalance.toFixed(0)}
               </p>
             </div>
           </div>
         </div>
 
-        <div className="bg-card rounded-xl p-4 border border-border">
+        <div 
+          className="bg-card rounded-xl p-4 border border-border cursor-pointer hover:border-gold/50 transition-colors"
+          onClick={() => navigate('/history')}
+        >
           <div className="flex items-center gap-3">
-            <div className="p-2 bg-green-500/10 rounded-lg">
-              <Clock className="w-5 h-5 text-green-500" />
+            <div className="p-2 bg-blue-500/10 rounded-lg">
+              <History className="w-5 h-5 text-blue-500" />
             </div>
             <div>
-              <p className="text-xs text-muted-foreground">Serving</p>
+              <p className="text-xs text-muted-foreground">My History</p>
               <p className="text-2xl font-bold text-foreground">
-                {liveStatus?.overall?.current_token || '-'}
+                View →
               </p>
             </div>
           </div>

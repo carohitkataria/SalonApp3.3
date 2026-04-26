@@ -47,14 +47,84 @@ export default function EnhancedSalonDashboard() {
   const [activeTab, setActiveTab] = useState(() => {
     // URL param takes precedence, then localStorage, then 'home'
     const urlTab = new URLSearchParams(window.location.search).get('tab');
-    return urlTab || localStorage.getItem('salon_active_tab') || 'home';
+    const storedTab = localStorage.getItem('salon_active_tab') || 'home';
+    const requestedTab = urlTab || storedTab;
+    
+    // SECURITY: Check if requested tab is allowed for this user
+    const isAdmin = (() => {
+      let storedSalonUser = null;
+      try {
+        const raw = localStorage.getItem('salon_user_auth');
+        if (raw) storedSalonUser = JSON.parse(raw);
+      } catch (e) { storedSalonUser = null; }
+      if (storedSalonUser) return storedSalonUser?.role === 'admin';
+      return !!localStorage.getItem('salon_admin_token');
+    })();
+    
+    const hasPermission = (permission) => {
+      let storedSalonUser = null;
+      try {
+        const raw = localStorage.getItem('salon_user_auth');
+        if (raw) storedSalonUser = JSON.parse(raw);
+      } catch (e) { storedSalonUser = null; }
+      if (storedSalonUser?.role === 'admin') return true;
+      return !!storedSalonUser?.permissions?.[permission];
+    };
+    
+    // Check restricted tabs
+    const restrictedTabs = {
+      'staff': isAdmin,
+      'financials': isAdmin || hasPermission('can_access_financials'),
+      'analytics': isAdmin || hasPermission('can_access_analytics'),
+      'salon': isAdmin || hasPermission('can_edit_salon')
+    };
+    
+    const allowed = restrictedTabs[requestedTab] ?? true;
+    return allowed ? requestedTab : 'home';
   });
 
   // React to URL param changes so notification clicks jump to the right tab
+  // SECURITY: Also validate against permissions
   useEffect(() => {
     const tab = searchParams.get('tab');
     if (tab && tab !== activeTab) {
-      setActiveTab(tab);
+      // Build allowed tabs based on current permissions
+      const isAdmin = (() => {
+        let storedSalonUser = null;
+        try {
+          const raw = localStorage.getItem('salon_user_auth');
+          if (raw) storedSalonUser = JSON.parse(raw);
+        } catch (e) { storedSalonUser = null; }
+        if (storedSalonUser) return storedSalonUser?.role === 'admin';
+        return !!localStorage.getItem('salon_admin_token');
+      })();
+      
+      const hasPermission = (permission) => {
+        let storedSalonUser = null;
+        try {
+          const raw = localStorage.getItem('salon_user_auth');
+          if (raw) storedSalonUser = JSON.parse(raw);
+        } catch (e) { storedSalonUser = null; }
+        if (storedSalonUser?.role === 'admin') return true;
+        return !!storedSalonUser?.permissions?.[permission];
+      };
+      
+      // Check if tab is allowed for this user
+      const restrictedTabs = {
+        'staff': isAdmin,
+        'financials': isAdmin || hasPermission('can_access_financials'),
+        'analytics': isAdmin || hasPermission('can_access_analytics'),
+        'salon': isAdmin || hasPermission('can_edit_salon')
+      };
+      
+      const allowed = restrictedTabs[tab] ?? true;
+      if (allowed) {
+        setActiveTab(tab);
+      } else {
+        // Redirect to home if not allowed
+        setActiveTab('home');
+        try { localStorage.setItem('salon_active_tab', 'home'); } catch (e) {}
+      }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchParams]);

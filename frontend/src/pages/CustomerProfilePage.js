@@ -8,6 +8,7 @@ import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
 import { toast } from 'sonner';
 import { Bell, User, Phone, Save, ChevronDown, ChevronUp, MessageCircle } from 'lucide-react';
+import CustomerOtpVerification from '@/components/CustomerOtpVerification';
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
 const API = `${BACKEND_URL}/api`;
@@ -55,7 +56,7 @@ const NOTIFICATION_ROWS = [
 const GENDERS = ['Male', 'Female', 'Other'];
 
 export default function CustomerProfilePage() {
-  const { user } = useAuth();
+  const { user, isUserOtpVerified } = useAuth();
   const [profile, setProfile] = useState(null);
   const [settings, setSettings] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -72,13 +73,13 @@ export default function CustomerProfilePage() {
   const cleanPhone = (phone || '').replace('+91', '');
 
   useEffect(() => {
-    if (!phone) {
+    if (!phone || !isUserOtpVerified) {
       setLoading(false);
       return;
     }
     loadAll();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [phone]);
+  }, [phone, isUserOtpVerified]);
 
   const loadAll = async () => {
     try {
@@ -145,6 +146,17 @@ export default function CustomerProfilePage() {
             <p className="text-muted-foreground">Please log in to view your profile.</p>
           </CardContent>
         </Card>
+      </div>
+    );
+  }
+
+  // Require OTP verification for profile access
+  if (!isUserOtpVerified) {
+    return (
+      <div className="min-h-screen bg-background">
+        <div className="max-w-md mx-auto p-4 pt-20">
+          <CustomerOtpVerification showAs="card" onVerified={loadAll} />
+        </div>
       </div>
     );
   }

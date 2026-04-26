@@ -376,7 +376,17 @@ class User(BaseModel):
     address: Optional[str] = None
     city: Optional[str] = None
     pincode: Optional[str] = None
+    is_otp_verified: Optional[bool] = False  # OTP verification status
+    otp_verified_at: Optional[str] = None  # When OTP was verified
     created_at: str
+
+
+class CustomerOTPRequest(BaseModel):
+    phone: str
+
+class CustomerOTPVerify(BaseModel):
+    phone: str
+    otp: str
 
 
 class UserProfileUpdate(BaseModel):
@@ -1126,12 +1136,20 @@ def _mask_name(name: Optional[str]) -> str:
         return first
     return first[0] + "*" * (len(first) - 2) + first[-1]
 
-async def check_and_apply_loyalty_reward(salon_id: str, customer_phone: str, booking_amount: float):
-    """Check if customer qualifies for loyalty reward and auto top-up wallet (Multi-Tier with individual periods)"""
+async def check_and_apply_loyalty_reward(salon_id: str, customer_phone: str, booking_amount: float, payment_mode: str = None):
+    """Check if customer qualifies for loyalty reward and auto top-up wallet (Multi-Tier with individual periods)
+    
+    IMPORTANT: Only counts completed bookings paid by non-wallet methods (cash, upi, pay_later, card).
+    Wallet balance is independent of membership - stored in customer_wallets collection.
+    """
     # Get loyalty program settings
     loyalty_program = await db.loyalty_programs.find_one({"salon_id": salon_id, "enabled": True}, {"_id": 0})
     if not loyalty_program or not loyalty_program.get("tiers"):
         return None
+    
+    # Normalize phone number
+    if not customer_phone.startswith("+91"):
+        customer_phone = f"+91{customer_phone}"
     
     # Find highest qualifying tier (each tier has its own period)
     qualifying_tier = None
@@ -1142,14 +1160,16 @@ async def check_and_apply_loyalty_reward(salon_id: str, customer_phone: str, boo
         cutoff_date = datetime.now(timezone.utc) - timedelta(days=tier["period_months"] * 30)
         
         # Get customer's completed bookings in THIS tier's period
+        # ONLY count bookings paid by non-wallet methods (cash, upi, pay_later, card)
         completed_bookings = await db.tokens.find({
             "salon_id": salon_id,
             "phone": customer_phone,
             "status": "completed",
-            "completed_at": {"$gte": cutoff_date.isoformat()}
-        }, {"_id": 0, "total_amount": 1}).to_list(1000)
+            "completed_at": {"$gte": cutoff_date.isoformat()},
+            "payment_mode": {"$nin": ["wallet", None]}  # Exclude wallet payments
+        }, {"_id": 0, "total_amount": 1, "payment_mode": 1}).to_list(1000)
         
-        # Calculate total spend in this period
+        # Calculate total spend in this period (only non-wallet payments)
         total_spend = sum([b.get("total_amount", 0) for b in completed_bookings])
         
         # Check if threshold is met for this tier
@@ -1164,42 +1184,116 @@ async def check_and_apply_loyalty_reward(salon_id: str, customer_phone: str, boo
     # Calculate top-up amount based on tier
     topup_amount = (qualifying_tier["spend_amount"] * qualifying_tier["topup_percentage"]) / 100
     
-    # Check if customer already has membership
-    membership = await db.customer_memberships.find_one({
+    # Check if customer already received this tier's reward in current period
+    # to avoid duplicate rewards
+    cutoff_for_check = datetime.now(timezone.utc) - timedelta(days=qualifying_tier["period_months"] * 30)
+    existing_reward = await db.loyalty_rewards.find_one({
         "salon_id": salon_id,
         "customer_phone": customer_phone,
-        "is_active": True
+        "tier_name": qualifying_tier["name"],
+        "created_at": {"$gte": cutoff_for_check.isoformat()}
+    })
+    
+    if existing_reward:
+        # Already rewarded for this tier in current period
+        return None
+    
+    # Get or create customer wallet (independent of membership)
+    customer_wallet = await db.customer_wallets.find_one({
+        "salon_id": salon_id,
+        "customer_phone": customer_phone
     }, {"_id": 0})
     
-    if membership:
+    if customer_wallet:
         # Top up existing wallet
-        new_balance = membership["wallet_balance"] + topup_amount
-        await db.customer_memberships.update_one(
-            {"id": membership["id"]},
-            {"$set": {"wallet_balance": new_balance}}
+        new_balance = customer_wallet["wallet_balance"] + topup_amount
+        await db.customer_wallets.update_one(
+            {"id": customer_wallet["id"]},
+            {"$set": {"wallet_balance": new_balance, "updated_at": datetime.now(timezone.utc).isoformat()}}
         )
-        
-        # Record transaction
-        await db.wallet_transactions.insert_one({
+    else:
+        # Create new customer wallet
+        new_balance = topup_amount
+        customer_wallet = {
             "id": str(uuid.uuid4()),
-            "customer_phone": customer_phone,
             "salon_id": salon_id,
-            "transaction_type": "credit",
-            "amount": topup_amount,
-            "balance_after": new_balance,
-            "description": f"Loyalty reward ({qualifying_tier['name']} tier): Spent ₹{total_spend_for_tier:.2f} in {qualifying_tier['period_months']} months",
-            "created_at": datetime.now(timezone.utc).isoformat()
-        })
-        
-        return {
-            "rewarded": True,
-            "tier": qualifying_tier["name"],
-            "topup_amount": topup_amount,
-            "new_balance": new_balance,
-            "total_spend": total_spend_for_tier
+            "customer_phone": customer_phone,
+            "wallet_balance": new_balance,
+            "created_at": datetime.now(timezone.utc).isoformat(),
+            "updated_at": datetime.now(timezone.utc).isoformat()
         }
+        await db.customer_wallets.insert_one(customer_wallet)
     
-    return None
+    # Record the loyalty reward to prevent duplicates
+    await db.loyalty_rewards.insert_one({
+        "id": str(uuid.uuid4()),
+        "salon_id": salon_id,
+        "customer_phone": customer_phone,
+        "tier_name": qualifying_tier["name"],
+        "topup_amount": topup_amount,
+        "total_spend": total_spend_for_tier,
+        "period_months": qualifying_tier["period_months"],
+        "created_at": datetime.now(timezone.utc).isoformat()
+    })
+    
+    # Record wallet transaction
+    await db.wallet_transactions.insert_one({
+        "id": str(uuid.uuid4()),
+        "customer_phone": customer_phone,
+        "salon_id": salon_id,
+        "transaction_type": "credit",
+        "amount": topup_amount,
+        "balance_after": new_balance,
+        "description": f"🎉 Loyalty reward ({qualifying_tier['name']} tier): Spent ₹{total_spend_for_tier:.2f} in {qualifying_tier['period_months']} months",
+        "source": "loyalty_reward",
+        "created_at": datetime.now(timezone.utc).isoformat()
+    })
+    
+    # Create in-app notification for customer
+    await create_in_app_notification(
+        user_type="customer",
+        user_id=customer_phone,
+        title="🎉 Loyalty Bonus Credited!",
+        message=f"Congratulations! You've earned ₹{topup_amount:.2f} as loyalty reward ({qualifying_tier['name']} tier). Your new wallet balance is ₹{new_balance:.2f}.",
+        notification_type="loyalty_reward",
+        setting_key="membership_added",
+        salon_id=salon_id,
+        related_id=customer_wallet.get("id", "")
+    )
+    
+    # Send WhatsApp notification for loyalty bonus
+    try:
+        # Get salon name for the message
+        salon = await db.salons.find_one({"id": salon_id}, {"_id": 0, "salon_name": 1})
+        salon_name = salon.get("salon_name", "The Salon") if salon else "The Salon"
+        
+        whatsapp_message = f"""🎉 *Loyalty Bonus Credited!*
+
+Hi! Great news from *{salon_name}*!
+
+You've earned a loyalty reward:
+• *Tier*: {qualifying_tier['name']}
+• *Bonus*: ₹{topup_amount:.2f}
+• *Total Spend*: ₹{total_spend_for_tier:.2f} in {qualifying_tier['period_months']} months
+
+💰 *New Wallet Balance*: ₹{new_balance:.2f}
+
+Thank you for being a valued customer! Use your wallet balance on your next visit.
+
+Book your next appointment on SalonHub! 💇"""
+        
+        await send_whatsapp_notification(customer_phone, whatsapp_message, "loyalty_bonus")
+        logger.info(f"WhatsApp loyalty notification sent to {customer_phone}")
+    except Exception as e:
+        logger.error(f"Failed to send WhatsApp loyalty notification to {customer_phone}: {e}")
+    
+    return {
+        "rewarded": True,
+        "tier": qualifying_tier["name"],
+        "topup_amount": topup_amount,
+        "new_balance": new_balance,
+        "total_spend": total_spend_for_tier
+    }
 
 async def calculate_booking_total(service_ids: List[str], barber_id: str) -> float:
     """Calculate total amount for selected services"""
@@ -3173,7 +3267,131 @@ async def update_user_profile(phone: str, payload: UserProfileUpdate):
     return User(**user)
 
 
-# ============ CUSTOMER MASTER ROUTES ============
+# ============ CUSTOMER OTP VERIFICATION ============
+
+@api_router.post("/customer/send-otp")
+async def send_customer_otp(request: CustomerOTPRequest):
+    """Send OTP to customer phone number via WhatsApp for verification"""
+    phone = request.phone
+    if not phone.startswith("+91"):
+        phone = f"+91{phone}"
+    
+    if len(phone) != 13:
+        raise HTTPException(status_code=400, detail="Invalid phone number format")
+    
+    logger.info(f"Customer OTP request for phone: {phone}")
+    
+    # Check if user exists
+    user = await db.users.find_one({"phone": phone}, {"_id": 0})
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found. Please login first.")
+    
+    # Generate OTP
+    otp = generate_otp()
+    logger.info(f"Generated OTP for customer {phone}: {otp}")
+    
+    # Store OTP in database
+    await db.customer_otp.delete_many({"phone": phone})
+    await db.customer_otp.insert_one({
+        "phone": phone,
+        "otp": otp,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "expires_at": (datetime.now(timezone.utc) + timedelta(minutes=10)).isoformat()
+    })
+    
+    logger.info(f"OTP stored in database for customer {phone}")
+    
+    # Send OTP via WhatsApp
+    whatsapp_result = await send_whatsapp_otp(phone, otp)
+    
+    response = {
+        "success": True,
+        "message": "OTP sent successfully via WhatsApp",
+        "phone": phone
+    }
+    
+    # Include OTP in response for testing (mock mode or failed delivery)
+    if whatsapp_result.get("mock") or not whatsapp_result.get("success"):
+        response['otp'] = otp
+        if whatsapp_result.get("mock"):
+            response['note'] = "⚠️ Twilio not configured - OTP shown for testing"
+            logger.warning(f"Mock OTP for customer {phone}: {otp}")
+        else:
+            response['note'] = "OTP included because WhatsApp delivery failed"
+    else:
+        logger.info(f"✅ OTP sent via WhatsApp to customer {phone}")
+    
+    return response
+
+
+@api_router.post("/customer/verify-otp")
+async def verify_customer_otp(request: CustomerOTPVerify):
+    """Verify customer OTP and mark user as OTP verified"""
+    phone = request.phone
+    if not phone.startswith("+91"):
+        phone = f"+91{phone}"
+    
+    if len(phone) != 13:
+        raise HTTPException(status_code=400, detail="Invalid phone number format")
+    
+    # Get stored OTP
+    stored = await db.customer_otp.find_one({"phone": phone})
+    if not stored:
+        raise HTTPException(status_code=400, detail="No OTP found. Please request a new OTP.")
+    
+    # Check if OTP has expired
+    expires_at = datetime.fromisoformat(stored["expires_at"].replace("Z", "+00:00"))
+    if datetime.now(timezone.utc) > expires_at:
+        await db.customer_otp.delete_many({"phone": phone})
+        raise HTTPException(status_code=400, detail="OTP has expired. Please request a new OTP.")
+    
+    # Verify OTP
+    if stored["otp"] != request.otp:
+        raise HTTPException(status_code=400, detail="Invalid OTP")
+    
+    # OTP is valid - delete it and mark user as verified
+    await db.customer_otp.delete_many({"phone": phone})
+    
+    # Update user to mark as OTP verified
+    user = await db.users.find_one({"phone": phone}, {"_id": 0})
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    await db.users.update_one(
+        {"phone": phone},
+        {"$set": {
+            "is_otp_verified": True,
+            "otp_verified_at": datetime.now(timezone.utc).isoformat()
+        }}
+    )
+    
+    user["is_otp_verified"] = True
+    user["otp_verified_at"] = datetime.now(timezone.utc).isoformat()
+    
+    logger.info(f"Customer {phone} OTP verified successfully")
+    
+    return {
+        "success": True,
+        "message": "OTP verified successfully",
+        "user": User(**user)
+    }
+
+
+@api_router.get("/customer/{phone}/otp-status")
+async def get_customer_otp_status(phone: str):
+    """Check if customer is OTP verified"""
+    if not phone.startswith("+91"):
+        phone = f"+91{phone}"
+    
+    user = await db.users.find_one({"phone": phone}, {"_id": 0})
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    return {
+        "phone": phone,
+        "is_otp_verified": user.get("is_otp_verified", False),
+        "otp_verified_at": user.get("otp_verified_at")
+    }
 
 @api_router.get("/salons/{salon_id}/customers")
 async def get_salon_customers(salon_id: str, current_user=Depends(get_current_salon_user)):
@@ -4670,13 +4888,15 @@ async def complete_token(token_id: str, current_salon=Depends(get_current_salon)
             related_id=token_id,
         )
     
-    # Check and apply loyalty reward
+    # Check and apply loyalty reward (only for non-wallet payments)
     loyalty_reward = None
+    payment_mode = token.get("payment_mode", "cash")
     try:
         loyalty_reward = await check_and_apply_loyalty_reward(
             token["salon_id"], 
             token["phone"], 
-            token.get("total_amount", 0)
+            token.get("total_amount", 0),
+            payment_mode
         )
     except Exception as e:
         logger.error(f"Error checking loyalty reward: {e}")
@@ -5138,33 +5358,58 @@ async def update_token_amount(token_id: str, body: dict, current_salon=Depends(g
 async def get_customer_wallet(salon_id: str, phone: str):
     """Return customer's active wallet balance with this salon.
 
-    Returns 0 balance when the customer has no membership. This endpoint is public
-    (used by the salon's mark-payment UI and by the customer to view their wallet).
+    Wallet balance comes from two sources:
+    1. Membership wallet (if customer has active membership)
+    2. Loyalty wallet (independent of membership, from loyalty rewards)
+    
+    Returns combined balance for customer's usage.
     """
     if not phone.startswith("+91"):
         phone = f"+91{phone}"
-    m = await db.customer_memberships.find_one(
+    
+    # Check for membership wallet
+    membership = await db.customer_memberships.find_one(
         {"salon_id": salon_id, "customer_phone": phone, "is_active": True, "payment_confirmed": True},
         {"_id": 0, "id": 1, "wallet_balance": 1, "membership_name": 1, "tier": 1, "color": 1, "expiry_date": 1},
     )
-    if not m:
+    
+    # Check for loyalty wallet (independent of membership)
+    loyalty_wallet = await db.customer_wallets.find_one(
+        {"salon_id": salon_id, "customer_phone": phone},
+        {"_id": 0, "id": 1, "wallet_balance": 1}
+    )
+    
+    membership_balance = float(membership.get("wallet_balance", 0)) if membership else 0.0
+    loyalty_balance = float(loyalty_wallet.get("wallet_balance", 0)) if loyalty_wallet else 0.0
+    total_balance = membership_balance + loyalty_balance
+    
+    if not membership and not loyalty_wallet:
         return {
             "has_membership": False,
+            "has_loyalty_wallet": False,
             "wallet_balance": 0.0,
+            "membership_balance": 0.0,
+            "loyalty_balance": 0.0,
             "membership_id": None,
+            "loyalty_wallet_id": None,
             "membership_name": None,
             "tier": None,
             "color": None,
             "expiry_date": None,
         }
+    
     return {
-        "has_membership": True,
-        "wallet_balance": float(m.get("wallet_balance", 0)),
-        "membership_id": m.get("id"),
-        "membership_name": m.get("membership_name"),
-        "tier": m.get("tier"),
-        "color": m.get("color"),
-        "expiry_date": m.get("expiry_date"),
+        "has_membership": bool(membership),
+        "has_loyalty_wallet": bool(loyalty_wallet),
+        "wallet_balance": total_balance,
+        "membership_balance": membership_balance,
+        "loyalty_balance": loyalty_balance,
+        "membership_id": membership.get("id") if membership else None,
+        "loyalty_wallet_id": loyalty_wallet.get("id") if loyalty_wallet else None,
+        "membership_name": membership.get("membership_name") if membership else None,
+        "tier": membership.get("tier") if membership else None,
+        "color": membership.get("color") if membership else None,
+        "expiry_date": membership.get("expiry_date") if membership else None,
     }
 
 

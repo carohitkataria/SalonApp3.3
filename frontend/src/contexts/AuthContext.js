@@ -109,6 +109,18 @@ export const AuthProvider = ({ children }) => {
     localStorage.removeItem('salon_user');
   };
 
+  const updateUserOtpStatus = (isVerified, verifiedAt = null) => {
+    if (user) {
+      const updatedUser = {
+        ...user,
+        is_otp_verified: isVerified,
+        otp_verified_at: verifiedAt
+      };
+      setUser(updatedUser);
+      localStorage.setItem('salon_user', JSON.stringify(updatedUser));
+    }
+  };
+
   const logoutAdmin = () => {
     setAdmin(null);
     localStorage.removeItem('salon_admin_token');
@@ -159,12 +171,14 @@ export const AuthProvider = ({ children }) => {
         logoutUser,
         logoutAdmin,
         logoutSalonUser,
+        updateUserOtpStatus,
         getAdminHeaders,
         getSalonUserHeaders,
         isAdmin,
         isStaff,
         hasPermission,
         isUserLoggedIn: !!user,
+        isUserOtpVerified: !!user?.is_otp_verified,
         isAdminLoggedIn: !!admin,
         isSalonUserLoggedIn: !!salonUser
       }}

@@ -1,708 +1,449 @@
 #!/usr/bin/env python3
 """
-Backend Testing Script for Employee Reward Plan and Analytics Auth Widening
-Test scenarios as specified in the review request.
+Backend API Testing Script for Salon Management System
+Tests the continuation tasks: OTP verification, loyalty rewards, and staff access control
 """
 
 import requests
 import json
-import uuid
-from datetime import datetime, timedelta
-import sys
+import time
+from datetime import datetime
 
 # Configuration
 BASE_URL = "https://loyalty-wallet-fix.preview.emergentagent.com/api"
-SALON_ID = "2dad5cd9-5dda-4398-bbb5-a4d12aae7915"
+SALON_ID = "91a8e87d-d687-49ea-b3e5-460cc55cf3de"  # Updated to working salon ID
 ADMIN_PHONE = "+917503070727"
 ADMIN_PASSWORD = "salon123"
-TEST_BARBER_ID = "5d7d3064-2580-4a43-ae3e-73cdcaefd9de"  # Imran with compensation 25000
+TEST_CUSTOMER_PHONE = "9876543210"
+EXISTING_CUSTOMER_PHONE = "7503070727"
 
-class TestRunner:
+class BackendTester:
     def __init__(self):
         self.admin_token = None
         self.staff_token = None
         self.staff_user_id = None
-        self.staff_login_id = None
-        self.test_results = []
-        self.cleanup_items = []
-
-    def log_result(self, test_name, success, details=""):
-        """Log test result"""
-        status = "✅ PASS" if success else "❌ FAIL"
-        print(f"{status}: {test_name}")
-        if details:
-            print(f"   Details: {details}")
-        self.test_results.append({
-            "test": test_name,
-            "success": success,
-            "details": details
+        
+    def log(self, message):
+        """Log test messages with timestamp"""
+        timestamp = datetime.now().strftime("%H:%M:%S")
+        print(f"[{timestamp}] {message}")
+        
+    def make_request(self, method, endpoint, data=None, headers=None, params=None):
+        """Make HTTP request with error handling"""
+        url = f"{BASE_URL}{endpoint}"
+        try:
+            if method.upper() == "GET":
+                response = requests.get(url, headers=headers, params=params, timeout=30)
+            elif method.upper() == "POST":
+                response = requests.post(url, json=data, headers=headers, params=params, timeout=30)
+            elif method.upper() == "PUT":
+                response = requests.put(url, json=data, headers=headers, params=params, timeout=30)
+            elif method.upper() == "DELETE":
+                response = requests.delete(url, headers=headers, params=params, timeout=30)
+            else:
+                raise ValueError(f"Unsupported method: {method}")
+                
+            self.log(f"{method} {endpoint} -> {response.status_code}")
+            
+            # Try to parse JSON response
+            try:
+                response_data = response.json()
+            except:
+                response_data = {"text": response.text}
+                
+            return {
+                "status_code": response.status_code,
+                "data": response_data,
+                "success": 200 <= response.status_code < 300
+            }
+        except Exception as e:
+            self.log(f"ERROR: {method} {endpoint} failed: {str(e)}")
+            return {
+                "status_code": 0,
+                "data": {"error": str(e)},
+                "success": False
+            }
+    
+    def authenticate_admin(self):
+        """Authenticate as admin user"""
+        self.log("=== ADMIN AUTHENTICATION ===")
+        
+        # Try to get fresh OTP and authenticate
+        self.log("Getting fresh OTP for authentication...")
+        otp_response = self.make_request("POST", "/salon/send-otp", {
+            "phone": ADMIN_PHONE
         })
-
-    def login_admin(self):
-        """Login as admin to get token"""
-        try:
-            response = requests.post(f"{BASE_URL}/salon/password-login", json={
-                "phone": ADMIN_PHONE,
-                "password": ADMIN_PASSWORD
-            })
-            if response.status_code == 200:
-                data = response.json()
-                self.admin_token = data.get("access_token")
-                self.log_result("Admin Login", True, f"Token obtained")
-                return True
-            else:
-                self.log_result("Admin Login", False, f"Status: {response.status_code}, Response: {response.text}")
-                return False
-        except Exception as e:
-            self.log_result("Admin Login", False, f"Exception: {str(e)}")
-            return False
-
-    def create_staff_user(self, permissions=None):
-        """Create a staff user for testing"""
-        if not self.admin_token:
-            return False
         
-        try:
-            # Use timestamp to make login_id unique
+        if otp_response["success"]:
+            self.log(f"OTP sent successfully: {otp_response['data']}")
+            
+            # Get OTP from logs
+            import subprocess
             import time
-            timestamp = str(int(time.time()))
+            time.sleep(2)  # Wait for log to be written
             
-            staff_data = {
-                "salon_id": SALON_ID,
-                "name": "Test Staff Analytics",
-                "mobile": f"+9199999{timestamp[-5:]}",  # Unique mobile
-                "login_id": f"teststaff_analytics_{timestamp}",  # Unique login_id
-                "password": "testpass123",
-                "role": "staff",
-                "permissions": permissions or {"can_access_analytics": True}
-            }
-            
-            headers = {"Authorization": f"Bearer {self.admin_token}"}
-            response = requests.post(f"{BASE_URL}/salon/users", json=staff_data, headers=headers)
-            
-            if response.status_code == 200:
-                data = response.json()
-                user_id = data.get("id")  # Direct response, not nested under "user"
-                self.staff_login_id = staff_data["login_id"]  # Store for login
-                self.cleanup_items.append(("staff_user", user_id))
-                self.log_result("Create Staff User", True, f"User ID: {user_id}")
-                return user_id
-            else:
-                self.log_result("Create Staff User", False, f"Status: {response.status_code}, Response: {response.text}")
-                return None
-        except Exception as e:
-            self.log_result("Create Staff User", False, f"Exception: {str(e)}")
-            return None
-
-    def login_staff(self, login_id=None, password="testpass123"):
-        """Login as staff user"""
-        try:
-            response = requests.post(f"{BASE_URL}/salon/users/login", json={
-                "identifier": login_id or self.staff_login_id,
-                "password": password
-            })
-            if response.status_code == 200:
-                data = response.json()
-                self.staff_token = data.get("access_token")
-                self.staff_user_id = data.get("user_id")
-                self.log_result("Staff Login", True, f"Token obtained")
-                return True
-            else:
-                self.log_result("Staff Login", False, f"Status: {response.status_code}, Response: {response.text}")
-                return False
-        except Exception as e:
-            self.log_result("Staff Login", False, f"Exception: {str(e)}")
-            return False
-
-    def test_a1_eligible_barbers(self):
-        """A1. GET /api/salons/{salon_id}/reward-plan/eligible-barbers"""
-        if not self.admin_token:
-            self.log_result("A1 - Eligible Barbers", False, "No admin token")
-            return
-        
-        try:
-            headers = {"Authorization": f"Bearer {self.admin_token}"}
-            response = requests.get(f"{BASE_URL}/salons/{SALON_ID}/reward-plan/eligible-barbers", headers=headers)
-            
-            if response.status_code == 200:
-                data = response.json()
-                barbers = data.get("barbers", [])
-                
-                # Verify structure and is_barber=true filter
-                valid_structure = all(
-                    "id" in b and "name" in b and "is_barber" in b
-                    for b in barbers
-                )
-                all_are_barbers = all(b.get("is_barber") == True for b in barbers)
-                
-                if valid_structure and all_are_barbers:
-                    self.log_result("A1 - Eligible Barbers", True, f"Found {len(barbers)} eligible barbers, all with is_barber=true")
-                else:
-                    self.log_result("A1 - Eligible Barbers", False, f"Invalid structure or non-barber included")
-            else:
-                self.log_result("A1 - Eligible Barbers", False, f"Status: {response.status_code}")
-        except Exception as e:
-            self.log_result("A1 - Eligible Barbers", False, f"Exception: {str(e)}")
-
-    def test_a2_get_reward_plan(self):
-        """A2. GET /api/salons/{salon_id}/reward-plan"""
-        if not self.admin_token:
-            self.log_result("A2 - Get Reward Plan", False, "No admin token")
-            return
-        
-        try:
-            headers = {"Authorization": f"Bearer {self.admin_token}"}
-            response = requests.get(f"{BASE_URL}/salons/{SALON_ID}/reward-plan", headers=headers)
-            
-            if response.status_code == 200:
-                data = response.json()
-                # Check if it returns saved plan or default skeleton
-                has_mode = "mode" in data
-                has_salon_id = data.get("salon_id") == SALON_ID
-                
-                if has_mode and has_salon_id:
-                    mode = data.get("mode")
-                    self.log_result("A2 - Get Reward Plan", True, f"Retrieved plan with mode: {mode}")
-                    return data
-                else:
-                    self.log_result("A2 - Get Reward Plan", False, "Invalid response structure")
-            else:
-                self.log_result("A2 - Get Reward Plan", False, f"Status: {response.status_code}")
-        except Exception as e:
-            self.log_result("A2 - Get Reward Plan", False, f"Exception: {str(e)}")
-        return None
-
-    def test_a3_save_reward_plan(self):
-        """A3. POST /api/salons/{salon_id}/reward-plan - Save new plan"""
-        if not self.admin_token:
-            self.log_result("A3 - Save Reward Plan", False, "No admin token")
-            return
-        
-        try:
-            new_plan = {
-                "mode": "partial",
-                "global_plan": {
-                    "target_type": "manual",
-                    "manual_target": 80000,
-                    "slabs": [
-                        {"from_pct": 100, "to_pct": 120, "type": "total_pct", "value": 7},
-                        {"from_pct": 120, "to_pct": 9999, "type": "fixed_amount", "value": 2000}
-                    ]
-                },
-                "assigned_barber_ids": [TEST_BARBER_ID],
-                "individual_plans": {}
-            }
-            
-            headers = {"Authorization": f"Bearer {self.admin_token}"}
-            response = requests.post(f"{BASE_URL}/salons/{SALON_ID}/reward-plan", json=new_plan, headers=headers)
-            
-            if response.status_code == 200:
-                # Verify by getting the plan back
-                get_response = requests.get(f"{BASE_URL}/salons/{SALON_ID}/reward-plan", headers=headers)
-                if get_response.status_code == 200:
-                    saved_data = get_response.json()
-                    if (saved_data.get("mode") == "partial" and 
-                        saved_data.get("global_plan", {}).get("manual_target") == 80000):
-                        self.log_result("A3 - Save Reward Plan", True, "Plan saved and verified")
-                        self.cleanup_items.append(("reward_plan", None))
-                    else:
-                        self.log_result("A3 - Save Reward Plan", False, "Plan not saved correctly")
-                else:
-                    self.log_result("A3 - Save Reward Plan", False, "Could not verify saved plan")
-            else:
-                self.log_result("A3 - Save Reward Plan", False, f"Status: {response.status_code}, Response: {response.text}")
-        except Exception as e:
-            self.log_result("A3 - Save Reward Plan", False, f"Exception: {str(e)}")
-
-    def test_a4_staff_save_reward_plan(self):
-        """A4. POST /api/salons/{salon_id}/reward-plan as staff (should fail)"""
-        # Create staff user first
-        staff_user_id = self.create_staff_user()
-        if not staff_user_id:
-            self.log_result("A4 - Staff Save Reward Plan", False, "Could not create staff user")
-            return
-        
-        if not self.login_staff():
-            self.log_result("A4 - Staff Save Reward Plan", False, "Could not login as staff")
-            return
-        
-        try:
-            plan = {
-                "mode": "all",
-                "global_plan": {"target_type": "salary_multiplier", "multiplier": 3, "slabs": []},
-                "assigned_barber_ids": [],
-                "individual_plans": {}
-            }
-            
-            headers = {"Authorization": f"Bearer {self.staff_token}"}
-            response = requests.post(f"{BASE_URL}/salons/{SALON_ID}/reward-plan", json=plan, headers=headers)
-            
-            if response.status_code == 403:
-                self.log_result("A4 - Staff Save Reward Plan", True, "Correctly rejected staff access (403)")
-            else:
-                self.log_result("A4 - Staff Save Reward Plan", False, f"Expected 403, got {response.status_code}")
-        except Exception as e:
-            self.log_result("A4 - Staff Save Reward Plan", False, f"Exception: {str(e)}")
-
-    def test_a5_get_incentives(self):
-        """A5. GET /api/salons/{salon_id}/reward-plan/incentives?month=2026-04"""
-        if not self.admin_token:
-            self.log_result("A5 - Get Incentives", False, "No admin token")
-            return
-        
-        try:
-            headers = {"Authorization": f"Bearer {self.admin_token}"}
-            response = requests.get(f"{BASE_URL}/salons/{SALON_ID}/reward-plan/incentives?month=2026-04", headers=headers)
-            
-            if response.status_code == 200:
-                data = response.json()
-                if data.get("month") == "2026-04" and "incentives" in data:
-                    incentives = data["incentives"]
-                    # Check structure of incentive rows
-                    if incentives:
-                        sample = incentives[0]
-                        required_fields = ["barber_id", "barber_name", "salary", "target", "actual_sales", 
-                                         "achievement_pct", "incentive_earned", "breakdown", "status"]
-                        has_all_fields = all(field in sample for field in required_fields)
-                        
-                        if has_all_fields:
-                            self.log_result("A5 - Get Incentives", True, f"Retrieved {len(incentives)} incentive records with correct structure")
-                        else:
-                            missing = [f for f in required_fields if f not in sample]
-                            self.log_result("A5 - Get Incentives", False, f"Missing fields: {missing}")
-                    else:
-                        self.log_result("A5 - Get Incentives", True, "No incentives found (expected if no sales)")
-                else:
-                    self.log_result("A5 - Get Incentives", False, "Invalid response structure")
-            else:
-                self.log_result("A5 - Get Incentives", False, f"Status: {response.status_code}")
-        except Exception as e:
-            self.log_result("A5 - Get Incentives", False, f"Exception: {str(e)}")
-
-    def test_a6_calc_verification(self):
-        """A6. Calculation verification with fake token"""
-        if not self.admin_token:
-            self.log_result("A6 - Calc Verification", False, "No admin token")
-            return
-        
-        try:
-            # First set the plan back to the expected configuration
-            plan = {
-                "mode": "all",
-                "global_plan": {
-                    "target_type": "salary_multiplier",
-                    "multiplier": 4,
-                    "slabs": [
-                        {"from_pct": 100, "to_pct": 110, "type": "additional_pct", "value": 5},
-                        {"from_pct": 110, "to_pct": 120, "type": "additional_pct", "value": 8}
-                    ]
-                },
-                "assigned_barber_ids": [],
-                "individual_plans": {}
-            }
-            
-            headers = {"Authorization": f"Bearer {self.admin_token}"}
-            save_response = requests.post(f"{BASE_URL}/salons/{SALON_ID}/reward-plan", json=plan, headers=headers)
-            
-            if save_response.status_code != 200:
-                self.log_result("A6 - Calc Verification", False, "Could not set test plan")
-                return
-            
-            # Insert fake token directly into database (simulating completed booking)
-            fake_token = {
-                "id": str(uuid.uuid4()),
-                "salon_id": SALON_ID,
-                "barber_id": TEST_BARBER_ID,
-                "booking_date": "2026-04-15",
-                "total_amount": 118000,
-                "status": "completed",
-                "customer_name": "Test Customer",
-                "phone": "+919999999998",
-                "token_number": "M999",
-                "date": "2026-04-15",
-                "shift": "Morning",
-                "selected_services": [],
-                "created_at": datetime.now().isoformat()
-            }
-            
-            # We can't directly insert into DB, so we'll test the calculation logic
-            # by checking if the incentives endpoint returns expected values
-            
-            # Get incentives for April 2026
-            response = requests.get(f"{BASE_URL}/salons/{SALON_ID}/reward-plan/incentives?month=2026-04", headers=headers)
-            
-            if response.status_code == 200:
-                data = response.json()
-                incentives = data.get("incentives", [])
-                
-                # Find Imran's record
-                imran_record = None
-                for record in incentives:
-                    if record.get("barber_id") == TEST_BARBER_ID:
-                        imran_record = record
+            try:
+                result = subprocess.run(['tail', '-n', '50', '/var/log/supervisor/backend.err.log'], 
+                                      capture_output=True, text=True)
+                lines = result.stdout.split('\n')
+                otp = None
+                for line in reversed(lines):
+                    if f"Generated OTP for {ADMIN_PHONE}:" in line:
+                        otp = line.split(': ')[-1].strip()
                         break
                 
-                if imran_record:
-                    target = imran_record.get("target")
-                    # Expected: 25000 * 4 = 100000
-                    if target == 100000:
-                        self.log_result("A6 - Calc Verification", True, f"Target calculation correct: {target}")
-                    else:
-                        self.log_result("A6 - Calc Verification", False, f"Target calculation wrong: expected 100000, got {target}")
-                else:
-                    self.log_result("A6 - Calc Verification", True, "No sales data found (expected without fake token)")
-            else:
-                self.log_result("A6 - Calc Verification", False, f"Could not get incentives: {response.status_code}")
-                
-        except Exception as e:
-            self.log_result("A6 - Calc Verification", False, f"Exception: {str(e)}")
-
-    def test_a7_recompute_on_complete(self):
-        """A7. Verify recompute triggers on token completion"""
-        # This test would require creating a real booking and completing it
-        # For now, we'll just verify the endpoint exists and responds
-        self.log_result("A7 - Recompute on Complete", True, "Endpoint integration verified in code review")
-
-    def test_a8_status_workflow(self):
-        """A8. Status workflow testing"""
-        if not self.admin_token:
-            self.log_result("A8 - Status Workflow", False, "No admin token")
-            return
-        
-        try:
-            headers = {"Authorization": f"Bearer {self.admin_token}"}
-            month = "2026-04"
-            
-            # A8a. Set status to Approved
-            response = requests.put(
-                f"{BASE_URL}/salons/{SALON_ID}/reward-plan/incentives/{TEST_BARBER_ID}/{month}/status",
-                json={"status": "Approved"},
-                headers=headers
-            )
-            
-            if response.status_code == 200:
-                data = response.json()
-                payout = data.get("payout", {})
-                if payout.get("status") == "Approved" and not payout.get("linked_expense_id"):
-                    self.log_result("A8a - Set Approved", True, "Status set to Approved, no expense created")
-                else:
-                    self.log_result("A8a - Set Approved", False, "Unexpected response structure")
-            else:
-                self.log_result("A8a - Set Approved", False, f"Status: {response.status_code}")
-            
-            # A8b. Try to set Paid without payment_method (should fail)
-            response = requests.put(
-                f"{BASE_URL}/salons/{SALON_ID}/reward-plan/incentives/{TEST_BARBER_ID}/{month}/status",
-                json={"status": "Paid"},
-                headers=headers
-            )
-            
-            if response.status_code == 400:
-                self.log_result("A8b - Paid without payment_method", True, "Correctly rejected (400)")
-            else:
-                self.log_result("A8b - Paid without payment_method", False, f"Expected 400, got {response.status_code}")
-            
-            # A8c. Set Paid with payment_method
-            response = requests.put(
-                f"{BASE_URL}/salons/{SALON_ID}/reward-plan/incentives/{TEST_BARBER_ID}/{month}/status",
-                json={"status": "Paid", "payment_method": "upi"},
-                headers=headers
-            )
-            
-            if response.status_code == 200:
-                data = response.json()
-                payout = data.get("payout", {})
-                if (payout.get("status") == "Paid" and 
-                    payout.get("payment_method") == "upi" and 
-                    payout.get("paid_at")):
-                    # Check if expense was created (linked_expense_id may be null if no incentive earned)
-                    if payout.get("incentive_earned", 0) > 0:
-                        if payout.get("linked_expense_id"):
-                            self.log_result("A8c - Set Paid with payment_method", True, "Status set correctly with expense link")
-                            self.log_result("A8d - Financial Transaction Created", True, f"Expense ID: {payout.get('linked_expense_id')}")
-                        else:
-                            self.log_result("A8c - Set Paid with payment_method", False, "Expected expense link for non-zero incentive")
-                            self.log_result("A8d - Financial Transaction Created", False, "No expense ID despite non-zero incentive")
-                    else:
-                        self.log_result("A8c - Set Paid with payment_method", True, "Status set correctly (no incentive earned, no expense needed)")
-                        self.log_result("A8d - Financial Transaction Created", True, "No expense needed for zero incentive")
+                if otp:
+                    self.log(f"Found OTP in logs: {otp}")
                     
-                    # A8e. Try setting Paid again (should not create duplicate)
-                    response2 = requests.put(
-                        f"{BASE_URL}/salons/{SALON_ID}/reward-plan/incentives/{TEST_BARBER_ID}/{month}/status",
-                        json={"status": "Paid", "payment_method": "upi"},
-                        headers=headers
-                    )
+                    # Verify OTP
+                    verify_response = self.make_request("POST", "/salon/verify-otp", {
+                        "phone": ADMIN_PHONE,
+                        "otp": otp
+                    })
                     
-                    if response2.status_code == 200:
-                        data2 = response2.json()
-                        payout2 = data2.get("payout", {})
-                        if payout2.get("linked_expense_id") == payout.get("linked_expense_id"):
-                            self.log_result("A8e - Idempotency Check", True, "No duplicate expense created")
-                        else:
-                            self.log_result("A8e - Idempotency Check", False, "Duplicate expense may have been created")
+                    if verify_response["success"] and "access_token" in verify_response["data"]:
+                        self.admin_token = verify_response["data"]["access_token"]
+                        actual_salon_id = verify_response["data"].get("salon_id")
+                        self.log(f"✅ Admin authenticated successfully (OTP login)")
+                        self.log(f"   Token: {self.admin_token[:20]}...")
+                        self.log(f"   Salon ID: {actual_salon_id}")
+                        
+                        # Update salon ID if different
+                        global SALON_ID
+                        if actual_salon_id and actual_salon_id != SALON_ID:
+                            self.log(f"   Updating SALON_ID from {SALON_ID} to {actual_salon_id}")
+                            SALON_ID = actual_salon_id
+                        
+                        return True
                     else:
-                        self.log_result("A8e - Idempotency Check", False, f"Status: {response2.status_code}")
+                        self.log(f"❌ OTP verification failed: {verify_response['data']}")
                 else:
-                    self.log_result("A8c - Set Paid with payment_method", False, "Missing required fields in response")
-            else:
-                self.log_result("A8c - Set Paid with payment_method", False, f"Status: {response.status_code}")
-                
-        except Exception as e:
-            self.log_result("A8 - Status Workflow", False, f"Exception: {str(e)}")
-
-    def test_a9_override_priority(self):
-        """A9. Override priority testing"""
-        if not self.admin_token:
-            self.log_result("A9 - Override Priority", False, "No admin token")
-            return
+                    self.log("❌ Could not find OTP in logs")
+            except Exception as e:
+                self.log(f"❌ Error getting OTP from logs: {e}")
+        else:
+            self.log(f"❌ Failed to send OTP: {otp_response['data']}")
         
-        try:
-            # Set plan with individual override for Imran
-            plan = {
-                "mode": "partial",
-                "global_plan": {
-                    "target_type": "salary_multiplier",
-                    "multiplier": 4,
-                    "slabs": [{"from_pct": 100, "to_pct": 110, "type": "additional_pct", "value": 5}]
-                },
-                "assigned_barber_ids": [TEST_BARBER_ID],
-                "individual_plans": {
-                    TEST_BARBER_ID: {
-                        "target_type": "salary_multiplier",
-                        "multiplier": 5,  # Different from global
-                        "slabs": [{"from_pct": 100, "to_pct": 110, "type": "additional_pct", "value": 10}]
-                    }
-                }
+        # Fallback attempts
+        self.log("Trying salon password login...")
+        response = self.make_request("POST", "/salon/password-login", {
+            "phone": ADMIN_PHONE,
+            "password": ADMIN_PASSWORD
+        })
+        
+        if response["success"] and "access_token" in response["data"]:
+            self.admin_token = response["data"]["access_token"]
+            self.log(f"✅ Admin authenticated successfully (salon password login)")
+            self.log(f"   Token: {self.admin_token[:20]}...")
+            self.log(f"   Salon ID: {response['data'].get('salon_id')}")
+            return True
+        else:
+            self.log(f"❌ Salon password login failed: {response['data']}")
+            
+            # Try salon user login as fallback
+            self.log("Trying salon user login...")
+            response = self.make_request("POST", "/salon/users/login", {
+                "identifier": ADMIN_PHONE,
+                "password": ADMIN_PASSWORD
+            })
+            
+            if response["success"] and "access_token" in response["data"]:
+                self.admin_token = response["data"]["access_token"]
+                self.log(f"✅ Admin authenticated successfully (salon user login)")
+                self.log(f"   Token: {self.admin_token[:20]}...")
+                self.log(f"   Salon ID: {response['data'].get('salon_id')}")
+                return True
+            else:
+                self.log(f"❌ Salon user login also failed: {response['data']}")
+                self.log("⚠️  Continuing without authentication to test public endpoints")
+                return False
+    
+    def test_customer_otp_flow(self):
+        """Test Customer OTP Verification Flow"""
+        self.log("\n=== CUSTOMER OTP VERIFICATION FLOW ===")
+        
+        # First, login the customer to create/get user record
+        self.log("0. Customer login to create user record")
+        login_response = self.make_request("POST", "/user/login", {
+            "name": "Test Customer",
+            "phone": TEST_CUSTOMER_PHONE,
+            "gender": "Male"
+        })
+        
+        if login_response["success"]:
+            self.log(f"✅ Customer login successful")
+            self.log(f"   User ID: {login_response['data'].get('id')}")
+        else:
+            self.log(f"❌ Customer login failed: {login_response['data']}")
+        
+        # Test 1: Send OTP
+        self.log("1. Testing POST /customer/send-otp")
+        response = self.make_request("POST", "/customer/send-otp", {
+            "phone": TEST_CUSTOMER_PHONE
+        })
+        
+        send_otp_success = False
+        actual_otp = None
+        if response["success"]:
+            self.log(f"✅ OTP send request successful")
+            self.log(f"   Response: {response['data']}")
+            send_otp_success = True
+            # Extract OTP if provided in response (for testing when WhatsApp fails)
+            actual_otp = response['data'].get('otp')
+        else:
+            self.log(f"❌ OTP send failed: {response['data']}")
+            
+        # Test 2: Check OTP status
+        self.log("2. Testing GET /customer/{phone}/otp-status")
+        response = self.make_request("GET", f"/customer/{TEST_CUSTOMER_PHONE}/otp-status")
+        
+        otp_status_success = False
+        if response["success"]:
+            self.log(f"✅ OTP status check successful")
+            self.log(f"   Response: {response['data']}")
+            otp_status = response['data']
+            otp_status_success = True
+        else:
+            self.log(f"❌ OTP status check failed: {response['data']}")
+            otp_status = {}
+            
+        # Test 3: Verify OTP (try with actual OTP if available, otherwise test OTP)
+        self.log("3. Testing POST /customer/verify-otp")
+        test_otp = actual_otp if actual_otp else "123456"
+        self.log(f"   Using OTP: {test_otp}")
+        
+        response = self.make_request("POST", "/customer/verify-otp", {
+            "phone": TEST_CUSTOMER_PHONE,
+            "otp": test_otp
+        })
+        
+        verify_endpoint_exists = response["status_code"] != 404
+        verify_success = False
+        if response["success"]:
+            self.log(f"✅ OTP verification successful")
+            self.log(f"   Response: {response['data']}")
+            verify_success = True
+        else:
+            self.log(f"❌ OTP verification failed: {response['data']}")
+            
+        # Test 4: Check OTP status after verification (if verification was successful)
+        if verify_success:
+            self.log("4. Testing OTP status after verification")
+            response = self.make_request("GET", f"/customer/{TEST_CUSTOMER_PHONE}/otp-status")
+            if response["success"]:
+                self.log(f"✅ Post-verification status check successful")
+                self.log(f"   Response: {response['data']}")
+            else:
+                self.log(f"❌ Post-verification status check failed: {response['data']}")
+            
+        return {
+            "send_otp": send_otp_success,
+            "check_status": otp_status_success,
+            "verify_endpoint_exists": verify_endpoint_exists,
+            "verify_success": verify_success
+        }
+    
+    def test_loyalty_reward_logic(self):
+        """Test Loyalty Reward Logic"""
+        self.log("\n=== LOYALTY REWARD LOGIC ===")
+        
+        # Test combined wallet balance endpoint
+        self.log("Testing GET /salons/{salon_id}/customers/{phone}/wallet")
+        response = self.make_request("GET", f"/salons/{SALON_ID}/customers/{EXISTING_CUSTOMER_PHONE}/wallet")
+        
+        if response["success"]:
+            self.log(f"✅ Wallet balance endpoint working")
+            wallet_data = response['data']
+            self.log(f"   Has membership: {wallet_data.get('has_membership')}")
+            self.log(f"   Has loyalty wallet: {wallet_data.get('has_loyalty_wallet')}")
+            self.log(f"   Total wallet balance: {wallet_data.get('wallet_balance')}")
+            self.log(f"   Membership balance: {wallet_data.get('membership_balance')}")
+            self.log(f"   Loyalty balance: {wallet_data.get('loyalty_balance')}")
+            
+            # Verify required fields are present
+            required_fields = ['has_membership', 'has_loyalty_wallet', 'wallet_balance', 'membership_balance', 'loyalty_balance']
+            missing_fields = [field for field in required_fields if field not in wallet_data]
+            
+            if missing_fields:
+                self.log(f"⚠️  Missing required fields: {missing_fields}")
+                return False
+            else:
+                self.log(f"✅ All required fields present in response")
+                return True
+        else:
+            self.log(f"❌ Wallet balance endpoint failed: {response['data']}")
+            return False
+    
+    def test_staff_access_control(self):
+        """Test Staff Access Control (can_access_financials)"""
+        self.log("\n=== STAFF ACCESS CONTROL ===")
+        
+        if not self.admin_token:
+            self.log("❌ Admin token required for staff management")
+            return False
+            
+        headers = {"Authorization": f"Bearer {self.admin_token}"}
+        
+        # Test 1: Create staff user with can_access_financials: true
+        self.log("1. Creating staff user with can_access_financials: true")
+        staff_data = {
+            "salon_id": SALON_ID,
+            "name": "Test Staff Financial",
+            "mobile": "+919876543210",
+            "login_id": "teststaff_financial",
+            "password": "staff123",
+            "role": "staff",
+            "permissions": {
+                "can_edit_salon": False,
+                "can_access_analytics": False,
+                "can_access_financials": True,
+                "can_delete_salon": False
             }
+        }
+        
+        response = self.make_request("POST", "/salon/users", staff_data, headers)
+        
+        if response["success"]:
+            self.log(f"✅ Staff user created successfully")
+            staff_user = response['data']
+            self.staff_user_id = staff_user.get('id')
+            self.log(f"   Staff ID: {self.staff_user_id}")
+            self.log(f"   Permissions: {staff_user.get('permissions')}")
+        else:
+            self.log(f"❌ Staff user creation failed: {response['data']}")
+            return False
             
-            headers = {"Authorization": f"Bearer {self.admin_token}"}
-            save_response = requests.post(f"{BASE_URL}/salons/{SALON_ID}/reward-plan", json=plan, headers=headers)
+        # Test 2: Login as staff user
+        self.log("2. Testing staff login")
+        response = self.make_request("POST", "/salon/users/login", {
+            "identifier": "teststaff_financial",
+            "password": "staff123"
+        })
+        
+        if response["success"] and "access_token" in response["data"]:
+            self.staff_token = response["data"]["access_token"]
+            staff_permissions = response["data"].get("permissions", {})
+            self.log(f"✅ Staff login successful")
+            self.log(f"   Token: {self.staff_token[:20]}...")
+            self.log(f"   can_access_financials: {staff_permissions.get('can_access_financials')}")
             
-            if save_response.status_code == 200:
-                # Get incentives to verify override is applied
-                response = requests.get(f"{BASE_URL}/salons/{SALON_ID}/reward-plan/incentives?month=2026-04", headers=headers)
-                
-                if response.status_code == 200:
-                    data = response.json()
-                    incentives = data.get("incentives", [])
-                    
-                    # Find Imran's record
-                    imran_record = None
-                    for record in incentives:
-                        if record.get("barber_id") == TEST_BARBER_ID:
-                            imran_record = record
-                            break
-                    
-                    if imran_record:
-                        target = imran_record.get("target")
-                        # Expected: 25000 * 5 = 125000 (individual override)
-                        if target == 125000:
-                            self.log_result("A9 - Override Priority", True, f"Individual override applied correctly: target={target}")
-                        else:
-                            self.log_result("A9 - Override Priority", False, f"Override not applied: expected 125000, got {target}")
-                    else:
-                        self.log_result("A9 - Override Priority", True, "No sales data to verify override (expected)")
-                else:
-                    self.log_result("A9 - Override Priority", False, f"Could not get incentives: {response.status_code}")
+            # Verify permission is present and true
+            if staff_permissions.get('can_access_financials') is True:
+                self.log(f"✅ can_access_financials permission correctly set to True")
+                staff_login_success = True
             else:
-                self.log_result("A9 - Override Priority", False, f"Could not save plan: {save_response.status_code}")
+                self.log(f"❌ can_access_financials permission not set correctly")
+                staff_login_success = False
+        else:
+            self.log(f"❌ Staff login failed: {response['data']}")
+            staff_login_success = False
+            
+        # Test 3: Create staff user WITHOUT can_access_financials
+        self.log("3. Creating staff user WITHOUT can_access_financials")
+        staff_data_no_financial = {
+            "salon_id": SALON_ID,
+            "name": "Test Staff No Financial",
+            "mobile": "+919876543211",
+            "login_id": "teststaff_no_financial",
+            "password": "staff123",
+            "role": "staff",
+            "permissions": {
+                "can_edit_salon": False,
+                "can_access_analytics": True,
+                "can_access_financials": False,
+                "can_delete_salon": False
+            }
+        }
+        
+        response = self.make_request("POST", "/salon/users", staff_data_no_financial, headers)
+        
+        if response["success"]:
+            self.log(f"✅ Staff user (no financial access) created successfully")
+            
+            # Login as this staff user
+            response = self.make_request("POST", "/salon/users/login", {
+                "identifier": "teststaff_no_financial",
+                "password": "staff123"
+            })
+            
+            if response["success"]:
+                no_financial_permissions = response["data"].get("permissions", {})
+                self.log(f"✅ Staff (no financial) login successful")
+                self.log(f"   can_access_financials: {no_financial_permissions.get('can_access_financials')}")
                 
-        except Exception as e:
-            self.log_result("A9 - Override Priority", False, f"Exception: {str(e)}")
-
-    def test_b1_admin_analytics(self):
-        """B1. Admin access to all 5 analytics endpoints"""
-        if not self.admin_token:
-            self.log_result("B1 - Admin Analytics", False, "No admin token")
-            return
-        
-        endpoints = [
-            "/analytics/day-wise-sales",
-            "/analytics/barber-wise-sales", 
-            "/analytics/service-wise-sales",
-            "/analytics/gender-distribution",
-            "/analytics/detailed-report"
-        ]
-        
-        headers = {"Authorization": f"Bearer {self.admin_token}"}
-        params = {
-            "salon_id": SALON_ID,
-            "start_date": "2026-04-01",
-            "end_date": "2026-04-30"
-        }
-        
-        all_success = True
-        for endpoint in endpoints:
-            try:
-                response = requests.get(f"{BASE_URL}{endpoint}", params=params, headers=headers)
-                if response.status_code == 200:
-                    self.log_result(f"B1 - Admin {endpoint}", True, "200 OK")
+                if no_financial_permissions.get('can_access_financials') is False:
+                    self.log(f"✅ can_access_financials correctly set to False")
+                    no_financial_test_success = True
                 else:
-                    self.log_result(f"B1 - Admin {endpoint}", False, f"Status: {response.status_code}")
-                    all_success = False
-            except Exception as e:
-                self.log_result(f"B1 - Admin {endpoint}", False, f"Exception: {str(e)}")
-                all_success = False
-        
-        if all_success:
-            self.log_result("B1 - Admin Analytics (Overall)", True, "All 5 endpoints accessible")
+                    self.log(f"❌ can_access_financials should be False")
+                    no_financial_test_success = False
+            else:
+                self.log(f"❌ Staff (no financial) login failed: {response['data']}")
+                no_financial_test_success = False
         else:
-            self.log_result("B1 - Admin Analytics (Overall)", False, "Some endpoints failed")
-
-    def test_b2_staff_analytics(self):
-        """B2. Staff access to analytics endpoints"""
-        # Create staff user with analytics permission
-        staff_user_id = self.create_staff_user({"can_access_analytics": True})
-        if not staff_user_id:
-            self.log_result("B2 - Staff Analytics", False, "Could not create staff user")
-            return
-        
-        if not self.login_staff():
-            self.log_result("B2 - Staff Analytics", False, "Could not login as staff")
-            return
-        
-        endpoints = [
-            "/analytics/day-wise-sales",
-            "/analytics/barber-wise-sales",
-            "/analytics/service-wise-sales", 
-            "/analytics/gender-distribution",
-            "/analytics/detailed-report"
-        ]
-        
-        headers = {"Authorization": f"Bearer {self.staff_token}"}
-        params = {
-            "salon_id": SALON_ID,
-            "start_date": "2026-04-01",
-            "end_date": "2026-04-30"
+            self.log(f"❌ Staff user (no financial) creation failed: {response['data']}")
+            no_financial_test_success = False
+            
+        return {
+            "staff_creation": response["success"] if 'response' in locals() else False,
+            "staff_login_with_financials": staff_login_success,
+            "staff_without_financials": no_financial_test_success
         }
-        
-        all_success = True
-        for endpoint in endpoints:
-            try:
-                response = requests.get(f"{BASE_URL}{endpoint}", params=params, headers=headers)
-                if response.status_code == 200:
-                    self.log_result(f"B2 - Staff {endpoint}", True, "200 OK")
-                else:
-                    self.log_result(f"B2 - Staff {endpoint}", False, f"Status: {response.status_code}")
-                    all_success = False
-            except Exception as e:
-                self.log_result(f"B2 - Staff {endpoint}", False, f"Exception: {str(e)}")
-                all_success = False
-        
-        if all_success:
-            self.log_result("B2 - Staff Analytics (Overall)", True, "All 5 endpoints accessible to staff")
-        else:
-            self.log_result("B2 - Staff Analytics (Overall)", False, "Some endpoints failed for staff")
-
-    def test_b3_no_auth_analytics(self):
-        """B3. No auth access to analytics endpoints (should fail)"""
-        endpoints = [
-            "/analytics/day-wise-sales",
-            "/analytics/barber-wise-sales",
-            "/analytics/service-wise-sales",
-            "/analytics/gender-distribution", 
-            "/analytics/detailed-report"
-        ]
-        
-        params = {
-            "salon_id": SALON_ID,
-            "start_date": "2026-04-01",
-            "end_date": "2026-04-30"
-        }
-        
-        all_unauthorized = True
-        for endpoint in endpoints:
-            try:
-                response = requests.get(f"{BASE_URL}{endpoint}", params=params)  # No auth header
-                if response.status_code in [401, 403]:
-                    self.log_result(f"B3 - No Auth {endpoint}", True, f"{response.status_code} Unauthorized")
-                else:
-                    self.log_result(f"B3 - No Auth {endpoint}", False, f"Expected 401/403, got {response.status_code}")
-                    all_unauthorized = False
-            except Exception as e:
-                self.log_result(f"B3 - No Auth {endpoint}", False, f"Exception: {str(e)}")
-                all_unauthorized = False
-        
-        if all_unauthorized:
-            self.log_result("B3 - No Auth Analytics (Overall)", True, "All endpoints correctly reject unauthorized access")
-        else:
-            self.log_result("B3 - No Auth Analytics (Overall)", False, "Some endpoints allow unauthorized access")
-
-    def cleanup(self):
-        """Clean up test data"""
-        if not self.admin_token:
-            return
-        
-        headers = {"Authorization": f"Bearer {self.admin_token}"}
-        
-        for item_type, item_id in self.cleanup_items:
-            try:
-                if item_type == "staff_user" and item_id:
-                    response = requests.delete(f"{BASE_URL}/salon/users/{item_id}", headers=headers)
-                    print(f"Cleanup staff user {item_id}: {response.status_code}")
-                elif item_type == "reward_plan":
-                    # Reset to default plan
-                    default_plan = {
-                        "mode": "all",
-                        "global_plan": {
-                            "target_type": "salary_multiplier",
-                            "multiplier": 4,
-                            "slabs": [
-                                {"from_pct": 100, "to_pct": 110, "type": "additional_pct", "value": 5},
-                                {"from_pct": 110, "to_pct": 120, "type": "additional_pct", "value": 8}
-                            ]
-                        },
-                        "assigned_barber_ids": [],
-                        "individual_plans": {}
-                    }
-                    response = requests.post(f"{BASE_URL}/salons/{SALON_ID}/reward-plan", json=default_plan, headers=headers)
-                    print(f"Reset reward plan: {response.status_code}")
-            except Exception as e:
-                print(f"Cleanup error for {item_type}: {e}")
-
+    
     def run_all_tests(self):
-        """Run all test scenarios"""
-        print("=== EMPLOYEE REWARD PLAN & ANALYTICS AUTH TESTING ===\n")
+        """Run all backend tests"""
+        self.log("🚀 Starting Backend API Tests")
+        self.log(f"Base URL: {BASE_URL}")
+        self.log(f"Salon ID: {SALON_ID}")
         
-        # Login first
-        if not self.login_admin():
-            print("❌ Cannot proceed without admin login")
-            return
+        results = {}
         
-        print("\n=== TEST GROUP A: Employee Reward Plan ===")
-        self.test_a1_eligible_barbers()
-        self.test_a2_get_reward_plan()
-        self.test_a3_save_reward_plan()
-        self.test_a4_staff_save_reward_plan()
-        self.test_a5_get_incentives()
-        self.test_a6_calc_verification()
-        self.test_a7_recompute_on_complete()
-        self.test_a8_status_workflow()
-        self.test_a9_override_priority()
+        # Try to authenticate admin (but continue even if it fails)
+        auth_success = self.authenticate_admin()
+            
+        # Test 1: Customer OTP Verification Flow (doesn't require auth)
+        results["otp_flow"] = self.test_customer_otp_flow()
         
-        print("\n=== TEST GROUP B: Analytics Auth Widening ===")
-        self.test_b1_admin_analytics()
-        self.test_b2_staff_analytics()
-        self.test_b3_no_auth_analytics()
+        # Test 2: Loyalty Reward Logic (doesn't require auth)
+        results["loyalty_rewards"] = self.test_loyalty_reward_logic()
         
-        print("\n=== CLEANUP ===")
-        self.cleanup()
+        # Test 3: Staff Access Control (requires auth)
+        if auth_success:
+            results["staff_access_control"] = self.test_staff_access_control()
+        else:
+            self.log("\n=== STAFF ACCESS CONTROL ===")
+            self.log("❌ Skipping staff access control tests - admin authentication required")
+            results["staff_access_control"] = {"skipped": True, "reason": "No admin authentication"}
         
-        print("\n=== TEST SUMMARY ===")
-        passed = sum(1 for r in self.test_results if r["success"])
-        total = len(self.test_results)
-        print(f"Passed: {passed}/{total}")
+        # Summary
+        self.log("\n" + "="*50)
+        self.log("📊 TEST SUMMARY")
+        self.log("="*50)
         
-        if passed < total:
-            print("\nFailed tests:")
-            for r in self.test_results:
-                if not r["success"]:
-                    print(f"  ❌ {r['test']}: {r['details']}")
+        # OTP Flow Summary
+        otp_results = results.get("otp_flow", {})
+        self.log(f"🔐 Customer OTP Flow:")
+        self.log(f"   Send OTP endpoint: {'✅' if otp_results.get('send_otp') else '❌'}")
+        self.log(f"   OTP status endpoint: {'✅' if otp_results.get('check_status') else '❌'}")
+        self.log(f"   Verify OTP endpoint: {'✅' if otp_results.get('verify_endpoint_exists') else '❌'}")
+        self.log(f"   OTP verification: {'✅' if otp_results.get('verify_success') else '❌'}")
         
-        return passed == total
+        # Loyalty Rewards Summary
+        loyalty_success = results.get("loyalty_rewards", False)
+        self.log(f"💰 Loyalty Rewards: {'✅' if loyalty_success else '❌'}")
+        
+        # Staff Access Control Summary
+        staff_results = results.get("staff_access_control", {})
+        if staff_results.get("skipped"):
+            self.log(f"👥 Staff Access Control: ⚠️  SKIPPED ({staff_results.get('reason')})")
+        else:
+            self.log(f"👥 Staff Access Control:")
+            self.log(f"   Staff creation: {'✅' if staff_results.get('staff_creation') else '❌'}")
+            self.log(f"   Login with financials: {'✅' if staff_results.get('staff_login_with_financials') else '❌'}")
+            self.log(f"   Login without financials: {'✅' if staff_results.get('staff_without_financials') else '❌'}")
+        
+        return results
 
 if __name__ == "__main__":
-    runner = TestRunner()
-    success = runner.run_all_tests()
-    sys.exit(0 if success else 1)
+    tester = BackendTester()
+    results = tester.run_all_tests()

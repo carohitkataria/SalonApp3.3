@@ -35,7 +35,7 @@ export default function CustomerLayout({ children }) {
   const [currentSalonId, setCurrentSalonId] = useState(null);
   const [unreadNotifCount, setUnreadNotifCount] = useState(0);
 
-  // Extract salonId from URL
+  // Extract salonId from URL and persist salon context
   useEffect(() => {
     const pathParts = location.pathname.split('/');
     let salonId = null;
@@ -50,9 +50,23 @@ export default function CustomerLayout({ children }) {
     if (salonId && salonId !== currentSalonId) {
       setCurrentSalonId(salonId);
       fetchSalonInfo(salonId);
+      // Persist salon context to localStorage
+      localStorage.setItem('customer_current_salon_id', salonId);
     } else if (!salonId) {
-      setCurrentSalonId(null);
-      setCurrentSalon(null);
+      // Don't clear salon context - keep the last visited salon
+      // Only clear if user explicitly goes to /salons (Find New Salon)
+      if (location.pathname === '/salons') {
+        setCurrentSalonId(null);
+        setCurrentSalon(null);
+        localStorage.removeItem('customer_current_salon_id');
+      } else {
+        // Restore salon context from localStorage if we don't have it
+        const savedSalonId = localStorage.getItem('customer_current_salon_id');
+        if (savedSalonId && !currentSalonId) {
+          setCurrentSalonId(savedSalonId);
+          fetchSalonInfo(savedSalonId);
+        }
+      }
     }
   }, [location.pathname]);
 

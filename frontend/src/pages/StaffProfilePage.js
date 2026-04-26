@@ -24,6 +24,7 @@ function CreateStaffUserForm({ staffId, staffName, staffMobile, salonId, onSucce
     permissions: {
       can_edit_salon: false,
       can_access_analytics: false,
+      can_access_financials: false,
       can_delete_salon: false
     }
   });
@@ -207,6 +208,7 @@ export default function StaffProfilePage() {
   const [permissions, setPermissions] = useState({
     can_edit_salon: false,
     can_access_analytics: false,
+    can_access_financials: false,
     can_delete_salon: false
   });
 
@@ -704,6 +706,19 @@ export default function StaffProfilePage() {
                         <Label htmlFor="can_access_analytics" className="cursor-pointer flex-1">
                           <span className="font-medium">Can access analytics</span>
                           <p className="text-xs text-muted-foreground">View analytics, reports, and statistics</p>
+                        </Label>
+                      </div>
+
+                      <div className="flex items-center space-x-2 p-3 border border-border rounded-lg">
+                        <Checkbox
+                          id="can_access_financials"
+                          checked={permissions.can_access_financials}
+                          onCheckedChange={(checked) => setPermissions({ ...permissions, can_access_financials: checked })}
+                          className="data-[state=checked]:bg-gold data-[state=checked]:border-gold"
+                        />
+                        <Label htmlFor="can_access_financials" className="cursor-pointer flex-1">
+                          <span className="font-medium">Can access financials</span>
+                          <p className="text-xs text-muted-foreground">View financial reports and cash flow</p>
                         </Label>
                       </div>
 

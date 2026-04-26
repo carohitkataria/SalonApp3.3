@@ -6,11 +6,12 @@ import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { toast } from 'sonner';
 import GenderBadge from '@/components/GenderBadge';
-import { Scissors, Calendar, User, CheckCircle, Star, Clock, ArrowLeft, Home, Zap, Check, ChevronDown, ChevronRight, Search, Package, Crown, History, Wallet, Banknote, Smartphone } from 'lucide-react';
+import { Scissors, Calendar, User, CheckCircle, Star, Clock, ArrowLeft, Home, Zap, Check, ChevronDown, ChevronRight, Search, Package, Crown, History, Wallet, Banknote, Smartphone, Shield } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Input } from '@/components/ui/input';
 import CustomerWalletCard from '@/components/CustomerWalletCard';
 import WalletDisplay from '@/components/WalletDisplay';
+import CustomerOtpVerification from '@/components/CustomerOtpVerification';
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
 const API = `${BACKEND_URL}/api`;
@@ -229,7 +230,7 @@ const CategorySection = ({ category, services, selectedServices, onToggle, price
 export default function SinglePageBooking() {
   const { salonId } = useParams();
   const navigate = useNavigate();
-  const { user, isUserLoggedIn } = useAuth();
+  const { user, isUserLoggedIn, isUserOtpVerified } = useAuth();
   const [searchParams] = useSearchParams();
   const source = searchParams.get('source') || 'online';
   const forSelf = searchParams.get('for') === 'self';
@@ -257,6 +258,7 @@ export default function SinglePageBooking() {
   const [barberServices, setBarberServices] = useState([]);
   const [shifts, setShifts] = useState([]);
   const [liveStatus, setLiveStatus] = useState(null);
+  const [showOtpModal, setShowOtpModal] = useState(false);
   const [bookedToken, setBookedToken] = useState(null);
   const [loading, setLoading] = useState(false);
   const [slotAvailability, setSlotAvailability] = useState(null);
@@ -957,6 +959,11 @@ export default function SinglePageBooking() {
                     toast.error(`Insufficient balance. Available: ₹${walletBalance}, Required: ₹${totalAmount}`);
                     return;
                   }
+                  // Require OTP verification for wallet payment
+                  if (!isUserOtpVerified) {
+                    setShowOtpModal(true);
+                    return;
+                  }
                   setPaymentMode('wallet');
                   setUpiAppOpened(false);
                 }}
@@ -977,9 +984,16 @@ export default function SinglePageBooking() {
                 <div className="flex-1">
                   <p className="font-bold text-foreground">Wallet</p>
                   {hasWallet ? (
-                    <p className={`text-xs ${walletSufficient ? 'text-green-600' : 'text-red-500'}`}>
-                      Balance: ₹{walletBalance} {!walletSufficient && '(Insufficient)'}
-                    </p>
+                    <>
+                      <p className={`text-xs ${walletSufficient ? 'text-green-600' : 'text-red-500'}`}>
+                        Balance: ₹{walletBalance} {!walletSufficient && '(Insufficient)'}
+                      </p>
+                      {!isUserOtpVerified && walletSufficient && (
+                        <p className="text-xs text-amber-500 flex items-center gap-1 mt-0.5">
+                          <Shield className="w-3 h-3" /> OTP required
+                        </p>
+                      )}
+                    </>
                   ) : (
                     <p className="text-xs text-muted-foreground">No active wallet</p>
                   )}
@@ -1532,6 +1546,37 @@ export default function SinglePageBooking() {
           </Button>
         </div>
       </div>
+
+      {/* OTP Verification Modal for Wallet Payment */}
+      <AnimatePresence>
+        {showOtpModal && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4"
+            onClick={() => setShowOtpModal(false)}
+          >
+            <motion.div
+              initial={{ scale: 0.9, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.9, opacity: 0 }}
+              onClick={(e) => e.stopPropagation()}
+              className="w-full max-w-md"
+            >
+              <CustomerOtpVerification 
+                showAs="card" 
+                onVerified={() => {
+                  setShowOtpModal(false);
+                  setPaymentMode('wallet');
+                  setUpiAppOpened(false);
+                  toast.success('Phone verified! Wallet payment enabled.');
+                }}
+              />
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }
