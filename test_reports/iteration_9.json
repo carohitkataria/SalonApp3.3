@@ -20,7 +20,7 @@
     "/app/backend/tests/conftest.py"
   ],
   "success_rate": {"backend": "100% (10/10)", "frontend": "100% (Imran row Actual/Achievement/Earned all match expected)"},
-  "test_credentials": "phone=+917503070727 password=salon123 salon_id=2dad5cd9-5dda-4398-bbb5-a4d12aae7915 imran_barber_id=5d7d3064-2580-4a43-ae3e-73cdcaefd9de",
+  "test_credentials": "phone=+917503070727 password=salon123 salon_id=loyalty-wallet-fix imran_barber_id=loyalty-wallet-fix",
   "seed_data_creation": "All test tokens were tagged _test_iter9=true and removed in module teardown (verified). One real-flow recompute test created a payment_confirmed=true waiting token, completed it via POST /api/tokens/{id}/complete, asserted actual_sales bumped by exactly 1234.0, then deleted the token and re-ran _recompute_incentive_payout to restore the dashboard. No real user data touched; the 4 real Imran tokens (₹63,360) are intact.",
   "retest_needed": false,
   "should_main_agent_self_test": false,

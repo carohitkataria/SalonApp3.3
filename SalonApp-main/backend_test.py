@@ -5,7 +5,7 @@ import json
 import uuid
 
 class SalonAPITester:
-    def __init__(self, base_url="https://gifted-shirley-8.preview.emergentagent.com/api"):
+    def __init__(self, base_url="https://loyalty-wallet-fix.preview.emergentagent.com/api"):
         self.base_url = base_url
         self.tests_run = 0
         self.tests_passed = 0

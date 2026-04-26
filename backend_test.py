@@ -11,7 +11,7 @@ from datetime import datetime, timedelta
 import sys
 
 # Configuration
-BASE_URL = "https://gifted-shirley-8.preview.emergentagent.com/api"
+BASE_URL = "https://loyalty-wallet-fix.preview.emergentagent.com/api"
 SALON_ID = "2dad5cd9-5dda-4398-bbb5-a4d12aae7915"
 ADMIN_PHONE = "+917503070727"
 ADMIN_PASSWORD = "salon123"

@@ -25,7 +25,7 @@
     "/app/backend/tests/test_incentive_dashboard.py"
   ],
   "success_rate": {"backend": "100% (5/5)", "frontend": "100% — all data-testids and flows verified"},
-  "test_credentials": "phone=+917503070727 password=salon123 salon_id=2dad5cd9-5dda-4398-bbb5-a4d12aae7915",
+  "test_credentials": "phone=+917503070727 password=salon123 salon_id=loyalty-wallet-fix",
   "seed_data_creation": "Saved a salon reward plan via POST /api/salons/{id}/reward-plan (mode=all, multiplier=4, slabs=[{from_pct:100,to_pct:9999,type:additional_pct,value:5}]) and inserted ONE seed completed token (_seed_test=true, total_amount=120000) for barber 5d7d3064-2580-4a43-ae3e-73cdcaefd9de (Imran) so Imran's actual_sales > target. To clean: db.tokens.delete_many({_seed_test: true}). Imran's incentive_payout was marked Paid via UI/test (linked_expense_id created in financial_transactions).",
   "retest_needed": false,
   "should_main_agent_self_test": false,

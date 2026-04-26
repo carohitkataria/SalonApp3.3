@@ -27,7 +27,7 @@
     "/app/backend/tests/test_incentive_dashboard.py"
   ],
   "success_rate": {"backend": "100% (10/10 executed; 1 conditional skip)", "frontend": "100% — full Approve→Pay→Financials flow verified"},
-  "test_credentials": "phone=+917503070727 password=salon123 salon_id=2dad5cd9-5dda-4398-bbb5-a4d12aae7915 imran_barber_id=5d7d3064-2580-4a43-ae3e-73cdcaefd9de",
+  "test_credentials": "phone=+917503070727 password=salon123 salon_id=loyalty-wallet-fix imran_barber_id=loyalty-wallet-fix",
   "seed_data_creation": "Seeded ONE completed token with _user_test=true (total_amount=41250, booking_date=current-month-15, barber=Imran). All seed/test artifacts CLEANED UP at end: 1 token + 1 financial_transaction + 1 incentive_payouts row reset to Pending.",
   "retest_needed": false,
   "should_main_agent_self_test": false,
