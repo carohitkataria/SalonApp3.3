@@ -1,0 +1,29 @@
+{
+  "summary": "Iteration 9 — verified both bug fixes. (1) Capacity rule (get_barber_blocked_minutes_used) now excludes status=completed (and cancelled/skipped). Pending statuses (waiting/future/in_progress/called) still count. (2) Incentive slab fix (_compute_incentive_amount): when achievement exceeds highest defined to_pct, the highest crossed slab still applies. (3) _get_barber_actual_sales now correctly sums via the `date` field (Imran's 4 real tokens in 2026-04 → ₹63,360). (4) Token complete handler triggers _recompute_incentive_payout using token['date'] (with fallback). 10/10 backend tests passed. Frontend Analytics→Incentives shows Imran row exactly: Actual ₹63,360, Achievement 169.0%, Earned ₹19,008, Pending — confirming end-to-end fix.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": [
+    "/app/backend/tests/test_iter9_capacity_and_slabs.py",
+    "/app/backend/tests/conftest.py",
+    "/app/test_reports/pytest/iter9.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "server.py _compute_incentive_amount (line ~6683): the early-break condition `if achievement_pct < to_pct or to_pct >= 9999: break` works for ascending-from_pct slabs, but if a future plan has overlapping or non-sorted slabs, the 'highest crossed' choice may be wrong. Consider explicitly sorting slabs by from_pct asc before iterating.",
+    "server.py _get_barber_actual_sales (line ~6788): the legacy fallback uses `created_at >= start AND < next_first + 'T99'` — the 'T99' suffix is a string-based hack that works only because ISO month boundaries sort lexicographically. Prefer constructing a proper next-first timestamp like `next_first + 'T00:00:00'`.",
+    "server.py complete_token (line ~4640): endpoint is POST /api/tokens/{id}/complete (the original review_request mentioned PUT — main agent should confirm the FE calls POST too). FE currently uses POST so behaviour is fine, but PRD/test wording was inconsistent.",
+    "server.py complete_token does not return a useful response when payment_confirmed=False short-circuits — admins lose context on partially-paid bookings. Minor UX nit.",
+    "Capacity rule: when admin manually un-completes a token (status moves completed→waiting), capacity will be re-imposed correctly because the helper re-queries on every booking attempt. Good, but worth a regression test."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iter9_capacity_and_slabs.py",
+    "/app/backend/tests/conftest.py"
+  ],
+  "success_rate": {"backend": "100% (10/10)", "frontend": "100% (Imran row Actual/Achievement/Earned all match expected)"},
+  "test_credentials": "phone=+917503070727 password=salon123 salon_id=2dad5cd9-5dda-4398-bbb5-a4d12aae7915 imran_barber_id=5d7d3064-2580-4a43-ae3e-73cdcaefd9de",
+  "seed_data_creation": "All test tokens were tagged _test_iter9=true and removed in module teardown (verified). One real-flow recompute test created a payment_confirmed=true waiting token, completed it via POST /api/tokens/{id}/complete, asserted actual_sales bumped by exactly 1234.0, then deleted the token and re-ran _recompute_incentive_payout to restore the dashboard. No real user data touched; the 4 real Imran tokens (₹63,360) are intact.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Backend test infra now uses pytest-asyncio v1.3.0 with --asyncio-mode=auto. /app/backend/tests/conftest.py forces every async test to share the session-scoped event loop (required because motor's AsyncIOMotorClient caches its loop on first IO). When writing new async tests, just `await srv.<helper>` directly — do NOT instantiate a fresh AsyncIOMotorClient inside async tests, that breaks the shared-loop contract. Imran's incentive math: target=37500 (multiplier=1.5x salary 25000), actual=63360 (4 real tokens in 2026-04), ach=168.96%, earned=19008 (slab 120%-150% @ 30%). The complete endpoint is POST not PUT. Tokens require payment_confirmed=true before complete is allowed.",
+  "rca_of_the_issue": "Original bug had two roots: (a) get_barber_blocked_minutes_used summed minutes for all non-(cancelled|skipped) tokens, INCLUDING completed ones — so a barber who finished a long booking inside a shift would be falsely 'full' for the rest of the shift. Fix excludes 'completed' from the sum. (b) _get_barber_actual_sales matched on `booking_date`, but real tokens are written with `date` (the legacy `booking_date` is never populated by the create-token flow). Imran's 4 tokens therefore returned ₹0. Fix uses an $or on date / booking_date / created_at-fallback. (c) _compute_incentive_amount's total_pct branch only credited an exact-range match, so achievement 168.96% with a top slab capped at 150% returned earned=0. Fix retains the highest crossed slab. All three fixes verified by automated tests."
+}

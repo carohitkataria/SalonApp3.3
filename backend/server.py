@@ -805,8 +805,14 @@ def calc_blocked_minutes_from_total(total_minutes: int) -> int:
 
 
 async def get_barber_blocked_minutes_used(salon_id: str, barber_id: str, date: str, shift: str) -> int:
-    """Sum blocked minutes of tokens assigned to this barber for this shift.
-    Completed bookings still count (they used capacity). Cancelled/skipped do NOT count.
+    """Sum blocked minutes of *pending* tokens assigned to this barber for this shift.
+
+    Only bookings that still occupy the chair count toward capacity:
+      • waiting / future / in_progress / called → COUNT (pending)
+      • completed / cancelled / skipped         → DO NOT count (slot is free again)
+
+    This means a barber who finishes a booking inside a shift can immediately
+    accept a new booking in the same shift if the shift duration permits.
     """
     if barber_id == "any":
         return 0
@@ -816,7 +822,7 @@ async def get_barber_blocked_minutes_used(salon_id: str, barber_id: str, date: s
             "barber_id": barber_id,
             "date": date,
             "shift": shift,
-            "status": {"$nin": ["cancelled", "skipped"]},
+            "status": {"$nin": ["cancelled", "skipped", "completed"]},
         },
         {"_id": 0, "selected_services": 1, "blocked_minutes": 1, "total_service_minutes": 1},
     ).to_list(1000)
@@ -4693,8 +4699,14 @@ async def complete_token(token_id: str, current_salon=Depends(get_current_salon)
         # Reward Plan dashboard always reflects the latest sales.
         try:
             barber_id = token.get("barber_id")
-            booking_date = token.get("booking_date") or datetime.now(timezone.utc).strftime("%Y-%m-%d")
-            year_month = booking_date[:7]
+            # Tokens use `date` field (YYYY-MM-DD). Fall back to legacy `booking_date`
+            # then to today's UTC date.
+            tok_date = (
+                token.get("date")
+                or token.get("booking_date")
+                or datetime.now(timezone.utc).strftime("%Y-%m-%d")
+            )
+            year_month = tok_date[:7]
             salon_id_for_token = token.get("salon_id")
             if barber_id and salon_id_for_token and year_month:
                 await _recompute_incentive_payout(salon_id_for_token, barber_id, year_month)
@@ -6652,24 +6664,39 @@ def _compute_incentive_amount(plan_config: dict, target: float, actual_sales: fl
                 "amount": round(amt, 2),
             })
 
-    # 2) Total % slab (only the single matching range applies)
+    # 2) Total % slab
+    # Pick the slab with the HIGHEST from_pct that the barber has crossed.
+    # If achievement_pct lands inside an explicit [from, to) range, that slab wins.
+    # If achievement_pct is past the highest defined to_pct, the highest crossed
+    # slab still applies (the barber doesn't lose the bonus for over-performing).
+    total_pct_match = None
     for slab in slabs:
         if slab.get("type") != "total_pct":
             continue
         from_pct = float(slab.get("from_pct", 0))
         to_pct = float(slab.get("to_pct", 9999))
-        rate = float(slab.get("value", 0))
-        if from_pct <= achievement_pct < to_pct or (achievement_pct >= from_pct and to_pct >= 9999):
-            amt = actual_sales * (rate / 100.0)
-            earned += amt
-            breakdown.append({
-                "slab": f"{from_pct:g}%-{to_pct:g}%",
-                "type": "% of Total Sale",
-                "applied_on": round(actual_sales, 2),
-                "rate": f"{rate:g}%",
-                "amount": round(amt, 2),
-            })
+        if achievement_pct < from_pct:
+            continue
+        # This slab is "crossed" — keep it as the best match so far.
+        # Slabs are sorted ascending by from_pct, so later iterations may overwrite.
+        total_pct_match = slab
+        if achievement_pct < to_pct or to_pct >= 9999:
+            # Exact range match — no higher slab can be better.
             break
+
+    if total_pct_match is not None:
+        from_pct = float(total_pct_match.get("from_pct", 0))
+        to_pct = float(total_pct_match.get("to_pct", 9999))
+        rate = float(total_pct_match.get("value", 0))
+        amt = actual_sales * (rate / 100.0)
+        earned += amt
+        breakdown.append({
+            "slab": f"{from_pct:g}%-{to_pct:g}%",
+            "type": "% of Total Sale",
+            "applied_on": round(actual_sales, 2),
+            "rate": f"{rate:g}%",
+            "amount": round(amt, 2),
+        })
 
     # 3) Fixed bonuses (additive when achievement crosses from_pct)
     for slab in slabs:
@@ -6729,7 +6756,12 @@ async def _get_barber_target(plan_config: dict, barber: dict) -> float:
 
 
 async def _get_barber_actual_sales(salon_id: str, barber_id: str, year_month: str) -> float:
-    """Sum of total_amount on completed tokens for this barber in the given month (YYYY-MM)."""
+    """Sum of total_amount on completed tokens for this barber in the given month (YYYY-MM).
+
+    Tokens are dated using the `date` field (YYYY-MM-DD). For older / migrated
+    rows that may not have `date` set, we fall back to the YYYY-MM prefix of
+    `created_at`.
+    """
     start = f"{year_month}-01"
     # Compute end of month
     try:
@@ -6746,7 +6778,16 @@ async def _get_barber_actual_sales(salon_id: str, barber_id: str, year_month: st
         "salon_id": salon_id,
         "barber_id": barber_id,
         "status": "completed",
-        "booking_date": {"$gte": start, "$lt": next_first}
+        "$or": [
+            {"date": {"$gte": start, "$lt": next_first}},
+            {"booking_date": {"$gte": start, "$lt": next_first}},
+            # Fallback for legacy tokens with neither date nor booking_date set
+            {
+                "date": {"$in": [None, ""]},
+                "booking_date": {"$in": [None, ""]},
+                "created_at": {"$gte": start, "$lt": next_first + "T99"},
+            },
+        ],
     }, {"_id": 0, "total_amount": 1})
 
     total = 0.0
