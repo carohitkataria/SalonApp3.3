@@ -697,14 +697,29 @@ export default function IncentiveDashboard({ salonId, getAuthHeaders, isAdmin = 
           </DialogHeader>
           <div className="space-y-2">
             <Label className="text-xs">Approved Amount (₹)</Label>
-            <Input
-              type="number"
-              min="0"
-              step="0.01"
-              value={approveDialog.amount}
-              onChange={(e) => setApproveDialog(p => ({ ...p, amount: e.target.value }))}
-              data-testid="approve-amount-input"
-            />
+            <div className="flex gap-2">
+              <Input
+                type="number"
+                min="0"
+                step="0.01"
+                value={approveDialog.amount}
+                onChange={(e) => setApproveDialog(p => ({ ...p, amount: e.target.value }))}
+                data-testid="approve-amount-input"
+              />
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="border-gold/30 whitespace-nowrap"
+                onClick={() => setApproveDialog(p => ({
+                  ...p,
+                  amount: String(p.row?.incentive_earned ?? 0)
+                }))}
+                data-testid="approve-use-auto-btn"
+              >
+                Use Auto
+              </Button>
+            </div>
             {approveDialog.row && (
               <p className="text-xs text-muted-foreground">
                 Auto-calculated: {fmtINR(approveDialog.row.incentive_earned)}. Approving here only locks the

@@ -18,14 +18,17 @@ A multi-tenant salon management SaaS (React + FastAPI + MongoDB). Most recent fe
 - Frontend: React + Tailwind + shadcn/ui at `/app/frontend/src/`
 
 ## Implemented (CHANGELOG)
-### Feb 2026 — Phase 2 of Employee Reward Plan
+### Feb 2026 — Phase 2 of Employee Reward Plan + Manual Adjustment
 - ✅ New `IncentiveDashboard.js` mounted as a sub-tab inside Analytics ("Performance" / "Incentives")
 - ✅ Single-row badge layout per employee (Salary / Target / Actual / Achievement / Earned) + status pill
 - ✅ Bulk actions: Approve, Hold, Reset to Pending (Pay is per-row only, captures payment method)
-- ✅ Pay dialog asks payment_method (cash/upi/bank); on confirm, backend auto-creates a linked expense in `financial_transactions` (category=staff_incentive, type=outflow) and stamps `linked_expense_id` on the payout
-- ✅ Excel/CSV export across a date-range (start month → end month, all employees)
+- ✅ **Approve dialog**: admin can manually adjust the incentive amount (with "Use Auto" reset), persisted as `manual_amount` on the payout
+- ✅ **Pay dialog**: pre-fills with effective amount (manual override or auto), admin can further edit
+- ✅ **Strict Financials sync rule**: a `financial_transactions` row is created **only on Paid**, **never on Approve**, and is **fully idempotent** even if `linked_expense_id` is lost (looks up by reference_id + reference_type). Effective amount = `manual_amount` if set else `incentive_earned`.
+- ✅ Excel/CSV export across a date-range (Auto Incentive, Adjusted Incentive, Effective Payout columns)
 - ✅ Eligible-barbers dropdown verified (filters `is_barber=true`)
-- ✅ Tested via testing_agent_v3_fork — backend 5/5 pytest, frontend full flow pass, no defects
+- ✅ Full e2e tested via testing_agent_v3_fork — backend 10/10 pytest, frontend full flow pass
+- ✅ Cleaned up stale test seed (₹1.2L token) and 2 orphan ₹1000 financial transactions that were causing the user's reported 480% achievement / earned=0 bug
 
 ### Earlier this session
 - Today/Tomorrow toggles (Salon + Token dashboards)
