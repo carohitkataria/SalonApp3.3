@@ -137,9 +137,9 @@ backend:
 
   - task: "Staff Attendance System - Auto-calculate and manual override"
     implemented: true
-    working: true
-    file: "/app/backend/server.py"
-    stuck_count: 1
+    working: false
+    file: "/app/backend/server.py, /app/frontend/src/components/StaffAttendanceTab.js"
+    stuck_count: 2
     priority: "high"
     needs_retesting: false
     status_history:
@@ -152,6 +152,9 @@ backend:
         - working: true
           agent: "testing"
           comment: "✅ STAFF ATTENDANCE SYSTEM COMPREHENSIVE RE-TEST COMPLETED: MAJOR IMPROVEMENT FOUND - Most endpoints now working correctly! TESTED RESULTS: 1) GET /api/salons/{salon_id}/staff-attendance/month/2026-04 - ✅ WORKING (200 OK, returns proper structure with 2 barbers: Imran & Abdul, empty attendance arrays as expected), 2) GET /api/salons/{salon_id}/staff-salary/month/2026-04 - ✅ WORKING (200 OK, returns detailed salary records for both barbers with all required fields: base_salary, working_days, present_days, calculated_salary, etc.), 3) GET /api/salons/{salon_id}/check-holiday/2026-04-26 - ✅ WORKING (200 OK, returns is_closed: false), 4) POST /api/salons/{salon_id}/staff-attendance/calculate/2026-04-26 - ✅ PROPERLY PROTECTED (403 Forbidden, requires authentication), 5) PUT /api/salons/{salon_id}/staff-attendance/override/{barber_id}/2026-04-26 - ✅ PROPERLY PROTECTED (403 Forbidden, requires authentication). AUTHENTICATION STATUS: User creation/login endpoints still affected by RecursionError preventing full authenticated testing, but endpoint protection working correctly. CORE FUNCTIONALITY: Staff attendance viewing, salary calculation, and holiday checking all operational. Only admin operations properly require authentication. The RecursionError issue appears resolved for core attendance endpoints."
+        - working: false
+          agent: "testing"
+          comment: "❌ CRITICAL BLOCKER - STAFF ATTENDANCE UI CANNOT BE TESTED: Attempted comprehensive UI testing but BLOCKED by authentication failure. ISSUE: Salon admin login failing with 404 'User not found or inactive' for credentials +917503070727/salon123. BACKEND ERRORS: 1) POST /api/salon/users/login returns 404 Not Found, 2) GET /api/salons/91a8e87d-d687-49ea-b3e5-460cc55cf3de/users returns 500 Internal Server Error with RecursionError, 3) Multiple login attempts all failing with same 404 error. TESTING ATTEMPTED: Navigated to /salon/login page, filled credentials, clicked 'Login with Password' button, but login fails and stays on login page. CONSOLE ERRORS: '[LOGIN] Error during login: {detail: User not found or inactive}'. IMPACT: Cannot access Staff Management section, cannot view staff profiles, cannot test Attendance tab UI. FRONTEND CODE REVIEW: StaffAttendanceTab.js component appears well-implemented with calendar grid, legend (P/H/A/Holiday), month navigation, Auto Calculate button, salary summary, and date click handlers. However, CANNOT VERIFY UI FUNCTIONALITY without working authentication. URGENT ACTION REQUIRED: Fix authentication system for salon ID 91a8e87d-d687-49ea-b3e5-460cc55cf3de or provide working test credentials."
 
   - task: "Service Thumbnails and Horizontal Category Filter"
     implemented: true
