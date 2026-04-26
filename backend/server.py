@@ -7835,8 +7835,7 @@ async def get_token_invoice(token_id: str):
     
     return invoice_data
 
-# Include router
-app.include_router(api_router)
+# Moved app.include_router to end of all routes (before scheduler)
 
 app.add_middleware(
     CORSMiddleware,
@@ -8413,6 +8412,9 @@ async def remove_salon_holiday(
     
     return {"message": "Holiday removed"}
 
+
+# Include router - MUST be after ALL @api_router routes are defined
+app.include_router(api_router)
 
 # Scheduler for token allocation
 scheduler = AsyncIOScheduler()
