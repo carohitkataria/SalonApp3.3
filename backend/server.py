@@ -5072,12 +5072,27 @@ async def complete_token(token_id: str, current_salon=Depends(get_current_salon)
 
 @api_router.post("/tokens/{token_id}/recall")
 async def recall_token(token_id: str, current_salon=Depends(get_current_salon)):
-    """Re-call a token (if customer not available)"""
+    """Re-call a token (if customer not available) or recall a skipped token"""
     token = await db.tokens.find_one({"id": token_id}, {"_id": 0})
     if not token:
         raise HTTPException(status_code=404, detail="Token not found")
     
-    # Increment recall count and update called_at timestamp
+    # If token is skipped, change status to called
+    if token.get("status") == "skipped":
+        await db.tokens.update_one(
+            {"id": token_id},
+            {
+                "$set": {
+                    "status": "called",
+                    "called_at": datetime.now(timezone.utc).isoformat(),
+                    "recall_count": token.get("recall_count", 0) + 1
+                }
+            }
+        )
+        await broadcast_update("token_recalled", {"token_id": token_id, "status": "called"})
+        return {"message": "Skipped token recalled and moved to called status"}
+    
+    # Otherwise, increment recall count and update called_at timestamp
     recall_count = token.get("recall_count", 0) + 1
     await db.tokens.update_one(
         {"id": token_id},
