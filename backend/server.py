@@ -55,12 +55,16 @@ security = HTTPBearer()
 # Socket.IO setup
 sio = socketio.AsyncServer(async_mode='asgi', cors_allowed_origins='*')
 
-# Create the main app
-app = FastAPI()
+# Create the main FastAPI app
+fastapi_app = FastAPI()
 api_router = APIRouter(prefix="/api")
 
-# Socket.IO app
-socket_app = socketio.ASGIApp(sio, app)
+# Socket.IO app wraps FastAPI app
+socket_app = socketio.ASGIApp(sio, fastapi_app)
+
+# Export socket_app as the main app for ASGI server
+# This prevents recursion issues during deployment
+app = socket_app
 
 # ============ MODELS ============
 
@@ -7948,7 +7952,7 @@ async def get_token_invoice(token_id: str):
 
 # Moved app.include_router to end of all routes (before scheduler)
 
-app.add_middleware(
+fastapi_app.add_middleware(
     CORSMiddleware,
     allow_credentials=True,
     allow_origins=os.environ.get('CORS_ORIGINS', '*').split(','),
@@ -8563,7 +8567,7 @@ async def remove_salon_holiday(
 
 
 # Include router - MUST be after ALL @api_router routes are defined
-app.include_router(api_router)
+fastapi_app.include_router(api_router)
 
 # Scheduler for token allocation
 scheduler = AsyncIOScheduler()
@@ -8571,16 +8575,17 @@ scheduler.add_job(allocate_future_tokens, 'cron', hour=5, minute=30)  # Run at 5
 # Membership expiry reminders (once daily at 9:00 AM UTC)
 scheduler.add_job(notify_expiring_memberships, 'cron', hour=9, minute=0)
 
-@app.on_event("startup")
+@fastapi_app.on_event("startup")
 async def startup_event():
     await initialize_data()
     scheduler.start()
     logger.info("Application started with multi-salon support")
 
-@app.on_event("shutdown")
+@fastapi_app.on_event("shutdown")
 async def shutdown_db_client():
     scheduler.shutdown()
     client.close()
 
-# Mount Socket.IO
-app.mount("/", socket_app)
+# Note: Socket.IO is already integrated via socketio.ASGIApp wrapping
+# at line 63: socket_app = socketio.ASGIApp(sio, fastapi_app)
+# The main app export is socket_app which wraps fastapi_app
