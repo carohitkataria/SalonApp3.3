@@ -1870,6 +1870,27 @@ async def initialize_data():
                     "is_available": True
                 }
                 await db.barber_services.insert_one(pricing)
+        
+        # Create salon admin user
+        admin_user = {
+            "id": str(uuid.uuid4()),
+            "salon_id": salon_id,
+            "name": "Admin",
+            "login_id": "admin",
+            "mobile": "+917503070727",
+            "password_hash": pwd_context.hash("salon123"),
+            "role": "admin",
+            "status": "active",
+            "permissions": {
+                "can_edit_salon": True,
+                "can_access_analytics": True,
+                "can_access_financials": True,
+                "can_delete_salon": True
+            },
+            "created_at": datetime.now(timezone.utc).isoformat()
+        }
+        await db.salon_users.insert_one(admin_user)
+        logger.info(f"Created admin user: login_id='admin', password='salon123'")
 
 async def allocate_future_tokens():
     """Run at 5-6 AM to allocate tokens for future bookings"""
@@ -3067,13 +3088,15 @@ async def salon_user_login(credentials: SalonUserLogin):
             identifier = f"+91{identifier}"
     
     # Find user by login_id or mobile
-    salon_user = await db.salon_users.find_one({
+    query = {
         "$or": [
-            {"login_id": credentials.identifier},
+            {"login_id": credentials.identifier.strip()},
             {"mobile": identifier}
         ],
         "status": "active"
-    }, {"_id": 0})
+    }
+    
+    salon_user = await db.salon_users.find_one(query, {"_id": 0})
     
     if not salon_user:
         raise HTTPException(status_code=404, detail="User not found or inactive")
@@ -8105,8 +8128,8 @@ async def calculate_daily_attendance(
     current_user=Depends(get_current_salon_user)
 ):
     """Calculate attendance for all barbers for a specific date based on completed bookings."""
-    # Verify admin
-    if current_user.get("role") != "admin":
+    # Verify admin (salon_admin or admin role)
+    if current_user.get("role") not in ["admin", "salon_admin"]:
         raise HTTPException(status_code=403, detail="Admin access required")
     
     # Get all active barbers
@@ -8169,7 +8192,7 @@ async def override_attendance(
 ):
     """Admin override for attendance. Click on calendar date to change status."""
     # Verify admin
-    if current_user.get("role") != "admin":
+    if current_user.get("role") not in ["admin", "salon_admin"]:
         raise HTTPException(status_code=403, detail="Admin access required")
     
     # Validate status
@@ -8340,7 +8363,7 @@ async def mark_salary_paid(
 ):
     """Mark salary as paid and create financial transaction."""
     # Verify admin
-    if current_user.get("role") != "admin":
+    if current_user.get("role") not in ["admin", "salon_admin"]:
         raise HTTPException(status_code=403, detail="Admin access required")
     
     if body.payment_method not in ["cash", "upi", "bank"]:
@@ -8458,7 +8481,7 @@ async def add_salon_holiday(
     current_user=Depends(get_current_salon_user)
 ):
     """Add a holiday for the salon."""
-    if current_user.get("role") != "admin":
+    if current_user.get("role") not in ["admin", "salon_admin"]:
         raise HTTPException(status_code=403, detail="Admin access required")
     
     holiday_id = f"{salon_id}_{date}"
@@ -8510,7 +8533,7 @@ async def remove_salon_holiday(
     current_user=Depends(get_current_salon_user)
 ):
     """Remove a holiday."""
-    if current_user.get("role") != "admin":
+    if current_user.get("role") not in ["admin", "salon_admin"]:
         raise HTTPException(status_code=403, detail="Admin access required")
     
     await db.salon_holidays.delete_one({"id": f"{salon_id}_{date}"})
