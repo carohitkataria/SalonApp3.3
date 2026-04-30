@@ -1,0 +1,35 @@
+{
+  "summary": "Iteration 10 — backend verification of WhatsApp cancel-link (GET confirmation + POST actually cancels), public-details, and customer-reschedule flows, plus FE code inspection for useAutoRefresh and reschedule banner. 14/14 pytest assertions pass. All Phase-2 backend contracts behave exactly as specified.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": [
+    "/app/backend/tests/test_whatsapp_cancel_reschedule.py",
+    "/app/test_reports/pytest/iter10_whatsapp.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "server.py _render_cancel_confirm_page (line ~6776): the 'No, Keep Booking' anchor points to /salons which navigates the user AWAY from the WhatsApp flow. Consider history.back() or a 'close this tab' affordance so the user doesn't land in a generic salon list on mobile WA browser.",
+    "server.py customer_reschedule_token (line ~5429): the endpoint accepts arbitrary dict body (no Pydantic model). Add a RescheduleRequest model for input validation (types for selected_services list, barber_id str, date ISO format). Currently a stray empty list for selected_services is silently ignored.",
+    "server.py customer_reschedule_token (line ~5461): if the customer switches to barber='any' or effective_services is empty, total_amount is NOT recomputed and silently stays at the old value — the customer could reschedule a ₹600 service to a ₹180 service without the total updating. Recommend: always recompute when selected_services or barber_id changes (defaulting to base_price sum as fallback).",
+    "server.py public-details / customer-reschedule (lines 5400 & 5429): no auth check. Anyone who guesses a UUID can view a customer's phone + name + booking and even modify it. Recommend adding a signed token query param (same pattern as you'd use for WhatsApp cancel-link) OR at minimum rate-limit by IP.",
+    "server.py _render_cancel_page success-branch uses status_code=200 even when underlying state is 'already cancelled' — fine, but the success icon (✓) may mislead users who intended a fresh cancellation. UX nit.",
+    "Both cancel-link and public-details correctly reject in-service/called/in_progress (spec compliance verified by tests)."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_whatsapp_cancel_reschedule.py"
+  ],
+  "success_rate": {"backend": "100% (14/14)", "frontend": "N/A (code-inspection only)"},
+  "test_credentials": "admin / salon123 (not used — tested endpoints are unauthenticated public endpoints)",
+  "seed_data_creation": "Per-test tokens inserted via pymongo with _seed_test=True, auto-deleted in fixture teardown AND in module teardown. Salon b742cd5f-e3f8-4b63-872b-b83d84841d2c ('The Looks Unisex Salon'), barber 8df34a0a-754a-4f56-b3c9-dff6788f3e3c (Imran), services Haircut/Beard/Color — NO production data mutated.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Phase-2 WhatsApp cancel/reschedule endpoints are backend-verified and stable. Test harness /app/backend/tests/test_whatsapp_cancel_reschedule.py uses pymongo (sync) and reads REACT_APP_BACKEND_URL from /app/frontend/.env via the helper at top of file — safe to re-run anytime. Frontend wiring confirmed via grep: SinglePageBooking.js imports & consumes modifyTokenId, calls GET /public-details on mount, PUT /customer-reschedule on submit (both normal and UPI branches), and renders the reschedule banner at line 1287 with data-testid='reschedule-banner'. WalletDisplay/ActiveBookingTracker/HistoryPage all import useAutoRefresh from '@/hooks/useAutoRefresh' and invoke it with 15-20s intervals. Main outstanding risk: public endpoints have no auth (see critical_code_review_comments #4).",
+  "frontend_code_inspection": {
+    "useAutoRefresh_hook_exists": "/app/frontend/src/hooks/useAutoRefresh.js line 18 exports default function useAutoRefresh(callback, intervalMs=15000, deps=[])",
+    "WalletDisplay_uses_hook": "line 5 imports, line 48 invokes with 20000ms",
+    "ActiveBookingTracker_uses_hook": "line 7 imports, line 37 invokes with 15000ms",
+    "HistoryPage_uses_hook": "line 13 imports, line 67 invokes",
+    "SinglePageBooking_reschedule_wiring": "modifyTokenId parsed from searchParams line 240; public-details GET at line 313; PUT /customer-reschedule at lines 737 & 805; reschedule banner with data-testid='reschedule-banner' at line 1289"
+  },
+  "rca_of_the_issue": "No bugs encountered. Initial test run failed because (a) REACT_APP_BACKEND_URL was not exported in the pytest shell (it lives only in /app/frontend/.env) and (b) mixing motor's AsyncIOMotorClient with loop.run_until_complete inside sync pytest fixtures crossed event-loop boundaries. Both resolved by (a) adding a minimal _load_env_file helper at test-module import time and (b) switching the fixtures to synchronous pymongo."
+}

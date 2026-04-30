@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import axios from 'axios';
@@ -6,7 +6,7 @@ import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { toast } from 'sonner';
 import GenderBadge from '@/components/GenderBadge';
-import { Scissors, Calendar, User, CheckCircle, Star, Clock, ArrowLeft, Home, Zap, Check, ChevronDown, ChevronRight, Search, Package, Crown, History, Wallet, Banknote, Smartphone, Shield } from 'lucide-react';
+import { Scissors, Calendar, User, CheckCircle, Star, Clock, ArrowLeft, Home, Zap, Check, ChevronDown, ChevronRight, Search, Package, Crown, History, Wallet, Banknote, Smartphone, Shield, Edit } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Input } from '@/components/ui/input';
 import CustomerWalletCard from '@/components/CustomerWalletCard';
@@ -237,6 +237,8 @@ export default function SinglePageBooking() {
   const whenParam = searchParams.get('when');
   const preselectedBarber = searchParams.get('barber');
   const preselectedServices = searchParams.get('services');
+  const modifyTokenId = searchParams.get('modify'); // WhatsApp reschedule flow
+  const [rescheduleBooking, setRescheduleBooking] = useState(null);
 
   const [salon, setSalon] = useState(null);
   const [barbers, setBarbers] = useState([]);
@@ -287,7 +289,7 @@ export default function SinglePageBooking() {
   // Fetch data on mount
   useEffect(() => {
     if (!isUserLoggedIn) {
-      navigate('/user/login', { state: { from: `/book/${salonId}` } });
+      navigate('/user/login', { state: { from: `/book/${salonId}${modifyTokenId ? `?modify=${modifyTokenId}` : ''}` } });
       return;
     }
     fetchSalonData();
@@ -301,6 +303,33 @@ export default function SinglePageBooking() {
     return () => clearInterval(interval);
   }, [isUserLoggedIn, salonId]);
 
+  // Reschedule flow: when ?modify=<tokenId> is present in URL, hydrate the form
+  // with the existing booking's data so the customer can edit the SAME token
+  // (rather than creating a fresh booking).
+  useEffect(() => {
+    if (!modifyTokenId || !isUserLoggedIn) return;
+    (async () => {
+      try {
+        const { data } = await axios.get(`${API}/tokens/${modifyTokenId}/public-details`);
+        setRescheduleBooking(data);
+        setFormData((prev) => ({
+          ...prev,
+          date: data.date || prev.date,
+          shift: data.shift || '',
+          barberId: data.barber_id || 'any',
+          selectedServices: Array.isArray(data.selected_services) ? data.selected_services : [],
+        }));
+        setFastestAvailable(!data.barber_id || data.barber_id === 'any');
+        if (typeof data.booking_for_self === 'boolean') setBookingForSelf(data.booking_for_self);
+        if (data.payment_mode) setPaymentMode(data.payment_mode);
+        toast.info(`Modifying booking #${data.token_number}`);
+      } catch (err) {
+        toast.error(err?.response?.data?.detail || 'Could not load booking to reschedule.');
+      }
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [modifyTokenId, isUserLoggedIn]);
+
   // Refetch shift windows when selected date changes (operational-hour driven)
   useEffect(() => {
     if (salonId && formData.date) {
@@ -310,11 +339,18 @@ export default function SinglePageBooking() {
   }, [formData.date, salonId]);
 
   // Fetch barber services when barber changes
+  const rescheduleHydratedRef = useRef(false);
   useEffect(() => {
     if (formData.barberId !== 'any' && !fastestAvailable) {
       fetchBarberServices(formData.barberId);
     } else {
       setBarberServices(salonServices);
+    }
+    // Don't wipe preloaded services during reschedule hydration — those are
+    // the services the customer just clicked through from WhatsApp.
+    if (modifyTokenId && !rescheduleHydratedRef.current && formData.selectedServices.length) {
+      rescheduleHydratedRef.current = true;
+      return;
     }
     setFormData(prev => ({ ...prev, selectedServices: [] }));
   }, [formData.barberId, salonServices, fastestAvailable]);
@@ -689,6 +725,22 @@ export default function SinglePageBooking() {
     setLoading(true);
 
     try {
+      // Reschedule/modify existing booking (opened via WhatsApp reschedule link)
+      if (modifyTokenId) {
+        const body = {
+          selected_services: formData.selectedServices,
+          barber_id: fastestAvailable ? 'any' : formData.barberId,
+          date: formData.date,
+          shift: formData.shift,
+          payment_mode: paymentMode,
+        };
+        const response = await axios.put(`${API}/tokens/${modifyTokenId}/customer-reschedule`, body);
+        setBookedToken(response.data.token || { id: modifyTokenId });
+        setBookingStep('success');
+        toast.success('Booking updated successfully!');
+        return;
+      }
+
       const bookingData = {
         salon_id: salonId,
         user_id: user.id,
@@ -741,6 +793,26 @@ export default function SinglePageBooking() {
   const handleUpiConfirm = async () => {
     setLoading(true);
     try {
+      // Reschedule path — update SAME token instead of creating a new one
+      if (modifyTokenId) {
+        const body = {
+          selected_services: formData.selectedServices,
+          barber_id: fastestAvailable ? 'any' : formData.barberId,
+          date: formData.date,
+          shift: formData.shift,
+          payment_mode: 'upi',
+        };
+        const response = await axios.put(`${API}/tokens/${modifyTokenId}/customer-reschedule`, body);
+        await axios.post(`${API}/payments/customer-confirm-upi`, {
+          token_id: modifyTokenId,
+          upi_reference: 'Customer confirmed'
+        });
+        setBookedToken(response.data.token || { id: modifyTokenId });
+        setBookingStep('success');
+        toast.success('Booking updated with UPI payment!');
+        return;
+      }
+
       // First create the booking
       const bookingData = {
         salon_id: salonId,
@@ -1210,6 +1282,25 @@ export default function SinglePageBooking() {
 
       <form onSubmit={(e) => { e.preventDefault(); goToPayment(); }} className="max-w-2xl mx-auto p-4 space-y-5">
         
+        {/* Reschedule banner — shown only when this page was opened via a
+            WhatsApp reschedule link (?modify=<token_id>) */}
+        {modifyTokenId && rescheduleBooking && (
+          <div
+            data-testid="reschedule-banner"
+            className="flex items-center gap-3 p-3 rounded-xl border border-gold/40 bg-gold/10"
+          >
+            <Edit className="w-5 h-5 text-gold shrink-0" />
+            <div className="text-sm leading-tight">
+              <p className="font-bold text-foreground">
+                Modifying booking #{rescheduleBooking.token_number}
+              </p>
+              <p className="text-xs text-muted-foreground">
+                Changes will update the same booking — no new token will be created.
+              </p>
+            </div>
+          </div>
+        )}
+
         {/* Section 1: Who & When */}
         <div className="space-y-4">
           {/* Booking For */}

@@ -5396,6 +5396,100 @@ async def customer_cancel_token(token_id: str):
     
     return {"message": "Booking cancelled successfully"}
 
+
+@api_router.get("/tokens/{token_id}/public-details")
+async def get_token_public_details(token_id: str):
+    """Public (no-auth) lookup of a booking, used by the customer-side Reschedule
+    flow that's opened via WhatsApp link. Returns only the fields the booking
+    page needs to hydrate its form."""
+    token = await db.tokens.find_one({"id": token_id}, {"_id": 0})
+    if not token:
+        raise HTTPException(status_code=404, detail="Booking not found")
+    if token.get("status") in ("completed", "cancelled", "in_service", "called", "in_progress"):
+        raise HTTPException(status_code=400, detail=f"Booking cannot be rescheduled (status: {token.get('status')})")
+    return {
+        "id": token.get("id"),
+        "salon_id": token.get("salon_id"),
+        "user_id": token.get("user_id"),
+        "customer_name": token.get("customer_name"),
+        "phone": token.get("phone"),
+        "date": token.get("date"),
+        "shift": token.get("shift"),
+        "barber_id": token.get("barber_id"),
+        "selected_services": token.get("selected_services") or [],
+        "total_amount": token.get("total_amount"),
+        "booking_for_self": token.get("booking_for_self", True),
+        "customer_gender": token.get("customer_gender"),
+        "source": token.get("source"),
+        "status": token.get("status"),
+        "token_number": token.get("token_number"),
+    }
+
+
+@api_router.put("/tokens/{token_id}/customer-reschedule")
+async def customer_reschedule_token(token_id: str, body: dict):
+    """Customer-driven reschedule / modification of an existing booking.
+    Updates services, barber, date and shift on the SAME token (no new token
+    is created). Recalculates total and re-broadcasts token_updated."""
+    token = await db.tokens.find_one({"id": token_id}, {"_id": 0})
+    if not token:
+        raise HTTPException(status_code=404, detail="Booking not found")
+    if token.get("status") in ("completed", "cancelled", "in_service", "called", "in_progress"):
+        raise HTTPException(status_code=400, detail=f"This booking cannot be modified (status: {token.get('status')})")
+
+    updates: dict = {}
+    # Services
+    new_services = body.get("selected_services")
+    if isinstance(new_services, list) and new_services:
+        updates["selected_services"] = new_services
+    # Barber
+    new_barber = body.get("barber_id")
+    if new_barber:
+        updates["barber_id"] = new_barber
+    # Date / shift
+    new_date = body.get("date")
+    if new_date:
+        updates["date"] = new_date
+    new_shift = body.get("shift")
+    if new_shift:
+        updates["shift"] = new_shift
+    # Payment (optional)
+    new_payment = body.get("payment_mode")
+    if new_payment:
+        updates["payment_mode"] = new_payment
+
+    # Recalculate total based on the *effective* barber + services
+    effective_barber = updates.get("barber_id", token.get("barber_id"))
+    effective_services = updates.get("selected_services", token.get("selected_services") or [])
+    if effective_services and effective_barber and effective_barber != "any":
+        try:
+            updates["total_amount"] = await calculate_booking_total(effective_services, effective_barber)
+        except Exception as e:
+            logger.warning(f"reschedule total recompute failed: {e}")
+
+    if not updates:
+        raise HTTPException(status_code=400, detail="No changes provided")
+
+    await db.tokens.update_one({"id": token_id}, {"$set": updates})
+    updated = await db.tokens.find_one({"id": token_id}, {"_id": 0})
+    await broadcast_update("token_updated", updated)
+
+    # Notify salon that the customer modified their booking
+    if updated and updated.get("salon_id"):
+        await create_in_app_notification(
+            user_type="salon",
+            user_id=updated["salon_id"],
+            title="Booking Modified by Customer",
+            message=f"{updated.get('customer_name','Customer')} rescheduled booking (Token #{updated.get('token_number','')}).",
+            notification_type="booking_modified",
+            setting_key="booking_change",
+            salon_id=updated["salon_id"],
+            related_id=token_id,
+        )
+
+    return {"message": "Booking updated successfully", "token": TokenModel(**updated)}
+
+
 @api_router.post("/tokens/{token_id}/defer")
 async def defer_token(token_id: str, new_slot: str, current_salon=Depends(get_current_salon)):
     """Defer token to next slot"""
@@ -6466,21 +6560,53 @@ async def update_customer_notif_settings(phone: str, body: dict):
 @api_router.get("/tokens/{token_id}/cancel-link", response_class=HTMLResponse)
 async def cancel_token_via_link(token_id: str):
     """
-    Cancel a booking via direct link (used in WhatsApp messages).
-    Returns a styled HTML confirmation page. No app login required.
+    GET handler: renders a "Are you sure?" confirmation page.
+    Actual cancellation happens on POST to /cancel-link (see below) which the
+    form on this page submits.
     """
     token = await db.tokens.find_one({"id": token_id}, {"_id": 0})
     if not token:
         return HTMLResponse(content=_render_cancel_page(success=False, message="Booking not found."), status_code=404)
 
-    # If already cancelled/completed, show appropriate page
     current_status = token.get("status")
     if current_status == "cancelled":
         return HTMLResponse(content=_render_cancel_page(
             success=True,
             message=f"Your booking (Token #{token.get('token_number','')}) is already cancelled."
         ))
-    if current_status in ("completed", "in_service", "called"):
+    if current_status in ("completed", "in_service", "called", "in_progress"):
+        return HTMLResponse(content=_render_cancel_page(
+            success=False,
+            message=f"This booking cannot be cancelled (status: {current_status})."
+        ), status_code=400)
+
+    # Fetch salon name for a nicer confirmation UX
+    salon = await db.salons.find_one({"id": token.get("salon_id")}, {"_id": 0, "salon_name": 1}) or {}
+    salon_name = salon.get("salon_name", "SalonHub")
+
+    return HTMLResponse(content=_render_cancel_confirm_page(
+        token=token,
+        salon_name=salon_name,
+    ))
+
+
+@api_router.post("/tokens/{token_id}/cancel-link", response_class=HTMLResponse)
+async def cancel_token_via_link_confirm(token_id: str):
+    """
+    POST handler: actually cancels the booking after the customer confirms on
+    the HTML interstitial. Returns result HTML page.
+    """
+    token = await db.tokens.find_one({"id": token_id}, {"_id": 0})
+    if not token:
+        return HTMLResponse(content=_render_cancel_page(success=False, message="Booking not found."), status_code=404)
+
+    current_status = token.get("status")
+    if current_status == "cancelled":
+        return HTMLResponse(content=_render_cancel_page(
+            success=True,
+            message=f"Your booking (Token #{token.get('token_number','')}) is already cancelled."
+        ))
+    if current_status in ("completed", "in_service", "called", "in_progress"):
         return HTMLResponse(content=_render_cancel_page(
             success=False,
             message=f"This booking cannot be cancelled (status: {current_status})."
@@ -6583,6 +6709,77 @@ def _render_cancel_page(success: bool, message: str) -> str:
   <p>{message}</p>
   <a class="btn" href="/salons">Book Another Appointment</a>
   <div class="small">SalonHub · You can close this tab.</div>
+</div>
+</body>
+</html>"""
+
+
+def _render_cancel_confirm_page(token: dict, salon_name: str) -> str:
+    """Interstitial "Are you sure?" page shown when the customer clicks the
+    WhatsApp cancel link. Submits a POST to the same URL to actually cancel."""
+    import html as _html
+    token_id = token.get("id", "")
+    token_number = token.get("token_number", "")
+    customer_name = _html.escape(token.get("customer_name", "Customer"))
+    date = _html.escape(token.get("date", ""))
+    shift = _html.escape(str(token.get("shift", "") or "").title())
+    services_count = len(token.get("selected_services", []) or [])
+    total_amount = token.get("total_amount", 0) or 0
+    salon_name_html = _html.escape(salon_name)
+    return f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Cancel Booking?</title>
+<style>
+  * {{ box-sizing: border-box; }}
+  body {{ margin:0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+         background: linear-gradient(135deg,#1f2937 0%, #111827 100%); min-height: 100vh;
+         display:flex; align-items:center; justify-content:center; color:#fff; padding:20px; }}
+  .card {{ background:#1f2937; border:1px solid rgba(184,134,11,0.3); border-radius:16px;
+         padding:32px 24px; max-width:440px; width:100%; box-shadow:0 20px 50px rgba(0,0,0,0.4);
+         text-align:center; }}
+  .icon {{ font-size:56px; line-height:1; margin-bottom:8px; }}
+  h1 {{ color:#f59e0b; margin:0 0 8px; font-size:22px; }}
+  .sub {{ color:#94a3b8; margin:0 0 20px; font-size:13px; }}
+  .details {{ background:#0f172a; border:1px solid rgba(184,134,11,0.2); border-radius:12px;
+         padding:16px; margin: 16px 0 20px; text-align:left; }}
+  .row {{ display:flex; justify-content:space-between; padding:6px 0; font-size:14px; }}
+  .row .k {{ color:#94a3b8; }}
+  .row .v {{ color:#f1f5f9; font-weight:600; }}
+  .actions {{ display:flex; gap:10px; margin-top:16px; }}
+  .btn {{ flex:1; padding:14px 16px; border-radius:10px; border:none; font-weight:700;
+         font-size:15px; cursor:pointer; text-decoration:none; display:inline-flex;
+         align-items:center; justify-content:center; }}
+  .btn-no {{ background:#334155; color:#e2e8f0; }}
+  .btn-no:hover {{ background:#475569; }}
+  .btn-yes {{ background:#dc2626; color:#fff; }}
+  .btn-yes:hover {{ background:#b91c1c; }}
+  .small {{ color:#64748b; font-size:12px; margin-top:18px; }}
+</style>
+</head>
+<body>
+<div class="card">
+  <div class="icon">⚠️</div>
+  <h1>Cancel this booking?</h1>
+  <p class="sub">Please confirm — this action cannot be undone.</p>
+  <div class="details">
+    <div class="row"><span class="k">Salon</span><span class="v">{salon_name_html}</span></div>
+    <div class="row"><span class="k">Token</span><span class="v">#{token_number}</span></div>
+    <div class="row"><span class="k">Customer</span><span class="v">{customer_name}</span></div>
+    <div class="row"><span class="k">Date</span><span class="v">{date}</span></div>
+    <div class="row"><span class="k">Shift</span><span class="v">{shift or '—'}</span></div>
+    <div class="row"><span class="k">Services</span><span class="v">{services_count}</span></div>
+    <div class="row"><span class="k">Amount</span><span class="v">₹{total_amount}</span></div>
+  </div>
+  <form method="POST" action="/api/tokens/{token_id}/cancel-link" style="margin:0;">
+    <div class="actions">
+      <a href="/salons" class="btn btn-no">No, Keep Booking</a>
+      <button type="submit" class="btn btn-yes">Yes, Cancel</button>
+    </div>
+  </form>
+  <div class="small">SalonHub · Safe to close if you change your mind.</div>
 </div>
 </body>
 </html>"""
