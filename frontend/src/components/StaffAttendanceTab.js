@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import axios from 'axios';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
@@ -7,7 +7,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '
 import { toast } from 'sonner';
 import { 
   Calendar, ChevronLeft, ChevronRight, Check, X, Clock, DollarSign, 
-  Loader2, AlertCircle, CheckCircle, Banknote, CreditCard, Building
+  Loader2, AlertCircle, CheckCircle, Banknote, CreditCard, Building, Plane
 } from 'lucide-react';
 import { motion } from 'framer-motion';
 
@@ -19,6 +19,7 @@ const STATUS_COLORS = {
   half_day: 'bg-yellow-500 text-black',
   absent: 'bg-red-500 text-white',
   holiday: 'bg-purple-500 text-white',
+  on_leave: 'bg-blue-500 text-white',
   future: 'bg-muted text-muted-foreground'
 };
 
@@ -26,7 +27,8 @@ const STATUS_LABELS = {
   present: 'P',
   half_day: 'H',
   absent: 'A',
-  holiday: '🎉'
+  holiday: '🎉',
+  on_leave: 'L'
 };
 
 export default function StaffAttendanceTab({ salonId, barberId, barberName, compensation }) {
@@ -37,9 +39,13 @@ export default function StaffAttendanceTab({ salonId, barberId, barberName, comp
   const [attendance, setAttendance] = useState([]);
   const [salary, setSalary] = useState(null);
   const [loading, setLoading] = useState(false);
+  const [bulkLoading, setBulkLoading] = useState(false);
   const [showPayDialog, setShowPayDialog] = useState(false);
   const [paymentMethod, setPaymentMethod] = useState('cash');
   const [paymentNote, setPaymentNote] = useState('');
+  const [leaveMode, setLeaveMode] = useState(false);
+  // Barber's employment dates + per-date leave list
+  const [leaveInfo, setLeaveInfo] = useState({ doj: null, last_working_date: null, leave_dates: [] });
 
   const token = localStorage.getItem('salon_admin_token') || 
     JSON.parse(localStorage.getItem('salon_user_auth') || '{}')?.token;
@@ -51,12 +57,7 @@ export default function StaffAttendanceTab({ salonId, barberId, barberName, comp
   const today = new Date();
   const todayStr = today.toISOString().split('T')[0];
 
-  useEffect(() => {
-    fetchAttendanceData();
-    fetchSalaryData();
-  }, [currentMonth, salonId, barberId]);
-
-  const fetchAttendanceData = async () => {
+  const fetchAttendanceData = useCallback(async () => {
     if (!salonId || !barberId) return;
     setLoading(true);
     try {
@@ -71,9 +72,9 @@ export default function StaffAttendanceTab({ salonId, barberId, barberName, comp
     } finally {
       setLoading(false);
     }
-  };
+  }, [salonId, barberId, currentMonth, token]);
 
-  const fetchSalaryData = async () => {
+  const fetchSalaryData = useCallback(async () => {
     if (!salonId || !barberId) return;
     try {
       const response = await axios.get(
@@ -85,7 +86,30 @@ export default function StaffAttendanceTab({ salonId, barberId, barberName, comp
     } catch (error) {
       console.error('Error fetching salary:', error);
     }
-  };
+  }, [salonId, barberId, currentMonth, token]);
+
+  const fetchLeaveInfo = useCallback(async () => {
+    if (!salonId || !barberId) return;
+    try {
+      const response = await axios.get(
+        `${API}/salons/${salonId}/barbers/${barberId}/leave-dates`,
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      setLeaveInfo({
+        doj: response.data.doj || null,
+        last_working_date: response.data.last_working_date || null,
+        leave_dates: response.data.leave_dates || [],
+      });
+    } catch (error) {
+      console.error('Error fetching leave info:', error);
+    }
+  }, [salonId, barberId, token]);
+
+  useEffect(() => {
+    fetchAttendanceData();
+    fetchSalaryData();
+    fetchLeaveInfo();
+  }, [fetchAttendanceData, fetchSalaryData, fetchLeaveInfo]);
 
   const handleCalculateAttendance = async () => {
     // Calculate for all days up to today in the current month
@@ -127,7 +151,67 @@ export default function StaffAttendanceTab({ salonId, barberId, barberName, comp
       fetchAttendanceData();
       fetchSalaryData();
     } catch (error) {
-      toast.error('Failed to update attendance');
+      const detail = error?.response?.data?.detail;
+      toast.error(typeof detail === 'string' ? detail : 'Failed to update attendance');
+    }
+  };
+
+  const handleMarkAllPresent = async () => {
+    if (loading || bulkLoading) return;
+    if (!window.confirm(`Mark ${barberName || 'this barber'} as PRESENT for every eligible past day in ${monthName}? Days outside the joining/last-working-day window or marked on leave will be skipped.`)) {
+      return;
+    }
+    setBulkLoading(true);
+    try {
+      // Iterate through all days up to today/end-of-month, calling the endpoint per-barber.
+      // The mark-all-present endpoint operates per-date for the WHOLE salon — but here we want only THIS barber.
+      // So we use the single override endpoint (with per-day eligibility validated server-side).
+      const endDay = currentMonth === todayStr.slice(0, 7) ? today.getDate() : daysInMonth;
+      let marked = 0, skipped = 0;
+      for (let day = 1; day <= endDay; day++) {
+        const dateStr = `${currentMonth}-${String(day).padStart(2, '0')}`;
+        // Skip if day is outside joining/last-working-day or is a leave day
+        if (leaveInfo.doj && dateStr < leaveInfo.doj) { skipped++; continue; }
+        if (leaveInfo.last_working_date && dateStr > leaveInfo.last_working_date) { skipped++; continue; }
+        if ((leaveInfo.leave_dates || []).includes(dateStr)) { skipped++; continue; }
+        try {
+          await axios.put(
+            `${API}/salons/${salonId}/staff-attendance/override/${barberId}/${dateStr}`,
+            { status: 'present', note: 'Bulk mark all present' },
+            { headers: { Authorization: `Bearer ${token}` } }
+          );
+          marked++;
+        } catch (innerErr) {
+          skipped++;
+        }
+      }
+      toast.success(`Marked ${marked} day(s) as present${skipped ? ` (skipped ${skipped})` : ''}`);
+      fetchAttendanceData();
+      fetchSalaryData();
+    } catch (error) {
+      toast.error('Failed to mark all present');
+    } finally {
+      setBulkLoading(false);
+    }
+  };
+
+  const handleToggleLeave = async (dateStr) => {
+    if (!dateStr) return;
+    const isCurrentlyOnLeave = (leaveInfo.leave_dates || []).includes(dateStr);
+    try {
+      await axios.put(
+        `${API}/salons/${salonId}/barbers/${barberId}/leave-date`,
+        { date: dateStr, is_on_leave: !isCurrentlyOnLeave },
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      toast.success(isCurrentlyOnLeave ? `Leave removed for ${dateStr}` : `${barberName || 'Barber'} marked on leave for ${dateStr}`);
+      // Refresh leave info & attendance so calendar updates.
+      fetchLeaveInfo();
+      fetchAttendanceData();
+      fetchSalaryData();
+    } catch (error) {
+      const detail = error?.response?.data?.detail;
+      toast.error(typeof detail === 'string' ? detail : 'Failed to update leave');
     }
   };
 
@@ -202,21 +286,59 @@ export default function StaffAttendanceTab({ salonId, barberId, barberName, comp
     >
       {/* Attendance Calendar */}
       <div className="bg-card border border-border rounded-lg p-6">
-        <div className="flex items-center justify-between mb-6">
+        <div className="flex items-center justify-between mb-6 flex-wrap gap-2">
           <h3 className="text-lg font-semibold flex items-center gap-2">
             <Calendar className="w-5 h-5 text-gold" />
             Attendance - {barberName}
           </h3>
-          <Button
-            onClick={handleCalculateAttendance}
-            disabled={loading}
-            variant="outline"
-            size="sm"
-          >
-            {loading ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <CheckCircle className="w-4 h-4 mr-2" />}
-            Auto Calculate
-          </Button>
+          <div className="flex flex-wrap gap-2">
+            <Button
+              onClick={handleMarkAllPresent}
+              disabled={loading || bulkLoading}
+              variant="outline"
+              size="sm"
+              title="Bulk mark every eligible day this month as present"
+            >
+              {bulkLoading ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Check className="w-4 h-4 mr-2" />}
+              Mark All Present
+            </Button>
+            <Button
+              onClick={() => setLeaveMode(prev => !prev)}
+              variant={leaveMode ? "default" : "outline"}
+              size="sm"
+              className={leaveMode ? 'bg-blue-600 hover:bg-blue-700 text-white' : ''}
+              title="When ON, clicking a date toggles ON/OFF leave"
+            >
+              <Plane className="w-4 h-4 mr-2" />
+              {leaveMode ? 'Leave Mode: ON' : 'Leave Mode: OFF'}
+            </Button>
+            <Button
+              onClick={handleCalculateAttendance}
+              disabled={loading}
+              variant="outline"
+              size="sm"
+            >
+              {loading ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <CheckCircle className="w-4 h-4 mr-2" />}
+              Auto Calculate
+            </Button>
+          </div>
         </div>
+
+        {/* Employment dates info row */}
+        {(leaveInfo.doj || leaveInfo.last_working_date) && (
+          <div className="flex flex-wrap gap-3 mb-4 text-xs">
+            {leaveInfo.doj && (
+              <span className="px-2 py-1 rounded-full bg-muted text-foreground">
+                Joined: <strong>{leaveInfo.doj}</strong>
+              </span>
+            )}
+            {leaveInfo.last_working_date && (
+              <span className="px-2 py-1 rounded-full bg-red-500/10 text-red-600">
+                Last working day: <strong>{leaveInfo.last_working_date}</strong>
+              </span>
+            )}
+          </div>
+        )}
 
         {/* Month Navigator */}
         <div className="flex items-center justify-between mb-4">
@@ -247,6 +369,10 @@ export default function StaffAttendanceTab({ salonId, barberId, barberName, comp
             <div className="w-5 h-5 rounded bg-purple-500 flex items-center justify-center text-white">🎉</div>
             <span>Holiday</span>
           </div>
+          <div className="flex items-center gap-1">
+            <div className="w-5 h-5 rounded bg-blue-500 flex items-center justify-center text-white font-bold">L</div>
+            <span>On Leave</span>
+          </div>
         </div>
 
         {/* Calendar Grid */}
@@ -263,26 +389,56 @@ export default function StaffAttendanceTab({ salonId, barberId, barberName, comp
             }
             
             const { day, dateStr, isFuture, record } = item;
-            const status = record?.status || (isFuture ? 'future' : null);
+            const isOnLeaveDate = (leaveInfo.leave_dates || []).includes(dateStr);
+            const beforeJoin = !!leaveInfo.doj && dateStr < leaveInfo.doj;
+            const afterLast = !!leaveInfo.last_working_date && dateStr > leaveInfo.last_working_date;
+            const outOfWindow = beforeJoin || afterLast;
+
+            // Decide visual status: leave overrides record status
+            const status = isOnLeaveDate
+              ? 'on_leave'
+              : (record?.status || (isFuture ? 'future' : null));
+            
+            // Click semantics:
+            //  - If outOfWindow: disabled
+            //  - Leave mode ON: toggles leave for ANY date (past/today/future) inside employment window
+            //  - Otherwise: only past/today dates → cycle attendance status
+            const canClick = !outOfWindow && (leaveMode || !isFuture);
+            const handleClick = () => {
+              if (!canClick) return;
+              if (leaveMode) return handleToggleLeave(dateStr);
+              return handleOverrideAttendance(dateStr, status);
+            };
+
+            const titleText = outOfWindow
+              ? (beforeJoin ? `Before joining (${leaveInfo.doj})` : `After last working day (${leaveInfo.last_working_date})`)
+              : leaveMode
+                ? (isOnLeaveDate ? `Click to remove leave (${dateStr})` : `Click to mark on leave (${dateStr})`)
+                : isFuture
+                  ? 'Future date — turn on Leave Mode to set leave for this day'
+                  : `Click to change (${status || 'not marked'})`;
             
             return (
               <button
                 key={item.key}
                 type="button"
-                disabled={isFuture}
-                onClick={() => !isFuture && handleOverrideAttendance(dateStr, status)}
+                disabled={!canClick}
+                onClick={handleClick}
                 className={`h-10 rounded text-xs font-bold transition-all ${
-                  isFuture
-                    ? 'bg-muted/30 text-muted-foreground cursor-not-allowed'
+                  outOfWindow
+                    ? 'bg-muted/20 text-muted-foreground cursor-not-allowed opacity-40'
                     : status
                     ? STATUS_COLORS[status]
-                    : 'bg-muted/50 hover:bg-muted cursor-pointer'
-                } ${record?.auto_calculated === false ? 'ring-2 ring-gold' : ''}`}
-                title={isFuture ? 'Future date' : `Click to change (${status || 'not marked'})`}
+                    : (isFuture
+                        ? (leaveMode ? 'bg-muted/50 hover:bg-blue-500/30 cursor-pointer' : 'bg-muted/30 text-muted-foreground cursor-not-allowed')
+                        : 'bg-muted/50 hover:bg-muted cursor-pointer'
+                      )
+                } ${record?.auto_calculated === false || isOnLeaveDate ? 'ring-2 ring-gold' : ''} ${leaveMode && !outOfWindow ? 'ring-1 ring-blue-400/40' : ''}`}
+                title={titleText}
               >
                 <div className="flex flex-col items-center">
-                  <span className={isFuture ? '' : 'text-[10px] opacity-70'}>{day}</span>
-                  {status && !isFuture && (
+                  <span className={isFuture && !leaveMode ? '' : 'text-[10px] opacity-70'}>{day}</span>
+                  {status && status !== 'future' && (
                     <span className="text-[10px]">{STATUS_LABELS[status]}</span>
                   )}
                 </div>
@@ -292,7 +448,9 @@ export default function StaffAttendanceTab({ salonId, barberId, barberName, comp
         </div>
 
         <p className="text-xs text-muted-foreground mt-4">
-          💡 Click on any date to change status. Gold ring = manually overridden.
+          💡 Click on any past/today date to cycle attendance.
+          Toggle <strong>Leave Mode</strong> to mark/unmark leave on any date (incl. future).
+          Days outside the employment window are disabled.
         </p>
       </div>
 

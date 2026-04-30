@@ -416,17 +416,7 @@ export default function BarberManagement({ salonId, getAuthHeaders }) {
               </Label>
             </div>
 
-            {/* On Leave Checkbox */}
-            <div className="flex items-center space-x-2">
-              <Checkbox
-                id="on_leave"
-                checked={newBarber.on_leave}
-                onCheckedChange={(checked) => setNewBarber({ ...newBarber, on_leave: checked })}
-              />
-              <Label htmlFor="on_leave" className="cursor-pointer">
-                Staff is on leave (won't be shown to customers for booking)
-              </Label>
-            </div>
+            {/* On-leave is managed from the Attendance tab (per-date), not on the staff form. */}
 
             <div className="flex justify-end space-x-2">
               <Button type="button" variant="outline" onClick={() => setShowAddForm(false)}>

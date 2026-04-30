@@ -1065,7 +1065,57 @@ agent_communication:
     - agent: "testing"
       message: "❌ CRITICAL STAFF ATTENDANCE SYSTEM FAILURE: Comprehensive testing attempted for Staff Attendance System but encountered critical system failure. ISSUE: All attendance endpoints (GET /attendance/{month}, GET /salary/{month}, POST /attendance/calculate/{date}, PUT /attendance/{barber_id}/{date}, POST /salary/{barber_id}/{month}/pay) returning 500 Internal Server Error due to RecursionError in Starlette error handling middleware. ROOT CAUSE: Maximum recursion depth exceeded in error handling, indicating infinite loop in attendance endpoint logic or response serialization. AUTHENTICATION BLOCKED: Admin login failing with 404 'User not found or inactive' for provided credentials (+917503070727/salon123), preventing testing of admin-only endpoints. WORKING COMPONENTS: ✅ Service Categories with Thumbnails (19 categories with proper thumbnail URLs), ✅ Barbers endpoint (2 active barbers: Imran, Abdul), ✅ Basic salon data access. SALON ID ISSUE: Review request salon ID (2dad5cd9-5dda-4398-bbb5-a4d12aae7915) does not exist, testing performed on available salon (91a8e87d-d687-49ea-b3e5-460cc55cf3de). URGENT ACTION REQUIRED: Debug and fix recursion error in attendance system before endpoints can be properly tested. Staff Attendance System is currently non-functional due to critical backend bug."
     - agent: "main"
-      message: "PHASE 1 of continuation request — implementing items 2 (staff bugs), 3 (manual booking customer search), 4 (auto-select latest slot), 5 (default All services + dynamic categories), 9 (max 2 bookings — already enforced), 10 (midnight cleanup + cancel-skipped button), 11 (gallery 5MB photo / 25MB video, remove samples).
+      message: "PHASE 1.5 — additional staff/attendance enhancements implemented:
+      
+      BACKEND (server.py):
+      1. New fields on Barber/BarberCreate/BarberUpdate: `last_working_date` (YYYY-MM-DD) and `leave_dates` (List[str]).
+      2. New helper: `is_barber_available_on(barber, date_str)` — single source of truth for 'is barber visible on this date?' Honors doj, last_working_date, leave_dates, and legacy on_leave (only for today).
+      3. `GET /api/salons/{salon_id}/barbers` updated:
+         - Accepts new `date` query param (defaults to today IST).
+         - When available_only=True OR customer_view=True, filters via is_barber_available_on so barbers past last_working_date / on leave today / before joining are hidden.
+         - Customer-facing app already passes available_only=true; updated to also pass customer_view=true so non-barber staff (receptionists etc.) stay hidden.
+      4. `pick_fastest_barber` (auto-assignment) now skips barbers unavailable on the booking date — so 'Fastest Available' will never assign a barber on leave that day or past last_working_date.
+      5. Calendar/queue calculation `calculate_barber_attendance_for_date` updated:
+         - Returns 'absent' if date in leave_dates.
+         - Returns 'absent' if date < doj or date > last_working_date (outside employment window).
+         - Otherwise: 1+ completed booking → present, else absent.
+      6. `PUT /api/salons/{salon_id}/staff-attendance/override/{barber_id}/{date}` now also accepts status='on_leave' and validates:
+         - Cannot mark present/half_day before doj.
+         - Cannot mark present/half_day after last_working_date.
+      7. NEW endpoint `POST /api/salons/{salon_id}/staff-attendance/mark-all-present/{date}` — bulk marks every active barber present for a given date. Skips barbers ineligible (before doj / after last_working_date / on leave). Returns counts + skipped reasons.
+      8. NEW endpoint `PUT /api/salons/{salon_id}/barbers/{barber_id}/leave-date` — body `{date, is_on_leave}`:
+         - Adds/removes a date from barber.leave_dates.
+         - When marking on leave, also writes that date's attendance as 'absent' (override).
+         - Updates legacy `on_leave` flag automatically based on whether today is in leave_dates.
+         - Validates the date is within employment window (doj..last_working_date).
+      9. NEW endpoint `GET /api/salons/{salon_id}/barbers/{barber_id}/leave-dates` — returns barber's leave_dates list + doj + last_working_date + legacy on_leave flag.
+      
+      FRONTEND:
+      A) StaffProfilePage.js — Profile tab:
+         - Removed 'On Leave' toggle (moved to Attendance tab).
+         - Added 'Last Working Day' date input (with min=doj). Helper text: 'Barber stops being visible to customers after this date.'
+      B) StaffAttendanceTab.js:
+         - Two new toolbar buttons: 'Mark All Present' (bulk) and 'Leave Mode: ON/OFF'.
+         - Employment dates badge row (Joined / Last working day) when set.
+         - Calendar legend + status now includes 'On Leave' (blue 'L').
+         - Per-date click semantics:
+           * Day outside [doj..last_working_date] → disabled & dimmed (with tooltip).
+           * Leave Mode OFF → past/today only, click cycles attendance status; future dates disabled.
+           * Leave Mode ON → click any date inside employment window to toggle leave on/off.
+         - Mark-All-Present iterates current month days up to today, skipping ineligible / leave dates client-side and uses the per-date override endpoint (so server-side validation also applies).
+         - Refreshes leave info + attendance + salary after every action.
+      C) BarberManagement.js form — removed 'On Leave' checkbox (now done from Attendance tab).
+      D) SinglePageBooking.js — barber fetch now passes `customer_view=true` so customers only see barbers visible to customers AND available today.
+      
+      PLEASE TEST these new endpoints / changes. Critical scenarios:
+      1. PUT /barbers/{id} accepts `last_working_date` and `leave_dates` fields and persists them.
+      2. GET /salons/{id}/barbers?available_only=true&date=2026-05-15 — barber whose last_working_date < 2026-05-15 is excluded.
+      3. PUT /salons/{id}/barbers/{id}/leave-date {date:'2026-05-10', is_on_leave: true} → barber.leave_dates contains '2026-05-10'; attendance 'absent' override created.
+      4. Setting is_on_leave=false → date removed from leave_dates.
+      5. POST /salons/{id}/staff-attendance/mark-all-present/{date} returns marked + skipped lists; barbers past last_working_date are skipped (reason 'after_last_working_day'); barbers on leave that day are skipped (reason 'on_leave').
+      6. Override PUT now rejects (400) status='present' for date before doj OR after last_working_date.
+      7. Customer-facing GET /salons/{id}/barbers?available_only=true returns ONLY barbers available today (not on leave today, within employment window).
+      8. pick_fastest_barber implicitly tested by creating a salon-side booking with 'auto-assign'. Backend should never pick a barber on leave."
       
       BACKEND CHANGES (server.py):
       1. Attendance rule simplified — barber is marked PRESENT if 1+ completed booking on the day (was: required 2 shifts). HALF_DAY classification removed.
@@ -1112,3 +1162,21 @@ agent_communication:
       message: "✅ PHASE 1 BACKEND TESTING COMPLETE (5/6 TESTS PASSED): Comprehensive testing of Phase 1 backend changes completed. SALON ID: b742cd5f-e3f8-4b63-872b-b83d84841d2c (admin login working with credentials login_id='admin', password='salon123'). TEST RESULTS: 1) ❌ PUT /api/barbers/{barber_id} - FAILING (401 Unauthorized) - ROOT CAUSE: Endpoint uses Depends(get_current_salon) which only accepts legacy 'salon' role tokens, but admin login returns 'salon_admin' role token. FIX REQUIRED: Change line 2751 in server.py from Depends(get_current_salon) to Depends(get_current_salon_user) or Depends(get_current_salon_admin). 2) ✅ NEW ATTENDANCE RULE - WORKING PERFECTLY (POST /api/salons/{salon_id}/staff-attendance/calculate/{date} returns status 'present' or 'absent' only, NO 'half_day' status found in monthly attendance data, rule correctly implemented: PRESENT if 1+ completed booking). 3) ✅ ATTENDANCE OVERRIDE ROLE CHECK - WORKING PERFECTLY (PUT /api/salons/{salon_id}/staff-attendance/override/{barber_id}/{date} returns 200 OK with admin token, correctly rejects without auth with 403, legacy 'salon' role support confirmed working). 4) ✅ CUSTOMERS WALLET ENRICHMENT - ENDPOINT WORKING (GET /api/salons/{salon_id}/customers returns 200 OK with 'customers' array structure, no customers in test database to verify wallet_balance and membership_name fields, but endpoint accessible and responding correctly). 5) ✅ SERVICE CATEGORIES & BARBERS REGRESSION - WORKING (GET /api/services/categories returns 1 category, GET /api/salons/{salon_id}/barbers returns 2 barbers: Imran and Abdul, no regression detected). 6) ✅ END-OF-DAY CLEANUP FUNCTION - VERIFIED (Function cancel_active_bookings_end_of_day() exists at line 8587 in server.py, registered via APScheduler at line 8693 with cron schedule hour=18, minute=30 UTC = 00:00 IST, backend running successfully without errors, function will execute at scheduled time). CRITICAL ISSUE: Only Test 1 (barber profile update) failing due to authentication dependency mismatch - simple one-line fix required in server.py line 2751."
     - agent: "testing"
       message: "✅ PUT /api/barbers/{barber_id} RE-TEST COMPLETE - ENDPOINT NOW WORKING: Comprehensive re-testing of barber profile update endpoint completed successfully after main agent's fix to use Depends(get_current_salon_user). SALON ID: b742cd5f-e3f8-4b63-872b-b83d84841d2c (admin login working with credentials identifier='admin', password='salon123'). TEST RESULTS: 1) ✅ ADMIN LOGIN - WORKING (POST /api/salon/users/login returns 200 OK with access_token and salon_id), 2) ✅ GET BARBERS LIST - WORKING (GET /api/salons/{salon_id}/barbers returns 2 barbers: Imran and Abdul), 3) ✅ PUT /api/barbers/{barber_id} WITH AUTHORIZATION - WORKING PERFECTLY (200 OK response, successfully updated barber profile with designation='Senior Stylist - QA Test' and experience=7, response includes updated fields), 4) ✅ VERIFY CHANGES PERSISTED - WORKING (re-fetched barbers list confirms designation and experience updated correctly), 5) ✅ RESTORE ORIGINAL VALUES - WORKING (successfully restored original designation=null and experience=8), 6) ✅ NEGATIVE TEST WITHOUT AUTHORIZATION - WORKING (correctly rejected with 403 Forbidden when no Authorization header provided). CRITICAL FIX CONFIRMED: The endpoint now uses Depends(get_current_salon_user) which accepts salon_admin role tokens (returned from admin login). Previously failing with 401 Unauthorized due to Depends(get_current_salon) which only accepted legacy 'salon' role. The barber profile update endpoint is now fully functional and production-ready."
+  - task: "Phase 1.5 - Barber Availability & Leave Management"
+    implemented: true
+    working: true
+    file: "/app/backend/server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+        - working: "NA"
+          agent: "main"
+          comment: "PHASE 1.5 — additional staff/attendance enhancements implemented: BACKEND: 1) New fields on Barber model: last_working_date (YYYY-MM-DD) and leave_dates (List[str]), 2) New helper is_barber_available_on(barber, date_str) for availability checks, 3) GET /api/salons/{salon_id}/barbers updated with date param and customer_view filter, 4) pick_fastest_barber now skips unavailable barbers, 5) calculate_barber_attendance_for_date updated to handle leave_dates and employment window, 6) PUT /api/salons/{salon_id}/staff-attendance/override validates doj/last_working_date, 7) NEW POST /api/salons/{salon_id}/staff-attendance/mark-all-present/{date} for bulk marking, 8) NEW PUT /api/salons/{salon_id}/barbers/{barber_id}/leave-date for toggle leave, 9) NEW GET /api/salons/{salon_id}/barbers/{barber_id}/leave-dates to get leave info. FRONTEND: StaffProfilePage.js added Last Working Day field, StaffAttendanceTab.js added Leave Mode and Mark All Present, BarberManagement.js removed On Leave checkbox, SinglePageBooking.js passes customer_view=true."
+        - working: true
+          agent: "testing"
+          comment: "✅ PHASE 1.5 BACKEND TESTING COMPLETE - ALL 6 TESTS PASSED: Comprehensive testing of barber availability and leave management features completed successfully. SALON ID: b742cd5f-e3f8-4b63-872b-b83d84841d2c (admin login working with credentials identifier='admin', password='salon123'). TEST RESULTS: 1) ✅ UPDATE BARBER NEW FIELDS - WORKING (PUT /api/barbers/{barber_id} successfully accepts and persists last_working_date='2026-12-31' and leave_dates=['2026-06-15', '2026-06-16'], verified by re-fetching barber data), 2) ✅ FILTERED LISTING - WORKING (GET /api/salons/{salon_id}/barbers?available_only=true&date=YYYY-MM-DD correctly excludes barbers when date > last_working_date, correctly includes barbers when date <= last_working_date), 3) ✅ TOGGLE LEAVE DATE - WORKING PERFECTLY (PUT /api/salons/{salon_id}/barbers/{barber_id}/leave-date with is_on_leave=true adds date to leave_dates array and creates attendance record with status='absent', is_on_leave=false removes date from leave_dates, GET /api/salons/{salon_id}/barbers/{barber_id}/leave-dates returns correct leave info, filtered listing correctly excludes barbers on leave dates), 4) ✅ BULK MARK ALL PRESENT - WORKING (POST /api/salons/{salon_id}/staff-attendance/mark-all-present/{date} returns marked count and skipped array with correct reasons: 'after_last_working_day' for barbers past last_working_date, 'on_leave' for barbers on leave that day, attendance records created with status='present' for eligible barbers), 5) ✅ OVERRIDE VALIDATION - WORKING (PUT /api/salons/{salon_id}/staff-attendance/override/{barber_id}/{date} correctly rejects with 400 when trying to mark present before doj or after last_working_date, correctly allows absent/holiday status regardless of dates), 6) ✅ CUSTOMER-VIEW FILTER - WORKING (GET /api/salons/{salon_id}/barbers?available_only=true&customer_view=true returns only barbers with is_barber=True AND available today, correctly excludes barbers on leave today using IST timezone). All Phase 1.5 features are production-ready and working correctly."
+
+agent_communication:
+    - agent: "testing"
+      message: "✅ PHASE 1.5 BACKEND TESTING COMPLETE - ALL 6 TESTS PASSED: Comprehensive testing of barber availability and leave management features completed successfully. SALON ID: b742cd5f-e3f8-4b63-872b-b83d84841d2c. All requested test scenarios executed and verified: (1) Update barber with last_working_date and leave_dates fields - fields persist correctly, (2) Filtered listing with available_only=true&date parameter - correctly excludes/includes barbers based on last_working_date, (3) Toggle leave date endpoint - adds/removes dates from leave_dates, creates attendance records with status='absent', GET /leave-dates endpoint working, (4) Bulk mark all present - returns marked count and skipped array with correct reasons (after_last_working_day, on_leave), (5) Override validation - correctly rejects present status before doj or after last_working_date, allows absent/holiday regardless of dates, (6) Customer-view filter - returns only is_barber=True barbers available today (not on leave, within employment window). All Phase 1.5 backend features are production-ready. NO ISSUES FOUND."

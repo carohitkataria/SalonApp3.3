@@ -339,7 +339,7 @@ export default function SinglePageBooking() {
     try {
       const [salonRes, barbersRes, servicesRes, categoriesRes] = await Promise.all([
         axios.get(`${API}/salons/${salonId}`),
-        axios.get(`${API}/salons/${salonId}/barbers?available_only=true`),
+        axios.get(`${API}/salons/${salonId}/barbers?available_only=true&customer_view=true`),
         axios.get(`${API}/salons/${salonId}/services/enabled`),
         axios.get(`${API}/services/categories`)
       ]);

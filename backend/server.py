@@ -281,8 +281,10 @@ class BarberCreate(BaseModel):
     designation: Optional[str] = None  # e.g., "Senior Stylist", "Receptionist"
     emergency_contact: Optional[str] = None
     aadhar_number: Optional[str] = None
-    doj: Optional[str] = None  # Date of Joining
+    doj: Optional[str] = None  # Date of Joining (YYYY-MM-DD)
     dob: Optional[str] = None  # Date of Birth
+    last_working_date: Optional[str] = None  # YYYY-MM-DD; barber stops being visible to customers after this date
+    leave_dates: Optional[List[str]] = None  # YYYY-MM-DD list of leave days (incl. future)
     compensation: Optional[float] = None
     documents: Optional[List[str]] = None  # URLs to uploaded documents
 
@@ -307,6 +309,8 @@ class BarberUpdate(BaseModel):
     aadhar_number: Optional[str] = None
     doj: Optional[str] = None
     dob: Optional[str] = None
+    last_working_date: Optional[str] = None
+    leave_dates: Optional[List[str]] = None
     compensation: Optional[float] = None
     documents: Optional[List[str]] = None
 
@@ -323,7 +327,7 @@ class Barber(BaseModel):
     profile_image: Optional[str] = None
     photo_url: Optional[str] = None  # Alias for profile_image
     queue_status: str = "available"  # available/busy/offline
-    on_leave: bool = False  # True if staff is on leave
+    on_leave: bool = False  # Legacy global "on leave today" flag (kept for backward compat)
     is_active: bool = True
     is_barber: bool = True  # True if staff is a barber (visible to customers)
     intro: Optional[str] = None  # Staff's story/about
@@ -337,6 +341,8 @@ class Barber(BaseModel):
     aadhar_number: Optional[str] = None
     doj: Optional[str] = None  # Date of Joining
     dob: Optional[str] = None  # Date of Birth
+    last_working_date: Optional[str] = None  # If set + today > this date, barber is hidden from customers
+    leave_dates: List[str] = []  # YYYY-MM-DD list; barber on leave on those days
     compensation: Optional[float] = None
     documents: List[str] = []  # URLs to uploaded documents
 
@@ -913,6 +919,41 @@ async def can_fit_in_barber_shift(
     }
 
 
+def is_barber_available_on(barber: Dict[str, Any], date_str: str) -> bool:
+    """Return True if this barber is allowed to take bookings / be visible to customers on date_str.
+    Date format: YYYY-MM-DD.
+    Conditions for unavailability:
+    - Barber's joining date (doj) is after `date_str`
+    - last_working_date is set and `date_str` > last_working_date
+    - `date_str` is in barber's leave_dates list
+    - Legacy global on_leave flag is True (only for "today" — kept for back-compat).
+    """
+    if not date_str:
+        return True
+    try:
+        # Joining date
+        doj = (barber.get("doj") or "").strip()
+        if doj and date_str < doj:
+            return False
+        # Last working date
+        lwd = (barber.get("last_working_date") or "").strip()
+        if lwd and date_str > lwd:
+            return False
+        # Per-date leave list
+        leave_dates = barber.get("leave_dates") or []
+        if isinstance(leave_dates, list) and date_str in leave_dates:
+            return False
+        # Legacy global on_leave flag — only treat as "leave today"
+        ist = timezone(timedelta(hours=5, minutes=30))
+        today_ist = datetime.now(ist).strftime("%Y-%m-%d")
+        if barber.get("on_leave") is True and date_str == today_ist:
+            return False
+    except Exception:
+        # On any parsing error, do not block the barber
+        return True
+    return True
+
+
 async def pick_fastest_barber(
     salon_id: str, date: str, shift: str, required_blocked_minutes: int,
     customer_gender: Optional[str] = None
@@ -925,6 +966,8 @@ async def pick_fastest_barber(
     Priority 3: Any random active barber with enough capacity.
 
     Returns the chosen barber doc or None if no barber has capacity.
+    Skips: barbers on leave on this date, barbers past last_working_date,
+           barbers whose joining date is later than this date.
     """
     barbers = await db.barbers.find(
         {
@@ -935,6 +978,11 @@ async def pick_fastest_barber(
         {"_id": 0},
     ).to_list(500)
 
+    if not barbers:
+        return None
+
+    # Filter out barbers unavailable on this date (joining date / last working day / leave_dates)
+    barbers = [b for b in barbers if is_barber_available_on(b, date)]
     if not barbers:
         return None
 
@@ -2720,20 +2768,27 @@ async def delete_salon_package(
 # ============ BARBER ROUTES ============
 
 @api_router.get("/salons/{salon_id}/barbers", response_model=List[Barber])
-async def get_salon_barbers(salon_id: str, available_only: bool = False, customer_view: bool = False):
+async def get_salon_barbers(salon_id: str, available_only: bool = False, customer_view: bool = False, date: Optional[str] = None):
     """
     Get barbers for a salon
-    available_only=True: Only return barbers not on leave (for customer booking)
+    available_only=True: Only return barbers available on the given date (or today if not provided).
+                       Excludes leave_dates entries, post-last_working_date, before joining date,
+                       and the legacy global on_leave flag for "today".
     customer_view=True: Only return staff marked as barbers (is_barber=True)
     available_only=False & customer_view=False: Return all active staff (for admin)
     """
     query = {"salon_id": salon_id, "is_active": True}
-    if available_only:
-        query["on_leave"] = {"$ne": True}  # Exclude barbers on leave
     if customer_view:
         query["is_barber"] = True  # Only show staff visible to customers
     
-    barbers = await db.barbers.find(query, {"_id": 0}).to_list(100)
+    barbers = await db.barbers.find(query, {"_id": 0}).to_list(500)
+    
+    if available_only or customer_view:
+        # Resolve target date — defaults to today (IST)
+        ist = timezone(timedelta(hours=5, minutes=30))
+        target_date = (date or "").strip() or datetime.now(ist).strftime("%Y-%m-%d")
+        barbers = [b for b in barbers if is_barber_available_on(b, target_date)]
+    
     return barbers
 
 @api_router.post("/salons/{salon_id}/barbers", response_model=Barber)
@@ -4883,15 +4938,15 @@ async def get_slot_availability(
         total_mins = await calc_service_total_minutes(sid_list)
         required_blocked = calc_blocked_minutes_from_total(total_mins)
 
-    # Find active barbers
-    barbers = await db.barbers.find(
+    # Find active barbers AVAILABLE on this date (joining/last-working/leave-aware)
+    raw_barbers = await db.barbers.find(
         {
             "salon_id": salon_id,
             "is_active": True,
-            "$or": [{"on_leave": False}, {"on_leave": None}, {"on_leave": {"$exists": False}}],
         },
-        {"_id": 0, "id": 1, "name": 1},
-    ).to_list(100)
+        {"_id": 0},
+    ).to_list(500)
+    barbers = [b for b in raw_barbers if is_barber_available_on(b, date)]
 
     result = []
     for barber in barbers:
@@ -8072,9 +8127,29 @@ async def calculate_barber_attendance_for_date(salon_id: str, barber_id: str, da
     """Calculate attendance for a barber on a specific date based on completed bookings.
     
     Rules (updated):
-    - Present: 1+ completed booking on that date
-    - Absent: No completed bookings on that date
+    - On leave (date in barber.leave_dates) → status='absent' regardless of completed bookings
+    - Date before joining date (doj) → status='absent' (not yet employed)
+    - Date after last_working_date → status='absent' (no longer employed)
+    - Otherwise: Present if 1+ completed booking, else Absent
     """
+    # Look up barber to apply employment-window / leave gating
+    barber = await db.barbers.find_one(
+        {"id": barber_id, "salon_id": salon_id},
+        {"_id": 0, "doj": 1, "last_working_date": 1, "leave_dates": 1}
+    ) or {}
+    
+    leave_dates = barber.get("leave_dates") or []
+    doj = (barber.get("doj") or "").strip()
+    lwd = (barber.get("last_working_date") or "").strip()
+    
+    # Outside employment window → mark absent (no service required)
+    if doj and date_str < doj:
+        return {"status": "absent", "bookings_count": 0,
+                "morning_shift_completed": False, "noon_evening_shift_completed": False}
+    if lwd and date_str > lwd:
+        return {"status": "absent", "bookings_count": 0,
+                "morning_shift_completed": False, "noon_evening_shift_completed": False}
+    
     # Get completed bookings for this barber on this date
     start_of_day = f"{date_str}T00:00:00"
     end_of_day = f"{date_str}T23:59:59"
@@ -8097,6 +8172,12 @@ async def calculate_barber_attendance_for_date(salon_id: str, barber_id: str, da
     
     morning_shift = "morning" in shifts_with_bookings
     noon_evening_shift = "noon" in shifts_with_bookings or "evening" in shifts_with_bookings
+    
+    # Leave overrides everything
+    if isinstance(leave_dates, list) and date_str in leave_dates:
+        return {"status": "absent", "bookings_count": bookings_count,
+                "morning_shift_completed": morning_shift,
+                "noon_evening_shift_completed": noon_evening_shift}
     
     # New rule: barber is marked present if at least one service was completed.
     if bookings_count >= 1:
@@ -8236,8 +8317,21 @@ async def override_attendance(
         raise HTTPException(status_code=403, detail="Admin access required")
     
     # Validate status
-    if body.status not in ["present", "half_day", "absent", "holiday"]:
-        raise HTTPException(status_code=400, detail="Invalid status. Use: present, half_day, absent, holiday")
+    if body.status not in ["present", "half_day", "absent", "holiday", "on_leave"]:
+        raise HTTPException(status_code=400, detail="Invalid status. Use: present, half_day, absent, holiday, on_leave")
+    
+    # Fetch barber to validate doj / last_working_date when status implies attending work
+    barber = await db.barbers.find_one({"id": barber_id, "salon_id": salon_id}, {"_id": 0})
+    if not barber:
+        raise HTTPException(status_code=404, detail="Barber not found")
+    
+    if body.status in ("present", "half_day"):
+        doj = (barber.get("doj") or "").strip()
+        if doj and date < doj:
+            raise HTTPException(status_code=400, detail=f"Cannot mark present before joining date ({doj})")
+        lwd = (barber.get("last_working_date") or "").strip()
+        if lwd and date > lwd:
+            raise HTTPException(status_code=400, detail=f"Cannot mark present after last working day ({lwd})")
     
     record_id = f"{salon_id}_{barber_id}_{date}"
     
@@ -8279,6 +8373,193 @@ async def override_attendance(
     
     updated = await db.attendance.find_one({"id": record_id}, {"_id": 0})
     return updated
+
+
+@api_router.post("/salons/{salon_id}/staff-attendance/mark-all-present/{date}")
+async def mark_all_present(
+    salon_id: str,
+    date: str,  # YYYY-MM-DD
+    current_user=Depends(get_current_salon_user)
+):
+    """Bulk mark every eligible barber 'present' on this date.
+    Eligibility: barber.is_active=True AND (no joining date OR doj <= date) AND (no last_working_date OR date <= last_working_date) AND date NOT in barber.leave_dates.
+    Returns counts of marked / skipped.
+    """
+    if current_user.get("role") not in ["admin", "salon_admin", "salon"]:
+        raise HTTPException(status_code=403, detail="Admin access required")
+    
+    # Basic date format check
+    try:
+        datetime.strptime(date, "%Y-%m-%d")
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid date format. Use YYYY-MM-DD")
+    
+    barbers = await db.barbers.find(
+        {"salon_id": salon_id, "is_active": True}, {"_id": 0}
+    ).to_list(500)
+    
+    now = datetime.now(timezone.utc).isoformat()
+    marked, skipped = 0, []
+    
+    for barber in barbers:
+        b_id = barber.get("id")
+        # Eligibility checks
+        doj = (barber.get("doj") or "").strip()
+        if doj and date < doj:
+            skipped.append({"barber_id": b_id, "name": barber.get("name"), "reason": "before_joining"})
+            continue
+        lwd = (barber.get("last_working_date") or "").strip()
+        if lwd and date > lwd:
+            skipped.append({"barber_id": b_id, "name": barber.get("name"), "reason": "after_last_working_day"})
+            continue
+        leave_dates = barber.get("leave_dates") or []
+        if isinstance(leave_dates, list) and date in leave_dates:
+            skipped.append({"barber_id": b_id, "name": barber.get("name"), "reason": "on_leave"})
+            continue
+        
+        record_id = f"{salon_id}_{b_id}_{date}"
+        existing = await db.attendance.find_one({"id": record_id}, {"_id": 0})
+        if existing:
+            await db.attendance.update_one(
+                {"id": record_id},
+                {"$set": {
+                    "status": "present",
+                    "auto_calculated": False,
+                    "override_by": current_user.get("id"),
+                    "override_note": "Bulk mark all present",
+                    "updated_at": now
+                }}
+            )
+        else:
+            await db.attendance.insert_one({
+                "id": record_id,
+                "salon_id": salon_id,
+                "barber_id": b_id,
+                "date": date,
+                "status": "present",
+                "auto_calculated": False,
+                "morning_shift_completed": False,
+                "noon_evening_shift_completed": False,
+                "bookings_count": 0,
+                "override_by": current_user.get("id"),
+                "override_note": "Bulk mark all present",
+                "created_at": now,
+                "updated_at": now,
+            })
+        marked += 1
+    
+    return {"date": date, "marked": marked, "skipped": skipped, "total": len(barbers)}
+
+
+class LeaveToggleBody(BaseModel):
+    date: str  # YYYY-MM-DD
+    is_on_leave: bool
+
+
+@api_router.put("/salons/{salon_id}/barbers/{barber_id}/leave-date")
+async def toggle_barber_leave_date(
+    salon_id: str,
+    barber_id: str,
+    body: LeaveToggleBody,
+    current_user=Depends(get_current_salon_user)
+):
+    """Add or remove a date from the barber's leave_dates list.
+    When marked on leave: also creates / overrides today/that-date's attendance record to 'absent'.
+    """
+    if current_user.get("role") not in ["admin", "salon_admin", "salon"]:
+        raise HTTPException(status_code=403, detail="Admin access required")
+    
+    # Basic date validation
+    try:
+        datetime.strptime(body.date, "%Y-%m-%d")
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid date format. Use YYYY-MM-DD")
+    
+    barber = await db.barbers.find_one({"id": barber_id, "salon_id": salon_id}, {"_id": 0})
+    if not barber:
+        raise HTTPException(status_code=404, detail="Barber not found")
+    
+    # Validate against doj / last working date — can't take leave outside employment
+    doj = (barber.get("doj") or "").strip()
+    if doj and body.date < doj:
+        raise HTTPException(status_code=400, detail=f"Cannot set leave before joining date ({doj})")
+    lwd = (barber.get("last_working_date") or "").strip()
+    if lwd and body.date > lwd:
+        raise HTTPException(status_code=400, detail=f"Cannot set leave after last working day ({lwd})")
+    
+    leave_dates = list(barber.get("leave_dates") or [])
+    
+    if body.is_on_leave:
+        if body.date not in leave_dates:
+            leave_dates.append(body.date)
+        # Also write attendance record as 'absent' for that date (admin-overridden)
+        record_id = f"{salon_id}_{barber_id}_{body.date}"
+        now = datetime.now(timezone.utc).isoformat()
+        existing = await db.attendance.find_one({"id": record_id}, {"_id": 0})
+        if existing:
+            await db.attendance.update_one(
+                {"id": record_id},
+                {"$set": {
+                    "status": "absent",
+                    "auto_calculated": False,
+                    "override_by": current_user.get("id"),
+                    "override_note": "Marked on leave",
+                    "updated_at": now,
+                }}
+            )
+        else:
+            await db.attendance.insert_one({
+                "id": record_id,
+                "salon_id": salon_id,
+                "barber_id": barber_id,
+                "date": body.date,
+                "status": "absent",
+                "auto_calculated": False,
+                "morning_shift_completed": False,
+                "noon_evening_shift_completed": False,
+                "bookings_count": 0,
+                "override_by": current_user.get("id"),
+                "override_note": "Marked on leave",
+                "created_at": now,
+                "updated_at": now,
+            })
+    else:
+        if body.date in leave_dates:
+            leave_dates = [d for d in leave_dates if d != body.date]
+    
+    # Decide legacy on_leave flag based on whether today is in leave_dates
+    ist = timezone(timedelta(hours=5, minutes=30))
+    today_ist = datetime.now(ist).strftime("%Y-%m-%d")
+    legacy_on_leave = today_ist in leave_dates
+    
+    await db.barbers.update_one(
+        {"id": barber_id, "salon_id": salon_id},
+        {"$set": {"leave_dates": leave_dates, "on_leave": legacy_on_leave}}
+    )
+    
+    return {
+        "barber_id": barber_id,
+        "date": body.date,
+        "is_on_leave": body.is_on_leave,
+        "leave_dates": leave_dates,
+    }
+
+
+@api_router.get("/salons/{salon_id}/barbers/{barber_id}/leave-dates")
+async def get_barber_leave_dates(salon_id: str, barber_id: str, current_user=Depends(get_current_salon_user)):
+    """Return barber's leave_dates list and key employment dates."""
+    if current_user.get("role") not in ["admin", "salon_admin", "salon"]:
+        raise HTTPException(status_code=403, detail="Admin access required")
+    barber = await db.barbers.find_one({"id": barber_id, "salon_id": salon_id}, {"_id": 0})
+    if not barber:
+        raise HTTPException(status_code=404, detail="Barber not found")
+    return {
+        "barber_id": barber_id,
+        "leave_dates": list(barber.get("leave_dates") or []),
+        "doj": barber.get("doj"),
+        "last_working_date": barber.get("last_working_date"),
+        "on_leave": bool(barber.get("on_leave")),
+    }
 
 
 @api_router.get("/salons/{salon_id}/staff-salary/month/{month}")

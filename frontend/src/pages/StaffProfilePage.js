@@ -202,9 +202,9 @@ export default function StaffProfilePage() {
     aadhar_number: '',
     doj: '',
     dob: '',
+    last_working_date: '',
     compensation: '',
     is_barber: true,
-    on_leave: false
   });
 
   const [permissions, setPermissions] = useState({
@@ -244,9 +244,9 @@ export default function StaffProfilePage() {
           aadhar_number: staffMember.aadhar_number || '',
           doj: staffMember.doj || '',
           dob: staffMember.dob || '',
+          last_working_date: staffMember.last_working_date || '',
           compensation: staffMember.compensation || '',
           is_barber: staffMember.is_barber !== false,
-          on_leave: staffMember.on_leave || false
         });
       }
 
@@ -540,6 +540,18 @@ export default function StaffProfilePage() {
                 </div>
 
                 <div>
+                  <Label>Last Working Day</Label>
+                  <Input
+                    type="date"
+                    value={profileData.last_working_date}
+                    onChange={(e) => setProfileData({ ...profileData, last_working_date: e.target.value })}
+                    disabled={!editMode}
+                    min={profileData.doj || undefined}
+                  />
+                  <p className="text-xs text-muted-foreground mt-1">Barber stops being visible to customers after this date.</p>
+                </div>
+
+                <div>
                   <Label>Monthly Compensation (₹)</Label>
                   <Input
                     type="number"
@@ -565,17 +577,7 @@ export default function StaffProfilePage() {
                   </Label>
                 </div>
 
-                <div className="flex items-center space-x-2">
-                  <Checkbox
-                    id="on_leave"
-                    checked={profileData.on_leave}
-                    onCheckedChange={(checked) => setProfileData({ ...profileData, on_leave: checked })}
-                    disabled={!editMode}
-                  />
-                  <Label htmlFor="on_leave" className="cursor-pointer">
-                    Staff is on leave
-                  </Label>
-                </div>
+                {/* On-leave management has moved to the Attendance tab — set leave date-wise from there. */}
               </div>
             </div>
           </motion.div>
