@@ -10,7 +10,7 @@ import sys
 from datetime import datetime
 
 # Configuration
-BASE_URL = "https://loyalty-wallet-fix.preview.emergentagent.com/api"
+BASE_URL = "https://customer-experience-4.preview.emergentagent.com/api"
 SALON_ID = "91a8e87d-d687-49ea-b3e5-460cc55cf3de"
 BARBER_IDS = ["4198bcd0-4dcb-4d67-8999-c653e2d32c37", "e36d6b1d-48c2-415b-a16e-23de6951a13a"]
 
