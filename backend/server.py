@@ -5458,12 +5458,22 @@ async def customer_reschedule_token(token_id: str, body: dict):
     if new_payment:
         updates["payment_mode"] = new_payment
 
-    # Recalculate total based on the *effective* barber + services
-    effective_barber = updates.get("barber_id", token.get("barber_id"))
-    effective_services = updates.get("selected_services", token.get("selected_services") or [])
-    if effective_services and effective_barber and effective_barber != "any":
+    # Recalculate total ONLY when the inputs that drive pricing changed.
+    # (Pure date/shift changes keep the existing price.)
+    services_changed = "selected_services" in updates
+    barber_changed = "barber_id" in updates
+    if services_changed or barber_changed:
+        effective_barber = updates.get("barber_id", token.get("barber_id"))
+        effective_services = updates.get("selected_services", token.get("selected_services") or [])
         try:
-            updates["total_amount"] = await calculate_booking_total(effective_services, effective_barber)
+            if effective_services and effective_barber and effective_barber != "any":
+                updates["total_amount"] = await calculate_booking_total(effective_services, effective_barber)
+            elif effective_services:
+                # Fallback: sum base prices if barber == 'any' or unknown
+                svc_docs = await db.services.find(
+                    {"id": {"$in": effective_services}}, {"_id": 0, "base_price": 1}
+                ).to_list(len(effective_services))
+                updates["total_amount"] = float(sum(s.get("base_price", 0) or 0 for s in svc_docs))
         except Exception as e:
             logger.warning(f"reschedule total recompute failed: {e}")
 

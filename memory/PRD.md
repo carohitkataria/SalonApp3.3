@@ -18,6 +18,14 @@ A multi-tenant salon management SaaS (React + FastAPI + MongoDB). Most recent fe
 - Frontend: React + Tailwind + shadcn/ui at `/app/frontend/src/`
 
 ## Implemented (CHANGELOG)
+### Feb 2026 — Phase 2 WhatsApp flows + Customer auto-refresh (Iteration 10)
+- ✅ **Item 7 — WhatsApp Cancel confirmation page**: `GET /api/tokens/{id}/cancel-link` now renders an "Are you sure?" HTML interstitial showing salon, token #, customer, date, shift, service count, amount, with "No, Keep Booking" + "Yes, Cancel" buttons. The actual cancel happens on `POST /api/tokens/{id}/cancel-link` (submitted via form from the interstitial). Wallet refunds preserved; salon + customer in-app notifications still fire.
+- ✅ **Item 8 — WhatsApp Reschedule link**: new `GET /api/tokens/{id}/public-details` (unauth) returns booking details for hydration; new `PUT /api/tokens/{id}/customer-reschedule` updates the SAME token (services/barber/date/shift/payment). Frontend `SinglePageBooking.js` handles `?modify=<tokenId>` — shows a gold "Modifying booking #N" banner (`data-testid="reschedule-banner"`), preloads all fields, submits via PUT instead of POST /bookings.
+- ✅ **Total recompute logic (correctness)**: reschedule only recomputes `total_amount` when `selected_services` or `barber_id` actually change (pure shift/date edits keep the existing price). Falls back to sum of `base_price` when barber=any.
+- ✅ **Item 6 — Customer auto-refresh**: `useAutoRefresh` hook consumed by `WalletDisplay` (20s), `ActiveBookingTracker` (15s), `HistoryPage` (20s); pauses while tab hidden, re-runs immediately on visibility. Customer session in `AuthContext` uses `localStorage.salon_user` with NO expiry → infinite auto-login until explicit logout.
+- ✅ **Item 1 — Salon auto-refresh**: optimistic UI on token actions + 20s polling fallback in `EnhancedSalonDashboard` (carried over from Phase 1.5).
+- ✅ Backend tested 14/14 via testing agent; no regressions.
+
 ### Feb 2026 — Booking capacity + Incentive correctness fixes (Iteration 9)
 - ✅ **Capacity rule**: `get_barber_blocked_minutes_used` now excludes `completed` (in addition to `cancelled` / `skipped`). When Imran finishes a booking, the slot is freed within the same shift — he can take another booking immediately if duration permits.
 - ✅ **Actual sales bug**: `_get_barber_actual_sales` was matching on `booking_date`, but tokens are stored with `date`. Fixed via `$or` on `date` / `booking_date` / `created_at` fallback. Imran's 4 real tokens now sum correctly to ₹63,360.
