@@ -1,7 +1,8 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import axios from 'axios';
 import { Crown, Wallet, Calendar, TrendingUp, ArrowUpCircle, ArrowDownCircle } from 'lucide-react';
 import { motion } from 'framer-motion';
+import useAutoRefresh from '@/hooks/useAutoRefresh';
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
 const API = `${BACKEND_URL}/api`;
@@ -11,14 +12,9 @@ export default function WalletDisplay({ salonId, customerPhone }) {
   const [transactions, setTransactions] = useState([]);
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    if (salonId && customerPhone) {
-      fetchWalletData();
-    }
-  }, [salonId, customerPhone]);
-
-  const fetchWalletData = async () => {
-    setLoading(true);
+  const fetchWalletData = useCallback(async (silent = false) => {
+    if (!salonId || !customerPhone) return;
+    if (!silent) setLoading(true);
     try {
       // Fetch membership
       const membershipResponse = await axios.get(
@@ -33,13 +29,23 @@ export default function WalletDisplay({ salonId, customerPhone }) {
           `${API}/salons/${salonId}/wallet-transactions/${customerPhone}`
         );
         setTransactions(transactionsResponse.data.transactions || []);
+      } else {
+        setMembership(null);
+        setTransactions([]);
       }
     } catch (error) {
       console.error('Error fetching wallet data:', error);
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
-  };
+  }, [salonId, customerPhone]);
+
+  useEffect(() => {
+    fetchWalletData();
+  }, [fetchWalletData]);
+
+  // Background refresh every 20s while the tab is visible.
+  useAutoRefresh(() => fetchWalletData(true), 20000, [salonId, customerPhone]);
 
   const getDaysUntilExpiry = () => {
     if (!membership?.expiry_date) return 0;

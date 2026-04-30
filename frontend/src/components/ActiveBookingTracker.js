@@ -1,9 +1,10 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
 import { Button } from '@/components/ui/button';
 import { Store, Clock, Users, Scissors, MapPin, ChevronRight } from 'lucide-react';
 import { motion } from 'framer-motion';
+import useAutoRefresh from '@/hooks/useAutoRefresh';
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
 const API = `${BACKEND_URL}/api`;
@@ -13,27 +14,27 @@ export default function ActiveBookingTracker({ userPhone, userName }) {
   const [activeBookings, setActiveBookings] = useState([]);
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    if (userPhone) {
-      fetchActiveBookings();
-    } else {
+  const fetchActiveBookings = useCallback(async (silent = false) => {
+    if (!userPhone) {
       setLoading(false);
+      return;
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [userPhone]);
-
-  const fetchActiveBookings = async () => {
     try {
-      console.log('[ActiveBookingTracker] Fetching bookings for phone:', userPhone);
       const response = await axios.get(`${API}/customers/${userPhone}/active-bookings`);
-      console.log('[ActiveBookingTracker] Response:', response.data);
       setActiveBookings(response.data.active_bookings || []);
     } catch (error) {
       console.error('[ActiveBookingTracker] Error fetching active bookings:', error);
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
-  };
+  }, [userPhone]);
+
+  useEffect(() => {
+    fetchActiveBookings();
+  }, [fetchActiveBookings]);
+
+  // Auto-refresh active bookings every 15s so token position / status stays live.
+  useAutoRefresh(() => fetchActiveBookings(true), 15000, [userPhone]);
 
   const getGreeting = () => {
     const hour = new Date().getHours();

@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import axios from 'axios';
@@ -10,6 +10,7 @@ import CustomerOtpVerification from '@/components/CustomerOtpVerification';
 import { Button } from '@/components/ui/button';
 import { toast } from 'sonner';
 import SalonHubLogo from '@/components/SalonHubLogo';
+import useAutoRefresh from '@/hooks/useAutoRefresh';
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
 const API = `${BACKEND_URL}/api`;
@@ -25,18 +26,8 @@ export default function HistoryPage() {
   const [showCancelModal, setShowCancelModal] = useState(false);
   const [cancellingId, setCancellingId] = useState(null);
 
-  useEffect(() => {
-    if (!isUserLoggedIn) {
-      navigate('/user/login');
-      return;
-    }
-
-    if (user && isUserOtpVerified) {
-      fetchHistory();
-    }
-  }, [user, isUserLoggedIn, isUserOtpVerified]);
-
-  const fetchHistory = async () => {
+  const fetchHistory = useCallback(async (silent = false) => {
+    if (!user?.id) return;
     try {
       const response = await axios.get(`${API}/user/${user.id}/history`);
       setHistory(response.data);
@@ -49,16 +40,35 @@ export default function HistoryPage() {
             if (canRateRes.data.already_rated) {
               rated.add(booking.id);
             }
-          } catch (e) {}
+          } catch (e) { /* ignore */ }
         }
       }
       setRatedTokens(rated);
     } catch (error) {
       console.error('Error fetching history:', error);
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
-  };
+  }, [user?.id]);
+
+  useEffect(() => {
+    if (!isUserLoggedIn) {
+      navigate('/user/login');
+      return;
+    }
+
+    if (user && isUserOtpVerified) {
+      fetchHistory();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user, isUserLoggedIn, isUserOtpVerified]);
+
+  // Auto-refresh booking history every 20s while tab visible.
+  useAutoRefresh(
+    () => { if (user && isUserOtpVerified) fetchHistory(true); },
+    20000,
+    [user?.id, isUserOtpVerified]
+  );
 
   const handleRateBooking = (booking) => {
     setSelectedBooking(booking);

@@ -3780,6 +3780,8 @@ async def create_salon_booking(salon_id: str, body: dict, current_user=Depends(g
             })
     
     await broadcast_update("new_token", token_dict)
+    # Also emit the standardized "token_created" so all dashboards / queues refresh.
+    await broadcast_update("token_created", token_dict)
     
     return token_dict
 

@@ -219,21 +219,54 @@ export default function EnhancedSalonDashboard() {
     };
 
     subscribe('token_created', handleUpdate);
+    subscribe('new_token', handleUpdate);
     subscribe('token_updated', handleUpdate);
     subscribe('token_called', handleUpdate);
     subscribe('token_completed', handleUpdate);
     subscribe('token_skipped', handleUpdate);
     subscribe('token_recalled', handleUpdate);
+    subscribe('token_cancelled', handleUpdate);
+    subscribe('token_status_changed', handleUpdate);
 
     return () => {
       unsubscribe('token_created', handleUpdate);
+      unsubscribe('new_token', handleUpdate);
       unsubscribe('token_updated', handleUpdate);
       unsubscribe('token_called', handleUpdate);
       unsubscribe('token_completed', handleUpdate);
       unsubscribe('token_skipped', handleUpdate);
       unsubscribe('token_recalled', handleUpdate);
+      unsubscribe('token_cancelled', handleUpdate);
+      unsubscribe('token_status_changed', handleUpdate);
     };
   }, [filter, selectedBarber]);
+
+  // Polling fallback: every 20s re-fetch tokens + daily sales so the dashboard
+  // stays in sync even if a websocket event is missed (network blip, mobile lock, etc.)
+  useEffect(() => {
+    const storedSalonId = localStorage.getItem('salon_id');
+    if (!storedSalonId) return;
+    const tick = () => {
+      // Only refresh while the tab is visible — saves resources / mobile battery.
+      if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return;
+      fetchTokens(storedSalonId);
+      fetchDailySales(storedSalonId);
+    };
+    const id = setInterval(tick, 20000);
+    // Also refresh immediately when the tab becomes visible again.
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') {
+        fetchTokens(storedSalonId);
+        fetchDailySales(storedSalonId);
+      }
+    };
+    document.addEventListener('visibilitychange', onVisible);
+    return () => {
+      clearInterval(id);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filter, selectedBarber, dateMode]);
 
   // Re-fetch tokens when date mode (today/tomorrow) toggles
   useEffect(() => {
@@ -378,32 +411,49 @@ export default function EnhancedSalonDashboard() {
     }
   };
 
+  // Optimistic helper: mutate the local tokens list immediately so the card moves
+  // to the next category before the websocket / re-fetch lands.
+  const setTokenStatusLocally = (tokenId, newStatus, extra = {}) => {
+    setTokens(prev =>
+      Array.isArray(prev)
+        ? prev.map(t => (t.id === tokenId ? { ...t, status: newStatus, ...extra } : t))
+        : prev
+    );
+  };
+
   const handleCallToken = async (tokenId) => {
+    // Optimistic: move to "called" immediately
+    setTokenStatusLocally(tokenId, 'called');
     try {
       await axios.post(`${API}/tokens/${tokenId}/call`, {}, { headers: getAuthHeaders() });
       toast.success('Token called');
     } catch (error) {
       toast.error('Failed to call token');
+      fetchTokens(salonId); // re-sync from server on failure
     }
   };
 
   const handleSkipToken = async (tokenId) => {
     if (!window.confirm('Skip this token? This action is final and cannot be undone.')) return;
     
+    setTokenStatusLocally(tokenId, 'skipped');
     try {
       await axios.post(`${API}/tokens/${tokenId}/skip`, {}, { headers: getAuthHeaders() });
       toast.success('Token skipped');
     } catch (error) {
       toast.error('Failed to skip token');
+      fetchTokens(salonId);
     }
   };
 
   const handleRecallToken = async (tokenId) => {
+    setTokenStatusLocally(tokenId, 'waiting');
     try {
       await axios.post(`${API}/tokens/${tokenId}/recall`, {}, { headers: getAuthHeaders() });
       toast.success('Token recalled');
     } catch (error) {
       toast.error(error.response?.data?.detail || 'Failed to recall token');
+      fetchTokens(salonId);
     }
   };
 
@@ -436,11 +486,13 @@ export default function EnhancedSalonDashboard() {
     
     if (!window.confirm('Mark this customer as completed? Invoice will be generated.')) return;
     
+    setTokenStatusLocally(tokenId, 'completed');
     try {
       await axios.post(`${API}/tokens/${tokenId}/complete`, {}, { headers: getAuthHeaders() });
       toast.success('Token marked as completed');
     } catch (error) {
       toast.error(error.response?.data?.detail || 'Failed to complete token');
+      fetchTokens(salonId);
     }
   };
 
@@ -646,11 +698,13 @@ export default function EnhancedSalonDashboard() {
   const handleCancelToken = async (tokenId) => {
     if (!window.confirm('Cancel this token?')) return;
     
+    setTokenStatusLocally(tokenId, 'cancelled');
     try {
       await axios.post(`${API}/tokens/${tokenId}/cancel`, {}, { headers: getAuthHeaders() });
       toast.success('Token cancelled');
     } catch (error) {
       toast.error('Failed to cancel token');
+      fetchTokens(salonId);
     }
   };
 
