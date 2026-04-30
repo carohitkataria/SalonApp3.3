@@ -2748,8 +2748,11 @@ async def create_barber(salon_id: str, barber: BarberCreate, current_salon=Depen
     return Barber(**barber_dict)
 
 @api_router.put("/barbers/{barber_id}", response_model=Barber)
-async def update_barber(barber_id: str, barber_update: BarberUpdate, current_salon=Depends(get_current_salon)):
-    """Update barber details"""
+async def update_barber(barber_id: str, barber_update: BarberUpdate, current_user=Depends(get_current_salon_user)):
+    """Update barber details. Accepts both legacy salon admin token and multi-user salon-admin tokens."""
+    # Only admins/salon admins can edit barber records
+    if current_user.get("role") not in ["admin", "salon_admin", "salon"]:
+        raise HTTPException(status_code=403, detail="Admin access required")
     existing = await db.barbers.find_one({"id": barber_id}, {"_id": 0})
     if not existing:
         raise HTTPException(status_code=404, detail="Barber not found")
