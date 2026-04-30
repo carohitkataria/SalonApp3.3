@@ -350,8 +350,22 @@ export default function MyProfile({ salon, onUpdate, getAuthHeaders, onDeleteSal
                   onChange={(e) => {
                     const files = Array.from(e.target.files);
                     if (files.length === 0) return;
-                    let completed = 0;
+                    const PHOTO_MAX = 5 * 1024 * 1024;   // 5 MB
+                    const VIDEO_MAX = 25 * 1024 * 1024;  // 25 MB
+                    const accepted = [];
                     files.forEach(file => {
+                      const isVideo = (file.type || '').startsWith('video/');
+                      const limit = isVideo ? VIDEO_MAX : PHOTO_MAX;
+                      const limitLabel = isVideo ? '25MB (video)' : '5MB (photo)';
+                      if (file.size > limit) {
+                        toast.error(`${file.name} is too large (max ${limitLabel})`);
+                        return;
+                      }
+                      accepted.push(file);
+                    });
+                    if (accepted.length === 0) return;
+                    let completed = 0;
+                    accepted.forEach(file => {
                       const reader = new FileReader();
                       reader.onloadend = () => {
                         setEditData(prev => ({
@@ -359,13 +373,14 @@ export default function MyProfile({ salon, onUpdate, getAuthHeaders, onDeleteSal
                           photo_gallery: [...(prev.photo_gallery || []), reader.result]
                         }));
                         completed++;
-                        if (completed === files.length) {
-                          toast.success(`${files.length} file(s) uploaded`);
+                        if (completed === accepted.length) {
+                          toast.success(`${accepted.length} file(s) uploaded`);
                         }
                       };
                       reader.onerror = () => toast.error(`Failed to upload ${file.name}`);
                       reader.readAsDataURL(file);
                     });
+                    try { e.target.value = ''; } catch (err) { /* ignore */ }
                   }}
                 />
                 <Input
@@ -414,7 +429,7 @@ export default function MyProfile({ salon, onUpdate, getAuthHeaders, onDeleteSal
                     })}
                   </div>
                 )}
-                <p className="text-xs text-muted-foreground">Upload multiple photos and videos to showcase your salon. No size limit.</p>
+                <p className="text-xs text-muted-foreground">Photos up to 5MB each • Videos up to 25MB each</p>
               </div>
             </div>
             <div className="md:col-span-2">

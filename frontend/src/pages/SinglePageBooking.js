@@ -248,7 +248,7 @@ export default function SinglePageBooking() {
   const [membershipPlans, setMembershipPlans] = useState([]);
   const [activeTab, setActiveTab] = useState('services');
   const [serviceTab, setServiceTab] = useState('services'); // favorites / services / packages
-  const [selectedCategory, setSelectedCategory] = useState('favorites'); // Category filter
+  const [selectedCategory, setSelectedCategory] = useState('All'); // Category filter (default: All services)
   const [categories, setCategories] = useState([]); // Categories with thumbnails
   const [customerBookings, setCustomerBookings] = useState([]);
   const [recentServices, setRecentServices] = useState([]);
@@ -349,6 +349,7 @@ export default function SinglePageBooking() {
       
       // Set categories with default thumbnails
       const defaultThumbnails = {
+        "All": "https://images.pexels.com/photos/3993449/pexels-photo-3993449.jpeg?w=200&h=200&fit=crop",
         "Favorites": "https://images.pexels.com/photos/7755651/pexels-photo-7755651.jpeg?w=200&h=200&fit=crop",
         "General": "https://images.pexels.com/photos/7781850/pexels-photo-7781850.jpeg?w=200&h=200&fit=crop",
         "Packages": "https://images.pexels.com/photos/3065171/pexels-photo-3065171.jpeg?w=200&h=200&fit=crop",
@@ -359,23 +360,34 @@ export default function SinglePageBooking() {
         "Manicure & Pedicure": "https://images.pexels.com/photos/3997379/pexels-photo-3997379.jpeg?w=200&h=200&fit=crop"
       };
       
-      // Build category list: Favorites first, then General, then Packages, then others
+      // Determine which categories actually have services available at this salon
+      const enabledServices = servicesRes.data || [];
+      const categoriesWithServices = new Set(
+        enabledServices.map(s => s.category || 'General').filter(Boolean)
+      );
+      
       const rawCategories = categoriesRes.data.categories || [];
-      const orderedCategories = [
-        { name: "Favorites", thumbnail_url: defaultThumbnails["Favorites"] }
-      ];
+      const orderedCategories = [];
       
-      // Add General first if exists
-      const general = rawCategories.find(c => c.name === "General");
-      if (general) orderedCategories.push(general);
+      // 1) "All" — always shown first when there is at least one service
+      if (enabledServices.length > 0) {
+        orderedCategories.push({ name: "All", thumbnail_url: defaultThumbnails["All"] });
+      }
       
-      // Add Packages
-      orderedCategories.push({ name: "Packages", thumbnail_url: defaultThumbnails["Packages"] });
+      // 2) Favorites — only if customer has any recent / favorite services (decided when recentServices loads).
+      // We pre-add it as a placeholder; if recentServices is empty, we'll filter it out below.
+      orderedCategories.push({ name: "Favorites", thumbnail_url: defaultThumbnails["Favorites"], _isFavorites: true });
       
-      // Add remaining categories (excluding General and any duplicates)
+      // 3) Real service categories (only those that actually have services at this salon)
       rawCategories.forEach(cat => {
-        if (cat.name !== "General" && !orderedCategories.find(c => c.name === cat.name)) {
+        if (categoriesWithServices.has(cat.name) && !orderedCategories.find(c => c.name === cat.name)) {
           orderedCategories.push(cat);
+        }
+      });
+      // Catch any service category that wasn't in the master list (custom categories)
+      categoriesWithServices.forEach(cName => {
+        if (!orderedCategories.find(c => c.name === cName)) {
+          orderedCategories.push({ name: cName, thumbnail_url: defaultThumbnails[cName] || defaultThumbnails["General"] });
         }
       });
       
@@ -566,6 +578,23 @@ export default function SinglePageBooking() {
     
     return currentHour < endHour;
   };
+
+  // Auto-select the latest available time slot whenever shifts/date change.
+  // "Latest" = the last (chronologically furthest) shift that is still available.
+  useEffect(() => {
+    if (!shifts || shifts.length === 0) return;
+    // If user already picked a shift and it's still valid, keep it.
+    const currentValid = formData.shift && shifts.some(s =>
+      s.id === formData.shift && getShiftAvailability(s.id) && (s.is_available !== false)
+    );
+    if (currentValid) return;
+    // Pick the LAST available shift in the list (shifts come ordered morning -> evening)
+    const availableShifts = shifts.filter(s => getShiftAvailability(s.id) && (s.is_available !== false));
+    if (availableShifts.length === 0) return;
+    const latest = availableShifts[availableShifts.length - 1];
+    setFormData(prev => ({ ...prev, shift: latest.id }));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [shifts, formData.date]);
 
   const calculateTotal = () => {
     if (formData.selectedServices.length === 0) {
@@ -1359,10 +1388,27 @@ export default function SinglePageBooking() {
             )}
           </div>
           
-          {/* Horizontal Scrollable Category Filter with Thumbnails */}
+          {/* Horizontal Scrollable Category Filter with Thumbnails - dynamically filtered */}
           <div className="relative">
             <div className="flex gap-3 overflow-x-auto pb-2 scrollbar-hide" style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}>
-              {categories.map((cat, idx) => (
+              {categories
+                .filter(cat => {
+                  // Hide "Favorites" if customer has no recent services
+                  if (cat._isFavorites && (!recentServices || recentServices.length === 0)) {
+                    return false;
+                  }
+                  // Hide "Packages" if there are no packages available
+                  if (cat.name === 'Packages' && (!packages || packages.length === 0)) {
+                    return false;
+                  }
+                  // Hide normal service categories that have no enabled services
+                  if (cat.name !== 'All' && cat.name !== 'Favorites' && cat.name !== 'Packages') {
+                    const hasAny = (genderFilteredServices || []).some(s => (s.category || 'General') === cat.name);
+                    if (!hasAny) return false;
+                  }
+                  return true;
+                })
+                .map((cat) => (
                 <button
                   key={cat.name}
                   type="button"
@@ -1517,6 +1563,24 @@ export default function SinglePageBooking() {
                     <p className="text-muted-foreground text-sm">No packages available</p>
                   </div>
                 );
+              } else if (selectedCategory === 'All') {
+                // Show ALL services (gender-filtered + search-filtered)
+                displayServices = filteredServices;
+                if (searchQuery) {
+                  displayServices = displayServices.filter(s =>
+                    s.service_name.toLowerCase().includes(searchQuery.toLowerCase())
+                  );
+                }
+                if (displayServices.length === 0) {
+                  return (
+                    <div className="text-center py-8 bg-card border border-border rounded-xl">
+                      <Scissors className="w-12 h-12 text-muted-foreground/30 mx-auto mb-2" />
+                      <p className="text-muted-foreground text-sm">
+                        {searchQuery ? 'No services match your search' : 'No services available'}
+                      </p>
+                    </div>
+                  );
+                }
               } else {
                 // Show services for selected category
                 displayServices = filteredServices.filter(s => s.category === selectedCategory);

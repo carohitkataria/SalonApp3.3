@@ -447,7 +447,16 @@ export default function BarberManagement({ salonId, getAuthHeaders }) {
           <motion.div
             key={barber.id}
             whileHover={{ scale: 1.02 }}
-            className="bg-card border border-border rounded-lg p-4 hover:border-gold transition-all"
+            onClick={() => navigate(`/salon/staff/${barber.id}`)}
+            role="button"
+            tabIndex={0}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault();
+                navigate(`/salon/staff/${barber.id}`);
+              }
+            }}
+            className="bg-card border border-border rounded-lg p-4 hover:border-gold transition-all cursor-pointer focus:outline-none focus:ring-2 focus:ring-gold"
           >
             <div className="flex items-start justify-between mb-3">
               <div className="flex-1">
@@ -496,7 +505,10 @@ export default function BarberManagement({ salonId, getAuthHeaders }) {
             </div>
 
             <Button 
-              onClick={() => navigate(`/salon/staff/${barber.id}`)}
+              onClick={(e) => {
+                e.stopPropagation();
+                navigate(`/salon/staff/${barber.id}`);
+              }}
               className="w-full bg-gold text-black hover:bg-gold/90"
             >
               View Profile

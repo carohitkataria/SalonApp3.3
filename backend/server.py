@@ -3504,7 +3504,8 @@ async def get_customer_otp_status(phone: str):
 
 @api_router.get("/salons/{salon_id}/customers")
 async def get_salon_customers(salon_id: str, current_user=Depends(get_current_salon_user)):
-    """Get all customers who have booked at this salon + manually added"""
+    """Get all customers who have booked at this salon + manually added.
+    Each customer also includes the active wallet balance (if any)."""
     # Get unique customers from tokens
     tokens = await db.tokens.find(
         {"salon_id": salon_id},
@@ -3547,6 +3548,26 @@ async def get_salon_customers(salon_id: str, current_user=Depends(get_current_sa
             # Update gender if not set from booking
             if not customers_map[phone].get('gender'):
                 customers_map[phone]['gender'] = mc.get('gender', 'Men')
+    
+    # Attach active wallet balance for each customer (if any active membership)
+    if customers_map:
+        phones = list(customers_map.keys())
+        memberships = await db.customer_memberships.find(
+            {"salon_id": salon_id, "customer_phone": {"$in": phones}, "is_active": True},
+            {"_id": 0, "customer_phone": 1, "wallet_balance": 1, "membership_name": 1}
+        ).to_list(20000)
+        wallet_by_phone = {}
+        for m in memberships:
+            p = m.get("customer_phone")
+            if p:
+                wallet_by_phone[p] = {
+                    "wallet_balance": float(m.get("wallet_balance") or 0),
+                    "membership_name": m.get("membership_name") or ""
+                }
+        for phone, cust in customers_map.items():
+            info = wallet_by_phone.get(phone, {"wallet_balance": 0, "membership_name": ""})
+            cust["wallet_balance"] = info["wallet_balance"]
+            cust["membership_name"] = info["membership_name"]
     
     return {"customers": list(customers_map.values())}
 
@@ -8047,10 +8068,9 @@ async def _send_expiry_reminder(m: Dict[str, Any], days_left: int, key: str):
 async def calculate_barber_attendance_for_date(salon_id: str, barber_id: str, date_str: str) -> dict:
     """Calculate attendance for a barber on a specific date based on completed bookings.
     
-    Rules:
-    - Present: 2+ bookings in different shifts (morning + noon/evening)
-    - Half Day: Bookings completed in only 1 shift
-    - Absent: No bookings or less than required
+    Rules (updated):
+    - Present: 1+ completed booking on that date
+    - Absent: No completed bookings on that date
     """
     # Get completed bookings for this barber on this date
     start_of_day = f"{date_str}T00:00:00"
@@ -8065,7 +8085,7 @@ async def calculate_barber_attendance_for_date(salon_id: str, barber_id: str, da
     
     bookings_count = len(completed_bookings)
     
-    # Check which shifts have bookings
+    # Track shifts (kept for analytics / display)
     shifts_with_bookings = set()
     for booking in completed_bookings:
         shift = booking.get("shift", "").lower()
@@ -8075,11 +8095,9 @@ async def calculate_barber_attendance_for_date(salon_id: str, barber_id: str, da
     morning_shift = "morning" in shifts_with_bookings
     noon_evening_shift = "noon" in shifts_with_bookings or "evening" in shifts_with_bookings
     
-    # Determine attendance status
-    if bookings_count >= 2 and morning_shift and noon_evening_shift:
+    # New rule: barber is marked present if at least one service was completed.
+    if bookings_count >= 1:
         status = "present"
-    elif bookings_count >= 1 and len(shifts_with_bookings) >= 1:
-        status = "half_day"
     else:
         status = "absent"
     
@@ -8210,8 +8228,8 @@ async def override_attendance(
     current_user=Depends(get_current_salon_user)
 ):
     """Admin override for attendance. Click on calendar date to change status."""
-    # Verify admin
-    if current_user.get("role") not in ["admin", "salon_admin"]:
+    # Verify admin (legacy "salon" role is also treated as admin)
+    if current_user.get("role") not in ["admin", "salon_admin", "salon"]:
         raise HTTPException(status_code=403, detail="Admin access required")
     
     # Validate status
@@ -8566,6 +8584,102 @@ async def remove_salon_holiday(
     return {"message": "Holiday removed"}
 
 
+async def cancel_active_bookings_end_of_day():
+    """End-of-day cleanup at 00:00 IST.
+    Cancels every booking still in an "active" (non-final) state for the day that just ended,
+    so the queue resets fresh tomorrow and no stale bookings carry forward.
+    """
+    try:
+        # Use IST for "today's date" — at 00:00 IST we cancel the day that just ended
+        ist = timezone(timedelta(hours=5, minutes=30))
+        now_ist = datetime.now(ist)
+        # The day that just ended (yesterday relative to IST midnight)
+        target_date = (now_ist - timedelta(minutes=1)).strftime("%Y-%m-%d")
+        
+        # Final/terminal statuses that we should NOT touch
+        final_statuses = ["completed", "cancelled", "skipped"]
+        
+        active_tokens = await db.tokens.find({
+            "date": target_date,
+            "status": {"$nin": final_statuses}
+        }, {"_id": 0}).to_list(5000)
+        
+        if not active_tokens:
+            logger.info(f"[EOD] No active bookings to cancel for {target_date}")
+            return
+        
+        cancelled_count = 0
+        for token in active_tokens:
+            try:
+                # Refund wallet balance if the booking was paid via wallet
+                if token.get("payment_mode") == "wallet" and token.get("payment_status") == "paid":
+                    wallet_phone = token.get("phone") or ""
+                    if wallet_phone and not wallet_phone.startswith("+91"):
+                        wallet_phone = f"+91{wallet_phone}"
+                    if wallet_phone:
+                        membership = await db.customer_memberships.find_one({
+                            "salon_id": token.get("salon_id"),
+                            "customer_phone": wallet_phone,
+                            "is_active": True
+                        }, {"_id": 0})
+                        if membership:
+                            refund_amount = token.get("total_amount", 0) or 0
+                            new_balance = (membership.get("wallet_balance") or 0) + refund_amount
+                            await db.customer_memberships.update_one(
+                                {"id": membership["id"]},
+                                {"$set": {"wallet_balance": new_balance}}
+                            )
+                            await db.wallet_transactions.insert_one({
+                                "id": str(uuid.uuid4()),
+                                "customer_phone": wallet_phone,
+                                "salon_id": token.get("salon_id"),
+                                "transaction_type": "credit",
+                                "amount": refund_amount,
+                                "balance_after": new_balance,
+                                "description": f"Refund - End-of-day auto cancel (Token {token.get('token_number','')})",
+                                "created_at": datetime.now(timezone.utc).isoformat()
+                            })
+                
+                await db.tokens.update_one(
+                    {"id": token["id"]},
+                    {"$set": {
+                        "status": "cancelled",
+                        "cancelled_reason": "Auto-cancelled at end of day (00:00 IST)",
+                        "cancelled_at": datetime.now(timezone.utc).isoformat()
+                    }}
+                )
+                cancelled_count += 1
+                
+                # Notify customer (best-effort)
+                try:
+                    await send_booking_notification(token, 'token_cancelled')
+                except Exception as nerr:
+                    logger.warning(f"[EOD] Notification failed for token {token.get('id')}: {nerr}")
+                
+                if token.get("phone"):
+                    try:
+                        await create_in_app_notification(
+                            user_type="customer",
+                            user_id=token["phone"],
+                            title="Booking Cancelled",
+                            message=f"Your booking (Token #{token.get('token_number','')}) was auto-cancelled at the end of the day.",
+                            notification_type="booking_cancelled",
+                            setting_key="booking_status_change",
+                            salon_id=token.get("salon_id", ""),
+                            related_id=token["id"],
+                        )
+                    except Exception as ierr:
+                        logger.warning(f"[EOD] In-app notif failed: {ierr}")
+                
+                await broadcast_update("token_cancelled", {"token_id": token["id"]})
+            except Exception as terr:
+                logger.error(f"[EOD] Error cancelling token {token.get('id')}: {terr}")
+        
+        logger.info(f"[EOD] Auto-cancelled {cancelled_count} bookings for {target_date}")
+    except Exception as e:
+        logger.error(f"[EOD] cancel_active_bookings_end_of_day failed: {e}")
+
+
 # Include router - MUST be after ALL @api_router routes are defined
 fastapi_app.include_router(api_router)
 
@@ -8574,6 +8688,9 @@ scheduler = AsyncIOScheduler()
 scheduler.add_job(allocate_future_tokens, 'cron', hour=5, minute=30)  # Run at 5:30 AM daily
 # Membership expiry reminders (once daily at 9:00 AM UTC)
 scheduler.add_job(notify_expiring_memberships, 'cron', hour=9, minute=0)
+# End-of-day cleanup at 00:00 IST = 18:30 UTC. Cancels all active (non-final) bookings
+# for the day so they don't carry forward to the next day.
+scheduler.add_job(cancel_active_bookings_end_of_day, 'cron', hour=18, minute=30)
 
 @fastapi_app.on_event("startup")
 async def startup_event():

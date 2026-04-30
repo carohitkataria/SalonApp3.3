@@ -8,12 +8,11 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { toast } from 'sonner';
 import { 
   ArrowLeft, User, Save, Scissors, Shield, Edit2, Phone, Calendar, 
-  Briefcase, CreditCard, FileText, X, Trophy, ChevronLeft, ChevronRight,
+  Briefcase, CreditCard, FileText, X, ChevronLeft, ChevronRight,
   Check, Loader2, DollarSign, Clock
 } from 'lucide-react';
 import { motion } from 'framer-motion';
 import StaffAttendanceTab from '@/components/StaffAttendanceTab';
-import StaffRewardsTab from '@/components/StaffRewardsTab';
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
 const API = `${BACKEND_URL}/api`;
@@ -279,12 +278,12 @@ export default function StaffProfilePage() {
 
   const handleSaveProfile = async () => {
     try {
-      const salonId = localStorage.getItem('salon_id');
       const token = localStorage.getItem('salon_admin_token') || 
                     JSON.parse(localStorage.getItem('salon_user_auth') || '{}').token;
 
+      // Backend exposes PUT /api/barbers/{barber_id} (not scoped under salons)
       await axios.put(
-        `${API}/salons/${salonId}/barbers/${staffId}`,
+        `${API}/barbers/${staffId}`,
         profileData,
         { headers: { Authorization: `Bearer ${token}` } }
       );
@@ -293,7 +292,8 @@ export default function StaffProfilePage() {
       setEditMode(false);
       fetchStaffData();
     } catch (error) {
-      toast.error('Failed to update profile');
+      const detail = error?.response?.data?.detail;
+      toast.error(typeof detail === 'string' ? detail : 'Failed to update profile');
     }
   };
 
@@ -401,7 +401,6 @@ export default function StaffProfilePage() {
               { id: 'profile', label: 'Profile', icon: User },
               { id: 'attendance', label: 'Attendance', icon: Calendar },
               { id: 'services', label: 'Services', icon: Scissors },
-              { id: 'rewards', label: 'Rewards', icon: Trophy },
               { id: 'access', label: 'Access', icon: Shield }
             ].map(tab => {
               const Icon = tab.icon;
@@ -829,15 +828,6 @@ export default function StaffProfilePage() {
               )}
             </div>
           </motion.div>
-        )}
-
-        {/* Rewards Tab */}
-        {activeTab === 'rewards' && (
-          <StaffRewardsTab 
-            salonId={localStorage.getItem('salon_id')} 
-            barberId={staffId} 
-            barberName={staff?.name}
-          />
         )}
       </div>
     </div>

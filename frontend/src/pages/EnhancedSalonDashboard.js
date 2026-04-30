@@ -31,7 +31,7 @@ import {
   Clock, User, Phone, Bell, MapPin, Settings, CheckCircle, Calendar,
   Users, ArrowLeft, FileText, Download, Plus, X, TrendingUp, Menu,
   Shield, DollarSign, Database, Pin, PinOff, Edit, CreditCard, Banknote, Smartphone,
-  LayoutDashboard, Activity, Zap, Wallet
+  LayoutDashboard, Activity, Zap, Wallet, Search
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
@@ -180,6 +180,8 @@ export default function EnhancedSalonDashboard() {
   // Manual Booking Dialog State
   const [showManualBookingDialog, setShowManualBookingDialog] = useState(false);
   const [customers, setCustomers] = useState([]);
+  const [customerSearchQuery, setCustomerSearchQuery] = useState('');
+  const [selectedCustomer, setSelectedCustomer] = useState(null);
   const [bookingMode, setBookingMode] = useState('existing'); // 'existing' or 'adhoc'
   const [manualBookingForm, setManualBookingForm] = useState({
     customer_name: '',
@@ -737,6 +739,8 @@ export default function EnhancedSalonDashboard() {
     await fetchCustomers();
     await fetchAllServices();
     setBookingMode('existing');
+    setCustomerSearchQuery('');
+    setSelectedCustomer(null);
     setManualBookingForm({
       customer_name: '',
       phone: '',
@@ -784,6 +788,7 @@ export default function EnhancedSalonDashboard() {
   };
 
   const handleCustomerSelection = (customer) => {
+    setSelectedCustomer(customer);
     setManualBookingForm(prev => ({
       ...prev,
       customer_name: customer.name,
@@ -1513,15 +1518,26 @@ export default function EnhancedSalonDashboard() {
                       
                       {/* Skipped Status Actions */}
                       {token.status === 'skipped' && (
-                        <Button 
-                          size="sm" 
-                          onClick={() => handleRecallToken(token.id)} 
-                          className="bg-blue-600 hover:bg-blue-700 h-8 text-xs px-2.5"
-                          title="Recall this customer"
-                        >
-                          <RotateCcw className="w-3 h-3 mr-1" />
-                          Recall
-                        </Button>
+                        <>
+                          <Button 
+                            size="sm" 
+                            onClick={() => handleRecallToken(token.id)} 
+                            className="bg-blue-600 hover:bg-blue-700 h-8 text-xs px-2.5"
+                            title="Recall this customer"
+                          >
+                            <RotateCcw className="w-3 h-3 mr-1" />
+                            Recall
+                          </Button>
+                          <Button 
+                            size="sm" 
+                            onClick={() => handleCancelToken(token.id)} 
+                            className="bg-red-600 hover:bg-red-700 text-white h-8 text-xs px-2.5"
+                            title="Cancel this booking"
+                          >
+                            <XCircle className="w-3 h-3 mr-1" />
+                            Cancel
+                          </Button>
+                        </>
                       )}
                       
                       {/* Completed Status Actions */}
@@ -1630,19 +1646,25 @@ export default function EnhancedSalonDashboard() {
 
               {/* Upload Section */}
               <div className="mb-6 p-4 bg-background/50 rounded-lg border border-border">
-                <Label className="mb-2 block font-semibold">Add Photos</Label>
+                <Label className="mb-2 block font-semibold">Add Photos &amp; Videos</Label>
                 <Input
                   type="file"
-                  accept="image/*"
+                  accept="image/*,video/*"
                   multiple
                   onChange={async (e) => {
                     const files = Array.from(e.target.files);
                     if (files.length === 0) return;
                     
+                    const PHOTO_MAX = 5 * 1024 * 1024;   // 5 MB
+                    const VIDEO_MAX = 25 * 1024 * 1024;  // 25 MB
+                    
                     const newPhotos = [];
                     for (const file of files) {
-                      if (file.size > 2 * 1024 * 1024) {
-                        toast.error(`${file.name} is too large (max 2MB)`);
+                      const isVideo = (file.type || '').startsWith('video/');
+                      const limit = isVideo ? VIDEO_MAX : PHOTO_MAX;
+                      const limitLabel = isVideo ? '25MB (video)' : '5MB (photo)';
+                      if (file.size > limit) {
+                        toast.error(`${file.name} is too large (max ${limitLabel})`);
                         continue;
                       }
                       const reader = new FileReader();
@@ -1664,34 +1686,49 @@ export default function EnhancedSalonDashboard() {
                           { headers: getAuthHeaders() }
                         );
                         setSalon({ ...salon, photo_gallery: updatedGallery });
-                        toast.success(`${newPhotos.length} photo(s) added!`);
+                        toast.success(`${newPhotos.length} file(s) added!`);
                       } catch (error) {
-                        toast.error('Failed to upload photos');
+                        toast.error('Failed to upload media');
                       }
                     }
+                    // Reset input so the same file can be re-selected
+                    try { e.target.value = ''; } catch (err) { /* ignore */ }
                   }}
                   className="mb-2"
                 />
-                <p className="text-xs text-muted-foreground">Upload multiple photos (max 2MB each)</p>
+                <p className="text-xs text-muted-foreground">Photos up to 5MB each • Videos up to 25MB each</p>
               </div>
 
               {/* Gallery Grid */}
               {salon?.photo_gallery && salon.photo_gallery.length > 0 ? (
                 <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
-                  {salon.photo_gallery.map((url, index) => (
+                  {salon.photo_gallery.map((url, index) => {
+                    const isVideo = typeof url === 'string' && (url.startsWith('data:video') || /\.(mp4|webm|mov|ogg)(\?|$)/i.test(url));
+                    return (
                     <motion.div
                       key={index}
                       initial={{ opacity: 0, scale: 0.9 }}
                       animate={{ opacity: 1, scale: 1 }}
                       transition={{ delay: index * 0.05 }}
-                      className="relative group aspect-square rounded-lg overflow-hidden border border-gold/20 shadow-lg hover:shadow-2xl transition-all"
+                      className="relative group aspect-square rounded-lg overflow-hidden border border-gold/20 shadow-lg hover:shadow-2xl transition-all bg-black"
                     >
-                      <img 
-                        src={url} 
-                        alt={`Gallery ${index + 1}`} 
-                        className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-300"
-                      />
-                      <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
+                      {isVideo ? (
+                        <video
+                          src={url}
+                          className="w-full h-full object-cover"
+                          muted
+                          playsInline
+                          controls
+                          preload="metadata"
+                        />
+                      ) : (
+                        <img 
+                          src={url} 
+                          alt={`Gallery ${index + 1}`} 
+                          className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-300"
+                        />
+                      )}
+                      <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none" />
                       <button
                         onClick={async () => {
                           const updatedGallery = salon.photo_gallery.filter((_, i) => i !== index);
@@ -1702,48 +1739,27 @@ export default function EnhancedSalonDashboard() {
                               { headers: getAuthHeaders() }
                             );
                             setSalon({ ...salon, photo_gallery: updatedGallery });
-                            toast.success('Photo removed');
+                            toast.success('Item removed');
                           } catch (error) {
-                            toast.error('Failed to remove photo');
+                            toast.error('Failed to remove item');
                           }
                         }}
-                        className="absolute top-2 right-2 p-2 bg-red-500 text-white rounded-full opacity-0 group-hover:opacity-100 transition-opacity hover:bg-red-600 shadow-lg"
+                        className="absolute top-2 right-2 p-2 bg-red-500 text-white rounded-full opacity-0 group-hover:opacity-100 transition-opacity hover:bg-red-600 shadow-lg z-10"
                       >
                         <X className="w-4 h-4" />
                       </button>
-                      <div className="absolute bottom-2 left-2 right-2 text-white text-xs font-semibold opacity-0 group-hover:opacity-100 transition-opacity">
-                        Photo {index + 1}
+                      <div className="absolute bottom-2 left-2 right-2 text-white text-xs font-semibold opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none">
+                        {isVideo ? `Video ${index + 1}` : `Photo ${index + 1}`}
                       </div>
                     </motion.div>
-                  ))}
+                    );
+                  })}
                 </div>
               ) : (
                 <div className="text-center py-12 bg-background/50 rounded-lg border border-dashed border-gold/30">
                   <FileText className="w-16 h-16 text-gold/50 mx-auto mb-4" />
-                  <p className="text-muted-foreground mb-2">No photos yet</p>
-                  <p className="text-sm text-muted-foreground">Upload photos to showcase your salon!</p>
-                </div>
-              )}
-
-              {/* Sample Salon Images */}
-              {(!salon?.photo_gallery || salon.photo_gallery.length === 0) && (
-                <div className="mt-8">
-                  <h3 className="text-lg font-semibold text-foreground mb-4">Inspiration Gallery</h3>
-                  <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
-                    {[
-                      'https://images.pexels.com/photos/3993293/pexels-photo-3993293.jpeg?auto=compress&cs=tinysrgb&w=400',
-                      'https://images.pexels.com/photos/853427/pexels-photo-853427.jpeg?auto=compress&cs=tinysrgb&w=400',
-                      'https://images.pexels.com/photos/9146943/pexels-photo-9146943.jpeg?auto=compress&cs=tinysrgb&w=400',
-                      'https://images.pexels.com/photos/3998403/pexels-photo-3998403.jpeg?auto=compress&cs=tinysrgb&w=400',
-                      'https://images.unsplash.com/photo-1600948836101-f9ffda59d250?w=400&q=80',
-                      'https://images.pexels.com/photos/3993295/pexels-photo-3993295.jpeg?auto=compress&cs=tinysrgb&w=400'
-                    ].map((url, i) => (
-                      <div key={i} className="aspect-square rounded-lg overflow-hidden opacity-50 hover:opacity-100 transition-opacity">
-                        <img src={url} alt={`Sample ${i + 1}`} className="w-full h-full object-cover" />
-                      </div>
-                    ))}
-                  </div>
-                  <p className="text-xs text-muted-foreground text-center mt-4">Sample professional salon photos for inspiration</p>
+                  <p className="text-muted-foreground mb-2">No photos or videos yet</p>
+                  <p className="text-sm text-muted-foreground">Upload media to showcase your salon!</p>
                 </div>
               )}
             </div>
@@ -2105,29 +2121,83 @@ export default function EnhancedSalonDashboard() {
           {bookingMode === 'existing' && (
             <div className="mb-4">
               <Label>Select Customer</Label>
-              <div className="max-h-48 overflow-y-auto border rounded-lg mt-2">
+              {/* Search box */}
+              <div className="relative mt-2 mb-2">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+                <Input
+                  placeholder="Search by name or mobile number..."
+                  value={customerSearchQuery}
+                  onChange={(e) => setCustomerSearchQuery(e.target.value)}
+                  className="pl-10"
+                />
+              </div>
+
+              {/* Wallet balance chip for selected customer */}
+              {selectedCustomer && (
+                <div className="mb-2 flex items-center gap-2 flex-wrap">
+                  <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold bg-gold/15 text-gold border border-gold/30">
+                    <Wallet className="w-3.5 h-3.5" />
+                    Wallet: ₹{Number(selectedCustomer.wallet_balance || 0).toFixed(0)}
+                  </span>
+                  {selectedCustomer.membership_name && (
+                    <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] bg-muted text-muted-foreground">
+                      {selectedCustomer.membership_name}
+                    </span>
+                  )}
+                </div>
+              )}
+
+              <div className="max-h-48 overflow-y-auto border rounded-lg">
                 {customers.length === 0 ? (
                   <p className="text-sm text-muted-foreground p-4 text-center">
                     No customers found. Switch to "Add New Customer" mode.
                   </p>
                 ) : (
-                  customers.map((customer) => (
-                    <div
-                      key={customer.phone || customer.name}
-                      onClick={() => handleCustomerSelection(customer)}
-                      className={`p-3 cursor-pointer hover:bg-muted border-b transition-colors ${
-                        manualBookingForm.customer_name === customer.name ? 'bg-gold/20 border-gold' : ''
-                      }`}
-                    >
-                      <p className="font-semibold">{customer.name}</p>
-                      <p className="text-xs text-muted-foreground">{customer.phone}</p>
-                      {customer.gender && (
-                        <span className="text-xs px-2 py-0.5 bg-muted rounded mt-1 inline-block">
-                          {customer.gender}
-                        </span>
-                      )}
-                    </div>
-                  ))
+                  (() => {
+                    const q = customerSearchQuery.trim().toLowerCase();
+                    const filtered = q
+                      ? customers.filter(c =>
+                          (c.name || '').toLowerCase().includes(q) ||
+                          (c.phone || '').toLowerCase().includes(q)
+                        )
+                      : customers;
+                    if (filtered.length === 0) {
+                      return (
+                        <p className="text-sm text-muted-foreground p-4 text-center">
+                          No customers match "{customerSearchQuery}".
+                        </p>
+                      );
+                    }
+                    return filtered.map((customer) => (
+                      <div
+                        key={customer.phone || customer.name}
+                        onClick={() => handleCustomerSelection(customer)}
+                        className={`p-3 cursor-pointer hover:bg-muted border-b transition-colors ${
+                          manualBookingForm.customer_name === customer.name && manualBookingForm.phone === customer.phone
+                            ? 'bg-gold/20 border-gold'
+                            : ''
+                        }`}
+                      >
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="min-w-0 flex-1">
+                            <p className="font-semibold truncate">{customer.name}</p>
+                            <p className="text-xs text-muted-foreground">{customer.phone || 'No phone'}</p>
+                            {customer.gender && (
+                              <span className="text-xs px-2 py-0.5 bg-muted rounded mt-1 inline-block">
+                                {customer.gender}
+                              </span>
+                            )}
+                          </div>
+                          {(customer.wallet_balance ?? 0) > 0 && (
+                            <span className="shrink-0 inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-gold/10 text-gold border border-gold/30">
+                              <Wallet className="w-3 h-3" />
+                              ₹{Number(customer.wallet_balance).toFixed(0)}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    ));
+                  })()
                 )}
               </div>
             </div>
