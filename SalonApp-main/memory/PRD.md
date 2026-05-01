@@ -104,7 +104,7 @@ A token-based queue management system for "The Looks Unisex Salon" supporting da
 - **User Login**: Any name + 10-digit phone
 
 ## Preview URL
-https://customer-experience-4.preview.emergentagent.com
+https://salon-booking-fix-7.preview.emergentagent.com
 
 ## Key Files
 - `/app/backend/server.py` - Main API (50+ endpoints)

@@ -9,7 +9,7 @@ import json
 from typing import Dict, Any, Optional
 
 # Base URL from frontend/.env
-BASE_URL = "https://customer-experience-4.preview.emergentagent.com/api"
+BASE_URL = "https://salon-booking-fix-7.preview.emergentagent.com/api"
 
 # Test credentials from /app/memory/test_credentials.md
 ADMIN_LOGIN_ID = "admin"
