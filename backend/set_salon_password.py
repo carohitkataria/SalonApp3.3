@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
 """
 Script to set password for a specific salon
-Usage: python set_salon_password.py
+Usage: python set_salon_password.py <phone> <password>
+Example: python set_salon_password.py +917503070727 mynewpassword
 """
 import asyncio
+import sys
 from motor.motor_asyncio import AsyncIOMotorClient
 from passlib.context import CryptContext
 import os
@@ -22,8 +24,14 @@ client = AsyncIOMotorClient(MONGO_URL)
 db = client[DB_NAME]
 
 async def set_password():
-    phone = "+917503070727"
-    password = "salon123"
+    # Get phone and password from command line arguments
+    if len(sys.argv) < 3:
+        print("Usage: python set_salon_password.py <phone> <password>")
+        print("Example: python set_salon_password.py +917503070727 mynewpassword")
+        sys.exit(1)
+    
+    phone = sys.argv[1]
+    password = sys.argv[2]
     
     # Hash password
     password_hash = pwd_context.hash(password)

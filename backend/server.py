@@ -21,6 +21,7 @@ import qrcode
 import jwt
 from passlib.context import CryptContext
 import random
+import secrets  # Secure random number generation
 import math
 
 # Import Twilio service
@@ -654,8 +655,8 @@ async def get_current_salon_optional(credentials: Optional[HTTPAuthorizationCred
 # ============ HELPER FUNCTIONS ============
 
 def generate_otp():
-    """Generate a random 6-digit OTP"""
-    return str(random.randint(100000, 999999))
+    """Generate a cryptographically secure random 6-digit OTP"""
+    return str(secrets.randbelow(900000) + 100000)
 
 def calculate_distance(lat1, lon1, lat2, lon2):
     """Calculate distance between two coordinates in km"""

@@ -21,7 +21,9 @@ export function playNotificationSound() {
     const ctx = getAudioCtx();
     if (!ctx) return;
     if (ctx.state === 'suspended') {
-      ctx.resume().catch(() => {});
+      ctx.resume().catch((err) => {
+        console.warn('Failed to resume audio context:', err);
+      });
     }
     const now = ctx.currentTime;
 
@@ -51,7 +53,7 @@ export function playNotificationSound() {
     osc2.start(now + 0.18);
     osc2.stop(now + 0.56);
   } catch (e) {
-    // ignore
+    console.warn('Audio notification sound failed:', e);
   }
 }
 
@@ -99,7 +101,9 @@ export function requestNotificationPermission() {
     if (Notification.permission === 'default') {
       Notification.requestPermission().then((p) => {
         if (p === 'granted') registerNotificationServiceWorker();
-      }).catch(() => {});
+      }).catch((err) => {
+        console.warn('Notification permission request failed:', err);
+      });
     }
     return Notification.permission;
   } catch (e) {
@@ -167,18 +171,24 @@ export function showBrowserNotification(title, body, options = {}) {
           silent: false,
           ...options,
         });
-        setTimeout(() => { try { n.close(); } catch (e) {} }, 8000);
+        setTimeout(() => { 
+          try { n.close(); } 
+          catch (e) { console.warn('Failed to auto-close notification:', e); }
+        }, 8000);
         if (options.onClick) {
           n.onclick = options.onClick;
         } else {
           n.onclick = () => {
-            try { window.focus(); n.close(); } catch (e) {}
+            try { window.focus(); n.close(); } 
+            catch (e) { console.warn('Failed to focus window or close notification:', e); }
           };
         }
-      } catch (e) { /* ignore */ }
+      } catch (e) { 
+        console.error('Failed to show notification:', e);
+      }
     });
   } catch (e) {
-    // ignore
+    console.error('Error in showBrowserNotification:', e);
   }
 }
 
@@ -199,7 +209,9 @@ export function setSeenIds(storageKey, ids) {
     // Keep only the latest 200 IDs to avoid bloat
     const arr = Array.from(ids).slice(-200);
     localStorage.setItem(storageKey, JSON.stringify(arr));
-  } catch (e) {}
+  } catch (e) {
+    console.error('Failed to save seen notification IDs:', e);
+  }
 }
 
 // Check if notifications are supported
