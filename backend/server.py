@@ -9351,6 +9351,15 @@ async def cancel_active_bookings_end_of_day():
 # Include router - MUST be after ALL @api_router routes are defined
 fastapi_app.include_router(api_router)
 
+# Health check endpoint for Kubernetes liveness/readiness probes
+@fastapi_app.get("/health")
+async def health_check():
+    """
+    Health check endpoint for Kubernetes probes.
+    Returns 200 OK if the application is healthy.
+    """
+    return {"status": "healthy", "service": "salon-backend"}
+
 # Scheduler for token allocation
 scheduler = AsyncIOScheduler()
 scheduler.add_job(allocate_future_tokens, 'cron', hour=5, minute=30)  # Run at 5:30 AM daily
