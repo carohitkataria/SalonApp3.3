@@ -177,13 +177,23 @@ export default function OTPLoginPage() {
       
       // SECURITY: Never display OTP in toast/UI even when backend returns it
       // (some dev/mock modes echo OTP back). Show only the generic confirmation.
-      toast.success(response.data.note || 'OTP sent to your WhatsApp! Please check your messages.');
+      // If backend reports a failed delivery_status, surface a friendly retry message.
+      if (response.data?.delivery_status === 'failed') {
+        toast.error(response.data?.note || 'WhatsApp delivery failed. Please try again.');
+        return;
+      }
+      toast.success(response.data?.note || 'OTP sent to your WhatsApp! Please check your messages.');
       
       setStep(2);
       setCountdown(30);
       setCanResend(false);
     } catch (error) {
-      toast.error(error.response?.data?.detail || 'Failed to send OTP');
+      console.error('[SEND OTP] Failed:', error?.response?.status, error?.response?.data || error?.message);
+      const detail = error?.response?.data?.detail
+        || error?.response?.data?.error
+        || error?.message
+        || 'Failed to send OTP. Please check your connection and try again.';
+      toast.error(typeof detail === 'string' ? detail : 'Failed to send OTP');
     } finally {
       setLoading(false);
     }
@@ -195,13 +205,22 @@ export default function OTPLoginPage() {
       const response = await axios.post(`${API}/salon/send-otp`, { phone });
       
       // SECURITY: Never display OTP in toast/UI
-      toast.success(response.data.note || 'OTP resent to your WhatsApp!');
+      if (response.data?.delivery_status === 'failed') {
+        toast.error(response.data?.note || 'WhatsApp delivery failed. Please try again.');
+        return;
+      }
+      toast.success(response.data?.note || 'OTP resent to your WhatsApp!');
       
       setCountdown(30);
       setCanResend(false);
       setOtp('');
     } catch (error) {
-      toast.error(error.response?.data?.detail || 'Failed to resend OTP');
+      console.error('[RESEND OTP] Failed:', error?.response?.status, error?.response?.data || error?.message);
+      const detail = error?.response?.data?.detail
+        || error?.response?.data?.error
+        || error?.message
+        || 'Failed to resend OTP. Please check your connection and try again.';
+      toast.error(typeof detail === 'string' ? detail : 'Failed to resend OTP');
     } finally {
       setLoading(false);
     }

@@ -3031,7 +3031,7 @@ async def send_otp(request: SalonOTPRequest):
             logger.warning(f"Mock OTP for {phone}: {otp}")
         else:
             response['error'] = whatsapp_result.get('error')
-            response['note'] = "OTP included because WhatsApp delivery failed"
+            response['note'] = "OTP delivery failed. Please try again."
             logger.error(f"WhatsApp delivery failed for {phone}: {whatsapp_result.get('error')}")
     else:
         # For successful WhatsApp delivery, also log OTP for debugging
@@ -3484,18 +3484,27 @@ async def send_customer_otp(request: CustomerOTPRequest):
     response = {
         "success": True,
         "message": "OTP sent successfully via WhatsApp",
-        "phone": phone
+        "phone": phone,
+        "delivery_status": whatsapp_result.get('status'),
     }
     
-    # Include OTP in response for testing (mock mode or failed delivery)
-    if whatsapp_result.get("mock") or not whatsapp_result.get("success"):
+    # Build the user-facing note based on the actual Twilio result.
+    # send_whatsapp_otp returns status in {'sent','mock','failed'} (no 'success' key).
+    status = whatsapp_result.get('status')
+    if status == 'mock':
+        # Mock-mode: include OTP for testing and explain
         response['otp'] = otp
-        if whatsapp_result.get("mock"):
-            response['note'] = "⚠️ Twilio not configured - OTP shown for testing"
-            logger.warning(f"Mock OTP for customer {phone}: {otp}")
-        else:
-            response['note'] = "OTP included because WhatsApp delivery failed"
+        response['note'] = "⚠️ Twilio not configured - OTP shown for testing"
+        logger.warning(f"Mock OTP for customer {phone}: {otp}")
+    elif status == 'failed':
+        # Genuine delivery failure — surface the error and include OTP fallback
+        response['otp'] = otp
+        response['note'] = "OTP delivery failed. Please try again."
+        response['error'] = whatsapp_result.get('error')
+        logger.error(f"WhatsApp delivery failed for customer {phone}: {whatsapp_result.get('error')}")
     else:
+        # Successful Twilio handoff
+        response['note'] = "OTP sent to your WhatsApp. Please check your messages."
         logger.info(f"✅ OTP sent via WhatsApp to customer {phone}")
     
     return response
@@ -3733,16 +3742,35 @@ async def create_salon_booking(salon_id: str, body: dict, current_user=Depends(g
         service = await db.services.find_one({"id": service_id}, {"_id": 0})
         if service:
             total_amount += service.get("base_price", 0)
+
+    # Auto-assign barber when "any" is selected, using the same fastest-barber
+    # logic as the customer booking flow (priority: shortest active queue today
+    # → fewest yesterday → random eligible).
+    if not barber_id or barber_id == "any":
+        service_total_minutes = await calc_service_total_minutes(selected_services)
+        required_blocked = calc_blocked_minutes_from_total(service_total_minutes)
+        chosen = await pick_fastest_barber(
+            salon_id=salon_id,
+            date=date,
+            shift=shift,
+            required_blocked_minutes=required_blocked,
+            customer_gender=gender,
+        )
+        if not chosen:
+            raise HTTPException(
+                status_code=400,
+                detail=f"All barbers are fully booked for {shift} shift. Please choose another shift or date."
+            )
+        barber_id = chosen["id"]
     
     # Get token number (signature: salon_id, date, shift)
     token_number = await get_next_token_number(salon_id, date, shift)
     
-    # Get barber name
-    barber_name = "Any Available"
-    if barber_id and barber_id != "any":
-        barber = await db.barbers.find_one({"id": barber_id}, {"_id": 0})
-        if barber:
-            barber_name = barber.get("name", "Unknown")
+    # Get barber name (always set since barber_id is now resolved)
+    barber_name = "Unknown"
+    barber = await db.barbers.find_one({"id": barber_id}, {"_id": 0})
+    if barber:
+        barber_name = barber.get("name", "Unknown")
     
     token_dict = {
         "id": str(uuid.uuid4()),

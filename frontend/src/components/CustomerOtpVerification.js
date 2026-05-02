@@ -41,13 +41,24 @@ export default function CustomerOtpVerification({ onVerified, showAs = 'banner' 
       const phone = user.phone.replace('+91', '');
       const response = await axios.post(`${API}/customer/send-otp`, { phone });
       
+      // If backend reports a failed delivery_status, treat it as an error
+      if (response.data?.delivery_status === 'failed') {
+        toast.error(response.data?.note || 'WhatsApp delivery failed. Please try again.');
+        return;
+      }
+      
       setStep('otp');
       setCountdown(60);
       
       // SECURITY: Never display OTP in toast/UI even if backend echoes it back
-      toast.success(response.data.note || 'OTP sent to your WhatsApp!');
+      toast.success(response.data?.note || 'OTP sent to your WhatsApp!');
     } catch (error) {
-      toast.error(error.response?.data?.detail || 'Failed to send OTP');
+      console.error('[CUSTOMER SEND OTP] Failed:', error?.response?.status, error?.response?.data || error?.message);
+      const detail = error?.response?.data?.detail
+        || error?.response?.data?.error
+        || error?.message
+        || 'Failed to send OTP. Please check your connection and try again.';
+      toast.error(typeof detail === 'string' ? detail : 'Failed to send OTP');
     } finally {
       setLoading(false);
     }
