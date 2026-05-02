@@ -2836,6 +2836,20 @@ def _is_barber_on_leave_on(barber: Dict[str, Any], date_str: str) -> bool:
     return False
 
 
+def normalize_barber_data(barber: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Normalize barber data to ensure all fields match Pydantic model expectations.
+    Converts None values to appropriate defaults for list fields.
+    """
+    if barber.get("leave_dates") is None:
+        barber["leave_dates"] = []
+    if barber.get("gallery") is None:
+        barber["gallery"] = []
+    if barber.get("documents") is None:
+        barber["documents"] = []
+    return barber
+
+
 @api_router.get("/salons/{salon_id}/barbers", response_model=List[Barber])
 async def get_salon_barbers(salon_id: str, available_only: bool = False, customer_view: bool = False, date: Optional[str] = None):
     """
@@ -2856,16 +2870,7 @@ async def get_salon_barbers(salon_id: str, available_only: bool = False, custome
         logger.info(f"Fetched {len(barbers)} barbers for salon {salon_id}, query: {query}")
 
         # Normalize barber data to ensure fields match Pydantic model expectations
-        for barber in barbers:
-            # Ensure leave_dates is a list (not None)
-            if barber.get("leave_dates") is None:
-                barber["leave_dates"] = []
-            # Ensure gallery is a list (not None)
-            if barber.get("gallery") is None:
-                barber["gallery"] = []
-            # Ensure documents is a list (not None)
-            if barber.get("documents") is None:
-                barber["documents"] = []
+        barbers = [normalize_barber_data(b) for b in barbers]
 
         # Resolve target date — defaults to today (IST)
         ist = timezone(timedelta(hours=5, minutes=30))
@@ -2901,6 +2906,8 @@ async def create_barber(salon_id: str, barber: BarberCreate, current_salon=Depen
     barber_dict["is_active"] = True
     
     await db.barbers.insert_one(barber_dict)
+    # Normalize before returning to ensure Pydantic validation passes
+    barber_dict = normalize_barber_data(barber_dict)
     return Barber(**barber_dict)
 
 @api_router.put("/barbers/{barber_id}", response_model=Barber)
@@ -2918,6 +2925,8 @@ async def update_barber(barber_id: str, barber_update: BarberUpdate, current_use
         await db.barbers.update_one({"id": barber_id}, {"$set": update_data})
     
     updated = await db.barbers.find_one({"id": barber_id}, {"_id": 0})
+    # Normalize before returning to ensure Pydantic validation passes
+    updated = normalize_barber_data(updated)
     return Barber(**updated)
 
 @api_router.delete("/barbers/{barber_id}")
