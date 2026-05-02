@@ -2855,6 +2855,18 @@ async def get_salon_barbers(salon_id: str, available_only: bool = False, custome
         barbers = await db.barbers.find(query, {"_id": 0}).to_list(500)
         logger.info(f"Fetched {len(barbers)} barbers for salon {salon_id}, query: {query}")
 
+        # Normalize barber data to ensure fields match Pydantic model expectations
+        for barber in barbers:
+            # Ensure leave_dates is a list (not None)
+            if barber.get("leave_dates") is None:
+                barber["leave_dates"] = []
+            # Ensure gallery is a list (not None)
+            if barber.get("gallery") is None:
+                barber["gallery"] = []
+            # Ensure documents is a list (not None)
+            if barber.get("documents") is None:
+                barber["documents"] = []
+
         # Resolve target date — defaults to today (IST)
         ist = timezone(timedelta(hours=5, minutes=30))
         target_date = (date or "").strip() or datetime.now(ist).strftime("%Y-%m-%d")
