@@ -1361,21 +1361,53 @@ export default function SinglePageBooking() {
           {/* Date Chips */}
           <div>
             <p className="text-sm font-medium text-muted-foreground mb-2">When</p>
-            <div className="flex gap-2 flex-wrap">
-              <SelectChip 
-                selected={formData.date === getTodayIST()} 
-                onClick={() => setFormData(prev => ({ ...prev, date: getTodayIST(), shift: '', bookingType: 'instant' }))}
-                icon={Calendar}
-              >
-                Today
-              </SelectChip>
-              <SelectChip 
-                selected={formData.date === getTomorrowIST()} 
-                onClick={() => setFormData(prev => ({ ...prev, date: getTomorrowIST(), shift: '', bookingType: 'future' }))}
-                icon={Calendar}
-              >
-                Tomorrow
-              </SelectChip>
+            <div className="grid grid-cols-2 gap-2 sm:flex sm:flex-wrap">
+              {(() => {
+                const today = getTodayIST();
+                const tomorrow = getTomorrowIST();
+                const formatDateLabel = (yyyy_mm_dd) => {
+                  // Render as "Mon, 22 Apr" using IST
+                  const [y, m, d] = yyyy_mm_dd.split('-').map(Number);
+                  const dt = new Date(Date.UTC(y, m - 1, d));
+                  return dt.toLocaleDateString('en-IN', {
+                    weekday: 'short', day: '2-digit', month: 'short', timeZone: 'UTC'
+                  });
+                };
+                const dateOptions = [
+                  { label: 'Today', value: today, bookingType: 'instant' },
+                  { label: 'Tomorrow', value: tomorrow, bookingType: 'future' }
+                ];
+                return dateOptions.map(opt => {
+                  const isSelected = formData.date === opt.value;
+                  return (
+                    <button
+                      key={opt.value}
+                      type="button"
+                      onClick={() => setFormData(prev => ({
+                        ...prev, date: opt.value, shift: '', bookingType: opt.bookingType
+                      }))}
+                      className={`relative flex flex-col items-center justify-center px-4 py-2 rounded-2xl border-2 transition-all ${
+                        isSelected
+                          ? 'bg-gold text-black border-gold shadow-lg shadow-gold/20'
+                          : 'bg-background text-foreground border-border hover:border-gold/50 active:scale-[0.98]'
+                      }`}
+                    >
+                      <div className="flex items-center gap-1.5">
+                        <Calendar className="w-3.5 h-3.5" />
+                        <span className="font-semibold text-sm">{opt.label}</span>
+                      </div>
+                      <span className={`text-[10px] mt-0.5 ${isSelected ? 'text-black/70' : 'text-muted-foreground'}`}>
+                        {formatDateLabel(opt.value)}
+                      </span>
+                      {isSelected && (
+                        <span className="absolute -top-1 -right-1 w-5 h-5 bg-green-500 rounded-full flex items-center justify-center">
+                          <Check className="w-3 h-3 text-white" />
+                        </span>
+                      )}
+                    </button>
+                  );
+                });
+              })()}
             </div>
           </div>
 

@@ -205,7 +205,9 @@ export default function StaffProfilePage() {
     last_working_date: '',
     compensation: '',
     is_barber: true,
+    profile_image: '',
   });
+  const [uploadingPhoto, setUploadingPhoto] = useState(false);
 
   const [permissions, setPermissions] = useState({
     can_edit_salon: false,
@@ -247,6 +249,7 @@ export default function StaffProfilePage() {
           last_working_date: staffMember.last_working_date || '',
           compensation: staffMember.compensation || '',
           is_barber: staffMember.is_barber !== false,
+          profile_image: staffMember.profile_image || '',
         });
       }
 
@@ -273,6 +276,66 @@ export default function StaffProfilePage() {
       setServices(response.data || []);
     } catch (error) {
       console.error('Error fetching services:', error);
+    }
+  };
+
+  const handleUploadProfileImage = async (file) => {
+    if (!file) return;
+    if (!file.type.startsWith('image/')) {
+      toast.error('Please select an image file');
+      return;
+    }
+    if (file.size > 5 * 1024 * 1024) {
+      toast.error('Image must be less than 5 MB');
+      return;
+    }
+    setUploadingPhoto(true);
+    try {
+      // Convert to base64 (matches existing pattern in BarberManagement)
+      const base64 = await new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result);
+        reader.onerror = reject;
+        reader.readAsDataURL(file);
+      });
+
+      const token = localStorage.getItem('salon_admin_token') ||
+                    JSON.parse(localStorage.getItem('salon_user_auth') || '{}').token;
+
+      // Persist immediately so it's visible without entering "Edit" mode
+      await axios.put(
+        `${API}/barbers/${staffId}`,
+        { ...profileData, profile_image: base64 },
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      setProfileData(prev => ({ ...prev, profile_image: base64 }));
+      setStaff(prev => prev ? { ...prev, profile_image: base64 } : prev);
+      toast.success('Profile photo updated');
+    } catch (error) {
+      console.error(error);
+      toast.error(error?.response?.data?.detail || 'Failed to upload profile photo');
+    } finally {
+      setUploadingPhoto(false);
+    }
+  };
+
+  const handleRemoveProfileImage = async () => {
+    setUploadingPhoto(true);
+    try {
+      const token = localStorage.getItem('salon_admin_token') ||
+                    JSON.parse(localStorage.getItem('salon_user_auth') || '{}').token;
+      await axios.put(
+        `${API}/barbers/${staffId}`,
+        { ...profileData, profile_image: '' },
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      setProfileData(prev => ({ ...prev, profile_image: '' }));
+      setStaff(prev => prev ? { ...prev, profile_image: '' } : prev);
+      toast.success('Profile photo removed');
+    } catch (error) {
+      toast.error('Failed to remove photo');
+    } finally {
+      setUploadingPhoto(false);
     }
   };
 
@@ -441,6 +504,60 @@ export default function StaffProfilePage() {
                     Edit
                   </Button>
                 )}
+              </div>
+
+              {/* Profile Photo */}
+              <div className="flex flex-col sm:flex-row sm:items-center gap-4 mb-6 pb-6 border-b border-border">
+                <div className="relative w-24 h-24 rounded-full overflow-hidden bg-muted border-2 border-border flex-shrink-0">
+                  {profileData.profile_image ? (
+                    <img
+                      src={profileData.profile_image}
+                      alt={profileData.name || 'Staff'}
+                      className="w-full h-full object-cover"
+                    />
+                  ) : (
+                    <div className="w-full h-full flex items-center justify-center bg-gold/10">
+                      <User className="w-10 h-10 text-gold" />
+                    </div>
+                  )}
+                  {uploadingPhoto && (
+                    <div className="absolute inset-0 bg-black/60 flex items-center justify-center">
+                      <Loader2 className="w-6 h-6 animate-spin text-white" />
+                    </div>
+                  )}
+                </div>
+                <div className="flex-1">
+                  <p className="font-medium text-foreground">Profile Photo</p>
+                  <p className="text-xs text-muted-foreground mb-3">JPG / PNG, up to 5 MB</p>
+                  <div className="flex flex-wrap gap-2">
+                    <label className="cursor-pointer">
+                      <input
+                        type="file"
+                        accept="image/*"
+                        className="hidden"
+                        disabled={uploadingPhoto}
+                        onChange={(e) => {
+                          const f = e.target.files?.[0];
+                          if (f) handleUploadProfileImage(f);
+                          e.target.value = '';
+                        }}
+                      />
+                      <span className="inline-flex items-center px-3 py-1.5 bg-gold text-black hover:bg-gold/90 rounded-md text-sm font-medium transition-colors">
+                        {profileData.profile_image ? 'Change Photo' : 'Upload Photo'}
+                      </span>
+                    </label>
+                    {profileData.profile_image && (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        disabled={uploadingPhoto}
+                        onClick={handleRemoveProfileImage}
+                      >
+                        Remove
+                      </Button>
+                    )}
+                  </div>
+                </div>
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">

@@ -191,6 +191,7 @@ export default function EnhancedSalonDashboard() {
     selected_services: [],
     payment_mode: 'cash'
   });
+  const [manualSelectedCategory, setManualSelectedCategory] = useState('All');
 
   useEffect(() => {
     const storedSalonId = localStorage.getItem('salon_id');
@@ -719,8 +720,18 @@ export default function EnhancedSalonDashboard() {
 
   const fetchAllServices = async () => {
     try {
-      const response = await axios.get(`${API}/services`);
-      setAllServices(response.data);
+      // Fetch only services enabled for THIS salon (not the global services list).
+      // Falls back to the global list if the enabled endpoint fails for any reason.
+      let enabled = [];
+      try {
+        const res = await axios.get(`${API}/salons/${salonId}/services/enabled`);
+        enabled = Array.isArray(res.data) ? res.data : [];
+      } catch (e) {
+        console.warn('Enabled services fetch failed, falling back to /services');
+        const fallback = await axios.get(`${API}/services`);
+        enabled = fallback.data || [];
+      }
+      setAllServices(enabled);
     } catch (error) {
       console.error('Error fetching services:', error);
       toast.error('Failed to load services');
@@ -795,6 +806,7 @@ export default function EnhancedSalonDashboard() {
     setBookingMode('existing');
     setCustomerSearchQuery('');
     setSelectedCustomer(null);
+    setManualSelectedCategory('All');
     setManualBookingForm({
       customer_name: '',
       phone: '',
@@ -2334,33 +2346,76 @@ export default function EnhancedSalonDashboard() {
           {/* Service Selection */}
           <div className="mb-4">
             <Label>Select Services *</Label>
-            <div className="max-h-64 overflow-y-auto border rounded-lg mt-2">
-              {allServices.length === 0 ? (
-                <p className="text-sm text-muted-foreground p-4 text-center">Loading services...</p>
-              ) : (
-                allServices.map((service) => {
-                  const isSelected = manualBookingForm.selected_services.includes(service.id);
+            {allServices.length === 0 ? (
+              <p className="text-sm text-muted-foreground p-4 text-center">Loading services...</p>
+            ) : (
+              <>
+                {/* Category Filter Chips */}
+                {(() => {
+                  const allCategories = ['All', ...Array.from(new Set(allServices.map(s => s.category || 'General')))];
                   return (
-                    <div
-                      key={service.id}
-                      onClick={() => toggleManualServiceSelection(service.id)}
-                      className={`p-3 cursor-pointer hover:bg-muted border-b transition-colors flex items-center justify-between ${
-                        isSelected ? 'bg-gold/20 border-gold' : ''
-                      }`}
-                    >
-                      <div className="flex items-center gap-3">
-                        <Checkbox checked={isSelected} />
-                        <div>
-                          <p className="font-semibold text-sm">{service.service_name}</p>
-                          <p className="text-xs text-muted-foreground">{service.category}</p>
-                        </div>
-                      </div>
-                      <p className="font-bold text-gold">₹{service.base_price}</p>
+                    <div className="flex gap-2 overflow-x-auto py-2 mt-2 -mx-1 px-1 scrollbar-thin">
+                      {allCategories.map(cat => {
+                        const isActive = manualSelectedCategory === cat;
+                        const count = cat === 'All'
+                          ? allServices.length
+                          : allServices.filter(s => (s.category || 'General') === cat).length;
+                        return (
+                          <button
+                            key={cat}
+                            type="button"
+                            onClick={() => setManualSelectedCategory(cat)}
+                            className={`flex-shrink-0 px-3 py-1.5 rounded-full border-2 text-xs font-medium transition-all whitespace-nowrap ${
+                              isActive
+                                ? 'bg-gold text-black border-gold shadow-md'
+                                : 'bg-background text-foreground border-border hover:border-gold/50'
+                            }`}
+                          >
+                            {cat} <span className={`ml-1 ${isActive ? 'text-black/60' : 'text-muted-foreground'}`}>({count})</span>
+                          </button>
+                        );
+                      })}
                     </div>
                   );
-                })
-              )}
-            </div>
+                })()}
+
+                <div className="max-h-64 overflow-y-auto border rounded-lg mt-2">
+                  {(() => {
+                    const filtered = manualSelectedCategory === 'All'
+                      ? allServices
+                      : allServices.filter(s => (s.category || 'General') === manualSelectedCategory);
+                    if (filtered.length === 0) {
+                      return <p className="text-sm text-muted-foreground p-4 text-center">No services in this category</p>;
+                    }
+                    return filtered.map((service) => {
+                      const isSelected = manualBookingForm.selected_services.includes(service.id);
+                      const price = service.base_price ?? service.price ?? 0;
+                      const isOnwards = service.price_type === 'onwards';
+                      return (
+                        <div
+                          key={service.id}
+                          onClick={() => toggleManualServiceSelection(service.id)}
+                          className={`p-3 cursor-pointer hover:bg-muted border-b transition-colors flex items-center justify-between ${
+                            isSelected ? 'bg-gold/20 border-gold' : ''
+                          }`}
+                        >
+                          <div className="flex items-center gap-3">
+                            <Checkbox checked={isSelected} />
+                            <div>
+                              <p className="font-semibold text-sm">{service.service_name || service.name}</p>
+                              <p className="text-xs text-muted-foreground">{service.category || 'General'}</p>
+                            </div>
+                          </div>
+                          <p className="font-bold text-gold whitespace-nowrap">
+                            {isOnwards ? '₹' + price + '+' : '₹' + price}
+                          </p>
+                        </div>
+                      );
+                    });
+                  })()}
+                </div>
+              </>
+            )}
           </div>
 
           {/* Payment Mode */}

@@ -10,12 +10,15 @@ import { toast } from 'sonner';
 import { motion, AnimatePresence } from 'framer-motion';
 import axios from 'axios';
 import SalonHubLogo from './SalonHubLogo';
+import NotificationOptInBanner from './NotificationOptInBanner';
 import {
   requestNotificationPermission,
   showBrowserNotification,
+  registerNotificationServiceWorker,
   getSeenIds,
   setSeenIds,
 } from '@/utils/browserNotifications';
+import { useWebSocket } from '@/contexts/WebSocketContext';
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
 const API = `${BACKEND_URL}/api`;
@@ -92,11 +95,16 @@ export default function CustomerLayout({ children }) {
   };
 
   // Fetch notification count + browser notification on new notifications
+  const { subscribe, unsubscribe } = useWebSocket();
   useEffect(() => {
     const userPhone = user?.phone?.replace('+91', '') || '';
     if (userPhone) {
-      // Ask for browser notification permission once
-      requestNotificationPermission();
+      // Do NOT auto-prompt here — opt-in is now driven by NotificationOptInBanner.
+      // But re-register the SW if permission was already granted earlier so
+      // backgrounded-tab notifications keep working.
+      if (typeof Notification !== 'undefined' && Notification.permission === 'granted') {
+        registerNotificationServiceWorker();
+      }
 
       const storageKey = `seen_notif_customer_${userPhone}`;
       let initialised = false;
@@ -143,6 +151,33 @@ export default function CustomerLayout({ children }) {
       return () => clearInterval(interval);
     }
   }, [user]);
+
+  // Real-time instant push: react to the WebSocket "token_called" event
+  // and surface a browser notification immediately (no 30s polling delay).
+  // The SW handles delivery so it works while the tab is backgrounded.
+  useEffect(() => {
+    const userPhone = user?.phone?.replace('+91', '') || '';
+    if (!userPhone) return;
+    const handleTokenCalled = (data) => {
+      try {
+        const tokenPhone = (data?.phone || '').replace('+91', '');
+        // Only notify the affected customer
+        if (!tokenPhone || tokenPhone !== userPhone) return;
+        const tokenNo = data?.token_number ? `Token #${data.token_number}` : 'Your token';
+        showBrowserNotification(
+          'It\'s your turn!',
+          `${tokenNo} has been called. Please head to the salon.`,
+          { tag: `token-called-${data?.token_id || data?.id || 'na'}`, requireInteraction: true }
+        );
+      } catch (e) { /* ignore */ }
+    };
+    subscribe('token_called', handleTokenCalled);
+    subscribe('token_recalled', handleTokenCalled);
+    return () => {
+      unsubscribe('token_called', handleTokenCalled);
+      unsubscribe('token_recalled', handleTokenCalled);
+    };
+  }, [user, subscribe, unsubscribe]);
 
   const handleLogout = () => {
     logoutUser();
@@ -380,6 +415,8 @@ export default function CustomerLayout({ children }) {
 
       {/* Main Content - shift when pinned */}
       <div className={`w-full transition-all duration-300 ${isPinned && sidebarOpen ? 'pl-72' : ''}`}>
+        {/* Opt-in browser push notification banner (auto-hides when permission decided / dismissed) */}
+        {user && <NotificationOptInBanner />}
         {children}
       </div>
     </div>

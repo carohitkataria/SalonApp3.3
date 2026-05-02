@@ -41,7 +41,6 @@ export default function OTPLoginPage() {
   const [showPassword, setShowPassword] = useState(false);
   const [otp, setOtp] = useState('');
   const [loading, setLoading] = useState(false);
-  const [sentOtp, setSentOtp] = useState('');
   const [countdown, setCountdown] = useState(0);
   const [canResend, setCanResend] = useState(false);
 
@@ -176,15 +175,9 @@ export default function OTPLoginPage() {
     try {
       const response = await axios.post(`${API}/salon/send-otp`, { phone });
       
-      // Check if OTP is in response (testing/mock mode)
-      if (response.data.otp) {
-        setSentOtp(response.data.otp);
-        toast.success(`OTP: ${response.data.otp} (${response.data.note || 'Check WhatsApp'})`, {
-          duration: 10000
-        });
-      } else {
-        toast.success(response.data.note || 'OTP sent to your WhatsApp! Please check your messages.');
-      }
+      // SECURITY: Never display OTP in toast/UI even when backend returns it
+      // (some dev/mock modes echo OTP back). Show only the generic confirmation.
+      toast.success(response.data.note || 'OTP sent to your WhatsApp! Please check your messages.');
       
       setStep(2);
       setCountdown(30);
@@ -201,14 +194,8 @@ export default function OTPLoginPage() {
     try {
       const response = await axios.post(`${API}/salon/send-otp`, { phone });
       
-      if (response.data.otp) {
-        setSentOtp(response.data.otp);
-        toast.success(`OTP: ${response.data.otp} (${response.data.note || 'Check WhatsApp'})`, {
-          duration: 10000
-        });
-      } else {
-        toast.success(response.data.note || 'OTP resent to your WhatsApp!');
-      }
+      // SECURITY: Never display OTP in toast/UI
+      toast.success(response.data.note || 'OTP resent to your WhatsApp!');
       
       setCountdown(30);
       setCanResend(false);
@@ -411,16 +398,6 @@ export default function OTPLoginPage() {
                       <p className="text-sm text-muted-foreground mt-2 text-center">
                         OTP sent to +91{phone} via WhatsApp
                       </p>
-                      {sentOtp && (
-                        <div className="mt-3 p-3 bg-gold/10 border border-gold/30 rounded-lg">
-                          <p className="text-xs text-muted-foreground text-center mb-1">
-                            For Testing (Twilio Not Configured)
-                          </p>
-                          <p className="text-center text-lg font-bold text-gold tracking-wider">
-                            {sentOtp}
-                          </p>
-                        </div>
-                      )}
                     </div>
 
                     <Button 

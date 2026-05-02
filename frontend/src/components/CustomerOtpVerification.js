@@ -16,7 +16,6 @@ export default function CustomerOtpVerification({ onVerified, showAs = 'banner' 
   const [otp, setOtp] = useState('');
   const [loading, setLoading] = useState(false);
   const [countdown, setCountdown] = useState(0);
-  const [sentOtp, setSentOtp] = useState('');
 
   useEffect(() => {
     if (isUserOtpVerified) {
@@ -45,14 +44,8 @@ export default function CustomerOtpVerification({ onVerified, showAs = 'banner' 
       setStep('otp');
       setCountdown(60);
       
-      if (response.data.otp) {
-        setSentOtp(response.data.otp);
-        toast.success(`OTP: ${response.data.otp} (${response.data.note || 'Check WhatsApp'})`, {
-          duration: 10000
-        });
-      } else {
-        toast.success('OTP sent to your WhatsApp!');
-      }
+      // SECURITY: Never display OTP in toast/UI even if backend echoes it back
+      toast.success(response.data.note || 'OTP sent to your WhatsApp!');
     } catch (error) {
       toast.error(error.response?.data?.detail || 'Failed to send OTP');
     } finally {

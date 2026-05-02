@@ -2249,10 +2249,20 @@ async def update_operational_hours(
     is_authorized = False
     
     if current_user:
-        if current_user.get("role") == "admin":
-            is_authorized = True
+        # Multi-user salon roles: 'salon_admin' has full access; 'salon_staff' needs 'can_edit_salon' permission.
+        # Also accept legacy 'admin' / 'salon' role values for backward compatibility.
+        user_role = current_user.get("role")
+        if user_role in ("salon_admin", "admin", "salon"):
+            # Make sure the user belongs to this salon
+            if current_user.get("salon_id") in (None, salon_id):
+                is_authorized = True
+            else:
+                # If salon_id is set on user, must match
+                if current_user.get("salon_id") == salon_id:
+                    is_authorized = True
         elif current_user.get("permissions", {}).get("can_edit_salon"):
-            is_authorized = True
+            if current_user.get("salon_id") == salon_id:
+                is_authorized = True
     
     if current_salon:
         salon_id_from_token = current_salon.get("sub") or current_salon.get("id")
@@ -3724,8 +3734,8 @@ async def create_salon_booking(salon_id: str, body: dict, current_user=Depends(g
         if service:
             total_amount += service.get("base_price", 0)
     
-    # Get token number
-    token_number = await get_next_token_number(salon_id, barber_id, date, shift)
+    # Get token number (signature: salon_id, date, shift)
+    token_number = await get_next_token_number(salon_id, date, shift)
     
     # Get barber name
     barber_name = "Any Available"
@@ -5156,7 +5166,7 @@ async def complete_token(token_id: str, current_salon=Depends(get_current_salon)
         }
 
 @api_router.post("/tokens/{token_id}/recall")
-async def recall_token(token_id: str, current_salon=Depends(get_current_salon)):
+async def recall_token(token_id: str, current_salon=Depends(get_current_salon_user)):
     """Re-call a token (if customer not available) or recall a skipped token"""
     token = await db.tokens.find_one({"id": token_id}, {"_id": 0})
     if not token:
@@ -5174,7 +5184,14 @@ async def recall_token(token_id: str, current_salon=Depends(get_current_salon)):
                 }
             }
         )
-        await broadcast_update("token_recalled", {"token_id": token_id, "status": "called"})
+        await broadcast_update("token_recalled", {
+            "token_id": token_id,
+            "status": "called",
+            "phone": token.get("phone", ""),
+            "token_number": token.get("token_number"),
+            "salon_id": token.get("salon_id"),
+            "barber_name": token.get("barber_name"),
+        })
         return {"message": "Skipped token recalled and moved to called status"}
     
     # Otherwise, increment recall count and update called_at timestamp
@@ -5191,7 +5208,14 @@ async def recall_token(token_id: str, current_salon=Depends(get_current_salon)):
     
     # Send notification again
     await send_booking_notification(token, 'token_called')
-    await broadcast_update("token_recalled", {"token_id": token_id, "recall_count": recall_count})
+    await broadcast_update("token_recalled", {
+        "token_id": token_id,
+        "recall_count": recall_count,
+        "phone": token.get("phone", ""),
+        "token_number": token.get("token_number"),
+        "salon_id": token.get("salon_id"),
+        "barber_name": token.get("barber_name"),
+    })
     
     return {"message": "Token recalled and notification sent", "recall_count": recall_count}
 
@@ -5240,7 +5264,7 @@ async def resend_invoice(token_id: str, current_salon=Depends(get_current_salon)
         raise HTTPException(status_code=500, detail=f"Failed to resend invoice: {str(e)}")
 
 @api_router.post("/tokens/{token_id}/call")
-async def call_token(token_id: str, current_salon=Depends(get_current_salon)):
+async def call_token(token_id: str, current_salon=Depends(get_current_salon_user)):
     """Call specific token"""
     token = await db.tokens.find_one({"id": token_id}, {"_id": 0})
     if not token:
@@ -5254,7 +5278,13 @@ async def call_token(token_id: str, current_salon=Depends(get_current_salon)):
             "called_at": datetime.now(timezone.utc).isoformat()
         }}
     )
-    await broadcast_update("token_called", {"token_id": token_id})
+    await broadcast_update("token_called", {
+        "token_id": token_id,
+        "phone": token.get("phone", ""),
+        "token_number": token.get("token_number"),
+        "salon_id": token.get("salon_id"),
+        "barber_name": token.get("barber_name"),
+    })
     
     # Send notification
     await send_booking_notification(token, 'token_called')
