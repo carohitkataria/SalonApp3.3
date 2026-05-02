@@ -2841,36 +2841,44 @@ async def get_salon_barbers(salon_id: str, available_only: bool = False, custome
     """
     Get barbers for a salon
     available_only=True: Strict filter — only return barbers fully available on the given date.
-    customer_view=True : Return all employed barbers (is_barber=True). Barbers on leave for the
-                         target date are KEPT in the response but flagged with `is_on_leave=True`,
+    customer_view=True : Return all employed barbers (is_barber=True OR is_barber not set - for backward compatibility).
+                         Barbers on leave for the target date are KEPT in the response but flagged with `is_on_leave=True`,
                          so the customer UI can show them greyed-out instead of hiding them.
     available_only=False & customer_view=False: Return all active staff (admin view).
     """
-    query = {"salon_id": salon_id, "is_active": True}
-    if customer_view:
-        query["is_barber"] = True
+    try:
+        query = {"salon_id": salon_id, "is_active": True}
+        if customer_view:
+            # For customer view, include barbers where is_barber=True OR is_barber field doesn't exist (backward compatibility)
+            query["$or"] = [{"is_barber": True}, {"is_barber": {"$exists": False}}]
 
-    barbers = await db.barbers.find(query, {"_id": 0}).to_list(500)
+        barbers = await db.barbers.find(query, {"_id": 0}).to_list(500)
+        logger.info(f"Fetched {len(barbers)} barbers for salon {salon_id}, query: {query}")
 
-    # Resolve target date — defaults to today (IST)
-    ist = timezone(timedelta(hours=5, minutes=30))
-    target_date = (date or "").strip() or datetime.now(ist).strftime("%Y-%m-%d")
+        # Resolve target date — defaults to today (IST)
+        ist = timezone(timedelta(hours=5, minutes=30))
+        target_date = (date or "").strip() or datetime.now(ist).strftime("%Y-%m-%d")
 
-    if available_only:
-        # Strict filter (used by booking-engine endpoints / admin "available" toggle).
-        barbers = [b for b in barbers if is_barber_available_on(b, target_date)]
-    elif customer_view:
-        # Customer view: hide barbers who haven't joined yet or have left employment,
-        # but KEEP on-leave barbers visible — flag them so the UI can grey them out.
-        out = []
-        for b in barbers:
-            if not _is_barber_employed_on(b, target_date):
-                continue
-            b["is_on_leave"] = _is_barber_on_leave_on(b, target_date)
-            out.append(b)
-        barbers = out
+        if available_only:
+            # Strict filter (used by booking-engine endpoints / admin "available" toggle).
+            barbers = [b for b in barbers if is_barber_available_on(b, target_date)]
+            logger.info(f"After available_only filter: {len(barbers)} barbers")
+        elif customer_view:
+            # Customer view: hide barbers who haven't joined yet or have left employment,
+            # but KEEP on-leave barbers visible — flag them so the UI can grey them out.
+            out = []
+            for b in barbers:
+                if not _is_barber_employed_on(b, target_date):
+                    continue
+                b["is_on_leave"] = _is_barber_on_leave_on(b, target_date)
+                out.append(b)
+            barbers = out
+            logger.info(f"After customer_view filter: {len(barbers)} barbers")
 
-    return barbers
+        return barbers
+    except Exception as e:
+        logger.error(f"Error fetching barbers for salon {salon_id}: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to fetch barbers: {str(e)}")
 
 @api_router.post("/salons/{salon_id}/barbers", response_model=Barber)
 async def create_barber(salon_id: str, barber: BarberCreate, current_salon=Depends(get_current_salon)):
