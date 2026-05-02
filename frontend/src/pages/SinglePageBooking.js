@@ -113,21 +113,27 @@ const ServiceCard = ({ service, selected, onToggle, price }) => {
 const BarberChip = ({ barber, selected, onSelect, liveStatus, slotAvailability }) => {
   const status = liveStatus?.barbers?.find(b => b.barber_id === barber.id);
   const waitingCount = status?.waiting_count || 0;
-  
+
   // Get slot availability for this barber
   const barberSlot = slotAvailability?.barbers?.find(b => b.barber_id === barber.id);
   const isFull = barberSlot?.is_full || false;
   const slotsLeft = barberSlot?.available ?? 10;
-  
+
+  // On-leave for the selected date — flag from backend customer_view response
+  const onLeave = barber.is_on_leave === true;
+  const disabled = isFull || onLeave;
+
   return (
     <motion.button
       type="button"
-      whileHover={isFull ? {} : { scale: 1.02 }}
-      whileTap={isFull ? {} : { scale: 0.98 }}
-      onClick={isFull ? undefined : () => onSelect(barber.id)}
-      disabled={isFull}
+      whileHover={disabled ? {} : { scale: 1.02 }}
+      whileTap={disabled ? {} : { scale: 0.98 }}
+      onClick={disabled ? undefined : () => onSelect(barber.id)}
+      disabled={disabled}
       className={`relative p-3 rounded-xl border-2 transition-all text-left ${
-        isFull
+        onLeave
+          ? 'bg-muted/40 border-border/40 opacity-50 cursor-not-allowed grayscale'
+          : isFull
           ? 'bg-muted/30 border-border/50 opacity-60 cursor-not-allowed'
           : selected
           ? 'bg-gold/10 border-gold shadow-md'
@@ -135,7 +141,7 @@ const BarberChip = ({ barber, selected, onSelect, liveStatus, slotAvailability }
       }`}
     >
       <div className="flex items-center gap-3">
-        <div className="w-10 h-10 rounded-full overflow-hidden bg-muted flex-shrink-0 border-2 border-gold/30">
+        <div className={`w-10 h-10 rounded-full overflow-hidden bg-muted flex-shrink-0 border-2 ${onLeave ? 'border-border/40' : 'border-gold/30'}`}>
           {barber.photo_url ? (
             <img src={barber.photo_url} alt={barber.name} className="w-full h-full object-cover" />
           ) : (
@@ -154,7 +160,9 @@ const BarberChip = ({ barber, selected, onSelect, liveStatus, slotAvailability }
           <div className="flex items-center gap-2 mt-0.5">
             <Star className="w-3 h-3 text-yellow-500 fill-yellow-500" />
             <span className="text-xs text-muted-foreground">{barber.rating || '4.5'}</span>
-            {isFull ? (
+            {onLeave ? (
+              <span className="text-xs text-amber-600 font-semibold">• On Leave</span>
+            ) : isFull ? (
               <span className="text-xs text-red-500 font-medium">• Full</span>
             ) : (
               <span className="text-xs text-muted-foreground">• {slotsLeft} slots</span>
@@ -162,7 +170,13 @@ const BarberChip = ({ barber, selected, onSelect, liveStatus, slotAvailability }
           </div>
         </div>
       </div>
-      {selected && !isFull && (
+      {/* Distinct "On Leave" badge */}
+      {onLeave && (
+        <span className="absolute top-2 right-2 px-1.5 py-0.5 text-[10px] font-bold rounded-md bg-amber-500/20 text-amber-700 border border-amber-500/40">
+          On Leave
+        </span>
+      )}
+      {selected && !disabled && (
         <motion.div
           initial={{ scale: 0 }}
           animate={{ scale: 1 }}
@@ -375,7 +389,9 @@ export default function SinglePageBooking() {
     try {
       const [salonRes, barbersRes, servicesRes, categoriesRes] = await Promise.all([
         axios.get(`${API}/salons/${salonId}`),
-        axios.get(`${API}/salons/${salonId}/barbers?available_only=true&customer_view=true`),
+        // Customer view with the active date so the backend marks `is_on_leave` per-date
+        // (we no longer pass available_only — we want on-leave barbers visible but greyed-out).
+        axios.get(`${API}/salons/${salonId}/barbers?customer_view=true&date=${formData.date || getTodayIST()}`),
         axios.get(`${API}/salons/${salonId}/services/enabled`),
         axios.get(`${API}/services/categories`)
       ]);
@@ -461,6 +477,24 @@ export default function SinglePageBooking() {
       console.error('Error fetching live status:', error);
     }
   };
+
+  // Refetch barbers whenever the selected date changes so the on-leave flag
+  // (per-date) updates correctly. We don't refetch the whole salon — just barbers.
+  useEffect(() => {
+    if (!salonId || !formData.date) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await axios.get(`${API}/salons/${salonId}/barbers`, {
+          params: { customer_view: true, date: formData.date }
+        });
+        if (!cancelled) setBarbers(res.data || []);
+      } catch (e) {
+        console.error('Error refreshing barbers for date', formData.date, e);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [salonId, formData.date]);
 
   const fetchSlotAvailability = async (date, shift) => {
     try {
@@ -615,8 +649,8 @@ export default function SinglePageBooking() {
     return currentHour < endHour;
   };
 
-  // Auto-select the latest available time slot whenever shifts/date change.
-  // "Latest" = the last (chronologically furthest) shift that is still available.
+  // Auto-select the EARLIEST available time slot whenever shifts/date change.
+  // "Earliest" = the first (chronologically nearest) shift that is still available.
   useEffect(() => {
     if (!shifts || shifts.length === 0) return;
     // If user already picked a shift and it's still valid, keep it.
@@ -624,11 +658,11 @@ export default function SinglePageBooking() {
       s.id === formData.shift && getShiftAvailability(s.id) && (s.is_available !== false)
     );
     if (currentValid) return;
-    // Pick the LAST available shift in the list (shifts come ordered morning -> evening)
+    // Pick the FIRST available shift in the list (shifts come ordered morning -> evening).
     const availableShifts = shifts.filter(s => getShiftAvailability(s.id) && (s.is_available !== false));
     if (availableShifts.length === 0) return;
-    const latest = availableShifts[availableShifts.length - 1];
-    setFormData(prev => ({ ...prev, shift: latest.id }));
+    const earliest = availableShifts[0];
+    setFormData(prev => ({ ...prev, shift: earliest.id }));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [shifts, formData.date]);
 

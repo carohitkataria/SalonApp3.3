@@ -136,18 +136,34 @@ export default function StaffAttendanceTab({ salonId, barberId, barberName, comp
   };
 
   const handleOverrideAttendance = async (dateStr, currentStatus) => {
-    // Cycle through statuses: present -> half_day -> absent -> holiday -> present
-    const statusCycle = ['present', 'half_day', 'absent', 'holiday'];
-    const currentIndex = statusCycle.indexOf(currentStatus || 'absent');
-    const newStatus = statusCycle[(currentIndex + 1) % statusCycle.length];
-    
+    // Cycle through statuses: present -> half_day -> absent -> holiday -> blank (no status)
+    // After "holiday", clicking again clears the entry (DELETE) and the day shows as unset.
+    const statusCycle = ['present', 'half_day', 'absent', 'holiday', null];
+    let nextStatus;
+    if (!currentStatus) {
+      nextStatus = 'present'; // Blank → Present (start of cycle)
+    } else {
+      const idx = statusCycle.indexOf(currentStatus);
+      // If currentStatus is unknown, default to "present" so users can recover.
+      nextStatus = idx === -1 ? 'present' : statusCycle[(idx + 1) % statusCycle.length];
+    }
+
     try {
-      await axios.put(
-        `${API}/salons/${salonId}/staff-attendance/override/${barberId}/${dateStr}`,
-        { status: newStatus },
-        { headers: { Authorization: `Bearer ${token}` } }
-      );
-      toast.success(`Marked as ${newStatus.replace('_', ' ')}`);
+      if (nextStatus === null) {
+        // Clear the override (the cell becomes blank / no status)
+        await axios.delete(
+          `${API}/salons/${salonId}/staff-attendance/override/${barberId}/${dateStr}`,
+          { headers: { Authorization: `Bearer ${token}` } }
+        );
+        toast.success('Attendance cleared');
+      } else {
+        await axios.put(
+          `${API}/salons/${salonId}/staff-attendance/override/${barberId}/${dateStr}`,
+          { status: nextStatus },
+          { headers: { Authorization: `Bearer ${token}` } }
+        );
+        toast.success(`Marked as ${nextStatus.replace('_', ' ')}`);
+      }
       fetchAttendanceData();
       fetchSalaryData();
     } catch (error) {

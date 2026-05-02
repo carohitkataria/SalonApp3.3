@@ -32,7 +32,8 @@ from twilio_service import (
     format_token_near,
     format_token_called,
     format_token_cancelled,
-    format_token_rescheduled
+    format_token_rescheduled,
+    format_salon_calling,
 )
 
 # Import invoice service
@@ -345,6 +346,10 @@ class Barber(BaseModel):
     leave_dates: List[str] = []  # YYYY-MM-DD list; barber on leave on those days
     compensation: Optional[float] = None
     documents: List[str] = []  # URLs to uploaded documents
+    # Customer-view-only flag: True when this barber is on leave for the requested date.
+    # Set by GET /salons/{id}/barbers?customer_view=true&date=YYYY-MM-DD so the UI
+    # can render the staff card greyed-out with an "On Leave" tag.
+    is_on_leave: Optional[bool] = None
 
 class BarberServicePrice(BaseModel):
     barber_id: str
@@ -1557,6 +1562,19 @@ async def send_booking_notification(token_data: dict, notification_type: str):
                 barber_name=token_data.get('barber_name')
             )
             whatsapp_setting_key = 'whatsapp_turn_approaching'
+            # Reschedule / Cancel action links on every "your turn" ping
+            if token_id and salon_id_for_links:
+                action_links = build_action_links(token_id, salon_id_for_links)
+        elif notification_type == 'salon_calling':
+            # Triggered by the salon's "Send Notification to Customer" button on the token row.
+            message = format_salon_calling(
+                customer_name=customer_name,
+                salon_name=salon_name,
+                barber_name=token_data.get('barber_name')
+            )
+            whatsapp_setting_key = 'whatsapp_turn_approaching'
+            if token_id and salon_id_for_links:
+                action_links = build_action_links(token_id, salon_id_for_links)
         elif notification_type == 'token_cancelled':
             message = format_token_cancelled(
                 customer_name=customer_name,
@@ -1564,6 +1582,7 @@ async def send_booking_notification(token_data: dict, notification_type: str):
                 reason=token_data.get('cancellation_reason')
             )
             whatsapp_setting_key = 'whatsapp_booking_cancelled'
+            # No reschedule/cancel link on cancelled — already cancelled.
         elif notification_type == 'token_rescheduled':
             message = format_token_rescheduled(
                 customer_name=customer_name,
@@ -1582,6 +1601,8 @@ async def send_booking_notification(token_data: dict, notification_type: str):
                 reason="Skipped"
             )
             whatsapp_setting_key = 'whatsapp_booking_status_change'
+            if token_id and salon_id_for_links:
+                action_links = build_action_links(token_id, salon_id_for_links)
         
         if message:
             # Check customer WhatsApp preference (default ON)
@@ -2777,28 +2798,76 @@ async def delete_salon_package(
 
 # ============ BARBER ROUTES ============
 
+def _is_barber_employed_on(barber: Dict[str, Any], date_str: str) -> bool:
+    """Subset of is_barber_available_on: only checks employment window
+    (doj / last_working_date). Used when we want to keep on-leave barbers
+    visible (greyed-out) but hide barbers who haven't joined or have left.
+    """
+    if not date_str:
+        return True
+    try:
+        doj = (barber.get("doj") or "").strip()
+        if doj and date_str < doj:
+            return False
+        lwd = (barber.get("last_working_date") or "").strip()
+        if lwd and date_str > lwd:
+            return False
+    except Exception:
+        return True
+    return True
+
+
+def _is_barber_on_leave_on(barber: Dict[str, Any], date_str: str) -> bool:
+    """True if barber is on leave for the given date (per-date list or legacy flag)."""
+    if not date_str:
+        return False
+    try:
+        leave_dates = barber.get("leave_dates") or []
+        if isinstance(leave_dates, list) and date_str in leave_dates:
+            return True
+        ist = timezone(timedelta(hours=5, minutes=30))
+        today_ist = datetime.now(ist).strftime("%Y-%m-%d")
+        if barber.get("on_leave") is True and date_str == today_ist:
+            return True
+    except Exception:
+        return False
+    return False
+
+
 @api_router.get("/salons/{salon_id}/barbers", response_model=List[Barber])
 async def get_salon_barbers(salon_id: str, available_only: bool = False, customer_view: bool = False, date: Optional[str] = None):
     """
     Get barbers for a salon
-    available_only=True: Only return barbers available on the given date (or today if not provided).
-                       Excludes leave_dates entries, post-last_working_date, before joining date,
-                       and the legacy global on_leave flag for "today".
-    customer_view=True: Only return staff marked as barbers (is_barber=True)
-    available_only=False & customer_view=False: Return all active staff (for admin)
+    available_only=True: Strict filter — only return barbers fully available on the given date.
+    customer_view=True : Return all employed barbers (is_barber=True). Barbers on leave for the
+                         target date are KEPT in the response but flagged with `is_on_leave=True`,
+                         so the customer UI can show them greyed-out instead of hiding them.
+    available_only=False & customer_view=False: Return all active staff (admin view).
     """
     query = {"salon_id": salon_id, "is_active": True}
     if customer_view:
-        query["is_barber"] = True  # Only show staff visible to customers
-    
+        query["is_barber"] = True
+
     barbers = await db.barbers.find(query, {"_id": 0}).to_list(500)
-    
-    if available_only or customer_view:
-        # Resolve target date — defaults to today (IST)
-        ist = timezone(timedelta(hours=5, minutes=30))
-        target_date = (date or "").strip() or datetime.now(ist).strftime("%Y-%m-%d")
+
+    # Resolve target date — defaults to today (IST)
+    ist = timezone(timedelta(hours=5, minutes=30))
+    target_date = (date or "").strip() or datetime.now(ist).strftime("%Y-%m-%d")
+
+    if available_only:
+        # Strict filter (used by booking-engine endpoints / admin "available" toggle).
         barbers = [b for b in barbers if is_barber_available_on(b, target_date)]
-    
+    elif customer_view:
+        # Customer view: hide barbers who haven't joined yet or have left employment,
+        # but KEEP on-leave barbers visible — flag them so the UI can grey them out.
+        out = []
+        for b in barbers:
+            if not _is_barber_employed_on(b, target_date):
+                continue
+            b["is_on_leave"] = _is_barber_on_leave_on(b, target_date)
+            out.append(b)
+        barbers = out
+
     return barbers
 
 @api_router.post("/salons/{salon_id}/barbers", response_model=Barber)
@@ -5320,11 +5389,35 @@ async def call_token(token_id: str, current_salon=Depends(get_current_salon_user
     return {"message": "Token called"}
 
 @api_router.post("/tokens/{token_id}/cancel")
-async def cancel_token(token_id: str, current_salon=Depends(get_current_salon)):
-    """Cancel token and refund wallet if paid via wallet"""
+async def cancel_token(
+    token_id: str,
+    current_salon: Optional[Dict[str, Any]] = Depends(get_current_salon_optional),
+    current_user: Optional[Dict[str, Any]] = Depends(get_current_salon_user_optional),
+):
+    """Cancel token and refund wallet if paid via wallet (works for both legacy salon JWT and multi-user salon_admin/salon_staff)."""
+    if not (current_salon or current_user):
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
     token = await db.tokens.find_one({"id": token_id}, {"_id": 0})
     if not token:
         raise HTTPException(status_code=404, detail="Token not found")
+
+    # Authorization
+    salon_id = token.get("salon_id")
+    authorized = False
+    if current_salon:
+        cs_salon_id = current_salon.get("sub") or current_salon.get("id")
+        if cs_salon_id == salon_id:
+            authorized = True
+    if current_user:
+        if current_user.get("role") in ("salon_admin", "admin", "salon"):
+            if current_user.get("salon_id") in (None, salon_id):
+                authorized = True
+        elif current_user.get("permissions", {}).get("can_manage_tokens"):
+            if current_user.get("salon_id") == salon_id:
+                authorized = True
+    if not authorized:
+        raise HTTPException(status_code=403, detail="Unauthorized for this salon")
     
     # Refund wallet if payment was via wallet
     if token.get("payment_mode") == "wallet" and token.get("payment_status") == "paid":
@@ -5570,67 +5663,66 @@ async def defer_token(token_id: str, new_slot: str, current_salon=Depends(get_cu
     return {"message": "Token deferred"}
 
 @api_router.post("/tokens/{token_id}/notify")
-async def send_token_notification(token_id: str, current_salon=Depends(get_current_salon)):
-    """Send queue status notification to customer"""
+async def send_token_notification(
+    token_id: str,
+    current_salon: Optional[Dict[str, Any]] = Depends(get_current_salon_optional),
+    current_user: Optional[Dict[str, Any]] = Depends(get_current_salon_user_optional),
+):
+    """
+    Triggered by the salon's "Send Notification to Customer" button.
+    Sends the spec'd "Salon X is calling you. Proceed to Barber Y's chair." message
+    via WhatsApp + appends Reschedule / Cancel deep-link actions.
+    Falls back gracefully if WhatsApp delivery fails.
+    """
+    if not (current_salon or current_user):
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
     token = await db.tokens.find_one({"id": token_id}, {"_id": 0})
     if not token:
         raise HTTPException(status_code=404, detail="Token not found")
-    
-    # Get current token being served for this barber
-    current_token = await db.tokens.find_one(
-        {"salon_id": token["salon_id"], "barber_id": token["barber_id"], "date": token["date"], "status": "in_progress"},
-        {"_id": 0}
-    )
-    
-    current_token_number = current_token.get('token_number', "M000") if current_token else "M000"
-    user_token_number = token.get('token_number')
-    
-    # Calculate tokens away using sequence numbers
-    current_seq = extract_token_sequence(current_token_number) if current_token else 0
-    user_seq = extract_token_sequence(user_token_number)
-    tokens_away = user_seq - current_seq
-    
-    # Calculate estimated time (assume 20 minutes per token)
-    estimated_minutes = tokens_away * 20
-    if estimated_minutes < 60:
-        estimated_time = f"{estimated_minutes} minutes"
-    else:
-        hours = estimated_minutes // 60
-        mins = estimated_minutes % 60
-        estimated_time = f"{hours}h {mins}m" if mins > 0 else f"{hours}h"
-    
-    # Send queue status notification
-    message = format_queue_status(
-        customer_name=token.get('customer_name'),
-        current_token=current_token_number,
-        user_token=user_token_number,
-        tokens_away=tokens_away,
-        estimated_time=estimated_time
-    )
-    
-    result = await send_whatsapp_notification(token.get('phone'), message, 'queue_status')
-    
-    # Store notification record
+
+    # Authorization: the caller must belong to this token's salon.
+    salon_id = token.get("salon_id")
+    authorized = False
+    if current_salon:
+        cs_salon_id = current_salon.get("sub") or current_salon.get("id")
+        if cs_salon_id == salon_id:
+            authorized = True
+    if current_user:
+        if current_user.get("role") in ("salon_admin", "admin", "salon"):
+            if current_user.get("salon_id") in (None, salon_id):
+                authorized = True
+        elif current_user.get("permissions", {}).get("can_manage_tokens"):
+            if current_user.get("salon_id") == salon_id:
+                authorized = True
+    if not authorized:
+        raise HTTPException(status_code=403, detail="Unauthorized for this salon")
+
+    # Send the salon-calling notification (handles WhatsApp + adds action links).
+    await send_booking_notification(token, 'salon_calling')
+
+    # Persist a record so the salon can see history if needed.
     notification = {
         "id": str(uuid.uuid4()),
         "token_id": token_id,
-        "notification_type": "whatsapp_queue_status",
-        "message": message,
-        "status": result.get('status'),
-        "sent_at": datetime.now(timezone.utc).isoformat()
+        "notification_type": "salon_calling",
+        "sent_at": datetime.now(timezone.utc).isoformat(),
     }
-    await db.notifications.insert_one(notification)
-    
-    logger.info(f"Queue status notification sent to {token.get('phone')}: {result.get('status')}")
-    
-    return {
-        "message": "Notification sent successfully",
-        "delivery_status": result.get('status'),
-        "current_token": current_token_number,
-        "user_token": user_token_number,
-        "tokens_away": tokens_away,
-        "estimated_time": estimated_time
-    }
+    try:
+        await db.notifications.insert_one(notification)
+    except Exception as _e:  # noqa: BLE001
+        logger.warning(f"Failed to persist notification record: {_e}")
+
+    # Also broadcast in-app so the customer's open tab shows it instantly.
+    await broadcast_update("salon_calling", {
+        "token_id": token_id,
+        "phone": token.get("phone", ""),
+        "token_number": token.get("token_number"),
+        "salon_id": salon_id,
+        "barber_name": token.get("barber_name"),
+    })
+
+    return {"message": "Notification sent to customer"}
 
 @api_router.put("/tokens/{token_id}/add-services")
 async def add_services_to_token(token_id: str, request: AddServicesRequest, current_salon=Depends(get_current_salon)):
@@ -8640,6 +8732,29 @@ async def override_attendance(
     
     updated = await db.attendance.find_one({"id": record_id}, {"_id": 0})
     return updated
+
+
+@api_router.delete("/salons/{salon_id}/staff-attendance/override/{barber_id}/{date}")
+async def clear_attendance_override(
+    salon_id: str,
+    barber_id: str,
+    date: str,  # YYYY-MM-DD
+    current_user=Depends(get_current_salon_user),
+):
+    """
+    Clear an attendance entry for the given barber+date.
+    Used by the calendar's status cycle:
+        present → half_day → absent → holiday → blank (this endpoint).
+    """
+    if current_user.get("role") not in ["admin", "salon_admin", "salon"]:
+        raise HTTPException(status_code=403, detail="Admin access required")
+
+    record_id = f"{salon_id}_{barber_id}_{date}"
+    res = await db.attendance.delete_one({"id": record_id})
+    return {
+        "deleted": res.deleted_count > 0,
+        "id": record_id,
+    }
 
 
 @api_router.post("/salons/{salon_id}/staff-attendance/mark-all-present/{date}")

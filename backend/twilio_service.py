@@ -231,6 +231,28 @@ _The Looks Salon_
     """.strip()
 
 
+def format_salon_calling(customer_name: str, salon_name: str, barber_name: str) -> str:
+    """
+    Format the message sent when the salon explicitly clicks
+    "Send Notification to Customer" on the token management screen.
+    Per product spec — must be a clear, friendly call to come in.
+    Reschedule / Cancel action links are appended by send_booking_notification.
+    """
+    cust = customer_name or "Customer"
+    salon = salon_name or "The salon"
+    barber = barber_name or "your barber"
+    return f"""
+🔔 *{salon} is calling you*
+
+Hello {cust}!
+
+{salon} is calling you. Please proceed to *{barber}*'s chair.
+If you have other plans, please inform the salon.
+
+ℹ️ _Note: Rescheduling will assign you the next available token._
+    """.strip()
+
+
 def format_token_cancelled(customer_name: str, token_number: int, reason: str = None) -> str:
     """Format cancellation notification"""
     reason_text = f"\nReason: {reason}" if reason else ""

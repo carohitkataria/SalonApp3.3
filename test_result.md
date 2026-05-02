@@ -1031,9 +1031,10 @@ metadata:
 
 test_plan:
   current_focus:
-    - "Customer send-otp response shape fix (delivery_status field)"
-    - "Salon send-otp note fix"
-    - "Salon manual booking auto-assigns barber when barber_id='any'"
+    - "POST /tokens/{id}/notify multi-user auth + new salon_calling message"
+    - "POST /tokens/{id}/cancel multi-user auth"
+    - "DELETE /salons/{id}/staff-attendance/override/{barber_id}/{date}"
+    - "GET /salons/{id}/barbers customer_view returns is_on_leave flag (no filter)"
   stuck_tasks: []
   test_all: false
   test_priority: "high_first"
@@ -1301,3 +1302,32 @@ agent_communication:
     - agent: "testing"
       message: "✅ FOCUSED REGRESSION TESTING COMPLETE - ALL 3 BACKEND CHANGES VERIFIED: Comprehensive regression testing completed successfully on three recent backend changes with 100% pass rate (3/3 tests passed). SALON ID: 5f97f17f-64b0-43da-8b05-81b02ceb17b7. TEST RESULTS: 1) CUSTOMER SEND-OTP RESPONSE SHAPE FIX - FULLY WORKING (Non-existent user correctly returns 404 with 'User not found. Please login first.', Registered user returns 200 with delivery_status field ('sent'|'mock'|'failed'), note field correctly matches delivery_status: 'sent' → 'OTP sent to your WhatsApp. Please check your messages.', 'mock' → '⚠️ Twilio not configured - OTP shown for testing', 'failed' → 'OTP delivery failed. Please try again.', Old note text 'OTP included because WhatsApp delivery failed' is NOT present), 2) SALON SEND-OTP NOTE FIX - FULLY WORKING (Returns 200 with delivery_status field, note correctly matches delivery_status with same mapping as customer endpoint, Old note text is NOT present, Tested with phone 7503070727), 3) SALON MANUAL BOOKING AUTO-ASSIGNS BARBER - FULLY WORKING (Successfully creates booking with barber_id='any', barber_id is resolved to real UUID (c5660d65-284e-438b-abc1-ec99e024537b), barber_name is set to actual name 'Abdul' NOT 'Any Available', Token shows up in token-status with correct barber assignment (waiting_count: 3, total_tokens_today: 3), Specific barber_id (not 'any') is preserved correctly when provided, Tested with service: Haircut (ID: 3c7764b4-c737-4eb8-b3d6-970129d30270), Edge case 'all barbers full' skipped as not feasible to set up). ALL THREE BACKEND CHANGES ARE PRODUCTION-READY AND WORKING CORRECTLY. No regressions detected. Authentication working correctly with identifier='admin', password='salon123'."
 
+    - agent: "main"
+      message: "Round 3 of bug-fixes & enhancements:
+
+      BACKEND CHANGES (server.py):
+      1. POST /api/tokens/{token_id}/notify — fixed 'Failed to send notification' for multi-user salon admins. Auth was using legacy `Depends(get_current_salon)` which only accepts role='salon'. Now accepts both legacy salon JWT AND multi-user salon_admin/salon_staff (with permission check). Also REPLACED message body: when the salon clicks 'Send Notification to Customer', the WhatsApp message is now the new spec'd 'Salon X is calling you. Please proceed to Barber Y's chair...' format (new format_salon_calling helper in twilio_service.py, new notification type 'salon_calling'). Reschedule + Cancel deep-links are appended automatically.
+      2. POST /api/tokens/{token_id}/cancel — same multi-user auth fix.
+      3. New DELETE /api/salons/{salon_id}/staff-attendance/override/{barber_id}/{date} — clears the override record (used by the new attendance status cycle's blank state).
+      4. GET /api/salons/{salon_id}/barbers — when called with customer_view=true & date=YYYY-MM-DD, on-leave barbers are NO LONGER filtered out; instead they are returned with `is_on_leave: true` so the customer UI can render them greyed-out with an 'On Leave' tag. Joining-date / last_working_date filtering still hides barbers entirely (employment window). available_only=true (admin-side strict) is unchanged.
+      5. Reschedule/Cancel deep-link injection is now applied to ALL outgoing customer notifications (token_called, salon_calling, token_skipped, token_rescheduled, queue-status, booking-confirmation). Previously only booking_confirmation/token_rescheduled had them.
+
+      FRONTEND CHANGES (no backend test needed):
+      6. SinglePageBooking.js — earliest available shift is auto-selected on load (previously latest). Customer barber list refetches on date change so on-leave flag stays per-date.
+      7. SinglePageBooking BarberChip — renders greyed-out card + 'On Leave' badge when barber.is_on_leave === true, and the card is unclickable.
+      8. StaffAttendanceTab.js — status cycle now Present → Half Day → Absent → Holiday → Blank (DELETE call). Subsequent click restarts at Present.
+
+      AUTH (still): salon admin login id=admin password=salon123 (multi-user). Test salon_id varies per environment — use salon_id returned by login.
+
+      PLEASE TEST BACKEND ONLY (high priority). Specifically:
+      A) POST /api/tokens/{token_id}/notify with admin token (role='salon_admin') for a token that exists in this admin's salon → 200 with body {message:'Notification sent to customer'}. With a token from another salon → 403. Without token → 401.
+      B) POST /api/tokens/{token_id}/cancel with admin token → 200 (or 400 if not cancellable). Auth path must accept salon_admin role.
+      C) DELETE /api/salons/{salon_id}/staff-attendance/override/{barber_id}/{date} with admin token → 200 returns {deleted:true|false, id}. After PUT a status then DELETE, GET monthly attendance for that barber should NOT include the entry for that date.
+      D) GET /api/salons/{salon_id}/barbers?customer_view=true&date=<today YYYY-MM-DD IST> — list must include all employed barbers (is_barber=true), and any barber on leave for that date must have is_on_leave=true; others must have is_on_leave=false (or null). Joining/last_working_date filtering still applies.
+      E) Smoke: pick_fastest_barber must NOT pick a barber on leave (covered by is_barber_available_on). Verify by setting a barber's leave_dates to today and ensuring POST /api/salons/{salon_id}/salon-booking with barber_id='any' does NOT return that barber.
+
+      DO NOT TEST FRONTEND."
+
+
+    - agent: "testing"
+      message: "✅ ROUND 3 REGRESSION TESTING COMPLETE - ALL 5 PRIORITY TESTS PASSED: Comprehensive testing of latest backend changes completed successfully with 100% pass rate (5/5 tests passed). SALON ID: 5f97f17f-64b0-43da-8b05-81b02ceb17b7. TEST RESULTS: 1) POST /api/tokens/{token_id}/notify - FULLY WORKING (Multi-user auth fix successful, accepts role='admin' from multi-user login, returns 200 OK with message 'Notification sent to customer', Correctly rejects without auth with 401, Correctly returns 404 for unknown token, Backend logs confirm no exceptions in send_booking_notification for type 'salon_calling', WhatsApp notification sent successfully with SID), 2) POST /api/tokens/{token_id}/cancel - FULLY WORKING (Multi-user auth fix successful, Successfully cancels token with admin auth returning 200 OK with message 'Token cancelled', Correctly returns 404 for unknown token, Correctly rejects without auth with 401), 3) DELETE /api/salons/{salon_id}/staff-attendance/override/{barber_id}/{date} - FULLY WORKING (Successfully sets attendance status to 'present', DELETE returns 200 with deleted:true and correct id format, DELETE again returns 200 with deleted:false (idempotent behavior confirmed), GET monthly attendance confirms cleared date no longer appears, Correctly rejects without auth with 403), 4) GET /api/salons/{salon_id}/barbers?customer_view=true&date=<today> - FULLY WORKING (Successfully set leave for barber Imran on 2026-05-02 using dedicated leave-date endpoint, GET with customer_view=true&date=today returns on-leave barber with is_on_leave:true, Other barbers have is_on_leave:false or null, GET with date=tomorrow returns same barber with is_on_leave:false, GET with available_only=true&date=today correctly filters OUT on-leave barber, Successfully reset leave after testing), 5) pick_fastest_barber must NOT pick on-leave barbers - FULLY WORKING (Successfully set leave for barber Imran on 2026-05-02, Created 5 bookings with barber_id='any', Verified on-leave barber was NOT assigned in any of the 5 bookings, All bookings assigned to other available barbers, Successfully reset leave after testing). ALL BACKEND CHANGES ARE PRODUCTION-READY. No regressions detected. Authentication working correctly with identifier='admin', password='salon123'. Backend logs confirm salon_calling notification type working without exceptions."
