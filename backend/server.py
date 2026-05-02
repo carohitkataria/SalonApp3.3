@@ -1670,7 +1670,8 @@ async def check_and_notify_nearby_tokens(salon_id: str, barber_id: str, date: st
                     user_token=token_number,
                     tokens_away=tokens_away
                 )
-                action_links = build_action_links(token.get('id', ''), salon_id) if tokens_away >= 2 else ""
+                # Reschedule / Cancel links on every queue-status ping (until booking is completed/cancelled)
+                action_links = build_action_links(token.get('id', ''), salon_id)
                 full_message = (message + action_links) if action_links else message
                 await send_whatsapp_notification(phone, full_message, f'token_{tokens_away}_away')
 

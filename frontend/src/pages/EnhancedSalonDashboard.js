@@ -712,9 +712,10 @@ export default function EnhancedSalonDashboard() {
   const handleSendNotification = async (tokenId) => {
     try {
       await axios.post(`${API}/tokens/${tokenId}/notify`, {}, { headers: getAuthHeaders() });
-      toast.success('Notification sent (mock)');
+      toast.success('Notification sent to customer');
     } catch (error) {
-      toast.error('Failed to send notification');
+      const detail = error?.response?.data?.detail;
+      toast.error(typeof detail === 'string' ? detail : 'Failed to send notification');
     }
   };
 

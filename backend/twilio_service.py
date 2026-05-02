@@ -247,7 +247,7 @@ def format_salon_calling(customer_name: str, salon_name: str, barber_name: str) 
 Hello {cust}!
 
 {salon} is calling you. Please proceed to *{barber}*'s chair.
-If you have other plans, please inform the salon.
+If you have any other plan, please inform the salon.
 
 ℹ️ _Note: Rescheduling will assign you the next available token._
     """.strip()
