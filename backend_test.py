@@ -11,7 +11,7 @@ from datetime import datetime, timedelta
 import time
 
 # Backend URL from environment
-BACKEND_URL = "https://salon-booking-fix-7.preview.emergentagent.com/api"
+BACKEND_URL = "https://model-branch.preview.emergentagent.com/api"
 
 # Test credentials
 ADMIN_IDENTIFIER = "admin"
