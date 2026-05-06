@@ -8,68 +8,113 @@ A multi-tenant salon management SaaS (React + FastAPI + MongoDB). Most recent fe
 4. Loyalty program: per-tier time period (months).
 5. Staff access control fixes: cache bug across logins, quick actions follow permissions, "Financials" permission via checkbox, all services visible to staff.
 6. Employee Reward Plan (Incentive Module): Global/individual plans, salary-linked or manual targets, slab-based %, automatic monthly calculation, dashboard view in Analytics, payment control linked to Financials.
+7. **Branch Model (BRD):** Convert single-location salons → multi-branch chains. New `salon_branches` & `staff_branch_transfers` tables, `branch_id` on every transactional collection, branch-aware queries, Branch Manager role, Add/Edit branch UI, branch dropdown in admin header, customer-side branch switching.
 
 ## Test Credentials
 - Phone: 7503070727  •  Password: salon123
-- Salon ID: 2dad5cd9-5dda-4398-bbb5-a4d12aae7915
+- Salon ID: b5c6b0ca-66ec-431b-8dc8-387de72fa67c
+- Multi-user login: identifier=`admin`, password=`salon123` → returns JWT
 
 ## Architecture
-- Backend: FastAPI (`/app/backend/server.py`) ~7600 lines, MongoDB (collections: salons, barbers, tokens, salon_reward_plans, incentive_payouts, financial_transactions, etc.)
-- Frontend: React + Tailwind + shadcn/ui at `/app/frontend/src/`
+- Backend: FastAPI (`/app/backend/server.py`) ~9.9k lines, MongoDB.
+- Collections: salons, **salon_branches** (NEW), **staff_branch_transfers** (NEW, Phase 2), barbers, tokens, attendance, financial_transactions, salon_customers, invoices, salon_users, customer_memberships, wallet_transactions, salon_reward_plans, incentive_payouts, salary_records.
+- Branch-aware fields: `branch_id` on tokens, barbers, attendance, financial_transactions, salon_customers, invoices, salon_users, customer_memberships, wallet_transactions, incentive_payouts, salary_records.
+- Frontend: React + Tailwind + shadcn/ui at `/app/frontend/src/`. New `BranchContext`, `BranchManagement` page, `BranchSelector` header dropdown.
 
 ## Implemented (CHANGELOG)
+
+### Feb 2026 — Phase 1: Branch Model Foundation (Iteration 11) ✅
+- ✅ **New collections**: `salon_branches`, `staff_branch_transfers`. Models: `Branch{Create,Update}`, `StaffBranchTransfer{Create}`.
+- ✅ **Migration on startup** (`migrate_branches`): for every existing salon → auto-create one "Main Branch" (`is_main_branch=true`, code "MAIN") inheriting salon address/coords/phone. Idempotent. Back-fills `branch_id` on every existing doc in 11 collections (tokens, barbers, attendance, financial_transactions, salon_customers, invoices, salon_users, customer_memberships, wallet_transactions, incentive_payouts, salary_records). Successfully back-filled 3 legacy docs in dev seed.
+- ✅ **Branch CRUD endpoints** (admin-only, salon-scoped):
+  - `GET /api/salons/{salon_id}/branches?include_inactive=false`
+  - `POST /api/salons/{salon_id}/branches`
+  - `GET /api/salons/{salon_id}/branches/{branch_id}`
+  - `PUT /api/salons/{salon_id}/branches/{branch_id}`
+  - `DELETE /api/salons/{salon_id}/branches/{branch_id}` — soft-delete (status=inactive). Cannot delete the main branch. Cannot deactivate a branch with active future tokens (400).
+  - `POST /api/salons/{salon_id}/branches/{branch_id}/set-main` — promotes & demotes the previous main atomically.
+  - `GET /api/salons/{salon_id}/branches/{branch_id}/qr-code?base_url=...` — public, returns base64 PNG embedding `/salon/{salon_id}?branch={branch_id}`.
+- ✅ **Branch-aware filters** (all backwards-compatible — omitting `branch_id` returns cross-branch data so legacy clients keep working):
+  - `GET /api/salons/{salon_id}/queue?branch_id=...`
+  - `GET /api/salons/{salon_id}/barbers/{barber_id}/queue?branch_id=...`
+  - `GET /api/salons/{salon_id}/barbers?branch_id=...`
+  - `GET /api/salons/{salon_id}/today-sales?branch_id=...`
+  - `GET /api/salons/{salon_id}/financials/transactions?branch_id=...`
+  - `GET /api/salons/{salon_id}/financials/dashboard?branch_id=...`
+  - `GET /api/salons/{salon_id}/customers?branch_id=...`
+- ✅ **Auto branch_id stamping** on creation: `POST /api/bookings`, `POST /api/salons/{id}/salon-booking`, `POST /api/salons/{id}/barbers`, `POST /api/salons/{id}/customers`, `POST /api/salons/{id}/financials/transactions`. Resolution order: explicit body field → barber's branch → salon's main branch.
+- ✅ **Per-token financial logging** also stamps `branch_id` so revenue analytics stay branch-aware.
+- ✅ **Frontend**:
+  - New `BranchContext` (auto-loads branches on salon-user login, persists selected branch in localStorage, fires `branch-changed` events).
+  - `<BranchSelector />` dropdown in admin header (shows current branch, star for main, click-to-switch).
+  - New "Branches" admin tab (admin-only, hidden for staff): list cards (Main badge, Inactive pill, address/phone/email), Add/Edit dialog (name, code, address, city, lat/long, phone, email, "Set as Main" toggle), per-branch QR dialog with download, "Set Main" / "Deactivate" actions.
+  - Dashboard `fetchBarbers`/`fetchTokens`/`fetchDailySales` re-fetch on branch change with `branch_id` query param. Manual booking sends `branch_id`.
+  - Branch code uniqueness enforced server-side per salon (case-insensitive 400 on duplicate).
+  - `resolve_branch_id` only ever returns ACTIVE branches → an inactive branch can never become a silent default.
+- ✅ **Tested**: 17/17 backend pytest assertions pass (`tests/test_branches_phase1.py` + `tests/test_branches_phase1_extra.py`). Frontend smoke verified end-to-end via Playwright (login → header dropdown → Branches admin → Add/Edit/QR → switch branch refreshes dashboard).
+- ✅ **Backwards compatibility**: every existing legacy endpoint still works without `branch_id` and returns cross-branch data — zero breaking changes.
+
 ### Feb 2026 — Phase 2 WhatsApp flows + Customer auto-refresh (Iteration 10)
-- ✅ **Item 7 — WhatsApp Cancel confirmation page**: `GET /api/tokens/{id}/cancel-link` now renders an "Are you sure?" HTML interstitial showing salon, token #, customer, date, shift, service count, amount, with "No, Keep Booking" + "Yes, Cancel" buttons. The actual cancel happens on `POST /api/tokens/{id}/cancel-link` (submitted via form from the interstitial). Wallet refunds preserved; salon + customer in-app notifications still fire.
-- ✅ **Item 8 — WhatsApp Reschedule link**: new `GET /api/tokens/{id}/public-details` (unauth) returns booking details for hydration; new `PUT /api/tokens/{id}/customer-reschedule` updates the SAME token (services/barber/date/shift/payment). Frontend `SinglePageBooking.js` handles `?modify=<tokenId>` — shows a gold "Modifying booking #N" banner (`data-testid="reschedule-banner"`), preloads all fields, submits via PUT instead of POST /bookings.
-- ✅ **Total recompute logic (correctness)**: reschedule only recomputes `total_amount` when `selected_services` or `barber_id` actually change (pure shift/date edits keep the existing price). Falls back to sum of `base_price` when barber=any.
-- ✅ **Item 6 — Customer auto-refresh**: `useAutoRefresh` hook consumed by `WalletDisplay` (20s), `ActiveBookingTracker` (15s), `HistoryPage` (20s); pauses while tab hidden, re-runs immediately on visibility. Customer session in `AuthContext` uses `localStorage.salon_user` with NO expiry → infinite auto-login until explicit logout.
-- ✅ **Item 1 — Salon auto-refresh**: optimistic UI on token actions + 20s polling fallback in `EnhancedSalonDashboard` (carried over from Phase 1.5).
-- ✅ Backend tested 14/14 via testing agent; no regressions.
+- ✅ **Item 7 — WhatsApp Cancel confirmation page**: `GET /api/tokens/{id}/cancel-link` now renders an "Are you sure?" HTML interstitial with cancel/keep buttons. Wallet refunds preserved; salon + customer in-app notifications still fire.
+- ✅ **Item 8 — WhatsApp Reschedule link**: `GET /api/tokens/{id}/public-details` (unauth) + `PUT /api/tokens/{id}/customer-reschedule`. Frontend `SinglePageBooking.js` handles `?modify=<tokenId>`.
+- ✅ **Total recompute logic**: reschedule only recomputes `total_amount` when `selected_services` or `barber_id` actually change.
+- ✅ **Item 6 — Customer auto-refresh**: `useAutoRefresh` hook on `WalletDisplay` (20s), `ActiveBookingTracker` (15s), `HistoryPage` (20s); pauses while tab hidden.
+- ✅ **Item 1 — Salon auto-refresh**: optimistic UI on token actions + 20s polling fallback.
+- ✅ Backend tested 14/14; no regressions.
 
 ### Feb 2026 — Booking capacity + Incentive correctness fixes (Iteration 9)
-- ✅ **Capacity rule**: `get_barber_blocked_minutes_used` now excludes `completed` (in addition to `cancelled` / `skipped`). When Imran finishes a booking, the slot is freed within the same shift — he can take another booking immediately if duration permits.
-- ✅ **Actual sales bug**: `_get_barber_actual_sales` was matching on `booking_date`, but tokens are stored with `date`. Fixed via `$or` on `date` / `booking_date` / `created_at` fallback. Imran's 4 real tokens now sum correctly to ₹63,360.
-- ✅ **Slab over-achievement**: When achievement % exceeds the highest defined slab's `to_pct`, the highest **crossed** slab still applies (no penalty for over-performance). Imran at 168.96% now earns 30% of ₹63,360 = ₹19,008 via the 120-150% slab.
-- ✅ Token complete handler picks up `date` first (with `booking_date` legacy fallback) when triggering incentive recompute.
+- ✅ **Capacity rule**: `get_barber_blocked_minutes_used` now excludes `completed`. Slot freed within same shift on completion.
+- ✅ **Actual sales bug**: `_get_barber_actual_sales` now uses `$or` on `date` / `booking_date` / `created_at`.
+- ✅ **Slab over-achievement**: When achievement % exceeds the highest defined slab's `to_pct`, the highest **crossed** slab still applies.
 
 ### Feb 2026 — Phase 2 of Employee Reward Plan + Manual Adjustment
-- ✅ New `IncentiveDashboard.js` mounted as a sub-tab inside Analytics ("Performance" / "Incentives")
-- ✅ Single-row badge layout per employee (Salary / Target / Actual / Achievement / Earned) + status pill
-- ✅ Bulk actions: Approve, Hold, Reset to Pending (Pay is per-row only, captures payment method)
-- ✅ **Approve dialog**: admin can manually adjust the incentive amount (with "Use Auto" reset), persisted as `manual_amount` on the payout
-- ✅ **Pay dialog**: pre-fills with effective amount (manual override or auto), admin can further edit
-- ✅ **Strict Financials sync rule**: a `financial_transactions` row is created **only on Paid**, **never on Approve**, and is **fully idempotent** even if `linked_expense_id` is lost (looks up by reference_id + reference_type). Effective amount = `manual_amount` if set else `incentive_earned`.
-- ✅ Excel/CSV export across a date-range (Auto Incentive, Adjusted Incentive, Effective Payout columns)
-- ✅ Eligible-barbers dropdown verified (filters `is_barber=true`)
-- ✅ Full e2e tested via testing_agent_v3_fork — backend 10/10 pytest, frontend full flow pass
-- ✅ Cleaned up stale test seed (₹1.2L token) and 2 orphan ₹1000 financial transactions that were causing the user's reported 480% achievement / earned=0 bug
+- ✅ `IncentiveDashboard.js` mounted as a sub-tab inside Analytics ("Performance" / "Incentives").
+- ✅ Single-row badge layout per employee + status pill, bulk actions, manual amount adjustment.
+- ✅ Strict Financials sync rule: row created **only on Paid**, idempotent.
+- ✅ Excel/CSV export across a date range.
 
 ### Earlier this session
-- Today/Tomorrow toggles (Salon + Token dashboards)
-- Browser notifications + sound (`utils/browserNotifications.js`)
-- Shift timing chips on customer booking
-- Loyalty per-tier time period
-- Staff access control hardening (cache reset on login/logout, quick-actions permission gating, `can_access_financials` checkbox, fixed Analytics access)
-- Employee Reward Plan Phase 1: backend models, calculation engine (slab types: additional_pct / total_pct / fixed_amount), APIs, auto recompute on token completion, Setup UI in Staff Management
+- Today/Tomorrow toggles, Browser notifications + sound, Shift timing chips, Loyalty per-tier time period, Staff access control hardening, Employee Reward Plan Phase 1.
 
 ## Roadmap (P0/P1/P2)
+
+### P0 — Phase 2: Branch Manager Role + Staff Transfers
+- New `branch_manager` role in `salon_users` (extends current `admin`/`staff` roles). Add `assigned_branch_ids: List[str]` so a manager can be tied to one or more branches.
+- **Mobile-number login** alongside `login_id` in `POST /api/salon/users/login` (already supports `identifier` = mobile or login_id; verify & document).
+- Frontend `AuthContext` to surface branch-manager role + assigned branches; menu items filtered accordingly.
+- **Staff transfer UI + backend**:
+  - `POST /api/salons/{salon_id}/staff-branch-transfers` body `{ staff_id, from_branch_id, to_branch_id, transfer_date, remarks }`.
+  - `GET /api/salons/{salon_id}/staff-branch-transfers?staff_id=...`.
+  - On submit: insert transfer row + update `barbers.branch_id`. Persist history.
+  - Frontend dialog inside Staff Management to "Transfer to another branch".
+- **RBAC enforcement**: branch managers should only see data for their assigned branches in queues, financials, customer master, analytics.
+
 ### P1
-- Reverse-sync: when an admin moves an incentive away from "Paid", offer to remove or reverse-credit the linked financial transaction
-- Parallelize bulk status updates (Promise.allSettled with concurrency cap) for large salons
+- Phase 3 Customer UX:
+  - Customer booking flow submits `branch_id` (default to nearest active branch by lat/long).
+  - "Switch Branch" dropdown on `/salon/:salonId` page so customers can navigate between branches of the same brand.
+  - Per-branch operational hours + holidays (currently shared at salon level).
+- Reverse-sync incentives (Paid → Approved should offer to reverse-credit the linked financial txn).
 
 ### P2
-- Modularize `server.py` (split into routes/, models/, services/) — over 7500 lines
-- Add aria-labels to bulk-select-all checkbox + per-row checkboxes for a11y
-- Hide Approve/Hold buttons after Paid (cleaner UX)
+- Modularize `server.py` (split into routes/, models/, services/) — over 9.9k lines now.
+- Per-branch loyalty rules (chain-wide vs branch-specific) — sold at one branch, valid at all.
+- Per-branch reports / analytics rollups.
+- Code review backlog from Iteration 11:
+  - `update_branch` PUT should accept explicit `is_main_branch=false` (currently only `set-main` POST can demote).
+  - QR endpoint rate-limiting.
 
-## Key API Endpoints (Incentive Module)
-- `GET    /api/salons/{salon_id}/reward-plan`
-- `POST   /api/salons/{salon_id}/reward-plan`
-- `GET    /api/salons/{salon_id}/reward-plan/eligible-barbers`
-- `GET    /api/salons/{salon_id}/reward-plan/incentives?month=YYYY-MM[&barber_id=X]`
-- `PUT    /api/salons/{salon_id}/reward-plan/incentives/{barber_id}/{month}/status`
-   - body: `{ status: Pending|Approved|Paid|Hold, payment_method?: cash|upi|bank, notes?: string }`
-   - status=Paid auto-inserts financial_transactions row + sets `linked_expense_id`
+## Key API Endpoints (Branch Module)
+- `GET    /api/salons/{salon_id}/branches[?include_inactive=true]`
+- `POST   /api/salons/{salon_id}/branches`
+- `GET    /api/salons/{salon_id}/branches/{branch_id}`
+- `PUT    /api/salons/{salon_id}/branches/{branch_id}`
+- `DELETE /api/salons/{salon_id}/branches/{branch_id}` (soft delete)
+- `POST   /api/salons/{salon_id}/branches/{branch_id}/set-main`
+- `GET    /api/salons/{salon_id}/branches/{branch_id}/qr-code[?base_url=...]` (public)
+- All listed legacy endpoints accept optional `branch_id` query param.
 
 ## Known Notes
-- Reward Plan Phase 2 testing seeded one completed token (`_seed_test=true`, ₹1,20,000) for barber Imran (id 5d7d3064-2580-4a43-ae3e-73cdcaefd9de) to validate flow. Cleanup: `db.tokens.delete_many({_seed_test: true})` if needed.
+- Reward Plan Phase 2 testing seeded one completed token (`_seed_test=true`, ₹1,20,000) for barber Imran. Cleanup: `db.tokens.delete_many({_seed_test: true})` if needed.
+- After Phase 1, every salon has at least one `salon_branches` doc (auto-created on startup). Idempotent: rerunning the migration is safe.
+- Frontend admin Branches page is reachable via Hamburger menu → Branches (no direct URL).

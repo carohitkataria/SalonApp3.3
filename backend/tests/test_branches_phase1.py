@@ -46,9 +46,10 @@ def test_main_branch_exists_after_migration(auth):
 
 def test_create_update_set_main_deactivate(auth):
     # Create
+    code = f"PYT-{uuid.uuid4().hex[:5]}"
     payload = {
         "branch_name": f"Pytest Branch {uuid.uuid4().hex[:6]}",
-        "branch_code": "PYT-1",
+        "branch_code": code,
         "address": "Test address",
         "city": "Bangalore",
         "phone": "+919999999998",
@@ -63,7 +64,7 @@ def test_create_update_set_main_deactivate(auth):
     new_branch = r.json()
     bid = new_branch["id"]
     assert new_branch["is_main_branch"] is False
-    assert new_branch["branch_code"] == "PYT-1"
+    assert new_branch["branch_code"] == code
 
     try:
         # Update phone

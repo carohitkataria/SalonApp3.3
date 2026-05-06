@@ -723,13 +723,16 @@ BRANCH_AWARE_COLLECTIONS = [
 
 
 async def get_main_branch(salon_id: str) -> Optional[dict]:
-    """Return the main branch for a salon (creating one if missing)."""
+    """Return the main branch for a salon (creating one if missing).
+    Only returns ACTIVE branches; an inactive branch should never become the
+    silent default for new bookings/staff/etc."""
     branch = await db.salon_branches.find_one(
-        {"salon_id": salon_id, "is_main_branch": True}, {"_id": 0}
+        {"salon_id": salon_id, "is_main_branch": True, "status": "active"}, {"_id": 0}
     )
     if branch:
         return branch
-    # Fallback: any active branch
+    # Fallback: any active branch (covers edge cases where main was wrongly
+    # deactivated outside the API).
     branch = await db.salon_branches.find_one(
         {"salon_id": salon_id, "status": "active"}, {"_id": 0}
     )
@@ -2507,6 +2510,16 @@ async def create_branch(
     await ensure_main_branch_for_salon(salon)
 
     branch_dict = payload.model_dump()
+
+    # Enforce per-salon uniqueness of branch_code (case-insensitive). Empty/None codes are skipped.
+    code = (branch_dict.get("branch_code") or "").strip()
+    if code:
+        existing = await db.salon_branches.find_one(
+            {"salon_id": salon_id, "branch_code": {"$regex": f"^{code}$", "$options": "i"}},
+            {"_id": 0, "id": 1},
+        )
+        if existing:
+            raise HTTPException(status_code=400, detail=f"Branch code '{code}' already exists for this salon")
 
     # If user requests to create a new "main", demote any existing main first
     if branch_dict.get("is_main_branch"):
