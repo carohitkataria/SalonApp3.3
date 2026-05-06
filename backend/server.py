@@ -271,6 +271,7 @@ class SalonPackage(BaseModel):
 class BarberCreate(BaseModel):
     name: str
     salon_id: str
+    branch_id: Optional[str] = None  # Branch this staff is assigned to
     experience: int
     category: str
     specialization: Optional[str] = None
@@ -292,6 +293,7 @@ class BarberCreate(BaseModel):
 
 class BarberUpdate(BaseModel):
     name: Optional[str] = None
+    branch_id: Optional[str] = None  # For transfers / assignment changes
     experience: Optional[int] = None
     category: Optional[str] = None
     specialization: Optional[str] = None
@@ -321,6 +323,7 @@ class Barber(BaseModel):
     id: str
     name: str
     salon_id: str
+    branch_id: Optional[str] = None
     experience: int
     category: str
     specialization: Optional[str] = None
@@ -422,6 +425,7 @@ class UserProfileUpdate(BaseModel):
 # Token/Booking Models
 class BookingCreate(BaseModel):
     salon_id: str
+    branch_id: Optional[str] = None  # Defaults to main branch if absent
     user_id: str
     customer_name: str
     phone: str
@@ -440,6 +444,7 @@ class TokenModel(BaseModel):
     model_config = ConfigDict(extra="ignore")
     id: str
     salon_id: str
+    branch_id: Optional[str] = None  # Branch where this booking belongs
     token_number: str  # Global/salon-wide token: M1, M2, N1, E1...
     customer_name: str
     phone: str
@@ -567,6 +572,73 @@ class SalonUserToken(BaseModel):
     role: str
     permissions: SalonUserPermissions
 
+# ============ BRANCH MODELS (Multi-Branch / Multi-Location) ============
+
+class BranchCreate(BaseModel):
+    branch_name: str
+    branch_code: Optional[str] = None  # short code e.g. "BLR-01"
+    address: Optional[str] = None
+    city: Optional[str] = None
+    latitude: Optional[float] = None
+    longitude: Optional[float] = None
+    phone: Optional[str] = None
+    email: Optional[str] = None
+    branch_manager_staff_id: Optional[str] = None  # link to barbers.id
+    is_main_branch: bool = False
+    status: str = "active"  # active/inactive
+    operational_hours: Optional[OperationalHours] = None
+
+class BranchUpdate(BaseModel):
+    branch_name: Optional[str] = None
+    branch_code: Optional[str] = None
+    address: Optional[str] = None
+    city: Optional[str] = None
+    latitude: Optional[float] = None
+    longitude: Optional[float] = None
+    phone: Optional[str] = None
+    email: Optional[str] = None
+    branch_manager_staff_id: Optional[str] = None
+    is_main_branch: Optional[bool] = None
+    status: Optional[str] = None
+    operational_hours: Optional[OperationalHours] = None
+
+class Branch(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    id: str
+    salon_id: str
+    branch_name: str
+    branch_code: Optional[str] = None
+    address: Optional[str] = None
+    city: Optional[str] = None
+    latitude: Optional[float] = None
+    longitude: Optional[float] = None
+    phone: Optional[str] = None
+    email: Optional[str] = None
+    branch_manager_staff_id: Optional[str] = None
+    is_main_branch: bool = False
+    status: str = "active"
+    operational_hours: Optional[OperationalHours] = None
+    created_at: str
+
+class StaffBranchTransferCreate(BaseModel):
+    staff_id: str
+    from_branch_id: Optional[str] = None  # null if first assignment
+    to_branch_id: str
+    transfer_date: str  # YYYY-MM-DD
+    remarks: Optional[str] = None
+
+class StaffBranchTransfer(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    id: str
+    salon_id: str
+    staff_id: str
+    from_branch_id: Optional[str] = None
+    to_branch_id: str
+    transfer_date: str
+    remarks: Optional[str] = None
+    created_by: Optional[str] = None
+    created_at: str
+
 # ============ AUTH HELPERS ============
 
 def create_access_token(data: dict):
@@ -628,6 +700,127 @@ def check_permission(user_payload: dict, permission: str) -> bool:
     
     permissions = user_payload.get("permissions", {})
     return permissions.get(permission, False)
+
+
+# ============ BRANCH HELPERS ============
+
+# Collections that are part of the branch-aware data model. Each gets a `branch_id`
+# field. When migration runs, all existing documents in these collections are
+# stamped with the salon's main branch id so old single-location salons keep working.
+BRANCH_AWARE_COLLECTIONS = [
+    "tokens",
+    "barbers",
+    "attendance",
+    "financial_transactions",
+    "salon_customers",
+    "invoices",
+    "salon_users",
+    "customer_memberships",
+    "wallet_transactions",
+    "incentive_payouts",
+    "salary_records",
+]
+
+
+async def get_main_branch(salon_id: str) -> Optional[dict]:
+    """Return the main branch for a salon (creating one if missing)."""
+    branch = await db.salon_branches.find_one(
+        {"salon_id": salon_id, "is_main_branch": True}, {"_id": 0}
+    )
+    if branch:
+        return branch
+    # Fallback: any active branch
+    branch = await db.salon_branches.find_one(
+        {"salon_id": salon_id, "status": "active"}, {"_id": 0}
+    )
+    return branch
+
+
+async def resolve_branch_id(salon_id: str, branch_id: Optional[str]) -> Optional[str]:
+    """Resolve `branch_id` for a request.
+
+    If a `branch_id` is provided, return it as-is (caller should validate it
+    belongs to the salon if security-sensitive). If not provided, fall back to
+    the salon's main branch id so legacy clients keep working.
+    """
+    if branch_id:
+        return branch_id
+    main = await get_main_branch(salon_id)
+    return main["id"] if main else None
+
+
+async def ensure_main_branch_for_salon(salon: dict) -> dict:
+    """Idempotently create a "Main Branch" for a salon if none exists. Returns the branch dict."""
+    salon_id = salon["id"]
+    existing_main = await db.salon_branches.find_one(
+        {"salon_id": salon_id, "is_main_branch": True}, {"_id": 0}
+    )
+    if existing_main:
+        return existing_main
+
+    # If any branches exist for this salon (without a main flag yet), promote the
+    # first one to main; otherwise create a fresh "Main Branch" inheriting salon
+    # address details so existing single-location data remains coherent.
+    any_branch = await db.salon_branches.find_one({"salon_id": salon_id}, {"_id": 0})
+    if any_branch:
+        await db.salon_branches.update_one(
+            {"id": any_branch["id"]},
+            {"$set": {"is_main_branch": True}},
+        )
+        any_branch["is_main_branch"] = True
+        return any_branch
+
+    new_branch = {
+        "id": str(uuid.uuid4()),
+        "salon_id": salon_id,
+        "branch_name": "Main Branch",
+        "branch_code": "MAIN",
+        "address": salon.get("address"),
+        "city": salon.get("city"),
+        "latitude": salon.get("latitude"),
+        "longitude": salon.get("longitude"),
+        "phone": salon.get("phone"),
+        "email": salon.get("email"),
+        "branch_manager_staff_id": None,
+        "is_main_branch": True,
+        "status": "active",
+        "operational_hours": salon.get("operational_hours"),
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    }
+    await db.salon_branches.insert_one(new_branch.copy())
+    new_branch.pop("_id", None)
+    return new_branch
+
+
+async def migrate_branches():
+    """Idempotent migration:
+    1. Ensure every salon has a "Main Branch" record in `salon_branches`.
+    2. Back-fill `branch_id` on every existing document in branch-aware collections
+       so legacy single-location data stays accessible after the multi-branch upgrade.
+    """
+    salons = await db.salons.find({}, {"_id": 0}).to_list(length=None)
+    if not salons:
+        return
+
+    total_backfilled = 0
+    for salon in salons:
+        salon_id = salon["id"]
+        main_branch = await ensure_main_branch_for_salon(salon)
+        main_branch_id = main_branch["id"]
+
+        for coll in BRANCH_AWARE_COLLECTIONS:
+            res = await db[coll].update_many(
+                {"salon_id": salon_id, "branch_id": {"$in": [None, ""]}},
+                {"$set": {"branch_id": main_branch_id}},
+            )
+            # Also handle docs missing the field entirely
+            res2 = await db[coll].update_many(
+                {"salon_id": salon_id, "branch_id": {"$exists": False}},
+                {"$set": {"branch_id": main_branch_id}},
+            )
+            total_backfilled += (res.modified_count + res2.modified_count)
+    if total_backfilled:
+        logger.info(f"[BRANCH MIGRATION] Back-filled branch_id on {total_backfilled} legacy docs")
 
 
 # Optional authentication dependencies (don't raise if no auth)
@@ -1819,6 +2012,7 @@ Thank you for visiting us! 💈
             "token_id": token_id,
             "invoice_no": invoice_no,
             "salon_id": token['salon_id'],
+            "branch_id": token.get('branch_id'),
             "customer_name": token.get('customer_name'),
             "customer_phone": token.get('phone'),
             "invoice_data": invoice_data,
@@ -2238,6 +2432,256 @@ async def delete_salon(salon_id: str, current_salon=Depends(get_current_salon)):
     await db.salons.delete_one({"id": salon_id})
     
     return {"message": "Salon and all associated data deleted successfully"}
+
+# ============================================================================
+# BRANCH MANAGEMENT (Multi-Location)
+# ============================================================================
+
+def _check_salon_admin_for_salon(current_user: dict, salon_id: str):
+    """Authorise a salon-admin (or legacy `salon` token) for a given salon_id.
+    Raises 403 if not authorised."""
+    if not current_user:
+        raise HTTPException(status_code=401, detail="Authentication required")
+    role = current_user.get("role")
+    user_salon_id = current_user.get("salon_id") or current_user.get("sub")
+    if user_salon_id != salon_id:
+        raise HTTPException(status_code=403, detail="Access denied for this salon")
+    if role not in ("salon_admin", "salon", "admin"):
+        # Allow staff with edit permission for read-ish operations? No — branch admin
+        # CRUD is admin-only by design; staff can list via the read endpoint which
+        # uses get_current_salon_user.
+        raise HTTPException(status_code=403, detail="Admin access required")
+
+
+async def _generate_branch_qr(booking_url: str) -> str:
+    """Generate a base64 PNG QR code for a given booking URL."""
+    qr = qrcode.QRCode(version=1, box_size=10, border=4)
+    qr.add_data(booking_url)
+    qr.make(fit=True)
+    img = qr.make_image(fill_color="black", back_color="white")
+    buffer = io.BytesIO()
+    img.save(buffer, format="PNG")
+    buffer.seek(0)
+    return f"data:image/png;base64,{base64.b64encode(buffer.getvalue()).decode()}"
+
+
+@api_router.get("/salons/{salon_id}/branches", response_model=List[Branch])
+async def list_branches(
+    salon_id: str,
+    include_inactive: bool = False,
+    current_user: dict = Depends(get_current_salon_user),
+):
+    """List all branches for a salon. Any authenticated salon user can list."""
+    user_salon_id = current_user.get("salon_id") or current_user.get("sub")
+    if user_salon_id != salon_id:
+        raise HTTPException(status_code=403, detail="Access denied for this salon")
+
+    # Make sure a Main Branch exists (lazy migration safeguard)
+    salon = await db.salons.find_one({"id": salon_id}, {"_id": 0})
+    if salon:
+        await ensure_main_branch_for_salon(salon)
+
+    query = {"salon_id": salon_id}
+    if not include_inactive:
+        query["status"] = "active"
+    branches = await db.salon_branches.find(query, {"_id": 0}).to_list(length=None)
+    # Sort: main branch first, then by created_at
+    branches.sort(key=lambda b: (not b.get("is_main_branch"), b.get("created_at", "")))
+    return [Branch(**b) for b in branches]
+
+
+@api_router.post("/salons/{salon_id}/branches", response_model=Branch)
+async def create_branch(
+    salon_id: str,
+    payload: BranchCreate,
+    current_user: dict = Depends(get_current_salon_user),
+):
+    """Create a new branch under a salon."""
+    _check_salon_admin_for_salon(current_user, salon_id)
+
+    salon = await db.salons.find_one({"id": salon_id}, {"_id": 0})
+    if not salon:
+        raise HTTPException(status_code=404, detail="Salon not found")
+
+    # Ensure main branch exists first (so the very first create might not collide)
+    await ensure_main_branch_for_salon(salon)
+
+    branch_dict = payload.model_dump()
+
+    # If user requests to create a new "main", demote any existing main first
+    if branch_dict.get("is_main_branch"):
+        await db.salon_branches.update_many(
+            {"salon_id": salon_id, "is_main_branch": True},
+            {"$set": {"is_main_branch": False}},
+        )
+
+    branch_dict["id"] = str(uuid.uuid4())
+    branch_dict["salon_id"] = salon_id
+    branch_dict.setdefault("status", "active")
+    branch_dict["created_at"] = datetime.now(timezone.utc).isoformat()
+
+    insert_doc = branch_dict.copy()
+    await db.salon_branches.insert_one(insert_doc)
+    branch_dict.pop("_id", None)
+    return Branch(**branch_dict)
+
+
+@api_router.get("/salons/{salon_id}/branches/{branch_id}", response_model=Branch)
+async def get_branch(
+    salon_id: str,
+    branch_id: str,
+    current_user: dict = Depends(get_current_salon_user),
+):
+    user_salon_id = current_user.get("salon_id") or current_user.get("sub")
+    if user_salon_id != salon_id:
+        raise HTTPException(status_code=403, detail="Access denied for this salon")
+
+    branch = await db.salon_branches.find_one(
+        {"id": branch_id, "salon_id": salon_id}, {"_id": 0}
+    )
+    if not branch:
+        raise HTTPException(status_code=404, detail="Branch not found")
+    return Branch(**branch)
+
+
+@api_router.put("/salons/{salon_id}/branches/{branch_id}", response_model=Branch)
+async def update_branch(
+    salon_id: str,
+    branch_id: str,
+    payload: BranchUpdate,
+    current_user: dict = Depends(get_current_salon_user),
+):
+    _check_salon_admin_for_salon(current_user, salon_id)
+
+    branch = await db.salon_branches.find_one(
+        {"id": branch_id, "salon_id": salon_id}, {"_id": 0}
+    )
+    if not branch:
+        raise HTTPException(status_code=404, detail="Branch not found")
+
+    update_data = {k: v for k, v in payload.model_dump().items() if v is not None}
+
+    # If promoting to main branch, demote others
+    if update_data.get("is_main_branch") is True:
+        await db.salon_branches.update_many(
+            {"salon_id": salon_id, "is_main_branch": True, "id": {"$ne": branch_id}},
+            {"$set": {"is_main_branch": False}},
+        )
+
+    if update_data:
+        await db.salon_branches.update_one(
+            {"id": branch_id, "salon_id": salon_id},
+            {"$set": update_data},
+        )
+
+    updated = await db.salon_branches.find_one(
+        {"id": branch_id, "salon_id": salon_id}, {"_id": 0}
+    )
+    return Branch(**updated)
+
+
+@api_router.delete("/salons/{salon_id}/branches/{branch_id}")
+async def delete_branch(
+    salon_id: str,
+    branch_id: str,
+    current_user: dict = Depends(get_current_salon_user),
+):
+    """Soft-delete a branch (status=inactive). Cannot delete the main branch.
+    The branch must have no active tokens for today/future to be deactivated.
+    """
+    _check_salon_admin_for_salon(current_user, salon_id)
+
+    branch = await db.salon_branches.find_one(
+        {"id": branch_id, "salon_id": salon_id}, {"_id": 0}
+    )
+    if not branch:
+        raise HTTPException(status_code=404, detail="Branch not found")
+    if branch.get("is_main_branch"):
+        raise HTTPException(status_code=400, detail="Cannot delete the main branch. Set another branch as main first.")
+
+    today = datetime.now(timezone.utc).date().isoformat()
+    active_tokens = await db.tokens.count_documents({
+        "salon_id": salon_id,
+        "branch_id": branch_id,
+        "date": {"$gte": today},
+        "status": {"$nin": ["completed", "cancelled", "skipped"]},
+    })
+    if active_tokens > 0:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Cannot deactivate branch with {active_tokens} active/upcoming bookings. Cancel or reassign them first.",
+        )
+
+    await db.salon_branches.update_one(
+        {"id": branch_id, "salon_id": salon_id},
+        {"$set": {"status": "inactive"}},
+    )
+    return {"message": "Branch deactivated", "branch_id": branch_id}
+
+
+@api_router.post("/salons/{salon_id}/branches/{branch_id}/set-main")
+async def set_main_branch(
+    salon_id: str,
+    branch_id: str,
+    current_user: dict = Depends(get_current_salon_user),
+):
+    """Promote a branch to be the salon's main branch. Demotes the previous main."""
+    _check_salon_admin_for_salon(current_user, salon_id)
+
+    branch = await db.salon_branches.find_one(
+        {"id": branch_id, "salon_id": salon_id}, {"_id": 0}
+    )
+    if not branch:
+        raise HTTPException(status_code=404, detail="Branch not found")
+    if branch.get("status") != "active":
+        raise HTTPException(status_code=400, detail="Cannot set an inactive branch as main")
+
+    await db.salon_branches.update_many(
+        {"salon_id": salon_id, "is_main_branch": True},
+        {"$set": {"is_main_branch": False}},
+    )
+    await db.salon_branches.update_one(
+        {"id": branch_id, "salon_id": salon_id},
+        {"$set": {"is_main_branch": True}},
+    )
+    return {"message": "Main branch updated", "branch_id": branch_id}
+
+
+@api_router.get("/salons/{salon_id}/branches/{branch_id}/qr-code")
+async def get_branch_qr(
+    salon_id: str,
+    branch_id: str,
+    base_url: Optional[str] = None,
+):
+    """Public endpoint: return per-branch booking QR code (base64 PNG).
+
+    Pass `base_url` query param (e.g. `https://app.example.com`) to embed an
+    absolute URL in the QR. Falls back to a relative path if missing.
+    """
+    branch = await db.salon_branches.find_one(
+        {"id": branch_id, "salon_id": salon_id}, {"_id": 0}
+    )
+    if not branch:
+        raise HTTPException(status_code=404, detail="Branch not found")
+
+    effective_base = (base_url or os.environ.get("PUBLIC_BASE_URL") or "").rstrip("/")
+    booking_url = (
+        f"{effective_base}/salon/{salon_id}?branch={branch_id}"
+        if effective_base
+        else f"/salon/{salon_id}?branch={branch_id}"
+    )
+    qr_code = await _generate_branch_qr(booking_url)
+
+    return {
+        "qr_code": qr_code,
+        "booking_url": booking_url,
+        "branch_name": branch.get("branch_name"),
+    }
+
+
+# ============================================================================
+# END BRANCH MANAGEMENT
+# ============================================================================
 
 @api_router.get("/salons/{salon_id}/operational-hours")
 async def get_operational_hours(salon_id: str):
@@ -2851,7 +3295,13 @@ def normalize_barber_data(barber: Dict[str, Any]) -> Dict[str, Any]:
 
 
 @api_router.get("/salons/{salon_id}/barbers", response_model=List[Barber])
-async def get_salon_barbers(salon_id: str, available_only: bool = False, customer_view: bool = False, date: Optional[str] = None):
+async def get_salon_barbers(
+    salon_id: str,
+    available_only: bool = False,
+    customer_view: bool = False,
+    date: Optional[str] = None,
+    branch_id: Optional[str] = None,
+):
     """
     Get barbers for a salon
     available_only=True: Strict filter — only return barbers fully available on the given date.
@@ -2859,12 +3309,15 @@ async def get_salon_barbers(salon_id: str, available_only: bool = False, custome
                          Barbers on leave for the target date are KEPT in the response but flagged with `is_on_leave=True`,
                          so the customer UI can show them greyed-out instead of hiding them.
     available_only=False & customer_view=False: Return all active staff (admin view).
+    branch_id (optional): When set, returns only staff assigned to this branch.
     """
     try:
         query = {"salon_id": salon_id, "is_active": True}
         if customer_view:
             # For customer view, include barbers where is_barber=True OR is_barber field doesn't exist (backward compatibility)
             query["$or"] = [{"is_barber": True}, {"is_barber": {"$exists": False}}]
+        if branch_id:
+            query["branch_id"] = branch_id
 
         barbers = await db.barbers.find(query, {"_id": 0}).to_list(500)
         logger.info(f"Fetched {len(barbers)} barbers for salon {salon_id}, query: {query}")
@@ -2902,6 +3355,8 @@ async def create_barber(salon_id: str, barber: BarberCreate, current_salon=Depen
     barber_dict = barber.model_dump()
     barber_dict["id"] = str(uuid.uuid4())
     barber_dict["salon_id"] = salon_id  # Override with URL param
+    # Resolve branch (defaults to main branch if not specified) so every staff is branch-tagged.
+    barber_dict["branch_id"] = await resolve_branch_id(salon_id, barber_dict.get("branch_id"))
     barber_dict["queue_status"] = "available"
     barber_dict["is_active"] = True
     
@@ -3680,12 +4135,18 @@ async def get_customer_otp_status(phone: str):
     }
 
 @api_router.get("/salons/{salon_id}/customers")
-async def get_salon_customers(salon_id: str, current_user=Depends(get_current_salon_user)):
+async def get_salon_customers(salon_id: str, branch_id: Optional[str] = None, current_user=Depends(get_current_salon_user)):
     """Get all customers who have booked at this salon + manually added.
-    Each customer also includes the active wallet balance (if any)."""
+    Each customer also includes the active wallet balance (if any).
+    If branch_id is provided, restrict to customers who have booked at (or were
+    manually added at) that specific branch.
+    """
     # Get unique customers from tokens
+    tokens_query = {"salon_id": salon_id}
+    if branch_id:
+        tokens_query["branch_id"] = branch_id
     tokens = await db.tokens.find(
-        {"salon_id": salon_id},
+        tokens_query,
         {"_id": 0, "user_id": 1, "customer_name": 1, "phone": 1}
     ).to_list(10000)
     
@@ -3707,8 +4168,11 @@ async def get_salon_customers(salon_id: str, current_user=Depends(get_current_sa
             }
     
     # Also include manually added customers
+    manual_query = {"salon_id": salon_id}
+    if branch_id:
+        manual_query["branch_id"] = branch_id
     manual_customers = await db.salon_customers.find(
-        {"salon_id": salon_id}, {"_id": 0}
+        manual_query, {"_id": 0}
     ).to_list(10000)
     
     for mc in manual_customers:
@@ -3782,6 +4246,7 @@ async def add_salon_customer(salon_id: str, body: dict, current_user=Depends(get
     customer = {
         "id": str(uuid.uuid4()),
         "salon_id": salon_id,
+        "branch_id": await resolve_branch_id(salon_id, body.get("branch_id")),
         "name": name,
         "phone": phone or None,
         "gender": gender,
@@ -3871,10 +4336,17 @@ async def create_salon_booking(salon_id: str, body: dict, current_user=Depends(g
     barber = await db.barbers.find_one({"id": barber_id}, {"_id": 0})
     if barber:
         barber_name = barber.get("name", "Unknown")
+
+    # Resolve branch: explicit body override > barber's branch > salon main
+    requested_branch_id = body.get("branch_id")
+    booking_branch_id = await resolve_branch_id(salon_id, requested_branch_id)
+    if not requested_branch_id and barber and barber.get("branch_id"):
+        booking_branch_id = barber.get("branch_id")
     
     token_dict = {
         "id": str(uuid.uuid4()),
         "salon_id": salon_id,
+        "branch_id": booking_branch_id,
         "token_number": token_number,
         "customer_name": customer_name,
         "phone": phone or "",
@@ -3910,6 +4382,7 @@ async def create_salon_booking(salon_id: str, body: dict, current_user=Depends(g
             await db.salon_customers.insert_one({
                 "id": str(uuid.uuid4()),
                 "salon_id": salon_id,
+                "branch_id": booking_branch_id,
                 "name": customer_name,
                 "phone": phone,
                 "gender": gender,
@@ -5002,10 +5475,16 @@ async def create_booking(booking: BookingCreate):
     # Get GLOBAL (salon-wide) token number — salon+date+shift sequence
     token_number = await get_next_token_number(booking.salon_id, booking.date, booking.shift)
 
+    # Resolve branch: explicit > barber's branch > salon's main branch
+    booking_branch_id = await resolve_branch_id(booking.salon_id, booking.branch_id)
+    if not booking_branch_id and barber and barber.get("branch_id"):
+        booking_branch_id = barber.get("branch_id")
+
     # Create token
     token_dict = {
         "id": str(uuid.uuid4()),
         "salon_id": booking.salon_id,
+        "branch_id": booking_branch_id,
         "token_number": token_number,
         "customer_name": booking.customer_name,
         "phone": phone,
@@ -5130,7 +5609,13 @@ async def get_slot_availability(
     }
 
 @api_router.get("/salons/{salon_id}/barbers/{barber_id}/queue", response_model=List[TokenModel])
-async def get_barber_queue(salon_id: str, barber_id: str, date: Optional[str] = None, status: Optional[str] = None):
+async def get_barber_queue(
+    salon_id: str,
+    barber_id: str,
+    date: Optional[str] = None,
+    status: Optional[str] = None,
+    branch_id: Optional[str] = None,
+):
     """Get queue for specific barber"""
     if not date:
         date = datetime.now(timezone.utc).date().isoformat()
@@ -5138,12 +5623,19 @@ async def get_barber_queue(salon_id: str, barber_id: str, date: Optional[str] = 
     query = {"salon_id": salon_id, "barber_id": barber_id, "date": date}
     if status:
         query["status"] = status
+    if branch_id:
+        query["branch_id"] = branch_id
     
     tokens = await db.tokens.find(query, {"_id": 0}).sort("created_at", -1).to_list(1000)
     return tokens
 
 @api_router.get("/salons/{salon_id}/queue", response_model=List[TokenModel])
-async def get_salon_queue(salon_id: str, date: Optional[str] = None, status: Optional[str] = None):
+async def get_salon_queue(
+    salon_id: str,
+    date: Optional[str] = None,
+    status: Optional[str] = None,
+    branch_id: Optional[str] = None,
+):
     """Get entire salon queue (all barbers)"""
     if not date:
         date = datetime.now(timezone.utc).date().isoformat()
@@ -5151,6 +5643,8 @@ async def get_salon_queue(salon_id: str, date: Optional[str] = None, status: Opt
     query = {"salon_id": salon_id, "date": date}
     if status:
         query["status"] = status
+    if branch_id:
+        query["branch_id"] = branch_id
     
     tokens = await db.tokens.find(query, {"_id": 0}).sort("created_at", -1).to_list(1000)
     return tokens
@@ -6089,6 +6583,7 @@ async def confirm_token_payment(token_id: str, body: dict, current_salon=Depends
                 await db.financial_transactions.insert_one({
                     "id": str(uuid.uuid4()),
                     "salon_id": salon_id,
+                    "branch_id": token.get("branch_id"),
                     "type": "inflow",
                     "category": "booking_payment",
                     "amount": float(amt),
@@ -6357,6 +6852,7 @@ class FinancialTransactionCreate(BaseModel):
     payment_mode: str = "cash"  # cash, upi, card, wallet
     narration: Optional[str] = ""
     date: Optional[str] = None  # YYYY-MM-DD, defaults to today
+    branch_id: Optional[str] = None  # Defaults to main branch
 
 @api_router.get("/salons/{salon_id}/financials/settings")
 async def get_financial_settings(salon_id: str, current_user=Depends(get_current_salon_user)):
@@ -6393,6 +6889,7 @@ async def get_financial_transactions(
     type: Optional[str] = None,
     category: Optional[str] = None,
     payment_mode: Optional[str] = None,
+    branch_id: Optional[str] = None,
     limit: int = 200,
     current_user=Depends(get_current_salon_user)
 ):
@@ -6412,6 +6909,8 @@ async def get_financial_transactions(
         query["category"] = category
     if payment_mode:
         query["payment_mode"] = payment_mode
+    if branch_id:
+        query["branch_id"] = branch_id
     
     transactions = await db.financial_transactions.find(query, {"_id": 0}).sort("created_at", -1).limit(limit).to_list(limit)
     
@@ -6425,6 +6924,7 @@ async def create_financial_transaction(salon_id: str, txn: FinancialTransactionC
     txn_data = {
         "id": str(uuid.uuid4()),
         "salon_id": salon_id,
+        "branch_id": await resolve_branch_id(salon_id, txn.branch_id),
         "type": txn.type,
         "category": txn.category,
         "amount": txn.amount if txn.type == "adjustment" else abs(txn.amount),
@@ -6461,6 +6961,7 @@ async def get_financial_dashboard(
     salon_id: str,
     period: str = "daily",  # daily or monthly
     date: Optional[str] = None,  # YYYY-MM-DD for daily, YYYY-MM for monthly
+    branch_id: Optional[str] = None,
     current_user=Depends(get_current_salon_user)
 ):
     """Get financial dashboard data with cash in/out summary"""
@@ -6472,6 +6973,8 @@ async def get_financial_dashboard(
     else:  # monthly
         target_month = date or today.strftime("%Y-%m")
         query = {"salon_id": salon_id, "date": {"$regex": f"^{target_month}"}}
+    if branch_id:
+        query["branch_id"] = branch_id
     
     transactions = await db.financial_transactions.find(query, {"_id": 0}).sort("created_at", -1).to_list(1000)
     
@@ -6508,10 +7011,10 @@ async def get_financial_dashboard(
     # For daily view, calculate running balance from opening + all previous transactions
     if period == "daily":
         target = target_date
-        prev_txns = await db.financial_transactions.find({
-            "salon_id": salon_id,
-            "date": {"$lt": target}
-        }, {"_id": 0, "type": 1, "amount": 1}).to_list(10000)
+        prev_query = {"salon_id": salon_id, "date": {"$lt": target}}
+        if branch_id:
+            prev_query["branch_id"] = branch_id
+        prev_txns = await db.financial_transactions.find(prev_query, {"_id": 0, "type": 1, "amount": 1}).to_list(10000)
         
         running_balance = opening_balance
         for pt in prev_txns:
@@ -6615,17 +7118,21 @@ async def download_financial_report_csv(
 
 @api_router.get("/salons/{salon_id}/today-sales")
 async def get_today_sales(
-    salon_id: str
+    salon_id: str,
+    branch_id: Optional[str] = None,
 ):
     """Get today's sales from completed tokens (analytics logic)"""
     today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     
     # Find all completed tokens for today (matching analytics logic)
-    completed_tokens = await db.tokens.find({
+    query = {
         "salon_id": salon_id,
         "date": today,
         "status": "completed"
-    }, {"_id": 0, "total_amount": 1}).to_list(1000)
+    }
+    if branch_id:
+        query["branch_id"] = branch_id
+    completed_tokens = await db.tokens.find(query, {"_id": 0, "total_amount": 1}).to_list(1000)
     
     # Sum up total_amount from all completed tokens (same as analytics)
     total_sales = sum(token.get("total_amount", 0) for token in completed_tokens)
@@ -9401,6 +9908,7 @@ scheduler.add_job(cancel_active_bookings_end_of_day, 'cron', hour=18, minute=30)
 @fastapi_app.on_event("startup")
 async def startup_event():
     await initialize_data()
+    await migrate_branches()
     scheduler.start()
     logger.info("Application started with multi-salon support")
 

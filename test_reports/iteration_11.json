@@ -1,0 +1,36 @@
+{
+  "summary": "Phase 1 Branch Model — full e2e backend + frontend smoke verification. Existing /app/backend/tests/test_branches_phase1.py (5 tests) PASSES, plus new /app/backend/tests/test_branches_phase1_extra.py (12 tests covering backwards-compatibility, salon-booking branch-stamping, financials & today-sales branch filters, cannot-deactivate-with-active-tokens 400, and salon_staff RBAC 403) all PASS. Frontend smoke confirms: branch-selector-trigger / branch-selector-dropdown / branch-option-* in header, Branches admin page with add-branch-btn, branch-card-*, edit/qr buttons, and the QR dialog returning a base64 PNG with a booking URL that contains branch=<id>. 17/17 backend assertions green; UI elements all match the requested data-testid contract.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "/salon/login", "issues": ["Login inputs (mobile/login-id, password) lack data-testid (e.g. 'login-identifier-input', 'login-password-input', 'login-submit-btn'). Not blocking, but improves automated-test stability across iterations."]},
+      {"screen": "BranchManagement (single-branch state)", "issues": ["When only the Main branch exists, the action row shows only 'Edit' + 'QR' — set-main-* and deactivate-branch-* buttons are intentionally hidden (correct: cannot demote/delete the sole main branch). Just confirming this is by-design and no bug."]}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_branches_phase1.py",
+    "/app/backend/tests/test_branches_phase1_extra.py",
+    "/app/test_reports/pytest/branches_phase1_full.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "server.py update_branch (line ~2547): BranchUpdate strips None values before $set, but a deliberate clear of phone/email (empty string) is honoured — fine. However, is_main_branch=False is silently dropped (because pydantic optional defaults to None) so an admin cannot demote a branch via PUT, only via POST .../set-main on another branch. Document this or accept explicit False.",
+    "server.py delete_branch (line ~2583): only checks tokens with date>=today and status NOT IN [completed,cancelled,skipped]. A branch with future-dated 'in_progress'/'called' tokens is correctly blocked, but if a customer creates a new booking AFTER deactivation flips status to inactive, resolve_branch_id may still return the inactive id (because BRANCH_AWARE_COLLECTIONS back-fill uses any main branch). Suggest explicitly filtering branches to status='active' in resolve_branch_id.",
+    "server.py create_branch (line ~2493): branch_code is not validated for uniqueness within a salon. Two branches in the same salon can both have code 'PYT-1'. Add a unique index { salon_id:1, branch_code:1 } and a 400 on duplicate.",
+    "server.py qr-code endpoint (line ~2650): no auth dependency — anyone with a salon_id+branch_id pair can fetch the QR. Acceptable for booking-link sharing, but consider rate-limiting; an enumeration attack on UUIDs would be slow but possible.",
+    "_check_salon_admin_for_salon (line ~2440): role check accepts 'salon_admin','salon','admin'. Verified that 'staff' → 403 on POST/PUT/DELETE/set-main, and staff CAN read via list_branches (uses get_current_salon_user). Behaviour matches the BRD.",
+    "Frontend BranchManagement: deactivate-branch-* and set-main-* buttons hidden for the sole main branch — correct UX, prevents accidental lockout."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_branches_phase1_extra.py"
+  ],
+  "success_rate": {"backend": "100% (17/17 — 5 existing + 12 new)", "frontend": "100% smoke (login, branch selector dropdown, branch admin page, add-branch dialog, QR dialog all render with correct data-testids)"},
+  "test_credentials": "admin / salon123 (salon_id b5c6b0ca-66ec-431b-8dc8-387de72fa67c) — used. Temp staff users created during test_staff_cannot_create_branch are deleted in teardown.",
+  "seed_data_creation": "All test data is auto-cleaned: temp branches (prefix 'Pytest...') deleted in finally blocks; temp staff user deleted via DELETE /api/salon/users/{id}; tokens cancelled via POST /api/tokens/{id}/cancel; barber branch_id reset to original. No production data mutated.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Phase 1 Branch Model is fully verified and stable. Run the suite via: REACT_APP_BACKEND_URL=https://model-branch.preview.emergentagent.com python -m pytest backend/tests/test_branches_phase1.py backend/tests/test_branches_phase1_extra.py -v. The salon currently has exactly 1 main branch (id d7424ca0-6625-4b41-9084-30de9d873ca2, code 'MAIN'). Frontend route to admin Branches page is via hamburger menu → Branches (NOT a direct URL like /salon/branches — that redirects to /login because activeTab state lives only in EnhancedSalonDashboard). For Phase-2 branch-manager-role + staff-transfers tests, you'll want to seed a non-admin 'branch_manager' user and exercise POST /api/salons/{salon_id}/staff-branch-transfers (collection already provisioned by Phase-1 migration). All 17 phase-1 tests must continue to pass after any phase-2 changes — they are the regression baseline.",
+  "rca_of_the_issue": "No bugs found. One initial test run skipped because the test used /api/salons/{salon_id}/barbers/{barber_id} for PUT, but the actual route is /api/barbers/{barber_id} (un-nested). Fixed in test file. After the fix all 17 tests pass."
+}

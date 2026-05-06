@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useWebSocket } from '@/contexts/WebSocketContext';
 import { useAuth } from '@/contexts/AuthContext';
+import { useBranch } from '@/contexts/BranchContext';
 import axios from 'axios';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
@@ -11,6 +12,8 @@ import { Input } from '@/components/ui/input';
 import { toast } from 'sonner';
 import ThemeToggle from '@/components/ThemeToggle';
 import BarberManagement from '@/components/BarberManagement';
+import BranchManagement from '@/components/BranchManagement';
+import BranchSelector from '@/components/BranchSelector';
 import CustomerMaster from '@/components/CustomerMaster';
 import OfferingsModule from '@/components/OfferingsModule';
 import FinancialsModule from '@/components/FinancialsModule';
@@ -31,7 +34,7 @@ import {
   Clock, User, Phone, Bell, MapPin, Settings, CheckCircle, Calendar,
   Users, ArrowLeft, FileText, Download, Plus, X, TrendingUp, Menu,
   Shield, DollarSign, Database, Pin, PinOff, Edit, CreditCard, Banknote, Smartphone,
-  LayoutDashboard, Activity, Zap, Wallet, Search
+  LayoutDashboard, Activity, Zap, Wallet, Search, Building2
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
@@ -43,6 +46,7 @@ export default function EnhancedSalonDashboard() {
   const [searchParams, setSearchParams] = useSearchParams();
   const { subscribe, unsubscribe } = useWebSocket();
   const { salonUser, isAdmin, hasPermission } = useAuth();
+  const { selectedBranchId } = useBranch();
   
   const [activeTab, setActiveTab] = useState(() => {
     // URL param takes precedence, then localStorage, then 'home'
@@ -76,7 +80,8 @@ export default function EnhancedSalonDashboard() {
       'staff': isAdmin,
       'financials': isAdmin || hasPermission('can_access_financials'),
       'analytics': isAdmin || hasPermission('can_access_analytics'),
-      'salon': isAdmin || hasPermission('can_edit_salon')
+      'salon': isAdmin || hasPermission('can_edit_salon'),
+      'branches': isAdmin
     };
     
     const allowed = restrictedTabs[requestedTab] ?? true;
@@ -114,7 +119,8 @@ export default function EnhancedSalonDashboard() {
         'staff': isAdmin,
         'financials': isAdmin || hasPermission('can_access_financials'),
         'analytics': isAdmin || hasPermission('can_access_analytics'),
-        'salon': isAdmin || hasPermission('can_edit_salon')
+        'salon': isAdmin || hasPermission('can_edit_salon'),
+        'branches': isAdmin
       };
       
       const allowed = restrictedTabs[tab] ?? true;
@@ -277,6 +283,15 @@ export default function EnhancedSalonDashboard() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [dateMode, salonId]);
 
+  // Re-fetch dashboard data when the user switches the active branch.
+  useEffect(() => {
+    if (!salonId) return;
+    fetchTokens(salonId);
+    fetchBarbers(salonId);
+    fetchDailySales(salonId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedBranchId]);
+
   // SECURITY: Reset active tab to 'home' if it's not in the menuItems list
   // (e.g., a staff user with a stale `salon_active_tab=financials` from a previous
   // admin session must not silently land on a forbidden tab).
@@ -359,7 +374,10 @@ export default function EnhancedSalonDashboard() {
 
   const fetchBarbers = async (id) => {
     try {
-      const response = await axios.get(`${API}/salons/${id}/barbers`);
+      const params = new URLSearchParams();
+      if (selectedBranchId) params.set('branch_id', selectedBranchId);
+      const url = `${API}/salons/${id}/barbers${params.toString() ? `?${params.toString()}` : ''}`;
+      const response = await axios.get(url);
       setBarbers(response.data);
     } catch (error) {
       console.error('Error fetching barbers:', error);
@@ -371,14 +389,14 @@ export default function EnhancedSalonDashboard() {
       let url;
       if (selectedBarber === 'all') {
         url = `${API}/salons/${id}/queue?date=${date}`;
-        if (filter !== 'all') {
-          url += `&status=${filter}`;
-        }
       } else {
         url = `${API}/salons/${id}/barbers/${selectedBarber}/queue?date=${date}`;
-        if (filter !== 'all') {
-          url += `&status=${filter}`;
-        }
+      }
+      if (filter !== 'all') {
+        url += `&status=${filter}`;
+      }
+      if (selectedBranchId) {
+        url += `&branch_id=${selectedBranchId}`;
       }
       
       const response = await axios.get(url);
@@ -686,10 +704,10 @@ export default function EnhancedSalonDashboard() {
 
   const fetchDailySales = async (sid) => {
     try {
-      const response = await axios.get(
-        `${API}/salons/${sid}/today-sales`,
-        { headers: getAuthHeaders() }
-      );
+      const params = new URLSearchParams();
+      if (selectedBranchId) params.set('branch_id', selectedBranchId);
+      const url = `${API}/salons/${sid}/today-sales${params.toString() ? `?${params.toString()}` : ''}`;
+      const response = await axios.get(url, { headers: getAuthHeaders() });
       setDailySales(response.data.today_sales || 0);
     } catch (error) {
       console.error('Error fetching daily sales:', error);
@@ -842,7 +860,8 @@ export default function EnhancedSalonDashboard() {
           gender: manualBookingForm.gender,
           barber_id: manualBookingForm.barber_id,
           selected_services: manualBookingForm.selected_services,
-          payment_mode: manualBookingForm.payment_mode
+          payment_mode: manualBookingForm.payment_mode,
+          branch_id: selectedBranchId || undefined
         },
         { headers: getAuthHeaders() }
       );
@@ -939,6 +958,7 @@ export default function EnhancedSalonDashboard() {
     { id: 'customer-master', label: 'Customer Master', icon: Database, show: true },
     { id: 'analytics', label: 'Analytics', icon: TrendingUp, show: checkIsAdmin() || checkHasPermission('can_access_analytics') },
     { id: 'gallery', label: 'Gallery', icon: FileText, show: true },
+    { id: 'branches', label: 'Branches', icon: Building2, show: checkIsAdmin() },
     { id: 'salon', label: 'Salon Settings', icon: Settings, show: checkIsAdmin() || checkHasPermission('can_edit_salon') }
   ].filter(item => item.show);
 
@@ -1008,6 +1028,7 @@ export default function EnhancedSalonDashboard() {
               </div>
             </div>
             <div className="flex items-center space-x-2 md:space-x-3 flex-shrink-0">
+              <BranchSelector compact />
               <button
                 onClick={() => {
                   setActiveTab('notifications');
@@ -1857,6 +1878,10 @@ export default function EnhancedSalonDashboard() {
               salonId={salonId}
             />
           </div>
+        )}
+
+        {activeTab === 'branches' && salonId && checkIsAdmin() && (
+          <BranchManagement salonId={salonId} />
         )}
 
         {activeTab === 'notifications' && salonId && (
