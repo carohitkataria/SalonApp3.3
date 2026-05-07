@@ -6,7 +6,7 @@ Test to check sold-memberships endpoint for pending memberships
 import requests
 import json
 
-BASE_URL = "https://model-branch.preview.emergentagent.com/api"
+BASE_URL = "https://staff-management-pro-2.preview.emergentagent.com/api"
 SALON_ID = "a356c4e6-274f-40e7-9a37-66d3a4613d17"
 ADMIN_PHONE = "+917503070727"
 ADMIN_PASSWORD = "salon123"
