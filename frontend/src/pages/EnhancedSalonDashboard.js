@@ -45,7 +45,7 @@ export default function EnhancedSalonDashboard() {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const { subscribe, unsubscribe } = useWebSocket();
-  const { salonUser, isAdmin, hasPermission } = useAuth();
+  const { salonUser, isAdmin, hasPermission, isBranchManager } = useAuth();
   const { selectedBranchId } = useBranch();
   
   const [activeTab, setActiveTab] = useState(() => {
@@ -64,6 +64,14 @@ export default function EnhancedSalonDashboard() {
       if (storedSalonUser) return storedSalonUser?.role === 'admin';
       return !!localStorage.getItem('salon_admin_token');
     })();
+
+    const isBM = (() => {
+      try {
+        const raw = localStorage.getItem('salon_user_auth');
+        if (raw) return JSON.parse(raw)?.role === 'branch_manager';
+      } catch (e) {}
+      return false;
+    })();
     
     const hasPermission = (permission) => {
       let storedSalonUser = null;
@@ -77,11 +85,11 @@ export default function EnhancedSalonDashboard() {
     
     // Check restricted tabs
     const restrictedTabs = {
-      'staff': isAdmin,
-      'financials': isAdmin || hasPermission('can_access_financials'),
-      'analytics': isAdmin || hasPermission('can_access_analytics'),
+      'staff': isAdmin || isBM,
+      'financials': isAdmin || isBM || hasPermission('can_access_financials'),
+      'analytics': isAdmin || isBM || hasPermission('can_access_analytics'),
       'salon': isAdmin || hasPermission('can_edit_salon'),
-      'branches': isAdmin
+      'branches': isAdmin || isBM
     };
     
     const allowed = restrictedTabs[requestedTab] ?? true;
@@ -115,12 +123,19 @@ export default function EnhancedSalonDashboard() {
       };
       
       // Check if tab is allowed for this user
+      const isBM = (() => {
+        try {
+          const raw = localStorage.getItem('salon_user_auth');
+          if (raw) return JSON.parse(raw)?.role === 'branch_manager';
+        } catch (e) {}
+        return false;
+      })();
       const restrictedTabs = {
-        'staff': isAdmin,
-        'financials': isAdmin || hasPermission('can_access_financials'),
-        'analytics': isAdmin || hasPermission('can_access_analytics'),
+        'staff': isAdmin || isBM,
+        'financials': isAdmin || isBM || hasPermission('can_access_financials'),
+        'analytics': isAdmin || isBM || hasPermission('can_access_analytics'),
         'salon': isAdmin || hasPermission('can_edit_salon'),
-        'branches': isAdmin
+        'branches': isAdmin || isBM
       };
       
       const allowed = restrictedTabs[tab] ?? true;
@@ -929,6 +944,16 @@ export default function EnhancedSalonDashboard() {
     return !!legacyToken;
   };
 
+  const checkIsBranchManager = () => {
+    let storedSalonUser = null;
+    try {
+      const raw = localStorage.getItem('salon_user_auth');
+      if (raw) storedSalonUser = JSON.parse(raw);
+    } catch (e) { storedSalonUser = null; }
+    const u = storedSalonUser || salonUser;
+    return u?.role === 'branch_manager';
+  };
+
   const checkHasPermission = (permission) => {
     // Read multi-user auth from localStorage to be strict
     let storedSalonUser = null;
@@ -952,13 +977,13 @@ export default function EnhancedSalonDashboard() {
   const menuItems = [
     { id: 'home', label: 'Home', icon: LayoutDashboard, show: true },
     { id: 'queue', label: 'Token Queue', icon: Calendar, show: true },
-    { id: 'staff', label: 'Staff Management', icon: Users, show: checkIsAdmin() },
+    { id: 'staff', label: 'Staff Management', icon: Users, show: checkIsAdmin() || checkIsBranchManager() },
     { id: 'services', label: 'Services & Offerings', icon: Scissors, show: true },
-    { id: 'financials', label: 'Financials', icon: DollarSign, show: checkIsAdmin() || checkHasPermission('can_access_financials') },
+    { id: 'financials', label: 'Financials', icon: DollarSign, show: checkIsAdmin() || checkIsBranchManager() || checkHasPermission('can_access_financials') },
     { id: 'customer-master', label: 'Customer Master', icon: Database, show: true },
-    { id: 'analytics', label: 'Analytics', icon: TrendingUp, show: checkIsAdmin() || checkHasPermission('can_access_analytics') },
+    { id: 'analytics', label: 'Analytics', icon: TrendingUp, show: checkIsAdmin() || checkIsBranchManager() || checkHasPermission('can_access_analytics') },
     { id: 'gallery', label: 'Gallery', icon: FileText, show: true },
-    { id: 'branches', label: 'Branches', icon: Building2, show: checkIsAdmin() },
+    { id: 'branches', label: 'Branches', icon: Building2, show: checkIsAdmin() || checkIsBranchManager() },
     { id: 'salon', label: 'Salon Settings', icon: Settings, show: checkIsAdmin() || checkHasPermission('can_edit_salon') }
   ].filter(item => item.show);
 

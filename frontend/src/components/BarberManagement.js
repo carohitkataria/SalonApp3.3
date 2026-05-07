@@ -6,12 +6,15 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Checkbox } from '@/components/ui/checkbox';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { toast } from 'sonner';
 import GenderBadge from '@/components/GenderBadge';
 import { 
-  User, Plus, Save
+  User, Plus, Save, ArrowRightLeft, Loader2, X
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
+import { useAuth } from '@/contexts/AuthContext';
+import { useBranch } from '@/contexts/BranchContext';
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
 const API = `${BACKEND_URL}/api`;
@@ -37,9 +40,60 @@ const SPECIALIZATION_OPTIONS = [
 
 export default function BarberManagement({ salonId, getAuthHeaders }) {
   const navigate = useNavigate();
+  const { isAdmin, isBranchManager, getSalonUserHeaders } = useAuth();
+  const { branches, refreshBranches } = useBranch();
   const [barbers, setBarbers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showAddForm, setShowAddForm] = useState(false);
+
+  // Staff transfer dialog state
+  const [transferStaff, setTransferStaff] = useState(null);
+  const [transferToBranch, setTransferToBranch] = useState('');
+  const [transferDate, setTransferDate] = useState(new Date().toISOString().slice(0, 10));
+  const [transferRemarks, setTransferRemarks] = useState('');
+  const [transferLoading, setTransferLoading] = useState(false);
+
+  useEffect(() => {
+    if (salonId) refreshBranches(salonId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [salonId]);
+
+  const canTransferStaff = isAdmin() || isBranchManager();
+
+  const openTransfer = (barber) => {
+    setTransferStaff(barber);
+    setTransferToBranch('');
+    setTransferDate(new Date().toISOString().slice(0, 10));
+    setTransferRemarks('');
+  };
+
+  const submitTransfer = async () => {
+    if (!transferStaff || !transferToBranch) {
+      toast.error('Please select a target branch');
+      return;
+    }
+    setTransferLoading(true);
+    try {
+      await axios.post(
+        `${API}/salons/${salonId}/staff-branch-transfers`,
+        {
+          staff_id: transferStaff.id,
+          from_branch_id: transferStaff.branch_id || null,
+          to_branch_id: transferToBranch,
+          transfer_date: transferDate,
+          remarks: transferRemarks || null,
+        },
+        { headers: getSalonUserHeaders() }
+      );
+      toast.success(`${transferStaff.name} transferred successfully`);
+      setTransferStaff(null);
+      fetchBarbers();
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || 'Failed to transfer staff');
+    } finally {
+      setTransferLoading(false);
+    }
+  };
   
   const [newBarber, setNewBarber] = useState({
     name: '',
@@ -481,6 +535,11 @@ export default function BarberManagement({ salonId, getAuthHeaders }) {
                   🏢 {barber.department}
                 </p>
               )}
+              {barber.branch_id && branches.length > 0 && (
+                <p className="text-xs text-purple-500" data-testid={`barber-branch-${barber.id}`}>
+                  📍 {branches.find(b => b.id === barber.branch_id)?.branch_name || 'Branch'}
+                </p>
+              )}
               <div className="flex items-center gap-2">
                 {barber.is_barber ? (
                   <span className="text-xs bg-gold/20 text-gold px-2 py-0.5 rounded">
@@ -494,15 +553,31 @@ export default function BarberManagement({ salonId, getAuthHeaders }) {
               </div>
             </div>
 
-            <Button 
-              onClick={(e) => {
-                e.stopPropagation();
-                navigate(`/salon/staff/${barber.id}`);
-              }}
-              className="w-full bg-gold text-black hover:bg-gold/90"
-            >
-              View Profile
-            </Button>
+            <div className="flex gap-2">
+              <Button 
+                onClick={(e) => {
+                  e.stopPropagation();
+                  navigate(`/salon/staff/${barber.id}`);
+                }}
+                className="flex-1 bg-gold text-black hover:bg-gold/90"
+              >
+                View Profile
+              </Button>
+              {canTransferStaff && branches.length > 1 && (
+                <Button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    openTransfer(barber);
+                  }}
+                  variant="outline"
+                  size="sm"
+                  data-testid={`transfer-staff-${barber.id}`}
+                  title="Transfer to another branch"
+                >
+                  <ArrowRightLeft className="w-4 h-4" />
+                </Button>
+              )}
+            </div>
           </motion.div>
         ))}
 
@@ -514,6 +589,85 @@ export default function BarberManagement({ salonId, getAuthHeaders }) {
           </div>
         )}
       </div>
+
+      {/* Staff Transfer Dialog */}
+      <Dialog open={!!transferStaff} onOpenChange={(o) => { if (!o) setTransferStaff(null); }}>
+        <DialogContent className="max-w-md" data-testid="staff-transfer-dialog">
+          <DialogHeader>
+            <DialogTitle>Transfer Staff</DialogTitle>
+          </DialogHeader>
+          {transferStaff && (
+            <div className="space-y-3">
+              <p className="text-sm text-muted-foreground">
+                Transferring <span className="font-semibold text-foreground">{transferStaff.name}</span>
+                {transferStaff.branch_id && (
+                  <> from <span className="font-semibold text-foreground">
+                    {branches.find(b => b.id === transferStaff.branch_id)?.branch_name || 'Current branch'}
+                  </span></>
+                )}
+              </p>
+
+              <div>
+                <Label htmlFor="transfer-to">Target Branch *</Label>
+                <select
+                  id="transfer-to"
+                  data-testid="transfer-to-branch-select"
+                  value={transferToBranch}
+                  onChange={(e) => setTransferToBranch(e.target.value)}
+                  className="w-full h-10 px-3 rounded-md border border-input bg-background"
+                >
+                  <option value="">-- Select Branch --</option>
+                  {branches
+                    .filter((b) => b.id !== transferStaff.branch_id && b.status === 'active')
+                    .map((b) => (
+                      <option key={b.id} value={b.id}>
+                        {b.branch_name}{b.is_main_branch ? ' • Main' : ''}{b.branch_code ? ` (${b.branch_code})` : ''}
+                      </option>
+                    ))}
+                </select>
+              </div>
+
+              <div>
+                <Label htmlFor="transfer-date">Transfer Date</Label>
+                <Input
+                  id="transfer-date"
+                  data-testid="transfer-date-input"
+                  type="date"
+                  value={transferDate}
+                  onChange={(e) => setTransferDate(e.target.value)}
+                />
+              </div>
+
+              <div>
+                <Label htmlFor="transfer-remarks">Remarks (optional)</Label>
+                <Input
+                  id="transfer-remarks"
+                  data-testid="transfer-remarks-input"
+                  value={transferRemarks}
+                  onChange={(e) => setTransferRemarks(e.target.value)}
+                  placeholder="Reason for transfer"
+                />
+              </div>
+            </div>
+          )}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setTransferStaff(null)}>
+              <X className="w-4 h-4 mr-1" /> Cancel
+            </Button>
+            <Button
+              onClick={submitTransfer}
+              disabled={transferLoading || !transferToBranch}
+              data-testid="confirm-transfer-btn"
+              className="bg-gold text-black hover:bg-gold/90"
+            >
+              {transferLoading
+                ? <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                : <ArrowRightLeft className="w-4 h-4 mr-2" />}
+              Transfer
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

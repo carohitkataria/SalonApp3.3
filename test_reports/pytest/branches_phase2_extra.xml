@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="utf-8"?><testsuites name="pytest tests"><testsuite name="pytest" errors="6" failures="1" skipped="0" tests="10" time="13.066" timestamp="2026-05-07T05:25:12.672506+00:00" hostname="agent-env-70313c29-5934-438d-bb5b-54e79f08d84e"><testcase classname="backend.tests.test_branches_phase2_extra" name="test_branch_manager_empty_assigned_branches_400" time="0.515" /><testcase classname="backend.tests.test_branches_phase2_extra" name="test_branch_manager_invalid_branch_id_400" time="0.102" /><testcase classname="backend.tests.test_branches_phase2_extra" name="test_put_user_change_role_and_branches" time="0.220"><failure message="AssertionError: {&quot;detail&quot;:&quot;Password must be at least 6 characters&quot;}&#10;assert 400 == 200&#10; +  where 400 = &lt;Response [400]&gt;.status_code">backend/tests/test_branches_phase2_extra.py:111: in test_put_user_change_role_and_branches
+    assert r.status_code == 200, r.text
+E   AssertionError: {"detail":"Password must be at least 6 characters"}
+E   assert 400 == 200
+E    +  where 400 = &lt;Response [400]&gt;.status_code</failure></testcase><testcase classname="backend.tests.test_branches_phase2_extra" name="test_bm_today_sales_other_branch_403" time="0.112"><error message="failed on setup with &quot;AssertionError: {&quot;detail&quot;:&quot;Password must be at least 6 characters&quot;}&#10;assert 400 == 200&#10; +  where 400 = &lt;Response [400]&gt;.status_code&quot;">backend/tests/test_branches_phase2_extra.py:154: in bm_main
+    assert r.status_code == 200, r.text
+E   AssertionError: {"detail":"Password must be at least 6 characters"}
+E   assert 400 == 200
+E    +  where 400 = &lt;Response [400]&gt;.status_code</error></testcase><testcase classname="backend.tests.test_branches_phase2_extra" name="test_bm_customers_scoped" time="0.099"><error message="failed on setup with &quot;AssertionError: {&quot;detail&quot;:&quot;Password must be at least 6 characters&quot;}&#10;assert 400 == 200&#10; +  where 400 = &lt;Response [400]&gt;.status_code&quot;">backend/tests/test_branches_phase2_extra.py:154: in bm_main
+    assert r.status_code == 200, r.text
+E   AssertionError: {"detail":"Password must be at least 6 characters"}
+E   assert 400 == 200
+E    +  where 400 = &lt;Response [400]&gt;.status_code</error></testcase><testcase classname="backend.tests.test_branches_phase2_extra" name="test_bm_barbers_admin_view_scoped" time="0.114"><error message="failed on setup with &quot;AssertionError: {&quot;detail&quot;:&quot;Password must be at least 6 characters&quot;}&#10;assert 400 == 200&#10; +  where 400 = &lt;Response [400]&gt;.status_code&quot;">backend/tests/test_branches_phase2_extra.py:154: in bm_main
+    assert r.status_code == 200, r.text
+E   AssertionError: {"detail":"Password must be at least 6 characters"}
+E   assert 400 == 200
+E    +  where 400 = &lt;Response [400]&gt;.status_code</error></testcase><testcase classname="backend.tests.test_branches_phase2_extra" name="test_bm_barbers_customer_view_not_scoped" time="0.123"><error message="failed on setup with &quot;AssertionError: {&quot;detail&quot;:&quot;Password must be at least 6 characters&quot;}&#10;assert 400 == 200&#10; +  where 400 = &lt;Response [400]&gt;.status_code&quot;">backend/tests/test_branches_phase2_extra.py:154: in bm_main
+    assert r.status_code == 200, r.text
+E   AssertionError: {"detail":"Password must be at least 6 characters"}
+E   assert 400 == 200
+E    +  where 400 = &lt;Response [400]&gt;.status_code</error></testcase><testcase classname="backend.tests.test_branches_phase2_extra" name="test_bm_financials_transactions_other_branch_403" time="0.104"><error message="failed on setup with &quot;AssertionError: {&quot;detail&quot;:&quot;Password must be at least 6 characters&quot;}&#10;assert 400 == 200&#10; +  where 400 = &lt;Response [400]&gt;.status_code&quot;">backend/tests/test_branches_phase2_extra.py:154: in bm_main
+    assert r.status_code == 200, r.text
+E   AssertionError: {"detail":"Password must be at least 6 characters"}
+E   assert 400 == 200
+E    +  where 400 = &lt;Response [400]&gt;.status_code</error></testcase><testcase classname="backend.tests.test_branches_phase2_extra" name="test_transfer_same_branch_400" time="11.458" /><testcase classname="backend.tests.test_branches_phase2_extra" name="test_bm_transfer_history_scoped" time="0.117"><error message="failed on setup with &quot;AssertionError: {&quot;detail&quot;:&quot;Password must be at least 6 characters&quot;}&#10;assert 400 == 200&#10; +  where 400 = &lt;Response [400]&gt;.status_code&quot;">backend/tests/test_branches_phase2_extra.py:154: in bm_main
+    assert r.status_code == 200, r.text
+E   AssertionError: {"detail":"Password must be at least 6 characters"}
+E   assert 400 == 200
+E    +  where 400 = &lt;Response [400]&gt;.status_code</error></testcase></testsuite></testsuites>

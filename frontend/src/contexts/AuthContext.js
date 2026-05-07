@@ -93,7 +93,8 @@ export const AuthProvider = ({ children }) => {
         salonId: response.data.salon_id,
         userId: response.data.user_id,
         role: response.data.role,
-        permissions: response.data.permissions
+        permissions: response.data.permissions,
+        assignedBranchIds: response.data.assigned_branch_ids || []
       };
       
       setSalonUser(authData);
@@ -153,6 +154,14 @@ export const AuthProvider = ({ children }) => {
     return salonUser?.role === 'staff';
   };
 
+  const isBranchManager = () => {
+    return salonUser?.role === 'branch_manager';
+  };
+
+  const getAssignedBranchIds = () => {
+    return salonUser?.assignedBranchIds || [];
+  };
+
   const hasPermission = (permission) => {
     if (salonUser?.role === 'admin') return true;
     return salonUser?.permissions?.[permission] || false;
@@ -176,6 +185,8 @@ export const AuthProvider = ({ children }) => {
         getSalonUserHeaders,
         isAdmin,
         isStaff,
+        isBranchManager,
+        getAssignedBranchIds,
         hasPermission,
         isUserLoggedIn: !!user,
         isUserOtpVerified: !!user?.is_otp_verified,

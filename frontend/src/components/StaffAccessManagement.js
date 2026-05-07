@@ -6,7 +6,7 @@ import { Label } from '@/components/ui/label';
 import { Checkbox } from '@/components/ui/checkbox';
 import { toast } from 'sonner';
 import { 
-  UserPlus, Edit2, Trash2, Eye, EyeOff, Users, Shield, X, Save
+  UserPlus, Edit2, Trash2, Eye, EyeOff, Users, Shield, X, Save, Building2
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useAuth } from '@/contexts/AuthContext';
@@ -18,6 +18,7 @@ export default function StaffAccessManagement() {
   const { getSalonUserHeaders, salonUser } = useAuth();
   const [staffUsers, setStaffUsers] = useState([]);
   const [staffMembers, setStaffMembers] = useState([]);
+  const [branches, setBranches] = useState([]);
   const [loading, setLoading] = useState(false);
   const [showAddForm, setShowAddForm] = useState(false);
   const [editingUser, setEditingUser] = useState(null);
@@ -27,7 +28,9 @@ export default function StaffAccessManagement() {
     mobile: '',
     login_id: '',
     password: '',
+    role: 'staff',
     staff_id: '',
+    assigned_branch_ids: [],
     permissions: {
       can_edit_salon: false,
       can_access_analytics: false,
@@ -41,6 +44,7 @@ export default function StaffAccessManagement() {
   useEffect(() => {
     fetchStaffUsers();
     fetchStaffMembers();
+    fetchBranches();
   }, []);
 
   const fetchStaffUsers = async () => {
@@ -62,6 +66,18 @@ export default function StaffAccessManagement() {
       setStaffMembers(response.data || []);
     } catch (error) {
       console.error('Error fetching staff members:', error);
+    }
+  };
+
+  const fetchBranches = async () => {
+    try {
+      const salonId = salonUser?.salonId || localStorage.getItem('salon_id');
+      const res = await axios.get(`${API}/salons/${salonId}/branches`, {
+        headers: getSalonUserHeaders(),
+      });
+      setBranches(Array.isArray(res.data) ? res.data : []);
+    } catch (error) {
+      console.error('Error fetching branches:', error);
     }
   };
 
@@ -95,8 +111,9 @@ export default function StaffAccessManagement() {
         mobile: formData.mobile,
         login_id: formData.login_id,
         password: formData.password,
-        role: 'staff',
+        role: formData.role,
         staff_id: formData.staff_id || null,
+        assigned_branch_ids: formData.role === 'branch_manager' ? formData.assigned_branch_ids : [],
         permissions: formData.permissions
       };
 
@@ -108,7 +125,9 @@ export default function StaffAccessManagement() {
             mobile: formData.mobile,
             login_id: formData.login_id,
             password: formData.password || undefined,
+            role: formData.role,
             staff_id: formData.staff_id || null,
+            assigned_branch_ids: formData.role === 'branch_manager' ? formData.assigned_branch_ids : [],
             permissions: formData.permissions
           },
           { headers: getSalonUserHeaders() }
@@ -139,7 +158,9 @@ export default function StaffAccessManagement() {
       mobile: user.mobile,
       login_id: user.login_id,
       password: '',
+      role: user.role || 'staff',
       staff_id: user.staff_id || '',
+      assigned_branch_ids: Array.isArray(user.assigned_branch_ids) ? user.assigned_branch_ids : [],
       permissions: {
         can_edit_salon: !!perms.can_edit_salon,
         can_access_analytics: !!perms.can_access_analytics,
@@ -170,7 +191,9 @@ export default function StaffAccessManagement() {
       mobile: '',
       login_id: '',
       password: '',
+      role: 'staff',
       staff_id: '',
+      assigned_branch_ids: [],
       permissions: {
         can_edit_salon: false,
         can_access_analytics: false,
@@ -310,6 +333,73 @@ export default function StaffAccessManagement() {
                     Link this user account to a staff member profile
                   </p>
                 </div>
+
+                <div className="md:col-span-2">
+                  <Label htmlFor="role">Role</Label>
+                  <select
+                    id="role"
+                    name="role"
+                    value={formData.role}
+                    onChange={handleInputChange}
+                    data-testid="user-role-select"
+                    className="w-full h-10 px-3 rounded-md border border-input bg-background"
+                  >
+                    <option value="staff">Staff</option>
+                    <option value="branch_manager">Branch Manager</option>
+                    <option value="admin">Admin</option>
+                  </select>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    Branch Manager: scoped to assigned branches only. Admin: full access.
+                  </p>
+                </div>
+
+                {formData.role === 'branch_manager' && (
+                  <div className="md:col-span-2">
+                    <Label className="flex items-center gap-2">
+                      <Building2 className="w-4 h-4 text-gold" />
+                      Assigned Branches *
+                    </Label>
+                    <div
+                      className="mt-2 space-y-2 max-h-40 overflow-auto border border-input rounded-md p-2 bg-background"
+                      data-testid="user-assigned-branches"
+                    >
+                      {branches.length === 0 && (
+                        <p className="text-xs text-muted-foreground">No branches yet. Create a branch first.</p>
+                      )}
+                      {branches.map((b) => {
+                        const checked = formData.assigned_branch_ids.includes(b.id);
+                        return (
+                          <label
+                            key={b.id}
+                            className="flex items-center gap-2 cursor-pointer text-sm"
+                            data-testid={`assign-branch-${b.id}`}
+                          >
+                            <input
+                              type="checkbox"
+                              checked={checked}
+                              onChange={(e) => {
+                                setFormData((prev) => {
+                                  const next = new Set(prev.assigned_branch_ids);
+                                  if (e.target.checked) next.add(b.id);
+                                  else next.delete(b.id);
+                                  return { ...prev, assigned_branch_ids: Array.from(next) };
+                                });
+                              }}
+                            />
+                            <span className="truncate">
+                              {b.branch_name}
+                              {b.is_main_branch ? ' • Main' : ''}
+                              {b.branch_code ? ` (${b.branch_code})` : ''}
+                            </span>
+                          </label>
+                        );
+                      })}
+                    </div>
+                    {formData.assigned_branch_ids.length === 0 && (
+                      <p className="text-xs text-red-500 mt-1">Select at least one branch for this manager.</p>
+                    )}
+                  </div>
+                )}
               </div>
 
               {/* Permissions */}
@@ -416,11 +506,13 @@ export default function StaffAccessManagement() {
                     <div className="flex items-center space-x-2 mb-2">
                       <h4 className="font-semibold">{user.name}</h4>
                       <span className={`text-xs px-2 py-1 rounded-full ${
-                        user.role === 'admin' 
-                          ? 'bg-gold/20 text-gold' 
-                          : 'bg-blue-500/20 text-blue-500'
-                      }`}>
-                        {user.role === 'admin' ? 'Admin' : 'Staff'}
+                        user.role === 'admin'
+                          ? 'bg-gold/20 text-gold'
+                          : user.role === 'branch_manager'
+                            ? 'bg-purple-500/20 text-purple-500'
+                            : 'bg-blue-500/20 text-blue-500'
+                      }`} data-testid={`user-role-badge-${user.id}`}>
+                        {user.role === 'admin' ? 'Admin' : user.role === 'branch_manager' ? 'Branch Manager' : 'Staff'}
                       </span>
                       <span className={`text-xs px-2 py-1 rounded-full ${
                         user.status === 'active' 
@@ -437,6 +529,11 @@ export default function StaffAccessManagement() {
                       {user.staff_id && (
                         <p className="text-gold">
                           Linked to: {staffMembers.find(s => s.id === user.staff_id)?.name || 'Staff Member'}
+                        </p>
+                      )}
+                      {user.role === 'branch_manager' && Array.isArray(user.assigned_branch_ids) && user.assigned_branch_ids.length > 0 && (
+                        <p className="text-purple-500">
+                          Branches: {user.assigned_branch_ids.map(id => branches.find(b => b.id === id)?.branch_name || 'Unknown').join(', ')}
                         </p>
                       )}
                     </div>

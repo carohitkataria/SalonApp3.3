@@ -533,8 +533,9 @@ class SalonUserCreate(BaseModel):
     mobile: str
     login_id: str  # Free text login ID
     password: str
-    role: str = "staff"  # "admin" or "staff"
+    role: str = "staff"  # "admin" | "staff" | "branch_manager"
     staff_id: Optional[str] = None  # Link to staff member in barbers collection
+    assigned_branch_ids: Optional[List[str]] = None  # For branch_manager
     permissions: Optional[SalonUserPermissions] = None
 
 class SalonUserUpdate(BaseModel):
@@ -542,7 +543,9 @@ class SalonUserUpdate(BaseModel):
     mobile: Optional[str] = None
     login_id: Optional[str] = None
     password: Optional[str] = None
+    role: Optional[str] = None
     staff_id: Optional[str] = None
+    assigned_branch_ids: Optional[List[str]] = None
     permissions: Optional[SalonUserPermissions] = None
     status: Optional[str] = None  # active/inactive
 
@@ -554,8 +557,9 @@ class SalonUser(BaseModel):
     mobile: str
     login_id: str
     password_hash: str
-    role: str  # "admin" or "staff"
+    role: str  # "admin" | "staff" | "branch_manager"
     staff_id: Optional[str] = None  # Link to staff member
+    assigned_branch_ids: List[str] = []  # Branches this user can access (branch_manager)
     permissions: SalonUserPermissions
     status: str = "active"  # active/inactive
     created_at: str
@@ -571,6 +575,7 @@ class SalonUserToken(BaseModel):
     user_id: str
     role: str
     permissions: SalonUserPermissions
+    assigned_branch_ids: List[str] = []
 
 # ============ BRANCH MODELS (Multi-Branch / Multi-Location) ============
 
@@ -665,11 +670,13 @@ async def get_current_salon(credentials: HTTPAuthorizationCredentials = Depends(
     return payload
 
 async def get_current_salon_user(credentials: HTTPAuthorizationCredentials = Depends(security)):
-    """Get current authenticated salon user (admin or staff)"""
+    """Get current authenticated salon user (admin / staff / branch_manager)"""
     token = credentials.credentials
     payload = verify_token(token)
-    # Accept legacy "salon" role as well as new "salon_admin" and "salon_staff" roles
-    if not payload or payload.get("role") not in ["salon_admin", "salon_staff", "salon"]:
+    # Accept legacy "salon" role as well as the multi-user salon roles
+    if not payload or payload.get("role") not in [
+        "salon_admin", "salon_staff", "salon_branch_manager", "salon"
+    ]:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid authentication credentials"
@@ -700,6 +707,49 @@ def check_permission(user_payload: dict, permission: str) -> bool:
     
     permissions = user_payload.get("permissions", {})
     return permissions.get(permission, False)
+
+
+def is_branch_manager(user_payload: dict) -> bool:
+    return user_payload.get("role") == "salon_branch_manager"
+
+
+def assigned_branch_ids_for(user_payload: dict) -> List[str]:
+    return list(user_payload.get("assigned_branch_ids") or [])
+
+
+def check_branch_access(user_payload: dict, branch_id: Optional[str]) -> bool:
+    """RBAC for branch managers: every branch_id passed in queries must be in
+    their assigned list. Admins and legacy salon roles are unrestricted."""
+    if not is_branch_manager(user_payload):
+        return True
+    assigned = assigned_branch_ids_for(user_payload)
+    # If the manager has no branches assigned at all, deny everything (safer default).
+    if not assigned:
+        return False
+    if branch_id is None:
+        # Cross-branch access is not allowed for managers. The caller is expected
+        # to substitute the manager's first assigned branch.
+        return False
+    return branch_id in assigned
+
+
+def enforce_branch_for_manager(user_payload: dict, branch_id: Optional[str]) -> str:
+    """Resolve the effective branch_id for a request while enforcing manager scope.
+    - For admins/staff/legacy: returns branch_id as-is (may be None).
+    - For branch managers: validates branch_id is in assigned_branch_ids, else 403.
+      If branch_id is None, returns the first assigned branch (so cross-branch
+      requests transparently scope to one branch).
+    """
+    if not is_branch_manager(user_payload):
+        return branch_id
+    assigned = assigned_branch_ids_for(user_payload)
+    if not assigned:
+        raise HTTPException(status_code=403, detail="Branch manager has no assigned branches")
+    if branch_id is None:
+        return assigned[0]
+    if branch_id not in assigned:
+        raise HTTPException(status_code=403, detail="Access denied for this branch")
+    return branch_id
 
 
 # ============ BRANCH HELPERS ============
@@ -833,7 +883,9 @@ async def get_current_salon_user_optional(credentials: Optional[HTTPAuthorizatio
         return None
     token = credentials.credentials
     payload = verify_token(token)
-    if not payload or payload.get("role") not in ["salon_admin", "salon_staff", "salon"]:
+    if not payload or payload.get("role") not in [
+        "salon_admin", "salon_staff", "salon_branch_manager", "salon"
+    ]:
         return None
     return payload
 
@@ -2474,7 +2526,8 @@ async def list_branches(
     include_inactive: bool = False,
     current_user: dict = Depends(get_current_salon_user),
 ):
-    """List all branches for a salon. Any authenticated salon user can list."""
+    """List all branches for a salon. Any authenticated salon user can list.
+    Branch managers only see branches in their assigned_branch_ids."""
     user_salon_id = current_user.get("salon_id") or current_user.get("sub")
     if user_salon_id != salon_id:
         raise HTTPException(status_code=403, detail="Access denied for this salon")
@@ -2487,6 +2540,14 @@ async def list_branches(
     query = {"salon_id": salon_id}
     if not include_inactive:
         query["status"] = "active"
+
+    # Branch-manager scoping — only see assigned branches.
+    if is_branch_manager(current_user):
+        assigned = assigned_branch_ids_for(current_user)
+        if not assigned:
+            return []
+        query["id"] = {"$in": assigned}
+
     branches = await db.salon_branches.find(query, {"_id": 0}).to_list(length=None)
     # Sort: main branch first, then by created_at
     branches.sort(key=lambda b: (not b.get("is_main_branch"), b.get("created_at", "")))
@@ -2690,6 +2751,115 @@ async def get_branch_qr(
         "booking_url": booking_url,
         "branch_name": branch.get("branch_name"),
     }
+
+
+# ----- Staff Branch Transfers (Phase 2) -----
+
+@api_router.post("/salons/{salon_id}/staff-branch-transfers", response_model=StaffBranchTransfer)
+async def create_staff_branch_transfer(
+    salon_id: str,
+    payload: StaffBranchTransferCreate,
+    current_user: dict = Depends(get_current_salon_user),
+):
+    """Transfer a staff member to a different branch.
+    - Admin: can transfer any staff to any branch within the salon.
+    - Branch Manager: can only transfer staff INTO one of their assigned branches
+      AND the staff being transferred must currently be in one of their assigned branches.
+    - Staff: 403.
+    """
+    user_salon_id = current_user.get("salon_id") or current_user.get("sub")
+    if user_salon_id != salon_id:
+        raise HTTPException(status_code=403, detail="Access denied for this salon")
+
+    role = current_user.get("role")
+    if role == "salon_staff":
+        raise HTTPException(status_code=403, detail="Staff cannot transfer barbers")
+
+    # Validate staff
+    staff = await db.barbers.find_one(
+        {"id": payload.staff_id, "salon_id": salon_id, "is_active": True}, {"_id": 0}
+    )
+    if not staff:
+        raise HTTPException(status_code=404, detail="Staff member not found")
+
+    # Validate target branch
+    target = await db.salon_branches.find_one(
+        {"id": payload.to_branch_id, "salon_id": salon_id, "status": "active"}, {"_id": 0}
+    )
+    if not target:
+        raise HTTPException(status_code=400, detail="Target branch not found or inactive")
+
+    # Resolve from_branch_id (default to staff's current branch)
+    from_branch_id = payload.from_branch_id or staff.get("branch_id")
+
+    # Branch manager scope
+    if is_branch_manager(current_user):
+        assigned = assigned_branch_ids_for(current_user)
+        if payload.to_branch_id not in assigned:
+            raise HTTPException(status_code=403, detail="Cannot transfer to a branch you do not manage")
+        if from_branch_id and from_branch_id not in assigned:
+            raise HTTPException(status_code=403, detail="Cannot transfer staff from a branch you do not manage")
+
+    # No-op guard
+    if from_branch_id == payload.to_branch_id:
+        raise HTTPException(status_code=400, detail="Staff is already at this branch")
+
+    transfer = {
+        "id": str(uuid.uuid4()),
+        "salon_id": salon_id,
+        "staff_id": payload.staff_id,
+        "from_branch_id": from_branch_id,
+        "to_branch_id": payload.to_branch_id,
+        "transfer_date": payload.transfer_date,
+        "remarks": payload.remarks,
+        "created_by": current_user.get("sub") or current_user.get("user_id"),
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    }
+    await db.staff_branch_transfers.insert_one(transfer.copy())
+    transfer.pop("_id", None)
+
+    # Apply the transfer immediately on the staff record
+    await db.barbers.update_one(
+        {"id": payload.staff_id, "salon_id": salon_id},
+        {"$set": {"branch_id": payload.to_branch_id}},
+    )
+
+    return StaffBranchTransfer(**transfer)
+
+
+@api_router.get("/salons/{salon_id}/staff-branch-transfers", response_model=List[StaffBranchTransfer])
+async def list_staff_branch_transfers(
+    salon_id: str,
+    staff_id: Optional[str] = None,
+    branch_id: Optional[str] = None,
+    current_user: dict = Depends(get_current_salon_user),
+):
+    """List staff transfers. Staff can read their salon's transfers; branch managers
+    are auto-scoped to transfers involving their assigned branches."""
+    user_salon_id = current_user.get("salon_id") or current_user.get("sub")
+    if user_salon_id != salon_id:
+        raise HTTPException(status_code=403, detail="Access denied for this salon")
+
+    query = {"salon_id": salon_id}
+    if staff_id:
+        query["staff_id"] = staff_id
+    if branch_id:
+        query["$or"] = [{"from_branch_id": branch_id}, {"to_branch_id": branch_id}]
+
+    if is_branch_manager(current_user):
+        assigned = assigned_branch_ids_for(current_user)
+        if not assigned:
+            return []
+        # Restrict to transfers touching any assigned branch.
+        scoped = {"$or": [{"from_branch_id": {"$in": assigned}}, {"to_branch_id": {"$in": assigned}}]}
+        # Combine with caller filters using $and so both clauses apply.
+        if "$or" in query:
+            query = {"$and": [query, scoped]}
+        else:
+            query.update(scoped)
+
+    rows = await db.staff_branch_transfers.find(query, {"_id": 0}).sort("created_at", -1).to_list(2000)
+    return [StaffBranchTransfer(**r) for r in rows]
 
 
 # ============================================================================
@@ -3314,6 +3484,7 @@ async def get_salon_barbers(
     customer_view: bool = False,
     date: Optional[str] = None,
     branch_id: Optional[str] = None,
+    current_user: Optional[dict] = Depends(get_current_salon_user_optional),
 ):
     """
     Get barbers for a salon
@@ -3325,6 +3496,9 @@ async def get_salon_barbers(
     branch_id (optional): When set, returns only staff assigned to this branch.
     """
     try:
+        # Branch-manager scoping (skip for customer_view so customers still see everything)
+        if not customer_view and current_user and is_branch_manager(current_user):
+            branch_id = enforce_branch_for_manager(current_user, branch_id)
         query = {"salon_id": salon_id, "is_active": True}
         if customer_view:
             # For customer view, include barbers where is_barber=True OR is_barber field doesn't exist (backward compatibility)
@@ -3757,12 +3931,15 @@ async def salon_user_login(credentials: SalonUserLogin):
     permissions.setdefault("can_access_analytics", False)
     permissions.setdefault("can_edit_salon", False)
     permissions.setdefault("can_delete_salon", False)
+
+    assigned_branch_ids = salon_user.get("assigned_branch_ids") or []
     
     token = create_access_token({
         "sub": salon_user["id"],
-        "role": f"salon_{salon_user['role']}",  # salon_admin or salon_staff
+        "role": f"salon_{salon_user['role']}",  # salon_admin / salon_staff / salon_branch_manager
         "salon_id": salon_user["salon_id"],
-        "permissions": permissions
+        "permissions": permissions,
+        "assigned_branch_ids": assigned_branch_ids,
     })
     
     return SalonUserToken(
@@ -3770,7 +3947,8 @@ async def salon_user_login(credentials: SalonUserLogin):
         salon_id=salon_user["salon_id"],
         user_id=salon_user["id"],
         role=salon_user["role"],
-        permissions=SalonUserPermissions(**permissions)
+        permissions=SalonUserPermissions(**permissions),
+        assigned_branch_ids=assigned_branch_ids,
     )
 
 @api_router.post("/salon/users", response_model=SalonUser)
@@ -3826,17 +4004,41 @@ async def create_salon_user(user_data: SalonUserCreate, current_user=Depends(get
             "can_access_financials": False,
             "can_delete_salon": False
         }
-    
+
+    # Validate role
+    if user_data.role not in ("admin", "staff", "branch_manager"):
+        raise HTTPException(status_code=400, detail="Invalid role")
+
+    # Validate assigned_branch_ids for branch_manager
+    assigned_branch_ids = list(user_data.assigned_branch_ids or [])
+    if user_data.role == "branch_manager":
+        if not assigned_branch_ids:
+            raise HTTPException(status_code=400, detail="Branch manager must have at least one assigned_branch_id")
+        # Make sure each branch belongs to this salon
+        valid = await db.salon_branches.find(
+            {"salon_id": user_data.salon_id, "id": {"$in": assigned_branch_ids}},
+            {"_id": 0, "id": 1},
+        ).to_list(length=None)
+        valid_ids = {b["id"] for b in valid}
+        invalid = [bid for bid in assigned_branch_ids if bid not in valid_ids]
+        if invalid:
+            raise HTTPException(status_code=400, detail=f"Invalid branch ids for this salon: {invalid}")
+
     # Create user
     new_user = {
         "id": str(uuid.uuid4()),
         "salon_id": user_data.salon_id,
+        "branch_id": await resolve_branch_id(
+            user_data.salon_id,
+            assigned_branch_ids[0] if assigned_branch_ids else None,
+        ),
         "name": user_data.name,
         "mobile": mobile,
         "login_id": user_data.login_id,
         "password_hash": password_hash,
         "role": user_data.role,
         "staff_id": user_data.staff_id,
+        "assigned_branch_ids": assigned_branch_ids,
         "permissions": permissions,
         "status": "active",
         "created_at": datetime.now(timezone.utc).isoformat()
@@ -3913,6 +4115,24 @@ async def update_salon_user(user_id: str, update_data: SalonUserUpdate, current_
             raise HTTPException(status_code=404, detail="Staff member not found")
         update_fields["staff_id"] = update_data.staff_id
     
+    if update_data.role is not None:
+        if update_data.role not in ("admin", "staff", "branch_manager"):
+            raise HTTPException(status_code=400, detail="Invalid role")
+        update_fields["role"] = update_data.role
+
+    if update_data.assigned_branch_ids is not None:
+        bids = list(update_data.assigned_branch_ids)
+        if bids:
+            valid = await db.salon_branches.find(
+                {"salon_id": salon_id, "id": {"$in": bids}},
+                {"_id": 0, "id": 1},
+            ).to_list(length=None)
+            valid_ids = {b["id"] for b in valid}
+            invalid = [bid for bid in bids if bid not in valid_ids]
+            if invalid:
+                raise HTTPException(status_code=400, detail=f"Invalid branch ids for this salon: {invalid}")
+        update_fields["assigned_branch_ids"] = bids
+
     if update_data.permissions:
         update_fields["permissions"] = update_data.permissions.dict()
     
@@ -4154,6 +4374,8 @@ async def get_salon_customers(salon_id: str, branch_id: Optional[str] = None, cu
     If branch_id is provided, restrict to customers who have booked at (or were
     manually added at) that specific branch.
     """
+    if is_branch_manager(current_user):
+        branch_id = enforce_branch_for_manager(current_user, branch_id)
     # Get unique customers from tokens
     tokens_query = {"salon_id": salon_id}
     if branch_id:
@@ -5648,10 +5870,15 @@ async def get_salon_queue(
     date: Optional[str] = None,
     status: Optional[str] = None,
     branch_id: Optional[str] = None,
+    current_user: Optional[dict] = Depends(get_current_salon_user_optional),
 ):
     """Get entire salon queue (all barbers)"""
     if not date:
         date = datetime.now(timezone.utc).date().isoformat()
+    
+    # Branch-manager scoping
+    if current_user and is_branch_manager(current_user):
+        branch_id = enforce_branch_for_manager(current_user, branch_id)
     
     query = {"salon_id": salon_id, "date": date}
     if status:
@@ -6907,6 +7134,8 @@ async def get_financial_transactions(
     current_user=Depends(get_current_salon_user)
 ):
     """Get financial transactions with filters"""
+    if is_branch_manager(current_user):
+        branch_id = enforce_branch_for_manager(current_user, branch_id)
     query = {"salon_id": salon_id}
     
     if start_date:
@@ -6978,6 +7207,8 @@ async def get_financial_dashboard(
     current_user=Depends(get_current_salon_user)
 ):
     """Get financial dashboard data with cash in/out summary"""
+    if is_branch_manager(current_user):
+        branch_id = enforce_branch_for_manager(current_user, branch_id)
     today = datetime.now(timezone.utc)
     
     if period == "daily":
@@ -7133,9 +7364,14 @@ async def download_financial_report_csv(
 async def get_today_sales(
     salon_id: str,
     branch_id: Optional[str] = None,
+    current_user: Optional[dict] = Depends(get_current_salon_user_optional),
 ):
     """Get today's sales from completed tokens (analytics logic)"""
     today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    
+    # Branch-manager scoping
+    if current_user and is_branch_manager(current_user):
+        branch_id = enforce_branch_for_manager(current_user, branch_id)
     
     # Find all completed tokens for today (matching analytics logic)
     query = {

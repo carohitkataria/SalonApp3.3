@@ -31,7 +31,7 @@ const emptyForm = {
 };
 
 export default function BranchManagement({ salonId }) {
-  const { getSalonUserHeaders, isAdmin } = useAuth();
+  const { getSalonUserHeaders, isAdmin, isBranchManager } = useAuth();
   const { branches, refreshBranches, selectedBranchId, setSelectedBranchId } = useBranch();
 
   const [loading, setLoading] = useState(false);
@@ -177,13 +177,15 @@ export default function BranchManagement({ salonId }) {
     link.click();
   };
 
-  if (!isAdmin()) {
+  if (!isAdmin() && !isBranchManager?.()) {
     return (
       <div className="p-6 text-center text-muted-foreground" data-testid="branches-no-access">
         Branch management is restricted to salon admins.
       </div>
     );
   }
+
+  const readOnly = !isAdmin();
 
   return (
     <div className="space-y-6" data-testid="branch-management">
@@ -200,7 +202,8 @@ export default function BranchManagement({ salonId }) {
         <Button
           data-testid="add-branch-btn"
           onClick={openCreate}
-          className="bg-gold text-black hover:bg-gold-hover"
+          disabled={readOnly}
+          className="bg-gold text-black hover:bg-gold-hover disabled:opacity-50 disabled:cursor-not-allowed"
         >
           <Plus className="w-4 h-4 mr-2" />
           Add Branch
@@ -279,6 +282,7 @@ export default function BranchManagement({ salonId }) {
                     size="sm"
                     variant="outline"
                     onClick={() => openEdit(branch)}
+                    disabled={readOnly}
                     data-testid={`edit-branch-${branch.id}`}
                   >
                     <Edit className="w-3 h-3 mr-1" /> Edit
@@ -292,7 +296,7 @@ export default function BranchManagement({ salonId }) {
                   >
                     <QrCode className="w-3 h-3 mr-1" /> QR
                   </Button>
-                  {!branch.is_main_branch && branch.status === 'active' && (
+                  {!branch.is_main_branch && branch.status === 'active' && !readOnly && (
                     <Button
                       size="sm"
                       variant="outline"
@@ -302,7 +306,7 @@ export default function BranchManagement({ salonId }) {
                       <Star className="w-3 h-3 mr-1" /> Set Main
                     </Button>
                   )}
-                  {!branch.is_main_branch && branch.status === 'active' && (
+                  {!branch.is_main_branch && branch.status === 'active' && !readOnly && (
                     <Button
                       size="sm"
                       variant="outline"
