@@ -14,6 +14,7 @@ import {
 } from '@/components/ui/dialog';
 import { useAuth } from '@/contexts/AuthContext';
 import { useBranch } from '@/contexts/BranchContext';
+import { useSubscription, parseSubscriptionError } from '@/contexts/SubscriptionContext';
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
 const API = `${BACKEND_URL}/api`;
@@ -33,6 +34,7 @@ const emptyForm = {
 export default function BranchManagement({ salonId }) {
   const { getSalonUserHeaders, isAdmin, isBranchManager } = useAuth();
   const { branches, refreshBranches, selectedBranchId, setSelectedBranchId } = useBranch();
+  const { openPaywall, isPremium } = useSubscription();
 
   const [loading, setLoading] = useState(false);
   const [showDialog, setShowDialog] = useState(false);
@@ -52,6 +54,14 @@ export default function BranchManagement({ salonId }) {
   }, [salonId]);
 
   const openCreate = () => {
+    // Pre-emptive paywall: any branch creation on free plan is blocked
+    if (!isPremium) {
+      openPaywall({
+        limit_type: 'max_branches',
+        message: 'Free plan does not allow multiple branches. Upgrade to SalonHub Pro to add branches.',
+      });
+      return;
+    }
     setEditingBranch(null);
     setForm(emptyForm);
     setShowDialog(true);
@@ -110,6 +120,12 @@ export default function BranchManagement({ salonId }) {
       setShowDialog(false);
       await refreshBranches(salonId);
     } catch (e) {
+      const subErr = parseSubscriptionError(e);
+      if (subErr) {
+        setShowDialog(false);
+        openPaywall(subErr);
+        return;
+      }
       toast.error(e?.response?.data?.detail || 'Failed to save branch');
     } finally {
       setSaving(false);

@@ -22,6 +22,9 @@ import SalonNotificationSettings from '@/components/SalonNotificationSettings';
 import OperationalHoursModule from '@/components/OperationalHoursModule';
 import Analytics from '@/components/Analytics';
 import EmployeeRewardPlan from '@/components/EmployeeRewardPlan';
+import SubscriptionPaywallModal from '@/components/SubscriptionPaywallModal';
+import SubscriptionPanel from '@/components/SubscriptionPanel';
+import { SubscriptionProvider } from '@/contexts/SubscriptionContext';
 import { getSession, clearSession } from '@/utils/sessionManager';
 import {
   requestNotificationPermission,
@@ -984,6 +987,7 @@ export default function EnhancedSalonDashboard() {
     { id: 'analytics', label: 'Analytics', icon: TrendingUp, show: checkIsAdmin() || checkIsBranchManager() || checkHasPermission('can_access_analytics') },
     { id: 'gallery', label: 'Gallery', icon: FileText, show: true },
     { id: 'branches', label: 'Branches', icon: Building2, show: checkIsAdmin() || checkIsBranchManager() },
+    { id: 'subscription', label: 'Subscription', icon: CreditCard, show: checkIsAdmin() },
     { id: 'salon', label: 'Salon Settings', icon: Settings, show: checkIsAdmin() || checkHasPermission('can_edit_salon') }
   ].filter(item => item.show);
 
@@ -1010,6 +1014,7 @@ export default function EnhancedSalonDashboard() {
   };
 
   return (
+    <SubscriptionProvider salonId={salonId}>
     <div className="min-h-screen bg-background relative overflow-hidden">
       {/* Background Image with Overlay */}
       <div className="fixed inset-0 z-0">
@@ -1909,6 +1914,10 @@ export default function EnhancedSalonDashboard() {
           <BranchManagement salonId={salonId} />
         )}
 
+        {activeTab === 'subscription' && salonId && checkIsAdmin() && (
+          <SubscriptionPanel salonId={salonId} />
+        )}
+
         {activeTab === 'notifications' && salonId && (
           <SalonNotificationsPanel
             salonId={salonId}
@@ -2510,6 +2519,8 @@ export default function EnhancedSalonDashboard() {
       </Dialog>
       </div>
     </div>
+    <SubscriptionPaywallModal />
+    </SubscriptionProvider>
   );
 }
 

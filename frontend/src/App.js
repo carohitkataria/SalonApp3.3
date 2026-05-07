@@ -30,6 +30,7 @@ import OTPLoginPage from '@/pages/OTPLoginPage';
 import SalonSignupPage from '@/pages/SalonSignupPage';
 import EnhancedSalonDashboard from '@/pages/EnhancedSalonDashboard';
 import StaffProfilePage from '@/pages/StaffProfilePage';
+import PaymentCallbackPage from '@/pages/PaymentCallbackPage';
 
 import '@/App.css';
 
@@ -72,6 +73,9 @@ function App() {
                   <Route path="/salon/signup" element={<SalonSignupPage />} />
                   <Route path="/salon/dashboard" element={<EnhancedSalonDashboard />} />
                   <Route path="/salon/staff/:staffId" element={<StaffProfilePage />} />
+
+                  {/* Subscription / Payment */}
+                  <Route path="/subscription/callback" element={<PaymentCallbackPage />} />
                   
                   {/* Redirect old routes */}
                   <Route path="/admin/login" element={<Navigate to="/salon/login" replace />} />

@@ -1,0 +1,212 @@
+import React, { useEffect, useState, useCallback } from 'react';
+import axios from 'axios';
+import { Crown, Check, AlertTriangle, Loader2, CreditCard, ReceiptText } from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import { useSubscription } from '@/contexts/SubscriptionContext';
+import { toast } from 'sonner';
+
+const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
+const API = `${BACKEND_URL}/api`;
+
+const getAuthHeaders = () => {
+  const salonUserAuth = localStorage.getItem('salon_user_auth');
+  if (salonUserAuth) {
+    try {
+      const authData = JSON.parse(salonUserAuth);
+      return { Authorization: `Bearer ${authData.token}` };
+    } catch (e) { /* ignore */ }
+  }
+  const legacyToken = localStorage.getItem('salon_admin_token');
+  return legacyToken ? { Authorization: `Bearer ${legacyToken}` } : {};
+};
+
+const fmtDate = (iso) => {
+  if (!iso) return '-';
+  try {
+    return new Date(iso).toLocaleDateString('en-IN', {
+      day: '2-digit',
+      month: 'short',
+      year: 'numeric',
+    });
+  } catch {
+    return iso;
+  }
+};
+
+export default function SubscriptionPanel({ salonId }) {
+  const { status, plan, refresh, loading, openPaywall, isPremium } = useSubscription();
+  const [transactions, setTransactions] = useState([]);
+  const [txLoading, setTxLoading] = useState(false);
+
+  const fetchTx = useCallback(async () => {
+    if (!salonId) return;
+    setTxLoading(true);
+    try {
+      const r = await axios.get(
+        `${API}/salons/${salonId}/subscription/transactions`,
+        { headers: getAuthHeaders() }
+      );
+      setTransactions(Array.isArray(r.data) ? r.data : []);
+    } catch (e) {
+      // ignore — user may not be admin in some legacy configs
+    } finally {
+      setTxLoading(false);
+    }
+  }, [salonId]);
+
+  useEffect(() => {
+    fetchTx();
+  }, [fetchTx]);
+
+  const expired = status?.status === 'expired';
+
+  return (
+    <div className="space-y-6" data-testid="subscription-panel">
+      <div className="flex items-center gap-3">
+        <Crown className="w-7 h-7 text-amber-400" />
+        <div>
+          <h2 className="text-2xl font-playfair font-bold text-foreground">Subscription</h2>
+          <p className="text-sm text-muted-foreground">Manage your SalonHub Pro plan</p>
+        </div>
+      </div>
+
+      {/* Status card */}
+      <div
+        className={`rounded-2xl border p-6 ${
+          isPremium
+            ? 'border-emerald-500/30 bg-emerald-500/5'
+            : expired
+            ? 'border-rose-500/40 bg-rose-500/5'
+            : 'border-amber-500/30 bg-amber-500/5'
+        }`}
+      >
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div>
+            <div className="flex items-center gap-2 mb-1">
+              {isPremium ? (
+                <span className="inline-flex items-center gap-1 text-xs uppercase tracking-widest text-emerald-400 font-semibold">
+                  <Check className="w-3 h-3" /> Active
+                </span>
+              ) : expired ? (
+                <span className="inline-flex items-center gap-1 text-xs uppercase tracking-widest text-rose-400 font-semibold">
+                  <AlertTriangle className="w-3 h-3" /> Expired
+                </span>
+              ) : (
+                <span className="inline-flex items-center gap-1 text-xs uppercase tracking-widest text-amber-400 font-semibold">
+                  Free Plan
+                </span>
+              )}
+            </div>
+            <h3 className="text-xl font-bold text-foreground">
+              {isPremium || expired ? plan?.plan_name || 'SalonHub Pro' : 'Free Plan'}
+            </h3>
+            {isPremium && status?.expiry_date && (
+              <p className="text-sm text-muted-foreground mt-1">
+                Renews on <span className="text-foreground font-medium">{fmtDate(status.expiry_date)}</span>
+                {typeof status.days_remaining === 'number' && (
+                  <> &nbsp;·&nbsp; {status.days_remaining} day{status.days_remaining === 1 ? '' : 's'} remaining</>
+                )}
+              </p>
+            )}
+            {expired && (
+              <p className="text-sm text-rose-300 mt-1">
+                Your premium features have stopped working. Existing data is safe and visible. Renew to unlock again.
+              </p>
+            )}
+            {!isPremium && !expired && (
+              <p className="text-sm text-muted-foreground mt-1">
+                You're on the free plan. Upgrade to add multiple staff & branches.
+              </p>
+            )}
+          </div>
+
+          <div className="text-right">
+            <div className="text-3xl font-bold text-foreground">
+              ₹{Number(plan?.price ?? 499).toLocaleString('en-IN')}
+              <span className="text-sm font-normal text-muted-foreground ml-1">
+                /{plan?.billing_cycle === 'yearly' ? 'year' : 'month'}
+              </span>
+            </div>
+            <Button
+              onClick={() => openPaywall()}
+              className="mt-2 bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 text-white"
+            >
+              {isPremium ? 'Renew Now' : expired ? 'Re-subscribe' : 'Subscribe Now'}
+            </Button>
+          </div>
+        </div>
+
+        {plan?.features?.length > 0 && (
+          <div className="mt-5 pt-4 border-t border-border/40 grid grid-cols-1 sm:grid-cols-2 gap-2">
+            {plan.features.map((f) => (
+              <div key={f} className="flex items-center gap-2 text-sm text-muted-foreground">
+                <Check className="w-4 h-4 text-emerald-500 shrink-0" />
+                <span>{f}</span>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* Transaction history */}
+      <div className="rounded-2xl border border-border bg-card/40 p-6">
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="text-lg font-bold text-foreground flex items-center gap-2">
+            <ReceiptText className="w-5 h-5 text-amber-400" />
+            Payment History
+          </h3>
+          <Button variant="ghost" size="sm" onClick={() => { fetchTx(); refresh(); }} disabled={loading || txLoading}>
+            {(loading || txLoading) ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Refresh'}
+          </Button>
+        </div>
+
+        {txLoading ? (
+          <div className="flex justify-center py-6">
+            <Loader2 className="w-5 h-5 animate-spin text-muted-foreground" />
+          </div>
+        ) : transactions.length === 0 ? (
+          <p className="text-sm text-muted-foreground py-6 text-center">No payments yet</p>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="text-xs uppercase text-muted-foreground border-b border-border">
+                  <th className="py-2 text-left font-medium">Date</th>
+                  <th className="py-2 text-left font-medium">Order ID</th>
+                  <th className="py-2 text-right font-medium">Amount</th>
+                  <th className="py-2 text-center font-medium">Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {transactions.map((tx) => (
+                  <tr key={tx.id} className="border-b border-border/40 last:border-0">
+                    <td className="py-3">{fmtDate(tx.created_at)}</td>
+                    <td className="py-3 font-mono text-xs text-muted-foreground">
+                      {tx.gateway_order_id || tx.id?.slice(0, 12)}
+                    </td>
+                    <td className="py-3 text-right font-medium">
+                      ₹{Number(tx.amount).toLocaleString('en-IN')}
+                    </td>
+                    <td className="py-3 text-center">
+                      <span
+                        className={`inline-block px-2 py-0.5 rounded text-xs font-semibold ${
+                          tx.payment_status === 'success'
+                            ? 'bg-emerald-500/15 text-emerald-400'
+                            : tx.payment_status === 'failed'
+                            ? 'bg-rose-500/15 text-rose-400'
+                            : 'bg-amber-500/15 text-amber-400'
+                        }`}
+                      >
+                        {tx.payment_status}
+                      </span>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}

@@ -1,4 +1,4 @@
-from fastapi import FastAPI, APIRouter, HTTPException, Depends, status
+from fastapi import FastAPI, APIRouter, HTTPException, Depends, status, Body, Request
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from fastapi.responses import Response, HTMLResponse
 from dotenv import load_dotenv
@@ -23,6 +23,7 @@ from passlib.context import CryptContext
 import random
 import secrets  # Secure random number generation
 import math
+import json
 
 # Import Twilio service
 from twilio_service import (
@@ -643,6 +644,74 @@ class StaffBranchTransfer(BaseModel):
     remarks: Optional[str] = None
     created_by: Optional[str] = None
     created_at: str
+
+# ============ SUBSCRIPTION MODELS (SalonHub Pro) ============
+
+class SubscriptionPlanCreate(BaseModel):
+    plan_name: str
+    price: float
+    billing_cycle: str = "monthly"  # monthly | yearly
+    max_staff: Optional[int] = None  # None = unlimited
+    max_branches: Optional[int] = None  # None = unlimited
+    features: List[str] = []
+    status: str = "active"  # active | inactive
+
+class SubscriptionPlanUpdate(BaseModel):
+    plan_name: Optional[str] = None
+    price: Optional[float] = None
+    billing_cycle: Optional[str] = None
+    max_staff: Optional[int] = None
+    max_branches: Optional[int] = None
+    features: Optional[List[str]] = None
+    status: Optional[str] = None
+
+class SubscriptionPlan(BaseModel):
+    id: str
+    plan_name: str
+    price: float
+    billing_cycle: str
+    max_staff: Optional[int] = None
+    max_branches: Optional[int] = None
+    features: List[str] = []
+    status: str
+    created_at: str
+
+class SalonSubscription(BaseModel):
+    id: str
+    salon_id: str
+    plan_id: str
+    plan_name: Optional[str] = None
+    price: Optional[float] = None
+    subscription_status: str  # active | expired | cancelled | payment_failed | pending
+    start_date: Optional[str] = None
+    expiry_date: Optional[str] = None
+    payment_status: str  # paid | pending | failed
+    cashfree_order_id: Optional[str] = None
+    cashfree_payment_id: Optional[str] = None
+    auto_renew: bool = False
+    created_at: str
+    updated_at: Optional[str] = None
+
+class PaymentTransaction(BaseModel):
+    id: str
+    salon_id: str
+    subscription_id: Optional[str] = None
+    plan_id: Optional[str] = None
+    amount: float
+    currency: str = "INR"
+    payment_gateway: str = "cashfree"
+    gateway_order_id: Optional[str] = None
+    gateway_payment_id: Optional[str] = None
+    payment_status: str  # pending | success | failed | cancelled
+    payment_response: Optional[Dict[str, Any]] = None
+    payment_method: Optional[str] = None
+    created_at: str
+    updated_at: Optional[str] = None
+
+class CreateOrderRequest(BaseModel):
+    plan_id: Optional[str] = None  # if None, use default active plan
+
+
 
 # ============ AUTH HELPERS ============
 
@@ -2099,6 +2168,129 @@ Thank you for visiting us! 💈
         logger.error(f"Failed to generate and send invoice: {str(e)}")
         return {"success": False, "error": str(e)}
 
+
+# ============ SUBSCRIPTION HELPERS ============
+
+import cashfree_service
+
+GRACE_PERIOD_DAYS = 0  # No grace period; subscription becomes premium immediately on payment
+
+async def get_active_plan() -> dict:
+    """Return the default active plan, or fall back to any active plan."""
+    plan = await db.subscription_plans.find_one(
+        {"status": "active", "is_default": True}, {"_id": 0}
+    )
+    if not plan:
+        plan = await db.subscription_plans.find_one({"status": "active"}, {"_id": 0})
+    return plan
+
+async def get_current_subscription(salon_id: str) -> Optional[dict]:
+    """
+    Return the most recent (latest expiry) subscription record for the salon.
+    Returns None if salon has never paid.
+    """
+    sub = await db.salon_subscriptions.find_one(
+        {"salon_id": salon_id, "payment_status": "paid"},
+        {"_id": 0},
+        sort=[("expiry_date", -1)],
+    )
+    return sub
+
+async def get_subscription_status(salon_id: str) -> dict:
+    """
+    Compute subscription state for a salon.
+    Returns dict with: is_premium, status, expiry_date, days_remaining, subscription, plan
+    """
+    sub = await get_current_subscription(salon_id)
+    plan = await get_active_plan()
+    now = datetime.now(timezone.utc)
+    is_premium = False
+    status = "free"
+    expiry_date = None
+    days_remaining = None
+
+    if sub and sub.get("expiry_date"):
+        try:
+            expiry_dt = datetime.fromisoformat(sub["expiry_date"].replace("Z", "+00:00"))
+            if expiry_dt.tzinfo is None:
+                expiry_dt = expiry_dt.replace(tzinfo=timezone.utc)
+            expiry_date = sub["expiry_date"]
+            delta = expiry_dt - now
+            days_remaining = max(0, delta.days)
+            if delta.total_seconds() > 0:
+                is_premium = True
+                status = "active"
+            else:
+                status = "expired"
+        except Exception as e:
+            logger.warning(f"[Subscription] Bad expiry_date for salon {salon_id}: {e}")
+
+    return {
+        "is_premium": is_premium,
+        "status": status,
+        "expiry_date": expiry_date,
+        "days_remaining": days_remaining,
+        "subscription": sub,
+        "plan": plan,
+    }
+
+async def enforce_premium_or_within_limit(salon_id: str, *, resource: str) -> None:
+    """
+    Block creation of premium-only resources when salon is on free plan.
+    resource in {"staff", "branch"}
+    Free-plan caps: max 1 staff, 0 branches.
+    Raises HTTPException(402) on block.
+    """
+    sub_status = await get_subscription_status(salon_id)
+    if sub_status["is_premium"]:
+        return  # premium = no limit
+
+    plan = sub_status.get("plan") or {}
+    if resource == "staff":
+        active_count = await db.barbers.count_documents(
+            {"salon_id": salon_id, "is_active": True}
+        )
+        max_allowed = 1
+        if active_count >= max_allowed:
+            raise HTTPException(
+                status_code=402,
+                detail={
+                    "error": "subscription_required",
+                    "message": "Free plan allows only 1 staff member. Upgrade to SalonHub Pro for unlimited staff.",
+                    "limit_type": "max_staff",
+                    "current_count": active_count,
+                    "max_allowed": max_allowed,
+                    "plan_price": float(plan.get("price", 499.0)),
+                    "plan_name": plan.get("plan_name", "SalonHub Pro"),
+                },
+            )
+    elif resource == "branch":
+        existing_count = await db.salon_branches.count_documents({"salon_id": salon_id})
+        max_allowed = 1  # only the auto-created main branch is allowed on free plan
+        if existing_count >= max_allowed:
+            raise HTTPException(
+                status_code=402,
+                detail={
+                    "error": "subscription_required",
+                    "message": "Free plan does not allow multiple branches. Upgrade to SalonHub Pro to add branches.",
+                    "limit_type": "max_branches",
+                    "current_count": existing_count,
+                    "max_allowed": max_allowed,
+                    "plan_price": float(plan.get("price", 499.0)),
+                    "plan_name": plan.get("plan_name", "SalonHub Pro"),
+                },
+            )
+
+def _add_billing_cycle(start_dt: datetime, billing_cycle: str) -> datetime:
+    """Add billing cycle to a datetime."""
+    if billing_cycle == "yearly":
+        try:
+            return start_dt.replace(year=start_dt.year + 1)
+        except ValueError:
+            return start_dt.replace(year=start_dt.year + 1, day=28)
+    return start_dt + timedelta(days=30)
+
+
 # ============ INITIALIZATION ============
 
 async def initialize_data():
@@ -2215,6 +2407,30 @@ async def initialize_data():
         }
         await db.salon_users.insert_one(admin_user)
         logger.info(f"Created admin user: login_id='admin', password='salon123'")
+
+    # Seed default subscription plan if none exists
+    plan_count = await db.subscription_plans.count_documents({})
+    if plan_count == 0:
+        default_plan = {
+            "id": str(uuid.uuid4()),
+            "plan_name": "SalonHub Pro",
+            "price": 499.0,
+            "billing_cycle": "monthly",
+            "max_staff": None,
+            "max_branches": None,
+            "features": [
+                "Unlimited Staff",
+                "Multiple Branches",
+                "Branch Management",
+                "Staff Transfers",
+                "Attendance System",
+            ],
+            "status": "active",
+            "is_default": True,
+            "created_at": datetime.now(timezone.utc).isoformat(),
+        }
+        await db.subscription_plans.insert_one(default_plan)
+        logger.info("Seeded default SalonHub Pro plan @ ₹499/month")
 
 async def allocate_future_tokens():
     """Run at 5-6 AM to allocate tokens for future bookings"""
@@ -2690,6 +2906,9 @@ async def create_branch(
 
     # Ensure main branch exists first (so the very first create might not collide)
     await ensure_main_branch_for_salon(salon)
+
+    # Subscription paywall: free plan disallows adding branches beyond the auto-created main
+    await enforce_premium_or_within_limit(salon_id, resource="branch")
 
     branch_dict = payload.model_dump()
 
@@ -3662,7 +3881,13 @@ async def get_salon_barbers(
         raise HTTPException(status_code=500, detail=f"Failed to fetch barbers: {str(e)}")
 
 @api_router.post("/salons/{salon_id}/barbers", response_model=Barber)
-async def create_barber(salon_id: str, barber: BarberCreate, current_salon=Depends(get_current_salon)):
+async def create_barber(salon_id: str, barber: BarberCreate, current_user=Depends(get_current_salon_user)):
+    # Only admin/branch_manager can add staff
+    if current_user.get("role") not in ("salon", "salon_admin", "salon_branch_manager"):
+        raise HTTPException(status_code=403, detail="Admin access required to add staff")
+    # Subscription paywall: free plan allows max 1 active staff
+    await enforce_premium_or_within_limit(salon_id, resource="staff")
+
     barber_dict = barber.model_dump()
     barber_dict["id"] = str(uuid.uuid4())
     barber_dict["salon_id"] = salon_id  # Override with URL param
@@ -10276,6 +10501,416 @@ async def cancel_active_bookings_end_of_day():
         logger.info(f"[EOD] Auto-cancelled {cancelled_count} bookings for {target_date}")
     except Exception as e:
         logger.error(f"[EOD] cancel_active_bookings_end_of_day failed: {e}")
+
+
+# ============ SUBSCRIPTION ROUTES (SalonHub Pro) ============
+
+@api_router.get("/subscription-plans")
+async def list_subscription_plans():
+    """Public list of active subscription plans."""
+    plans = await db.subscription_plans.find(
+        {"status": "active"}, {"_id": 0}
+    ).to_list(50)
+    return plans
+
+@api_router.get("/subscription-plans/active")
+async def get_active_subscription_plan():
+    """Return the default active plan (single source of truth for pricing)."""
+    plan = await get_active_plan()
+    if not plan:
+        raise HTTPException(status_code=404, detail="No active subscription plan configured")
+    return plan
+
+@api_router.get("/salons/{salon_id}/subscription/status")
+async def api_subscription_status(salon_id: str):
+    """Public endpoint - get current subscription state for a salon."""
+    salon = await db.salons.find_one({"id": salon_id}, {"_id": 0, "id": 1})
+    if not salon:
+        raise HTTPException(status_code=404, detail="Salon not found")
+    return await get_subscription_status(salon_id)
+
+@api_router.get("/salons/{salon_id}/subscription/transactions")
+async def api_subscription_transactions(
+    salon_id: str, current_user=Depends(get_current_salon_user)
+):
+    """List payment transactions for a salon (admin only)."""
+    _check_salon_admin_for_salon(current_user, salon_id)
+    txs = await db.payment_transactions.find(
+        {"salon_id": salon_id}, {"_id": 0}
+    ).sort("created_at", -1).to_list(200)
+    return txs
+
+@api_router.post("/salons/{salon_id}/subscription/create-order")
+async def create_subscription_order(
+    salon_id: str,
+    payload: CreateOrderRequest,
+    current_user=Depends(get_current_salon_user),
+):
+    """
+    Create a Cashfree order for subscribing the salon to a plan.
+    Returns the payment_session_id which the frontend uses with Cashfree JS SDK.
+    """
+    _check_salon_admin_for_salon(current_user, salon_id)
+
+    if not cashfree_service.is_configured():
+        raise HTTPException(
+            status_code=503,
+            detail="Payment gateway is not configured. Please contact support.",
+        )
+
+    salon = await db.salons.find_one({"id": salon_id}, {"_id": 0})
+    if not salon:
+        raise HTTPException(status_code=404, detail="Salon not found")
+
+    # Resolve plan
+    if payload.plan_id:
+        plan = await db.subscription_plans.find_one(
+            {"id": payload.plan_id, "status": "active"}, {"_id": 0}
+        )
+        if not plan:
+            raise HTTPException(status_code=404, detail="Subscription plan not found")
+    else:
+        plan = await get_active_plan()
+        if not plan:
+            raise HTTPException(status_code=404, detail="No active plan available")
+
+    amount = float(plan.get("price", 0))
+    if amount <= 0:
+        raise HTTPException(status_code=400, detail="Invalid plan price")
+
+    # Build order
+    order_id = f"SH-{salon_id[:8]}-{int(datetime.now(timezone.utc).timestamp())}"
+    customer_id = f"salon_{salon_id[:12]}"
+    customer_name = (salon.get("owner_name") or salon.get("salon_name") or "Salon Owner")[:50]
+    customer_email = salon.get("email") or "noreply@salonhub.in"
+    customer_phone = (salon.get("phone") or "9999999999").replace("+91", "").replace("+", "")[-10:]
+    if len(customer_phone) < 10:
+        customer_phone = "9999999999"
+
+    backend_base = os.environ.get("BACKEND_PUBLIC_URL", "")
+    frontend_base = os.environ.get("FRONTEND_PUBLIC_URL", "")
+    return_url = f"{frontend_base}/subscription/callback?order_id={order_id}" if frontend_base else None
+    notify_url = f"{backend_base}/api/subscriptions/webhook" if backend_base else None
+
+    try:
+        cf_response = await cashfree_service.create_order(
+            order_id=order_id,
+            order_amount=amount,
+            customer_id=customer_id,
+            customer_name=customer_name,
+            customer_email=customer_email,
+            customer_phone=customer_phone,
+            return_url=return_url or "https://salonhub.in/subscription/callback",
+            notify_url=notify_url,
+            order_note=f"{plan['plan_name']} - {plan.get('billing_cycle','monthly')}",
+            order_currency="INR",
+        )
+    except Exception as e:
+        logger.error(f"[Subscription] Cashfree create_order error: {e}")
+        raise HTTPException(status_code=502, detail=f"Payment gateway error: {str(e)}")
+
+    payment_session_id = cf_response.get("payment_session_id")
+    cf_order_id = cf_response.get("order_id") or order_id
+
+    # Persist a pending subscription record
+    sub_id = str(uuid.uuid4())
+    sub_doc = {
+        "id": sub_id,
+        "salon_id": salon_id,
+        "plan_id": plan["id"],
+        "plan_name": plan.get("plan_name"),
+        "price": amount,
+        "subscription_status": "pending",
+        "start_date": None,
+        "expiry_date": None,
+        "payment_status": "pending",
+        "cashfree_order_id": cf_order_id,
+        "cashfree_payment_id": None,
+        "auto_renew": False,
+        "billing_cycle": plan.get("billing_cycle", "monthly"),
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "updated_at": None,
+    }
+    await db.salon_subscriptions.insert_one(sub_doc.copy())
+
+    # Persist a pending transaction record
+    tx_id = str(uuid.uuid4())
+    tx_doc = {
+        "id": tx_id,
+        "salon_id": salon_id,
+        "subscription_id": sub_id,
+        "plan_id": plan["id"],
+        "amount": amount,
+        "currency": "INR",
+        "payment_gateway": "cashfree",
+        "gateway_order_id": cf_order_id,
+        "gateway_payment_id": None,
+        "payment_status": "pending",
+        "payment_response": cf_response,
+        "payment_method": None,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "updated_at": None,
+    }
+    await db.payment_transactions.insert_one(tx_doc.copy())
+
+    return {
+        "order_id": cf_order_id,
+        "payment_session_id": payment_session_id,
+        "amount": amount,
+        "currency": "INR",
+        "plan": plan,
+        "subscription_id": sub_id,
+        "cashfree_env": cashfree_service.CASHFREE_ENV,
+    }
+
+
+async def _activate_subscription_from_payment(
+    salon_id: str, sub_id: str, plan: dict, cf_payment: Optional[dict] = None
+) -> dict:
+    """Internal helper: mark subscription paid + extend expiry."""
+    now = datetime.now(timezone.utc)
+    # Stack from latest existing active expiry (renewal)
+    existing = await db.salon_subscriptions.find_one(
+        {
+            "salon_id": salon_id,
+            "payment_status": "paid",
+            "subscription_status": "active",
+        },
+        {"_id": 0},
+        sort=[("expiry_date", -1)],
+    )
+    base_dt = now
+    if existing and existing.get("expiry_date"):
+        try:
+            existing_exp = datetime.fromisoformat(existing["expiry_date"].replace("Z", "+00:00"))
+            if existing_exp.tzinfo is None:
+                existing_exp = existing_exp.replace(tzinfo=timezone.utc)
+            if existing_exp > now:
+                base_dt = existing_exp
+        except Exception:
+            pass
+
+    billing_cycle = plan.get("billing_cycle", "monthly")
+    expiry_dt = _add_billing_cycle(base_dt, billing_cycle)
+
+    update_doc = {
+        "subscription_status": "active",
+        "payment_status": "paid",
+        "start_date": now.isoformat(),
+        "expiry_date": expiry_dt.isoformat(),
+        "updated_at": now.isoformat(),
+    }
+    if cf_payment:
+        update_doc["cashfree_payment_id"] = (
+            cf_payment.get("cf_payment_id") or cf_payment.get("payment_id")
+        )
+
+    await db.salon_subscriptions.update_one({"id": sub_id}, {"$set": update_doc})
+    return update_doc
+
+
+@api_router.post("/salons/{salon_id}/subscription/verify-payment")
+async def verify_subscription_payment(
+    salon_id: str,
+    body: dict = Body(...),
+    current_user=Depends(get_current_salon_user),
+):
+    """Verify payment with Cashfree by fetching order/payment status."""
+    _check_salon_admin_for_salon(current_user, salon_id)
+
+    order_id = (body or {}).get("order_id")
+    if not order_id:
+        raise HTTPException(status_code=400, detail="order_id is required")
+
+    sub = await db.salon_subscriptions.find_one(
+        {"salon_id": salon_id, "cashfree_order_id": order_id}, {"_id": 0}
+    )
+    if not sub:
+        raise HTTPException(status_code=404, detail="Subscription order not found")
+
+    try:
+        cf_order = await cashfree_service.fetch_order(order_id)
+    except Exception as e:
+        logger.error(f"[Subscription] verify fetch_order failed: {e}")
+        raise HTTPException(status_code=502, detail="Failed to fetch order status")
+
+    order_status = cf_order.get("order_status")  # PAID, ACTIVE, EXPIRED, TERMINATED
+    payments = []
+    try:
+        payments = await cashfree_service.fetch_payments_for_order(order_id)
+    except Exception as e:
+        logger.warning(f"[Subscription] verify fetch_payments warning: {e}")
+
+    successful_payment = None
+    for p in payments:
+        if (p.get("payment_status") or "").upper() == "SUCCESS":
+            successful_payment = p
+            break
+
+    plan = await db.subscription_plans.find_one({"id": sub["plan_id"]}, {"_id": 0})
+    if not plan:
+        plan = await get_active_plan()
+
+    now_iso = datetime.now(timezone.utc).isoformat()
+
+    if order_status == "PAID" and successful_payment:
+        update = await _activate_subscription_from_payment(
+            salon_id, sub["id"], plan, successful_payment
+        )
+        await db.payment_transactions.update_many(
+            {"gateway_order_id": order_id},
+            {
+                "$set": {
+                    "payment_status": "success",
+                    "gateway_payment_id": successful_payment.get("cf_payment_id"),
+                    "payment_method": (
+                        successful_payment.get("payment_group")
+                        or (successful_payment.get("payment_method") or {}).get("type")
+                        if isinstance(successful_payment.get("payment_method"), dict)
+                        else successful_payment.get("payment_method")
+                    ),
+                    "payment_response": successful_payment,
+                    "updated_at": now_iso,
+                }
+            },
+        )
+        return {
+            "success": True,
+            "status": "active",
+            "expiry_date": update["expiry_date"],
+            "order_status": order_status,
+        }
+
+    # Handle failed/cancelled
+    if order_status in ("EXPIRED", "TERMINATED") or (
+        payments and not successful_payment
+    ):
+        await db.salon_subscriptions.update_one(
+            {"id": sub["id"]},
+            {
+                "$set": {
+                    "subscription_status": "payment_failed",
+                    "payment_status": "failed",
+                    "updated_at": now_iso,
+                }
+            },
+        )
+        await db.payment_transactions.update_many(
+            {"gateway_order_id": order_id, "payment_status": "pending"},
+            {
+                "$set": {
+                    "payment_status": "failed",
+                    "payment_response": cf_order,
+                    "updated_at": now_iso,
+                }
+            },
+        )
+        return {"success": False, "status": "payment_failed", "order_status": order_status}
+
+    # Otherwise still pending
+    return {"success": False, "status": "pending", "order_status": order_status}
+
+
+@fastapi_app.post("/api/subscriptions/webhook")
+async def cashfree_webhook(request: Request):
+    """
+    Cashfree webhook endpoint. Mounted directly on fastapi_app so we can
+    read the raw body for signature verification.
+    """
+    raw_body = await request.body()
+    timestamp = request.headers.get("x-webhook-timestamp", "")
+    signature = request.headers.get("x-webhook-signature", "")
+
+    if not cashfree_service.verify_webhook_signature(raw_body, timestamp, signature):
+        logger.warning("[Cashfree Webhook] Invalid signature")
+        # Always return 200 so Cashfree doesn't retry storms in dev when secret mismatches
+        return {"received": True, "verified": False}
+
+    try:
+        payload = json.loads(raw_body.decode("utf-8"))
+    except Exception:
+        return {"received": True, "verified": True, "parsed": False}
+
+    data = payload.get("data") or {}
+    order = data.get("order") or {}
+    payment = data.get("payment") or {}
+    order_id = order.get("order_id")
+    if not order_id:
+        return {"received": True, "verified": True}
+
+    sub = await db.salon_subscriptions.find_one(
+        {"cashfree_order_id": order_id}, {"_id": 0}
+    )
+    if not sub:
+        logger.warning(f"[Cashfree Webhook] Unknown order_id {order_id}")
+        return {"received": True, "verified": True, "matched": False}
+
+    plan = await db.subscription_plans.find_one({"id": sub["plan_id"]}, {"_id": 0})
+    if not plan:
+        plan = await get_active_plan()
+
+    payment_status = (payment.get("payment_status") or "").upper()
+    now_iso = datetime.now(timezone.utc).isoformat()
+
+    if payment_status == "SUCCESS":
+        await _activate_subscription_from_payment(sub["salon_id"], sub["id"], plan, payment)
+        await db.payment_transactions.update_many(
+            {"gateway_order_id": order_id},
+            {
+                "$set": {
+                    "payment_status": "success",
+                    "gateway_payment_id": payment.get("cf_payment_id"),
+                    "payment_response": payload,
+                    "updated_at": now_iso,
+                }
+            },
+        )
+    elif payment_status in ("FAILED", "USER_DROPPED", "CANCELLED"):
+        await db.salon_subscriptions.update_one(
+            {"id": sub["id"]},
+            {
+                "$set": {
+                    "subscription_status": "payment_failed",
+                    "payment_status": "failed",
+                    "updated_at": now_iso,
+                }
+            },
+        )
+        await db.payment_transactions.update_many(
+            {"gateway_order_id": order_id, "payment_status": "pending"},
+            {
+                "$set": {
+                    "payment_status": "failed",
+                    "payment_response": payload,
+                    "updated_at": now_iso,
+                }
+            },
+        )
+
+    return {"received": True, "verified": True, "matched": True}
+
+
+# ----- Admin endpoints to manage subscription plans (configurable pricing) -----
+@api_router.put("/admin/subscription-plans/{plan_id}")
+async def admin_update_subscription_plan(
+    plan_id: str,
+    payload: SubscriptionPlanUpdate,
+    current_user=Depends(get_current_salon_user),
+):
+    """Update a subscription plan (price, features, etc.). Admin-only."""
+    if current_user.get("role") not in ("admin", "salon_admin"):
+        raise HTTPException(status_code=403, detail="Admin access required")
+    update_doc = {k: v for k, v in payload.model_dump().items() if v is not None}
+    if not update_doc:
+        raise HTTPException(status_code=400, detail="No fields provided")
+    update_doc["updated_at"] = datetime.now(timezone.utc).isoformat()
+    res = await db.subscription_plans.update_one({"id": plan_id}, {"$set": update_doc})
+    if res.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Plan not found")
+    plan = await db.subscription_plans.find_one({"id": plan_id}, {"_id": 0})
+    return plan
+
+
 
 
 # Include router - MUST be after ALL @api_router routes are defined

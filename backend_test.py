@@ -1,799 +1,598 @@
 #!/usr/bin/env python3
 """
-Backend API Testing Script for Salon Booking System
-Focused regression testing on latest backend changes (Round 3)
-Testing multi-user auth fixes and on-leave barber handling
+Backend API Testing Script for SalonHub Pro Subscription System
+Tests all subscription endpoints (A-H) as specified in the review request.
 """
-
 import requests
 import json
-from datetime import datetime, timedelta
-import time
+import sys
+from typing import Dict, Any, Optional
 
 # Backend URL from environment
 BACKEND_URL = "https://staff-management-pro-2.preview.emergentagent.com/api"
 
-# Test credentials
-ADMIN_IDENTIFIER = "admin"
-ADMIN_PASSWORD = "salon123"
+# Test credentials from /app/memory/test_credentials.md
+LOGIN_ENDPOINT = f"{BACKEND_URL}/salon/users/login"
+LOGIN_CREDENTIALS = {
+    "identifier": "admin",
+    "password": "salon123"
+}
 
-# Color codes for output
-GREEN = '\033[92m'
-RED = '\033[91m'
-YELLOW = '\033[93m'
-BLUE = '\033[94m'
-RESET = '\033[0m'
+# Global variables for auth
+access_token: Optional[str] = None
+salon_id: Optional[str] = None
+headers: Dict[str, str] = {}
 
-def print_test(test_name):
-    print(f"\n{BLUE}{'='*80}{RESET}")
-    print(f"{BLUE}TEST: {test_name}{RESET}")
-    print(f"{BLUE}{'='*80}{RESET}")
 
-def print_pass(message):
-    print(f"{GREEN}✅ PASS: {message}{RESET}")
+def print_section(title: str):
+    """Print a formatted section header."""
+    print("\n" + "=" * 80)
+    print(f"  {title}")
+    print("=" * 80)
 
-def print_fail(message):
-    print(f"{RED}❌ FAIL: {message}{RESET}")
 
-def print_info(message):
-    print(f"{YELLOW}ℹ️  INFO: {message}{RESET}")
+def print_test(test_name: str, status: str, details: str = ""):
+    """Print test result."""
+    status_symbol = "✅" if status == "PASS" else "❌"
+    print(f"\n{status_symbol} {test_name}: {status}")
+    if details:
+        print(f"   {details}")
 
-def print_response(response):
-    print(f"Status: {response.status_code}")
-    try:
-        print(f"Response: {json.dumps(response.json(), indent=2)}")
-    except:
-        print(f"Response: {response.text[:500]}")
 
-def get_today_ist():
-    """Get today's date in IST (YYYY-MM-DD)"""
-    # For testing purposes, we'll use the current date
-    return datetime.now().strftime("%Y-%m-%d")
-
-def get_tomorrow_ist():
-    """Get tomorrow's date in IST (YYYY-MM-DD)"""
-    return (datetime.now() + timedelta(days=1)).strftime("%Y-%m-%d")
-
-# ============================================================================
-# SETUP: Login and get admin token + salon_id
-# ============================================================================
-def setup_admin_auth():
-    """Login as admin and return (salon_id, admin_token, headers)"""
-    print_info("Setting up admin authentication...")
-    
-    response = requests.post(
-        f"{BACKEND_URL}/salon/users/login",
-        json={"identifier": ADMIN_IDENTIFIER, "password": ADMIN_PASSWORD}
-    )
-    
-    if response.status_code != 200:
-        print_fail(f"Admin login failed: {response.status_code}")
-        print_response(response)
-        return None, None, None
-    
-    data = response.json()
-    salon_id = data.get("salon_id")
-    admin_token = data.get("access_token")
-    role = data.get("role")
-    
-    print_pass(f"Admin login successful. Salon ID: {salon_id}, Role: {role}")
-    
-    headers = {"Authorization": f"Bearer {admin_token}"}
-    return salon_id, admin_token, headers
-
-# ============================================================================
-# TEST 1: POST /api/tokens/{token_id}/notify - Multi-user auth + new message
-# ============================================================================
-def test_notify_endpoint(salon_id, admin_token, headers):
-    print_test("TEST 1: POST /api/tokens/{token_id}/notify - Multi-user auth + new message")
-    
-    # Step a: Get or create a token
-    print_info("Step a: Getting existing token or creating one")
-    
-    today = get_today_ist()
-    
-    # Try to get existing tokens
-    tokens_response = requests.get(
-        f"{BACKEND_URL}/salons/{salon_id}/tokens",
-        headers=headers,
-        params={"date": today}
-    )
-    
-    token_id = None
-    if tokens_response.status_code == 200:
-        tokens_data = tokens_response.json()
-        tokens = tokens_data.get("tokens", [])
-        if tokens:
-            # Use first waiting token
-            for token in tokens:
-                if token.get("status") == "waiting":
-                    token_id = token.get("id")
-                    print_info(f"Using existing token: {token_id}")
-                    break
-    
-    # If no existing token, create one
-    if not token_id:
-        print_info("No existing waiting token found. Creating new booking...")
-        
-        # Get enabled services
-        services_response = requests.get(
-            f"{BACKEND_URL}/salons/{salon_id}/services/enabled",
-            headers=headers
-        )
-        
-        if services_response.status_code != 200:
-            print_fail(f"Failed to get services: {services_response.status_code}")
-            return
-        
-        services_data = services_response.json()
-        services = services_data if isinstance(services_data, list) else services_data.get("services", [])
-        
-        if not services:
-            print_fail("No enabled services found")
-            return
-        
-        service_id = services[0]["id"]
-        
-        # Create booking
-        booking_data = {
-            "customer_name": "Notify Test Customer",
-            "phone": "9000011111",
-            "gender": "Men",
-            "barber_id": "any",
-            "selected_services": [service_id],
-            "payment_mode": "cash",
-            "date": today,
-            "shift": "Morning"
-        }
-        
-        booking_response = requests.post(
-            f"{BACKEND_URL}/salons/{salon_id}/salon-booking",
-            headers=headers,
-            json=booking_data
-        )
-        
-        if booking_response.status_code == 200:
-            token_data = booking_response.json()
-            token_id = token_data.get("id")
-            print_pass(f"Created new token: {token_id}")
-        else:
-            print_fail(f"Failed to create booking: {booking_response.status_code}")
-            print_response(booking_response)
-            return
-    
-    # Step b: Call POST /api/tokens/{token_id}/notify with admin Bearer token
-    print_info(f"\nStep b: Calling POST /api/tokens/{token_id}/notify with admin token")
-    
-    notify_response = requests.post(
-        f"{BACKEND_URL}/tokens/{token_id}/notify",
-        headers=headers
-    )
-    
-    print_response(notify_response)
-    
-    if notify_response.status_code == 200:
-        data = notify_response.json()
-        message = data.get("message", "")
-        
-        if message == "Notification sent to customer":
-            print_pass(f"Correct response message: '{message}'")
-        else:
-            print_fail(f"Wrong message. Expected 'Notification sent to customer', got '{message}'")
-    else:
-        print_fail(f"Expected 200, got {notify_response.status_code}")
-    
-    # Step c: Call without auth → 401
-    print_info("\nStep c: Calling without auth (should get 401)")
-    
-    notify_no_auth = requests.post(f"{BACKEND_URL}/tokens/{token_id}/notify")
-    print_response(notify_no_auth)
-    
-    if notify_no_auth.status_code in [401, 403]:
-        print_pass(f"Correctly rejected without auth: {notify_no_auth.status_code}")
-    else:
-        print_fail(f"Expected 401/403, got {notify_no_auth.status_code}")
-    
-    # Step d: Call with token from different salon → 403 or 404
-    print_info("\nStep d: Calling with random/mismatched token_id (should get 404 or 403)")
-    
-    random_token_id = "00000000-0000-0000-0000-000000000000"
-    notify_wrong_token = requests.post(
-        f"{BACKEND_URL}/tokens/{random_token_id}/notify",
-        headers=headers
-    )
-    print_response(notify_wrong_token)
-    
-    if notify_wrong_token.status_code == 404:
-        detail = notify_wrong_token.json().get("detail", "")
-        if "Token not found" in detail:
-            print_pass(f"Correctly returns 404 for unknown token: {detail}")
-        else:
-            print_fail(f"404 but wrong message: {detail}")
-    elif notify_wrong_token.status_code == 403:
-        print_pass("Correctly returns 403 for mismatched salon")
-    else:
-        print_fail(f"Expected 404 or 403, got {notify_wrong_token.status_code}")
-    
-    # Step e: Check backend logs for no exceptions
-    print_info("\nStep e: Checking backend logs for exceptions...")
-    print_info("(Manual check required: tail /var/log/supervisor/backend.err.log)")
-    print_info("Verify no RecursionError or exception in send_booking_notification for type 'salon_calling'")
-
-# ============================================================================
-# TEST 2: POST /api/tokens/{token_id}/cancel - Multi-user auth
-# ============================================================================
-def test_cancel_endpoint(salon_id, admin_token, headers):
-    print_test("TEST 2: POST /api/tokens/{token_id}/cancel - Multi-user auth")
-    
-    # Create a fresh token
-    print_info("Creating fresh token for cancellation test...")
-    
-    today = get_today_ist()
-    
-    # Get enabled services
-    services_response = requests.get(
-        f"{BACKEND_URL}/salons/{salon_id}/services/enabled",
-        headers=headers
-    )
-    
-    if services_response.status_code != 200:
-        print_fail(f"Failed to get services: {services_response.status_code}")
-        return
-    
-    services_data = services_response.json()
-    services = services_data if isinstance(services_data, list) else services_data.get("services", [])
-    
-    if not services:
-        print_fail("No enabled services found")
-        return
-    
-    service_id = services[0]["id"]
-    
-    # Create booking
-    booking_data = {
-        "customer_name": "Cancel Test Customer",
-        "phone": "9000022222",
-        "gender": "Men",
-        "barber_id": "any",
-        "selected_services": [service_id],
-        "payment_mode": "cash",
-        "date": today,
-        "shift": "Noon"
-    }
-    
-    booking_response = requests.post(
-        f"{BACKEND_URL}/salons/{salon_id}/salon-booking",
-        headers=headers,
-        json=booking_data
-    )
-    
-    if booking_response.status_code != 200:
-        print_fail(f"Failed to create booking: {booking_response.status_code}")
-        print_response(booking_response)
-        return
-    
-    token_data = booking_response.json()
-    token_id = token_data.get("id")
-    print_pass(f"Created token for cancellation: {token_id}")
-    
-    # Test: Cancel with admin token → 200
-    print_info(f"\nCalling POST /api/tokens/{token_id}/cancel with admin token")
-    
-    cancel_response = requests.post(
-        f"{BACKEND_URL}/tokens/{token_id}/cancel",
-        headers=headers
-    )
-    
-    print_response(cancel_response)
-    
-    if cancel_response.status_code == 200:
-        print_pass("Successfully cancelled token with admin auth")
-    else:
-        print_fail(f"Expected 200, got {cancel_response.status_code}")
-    
-    # Negative: random uuid → 404
-    print_info("\nCalling with random token_id (should get 404)")
-    
-    random_token_id = "00000000-0000-0000-0000-000000000001"
-    cancel_random = requests.post(
-        f"{BACKEND_URL}/tokens/{random_token_id}/cancel",
-        headers=headers
-    )
-    print_response(cancel_random)
-    
-    if cancel_random.status_code == 404:
-        print_pass("Correctly returns 404 for unknown token")
-    else:
-        print_fail(f"Expected 404, got {cancel_random.status_code}")
-    
-    # No auth → 401
-    print_info("\nCalling without auth (should get 401)")
-    
-    cancel_no_auth = requests.post(f"{BACKEND_URL}/tokens/{token_id}/cancel")
-    print_response(cancel_no_auth)
-    
-    if cancel_no_auth.status_code in [401, 403]:
-        print_pass(f"Correctly rejected without auth: {cancel_no_auth.status_code}")
-    else:
-        print_fail(f"Expected 401/403, got {cancel_no_auth.status_code}")
-
-# ============================================================================
-# TEST 3: DELETE /api/salons/{salon_id}/staff-attendance/override/{barber_id}/{date}
-# ============================================================================
-def test_attendance_delete(salon_id, admin_token, headers):
-    print_test("TEST 3: DELETE staff-attendance/override - Clear attendance status")
-    
-    # Get a barber
-    print_info("Getting barber list...")
-    
-    barbers_response = requests.get(
-        f"{BACKEND_URL}/salons/{salon_id}/barbers",
-        headers=headers
-    )
-    
-    if barbers_response.status_code != 200:
-        print_fail(f"Failed to get barbers: {barbers_response.status_code}")
-        return
-    
-    barbers_data = barbers_response.json()
-    barbers = barbers_data if isinstance(barbers_data, list) else barbers_data.get("barbers", [])
-    
-    if not barbers:
-        print_fail("No barbers found")
-        return
-    
-    barber_id = barbers[0]["id"]
-    barber_name = barbers[0]["name"]
-    print_info(f"Using barber: {barber_name} (ID: {barber_id})")
-    
-    # Use today's date
-    test_date = get_today_ist()
-    
-    # Step a: PUT a status
-    print_info(f"\nStep a: Setting attendance status to 'present' for {test_date}")
-    
-    put_response = requests.put(
-        f"{BACKEND_URL}/salons/{salon_id}/staff-attendance/override/{barber_id}/{test_date}",
-        headers=headers,
-        json={"status": "present"}
-    )
-    
-    print_response(put_response)
-    
-    if put_response.status_code == 200:
-        print_pass("Successfully set attendance status")
-    else:
-        print_fail(f"Failed to set status: {put_response.status_code}")
-        return
-    
-    # Step b: DELETE the same path
-    print_info(f"\nStep b: Deleting attendance override for {test_date}")
-    
-    delete_response = requests.delete(
-        f"{BACKEND_URL}/salons/{salon_id}/staff-attendance/override/{barber_id}/{test_date}",
-        headers=headers
-    )
-    
-    print_response(delete_response)
-    
-    if delete_response.status_code == 200:
-        data = delete_response.json()
-        deleted = data.get("deleted")
-        record_id = data.get("id")
-        
-        if deleted is True:
-            print_pass(f"Successfully deleted override. ID: {record_id}")
-        else:
-            print_fail(f"Delete returned 200 but deleted={deleted}")
-    else:
-        print_fail(f"Expected 200, got {delete_response.status_code}")
-    
-    # Step c: DELETE again → idempotent (should return deleted: false)
-    print_info("\nStep c: Deleting again (should be idempotent)")
-    
-    delete_again = requests.delete(
-        f"{BACKEND_URL}/salons/{salon_id}/staff-attendance/override/{barber_id}/{test_date}",
-        headers=headers
-    )
-    
-    print_response(delete_again)
-    
-    if delete_again.status_code == 200:
-        data = delete_again.json()
-        deleted = data.get("deleted")
-        
-        if deleted is False:
-            print_pass("Correctly returns deleted: false (idempotent)")
-        else:
-            print_fail(f"Expected deleted: false, got deleted: {deleted}")
-    else:
-        print_fail(f"Expected 200, got {delete_again.status_code}")
-    
-    # Step d: GET monthly attendance to verify cleared
-    print_info("\nStep d: Verifying cleared date no longer appears in monthly attendance")
-    
-    month = test_date[:7]  # YYYY-MM
-    attendance_response = requests.get(
-        f"{BACKEND_URL}/salons/{salon_id}/staff-attendance/month/{month}",
-        headers=headers,
-        params={"barber_id": barber_id}
-    )
-    
-    print_response(attendance_response)
-    
-    if attendance_response.status_code == 200:
-        data = attendance_response.json()
-        barbers_attendance = data.get("barbers", [])
-        
-        # Find our barber
-        found_barber = None
-        for b in barbers_attendance:
-            if b.get("barber_id") == barber_id:
-                found_barber = b
-                break
-        
-        if found_barber:
-            attendance_records = found_barber.get("attendance", [])
-            
-            # Check if test_date is in attendance records
-            date_found = False
-            for record in attendance_records:
-                if record.get("date") == test_date:
-                    date_found = True
-                    break
-            
-            if not date_found:
-                print_pass(f"Cleared date {test_date} no longer appears in attendance")
-            else:
-                print_fail(f"Cleared date {test_date} still appears in attendance")
-        else:
-            print_info("Barber not found in attendance response (may be expected if no records)")
-    else:
-        print_fail(f"Failed to get attendance: {attendance_response.status_code}")
-    
-    # Step e: Without auth → 401/403
-    print_info("\nStep e: Calling DELETE without auth (should get 401/403)")
-    
-    delete_no_auth = requests.delete(
-        f"{BACKEND_URL}/salons/{salon_id}/staff-attendance/override/{barber_id}/{test_date}"
-    )
-    print_response(delete_no_auth)
-    
-    if delete_no_auth.status_code in [401, 403]:
-        print_pass(f"Correctly rejected without auth: {delete_no_auth.status_code}")
-    else:
-        print_fail(f"Expected 401/403, got {delete_no_auth.status_code}")
-
-# ============================================================================
-# TEST 4: GET /api/salons/{salon_id}/barbers?customer_view=true&date=<today>
-# ============================================================================
-def test_customer_view_on_leave(salon_id, admin_token, headers):
-    print_test("TEST 4: GET barbers?customer_view=true - On-leave barbers included with flag")
-    
-    # Get barbers list
-    print_info("Getting barber list...")
-    
-    barbers_response = requests.get(
-        f"{BACKEND_URL}/salons/{salon_id}/barbers",
-        headers=headers
-    )
-    
-    if barbers_response.status_code != 200:
-        print_fail(f"Failed to get barbers: {barbers_response.status_code}")
-        return
-    
-    barbers_data = barbers_response.json()
-    barbers = barbers_data if isinstance(barbers_data, list) else barbers_data.get("barbers", [])
-    
-    if not barbers:
-        print_fail("No barbers found")
-        return
-    
-    test_barber = barbers[0]
-    barber_id = test_barber["id"]
-    barber_name = test_barber["name"]
-    print_info(f"Using barber: {barber_name} (ID: {barber_id})")
-    
-    today = get_today_ist()
-    tomorrow = get_tomorrow_ist()
-    
-    # Step a: Set leave for today
-    print_info(f"\nStep a: Setting leave for {barber_name} on {today}")
-    
-    # Use the dedicated leave-date endpoint
-    leave_response = requests.put(
-        f"{BACKEND_URL}/salons/{salon_id}/barbers/{barber_id}/leave-date",
-        headers=headers,
-        json={"date": today, "is_on_leave": True}
-    )
-    
-    print_response(leave_response)
-    
-    if leave_response.status_code == 200:
-        print_pass(f"Successfully set leave for {today}")
-    else:
-        print_fail(f"Failed to set leave: {leave_response.status_code}")
-        return
-    
-    # Step b: GET with customer_view=true&date=today
-    print_info(f"\nStep b: GET barbers?customer_view=true&date={today}")
-    
-    customer_view_response = requests.get(
-        f"{BACKEND_URL}/salons/{salon_id}/barbers",
-        params={"customer_view": "true", "date": today}
-    )
-    
-    print_response(customer_view_response)
-    
-    if customer_view_response.status_code == 200:
-        data = customer_view_response.json()
-        barbers_list = data if isinstance(data, list) else data.get("barbers", [])
-        
-        # Find our test barber
-        found_barber = None
-        for b in barbers_list:
-            if b.get("id") == barber_id:
-                found_barber = b
-                break
-        
-        if found_barber:
-            print_pass(f"On-leave barber IS in response (not filtered out)")
-            
-            is_on_leave = found_barber.get("is_on_leave")
-            if is_on_leave is True:
-                print_pass(f"Barber has is_on_leave=true")
-            else:
-                print_fail(f"Barber has is_on_leave={is_on_leave}, expected true")
-        else:
-            print_fail(f"On-leave barber NOT found in response (should be included)")
-        
-        # Check other barbers have is_on_leave=false
-        other_barbers_correct = True
-        for b in barbers_list:
-            if b.get("id") != barber_id:
-                is_on_leave = b.get("is_on_leave")
-                if is_on_leave not in [False, None]:
-                    other_barbers_correct = False
-                    print_fail(f"Other barber {b.get('name')} has is_on_leave={is_on_leave}, expected false/null")
-        
-        if other_barbers_correct:
-            print_pass("Other barbers have is_on_leave=false or null")
-    else:
-        print_fail(f"Failed to get barbers: {customer_view_response.status_code}")
-    
-    # Step c: GET with date=tomorrow
-    print_info(f"\nStep c: GET barbers?customer_view=true&date={tomorrow}")
-    
-    tomorrow_response = requests.get(
-        f"{BACKEND_URL}/salons/{salon_id}/barbers",
-        params={"customer_view": "true", "date": tomorrow}
-    )
-    
-    print_response(tomorrow_response)
-    
-    if tomorrow_response.status_code == 200:
-        data = tomorrow_response.json()
-        barbers_list = data if isinstance(data, list) else data.get("barbers", [])
-        
-        # Find our test barber
-        found_barber = None
-        for b in barbers_list:
-            if b.get("id") == barber_id:
-                found_barber = b
-                break
-        
-        if found_barber:
-            is_on_leave = found_barber.get("is_on_leave")
-            if is_on_leave in [False, None]:
-                print_pass(f"Barber has is_on_leave={is_on_leave} for tomorrow (correct)")
-            else:
-                print_fail(f"Barber has is_on_leave={is_on_leave} for tomorrow, expected false/null")
-        else:
-            print_info("Barber not found in tomorrow's list")
-    else:
-        print_fail(f"Failed to get barbers for tomorrow: {tomorrow_response.status_code}")
-    
-    # Step d: GET with available_only=true&date=today (admin strict mode)
-    print_info(f"\nStep d: GET barbers?available_only=true&date={today} (admin strict mode)")
-    
-    available_only_response = requests.get(
-        f"{BACKEND_URL}/salons/{salon_id}/barbers",
-        headers=headers,
-        params={"available_only": "true", "date": today}
-    )
-    
-    print_response(available_only_response)
-    
-    if available_only_response.status_code == 200:
-        data = available_only_response.json()
-        barbers_list = data if isinstance(data, list) else data.get("barbers", [])
-        
-        # Check if on-leave barber is filtered OUT
-        found_barber = None
-        for b in barbers_list:
-            if b.get("id") == barber_id:
-                found_barber = b
-                break
-        
-        if not found_barber:
-            print_pass("On-leave barber correctly filtered OUT in available_only mode")
-        else:
-            print_fail("On-leave barber still in response (should be filtered out)")
-    else:
-        print_fail(f"Failed to get barbers: {available_only_response.status_code}")
-    
-    # Step e: Reset leave
-    print_info(f"\nStep e: Resetting leave for {barber_name}")
-    
-    # Use the dedicated leave-date endpoint to remove leave
-    reset_response = requests.put(
-        f"{BACKEND_URL}/salons/{salon_id}/barbers/{barber_id}/leave-date",
-        headers=headers,
-        json={"date": today, "is_on_leave": False}
-    )
-    
-    if reset_response.status_code == 200:
-        print_pass("Successfully reset leave")
-    else:
-        print_fail(f"Failed to reset leave: {reset_response.status_code}")
-
-# ============================================================================
-# TEST 5: pick_fastest_barber must NOT pick on-leave barbers
-# ============================================================================
-def test_pick_fastest_barber_skip_on_leave(salon_id, admin_token, headers):
-    print_test("TEST 5: pick_fastest_barber must NOT pick on-leave barbers")
-    
-    # Get barbers list
-    print_info("Getting barber list...")
-    
-    barbers_response = requests.get(
-        f"{BACKEND_URL}/salons/{salon_id}/barbers",
-        headers=headers
-    )
-    
-    if barbers_response.status_code != 200:
-        print_fail(f"Failed to get barbers: {barbers_response.status_code}")
-        return
-    
-    barbers_data = barbers_response.json()
-    barbers = barbers_data if isinstance(barbers_data, list) else barbers_data.get("barbers", [])
-    
-    if len(barbers) < 2:
-        print_fail("Need at least 2 barbers to test pick_fastest_barber")
-        return
-    
-    test_barber = barbers[0]
-    barber_id = test_barber["id"]
-    barber_name = test_barber["name"]
-    print_info(f"Setting leave for: {barber_name} (ID: {barber_id})")
-    
-    today = get_today_ist()
-    
-    # Step a: Set leave for one barber today
-    print_info(f"\nStep a: Setting leave for {barber_name} on {today}")
-    
-    # Use the dedicated leave-date endpoint
-    leave_response = requests.put(
-        f"{BACKEND_URL}/salons/{salon_id}/barbers/{barber_id}/leave-date",
-        headers=headers,
-        json={"date": today, "is_on_leave": True}
-    )
-    
-    if leave_response.status_code != 200:
-        print_fail(f"Failed to set leave: {leave_response.status_code}")
-        return
-    
-    print_pass(f"Successfully set leave for {today}")
-    
-    # Step b: Create bookings with barber_id='any' and verify NOT the on-leave barber
-    print_info(f"\nStep b: Creating bookings with barber_id='any' (repeat 3-5 times)")
-    
-    # Get enabled services
-    services_response = requests.get(
-        f"{BACKEND_URL}/salons/{salon_id}/services/enabled",
-        headers=headers
-    )
-    
-    if services_response.status_code != 200:
-        print_fail(f"Failed to get services: {services_response.status_code}")
-        return
-    
-    services_data = services_response.json()
-    services = services_data if isinstance(services_data, list) else services_data.get("services", [])
-    
-    if not services:
-        print_fail("No enabled services found")
-        return
-    
-    service_id = services[0]["id"]
-    
-    # Create 5 bookings
-    assigned_barbers = []
-    for i in range(5):
-        booking_data = {
-            "customer_name": f"Pick Test Customer {i+1}",
-            "phone": f"900003{i:04d}",
-            "gender": "Men",
-            "barber_id": "any",
-            "selected_services": [service_id],
-            "payment_mode": "cash",
-            "date": today,
-            "shift": "Evening"
-        }
-        
-        booking_response = requests.post(
-            f"{BACKEND_URL}/salons/{salon_id}/salon-booking",
-            headers=headers,
-            json=booking_data
-        )
-        
-        if booking_response.status_code == 200:
-            token_data = booking_response.json()
-            assigned_barber_id = token_data.get("barber_id")
-            assigned_barber_name = token_data.get("barber_name")
-            assigned_barbers.append((assigned_barber_id, assigned_barber_name))
-            print_info(f"Booking {i+1}: Assigned to {assigned_barber_name} (ID: {assigned_barber_id})")
-        else:
-            print_fail(f"Booking {i+1} failed: {booking_response.status_code}")
-            print_response(booking_response)
-    
-    # Verify none of the assigned barbers is the on-leave barber
-    on_leave_assigned = False
-    for assigned_id, assigned_name in assigned_barbers:
-        if assigned_id == barber_id:
-            on_leave_assigned = True
-            print_fail(f"On-leave barber {barber_name} was assigned!")
-            break
-    
-    if not on_leave_assigned:
-        print_pass(f"On-leave barber {barber_name} was NOT assigned in any of the {len(assigned_barbers)} bookings")
-    
-    # Step c: Reset leave
-    print_info(f"\nStep c: Resetting leave for {barber_name}")
-    
-    # Use the dedicated leave-date endpoint to remove leave
-    reset_response = requests.put(
-        f"{BACKEND_URL}/salons/{salon_id}/barbers/{barber_id}/leave-date",
-        headers=headers,
-        json={"date": today, "is_on_leave": False}
-    )
-    
-    if reset_response.status_code == 200:
-        print_pass("Successfully reset leave")
-    else:
-        print_fail(f"Failed to reset leave: {reset_response.status_code}")
-
-# ============================================================================
-# Main execution
-# ============================================================================
-if __name__ == "__main__":
-    print(f"\n{BLUE}{'='*80}{RESET}")
-    print(f"{BLUE}BACKEND REGRESSION TESTING - ROUND 3 BUG FIXES{RESET}")
-    print(f"{BLUE}Multi-user auth fixes + On-leave barber handling{RESET}")
-    print(f"{BLUE}{'='*80}{RESET}")
-    print(f"Backend URL: {BACKEND_URL}")
-    print(f"Timestamp: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+def login() -> bool:
+    """Login and get access token and salon_id."""
+    global access_token, salon_id, headers
+    
+    print_section("AUTHENTICATION")
+    print(f"Logging in with credentials: {LOGIN_CREDENTIALS['identifier']}")
     
     try:
-        # Setup admin auth
-        salon_id, admin_token, headers = setup_admin_auth()
+        response = requests.post(LOGIN_ENDPOINT, json=LOGIN_CREDENTIALS, timeout=10)
+        print(f"Status: {response.status_code}")
         
-        if not salon_id or not admin_token:
-            print_fail("Failed to setup admin authentication. Exiting.")
-            exit(1)
-        
-        # Run all tests
-        test_notify_endpoint(salon_id, admin_token, headers)
-        test_cancel_endpoint(salon_id, admin_token, headers)
-        test_attendance_delete(salon_id, admin_token, headers)
-        test_customer_view_on_leave(salon_id, admin_token, headers)
-        test_pick_fastest_barber_skip_on_leave(salon_id, admin_token, headers)
-        
-        print(f"\n{BLUE}{'='*80}{RESET}")
-        print(f"{BLUE}TESTING COMPLETE{RESET}")
-        print(f"{BLUE}{'='*80}{RESET}\n")
-        
+        if response.status_code == 200:
+            data = response.json()
+            access_token = data.get("access_token")
+            salon_id = data.get("salon_id")
+            
+            if access_token and salon_id:
+                headers = {"Authorization": f"Bearer {access_token}"}
+                print(f"✅ Login successful!")
+                print(f"   Salon ID: {salon_id}")
+                print(f"   Token: {access_token[:20]}...")
+                return True
+            else:
+                print(f"❌ Login response missing access_token or salon_id")
+                print(f"   Response: {json.dumps(data, indent=2)}")
+                return False
+        else:
+            print(f"❌ Login failed with status {response.status_code}")
+            print(f"   Response: {response.text}")
+            return False
     except Exception as e:
-        print_fail(f"Test execution failed with exception: {str(e)}")
-        import traceback
-        traceback.print_exc()
+        print(f"❌ Login error: {e}")
+        return False
+
+
+def test_a_get_active_plan():
+    """A) GET /api/subscription-plans/active"""
+    print_section("TEST A: GET /api/subscription-plans/active")
+    
+    try:
+        url = f"{BACKEND_URL}/subscription-plans/active"
+        response = requests.get(url, timeout=10)
+        
+        print(f"URL: {url}")
+        print(f"Status: {response.status_code}")
+        
+        if response.status_code == 200:
+            data = response.json()
+            print(f"Response: {json.dumps(data, indent=2)}")
+            
+            # Verify required fields
+            required_fields = ["id", "plan_name", "price", "billing_cycle", "status", "is_default", "features"]
+            missing_fields = [f for f in required_fields if f not in data]
+            
+            if missing_fields:
+                print_test("TEST A", "FAIL", f"Missing fields: {missing_fields}")
+                return False
+            
+            # Verify values
+            if data.get("plan_name") != "SalonHub Pro":
+                print_test("TEST A", "FAIL", f"Expected plan_name='SalonHub Pro', got '{data.get('plan_name')}'")
+                return False
+            
+            if data.get("price") != 499.0:
+                print_test("TEST A", "FAIL", f"Expected price=499.0, got {data.get('price')}")
+                return False
+            
+            if data.get("billing_cycle") != "monthly":
+                print_test("TEST A", "FAIL", f"Expected billing_cycle='monthly', got '{data.get('billing_cycle')}'")
+                return False
+            
+            if data.get("status") != "active":
+                print_test("TEST A", "FAIL", f"Expected status='active', got '{data.get('status')}'")
+                return False
+            
+            if data.get("is_default") != True:
+                print_test("TEST A", "FAIL", f"Expected is_default=true, got {data.get('is_default')}")
+                return False
+            
+            if not isinstance(data.get("features"), list) or len(data.get("features", [])) == 0:
+                print_test("TEST A", "FAIL", f"Expected non-empty features list, got {data.get('features')}")
+                return False
+            
+            print_test("TEST A", "PASS", "All fields present and correct")
+            return True
+        else:
+            print_test("TEST A", "FAIL", f"Expected 200, got {response.status_code}: {response.text}")
+            return False
+    except Exception as e:
+        print_test("TEST A", "FAIL", f"Exception: {e}")
+        return False
+
+
+def test_b_subscription_status():
+    """B) GET /api/salons/{salon_id}/subscription/status"""
+    print_section("TEST B: GET /api/salons/{salon_id}/subscription/status")
+    
+    try:
+        url = f"{BACKEND_URL}/salons/{salon_id}/subscription/status"
+        response = requests.get(url, timeout=10)
+        
+        print(f"URL: {url}")
+        print(f"Status: {response.status_code}")
+        
+        if response.status_code == 200:
+            data = response.json()
+            print(f"Response: {json.dumps(data, indent=2)}")
+            
+            # For a salon that has never paid, expect:
+            # is_premium=false, status="free", expiry_date=null, subscription=null, plan object present
+            
+            if data.get("is_premium") != False:
+                print_test("TEST B", "FAIL", f"Expected is_premium=false, got {data.get('is_premium')}")
+                return False
+            
+            if data.get("status") != "free":
+                print_test("TEST B", "FAIL", f"Expected status='free', got '{data.get('status')}'")
+                return False
+            
+            if data.get("expiry_date") is not None:
+                print_test("TEST B", "FAIL", f"Expected expiry_date=null, got {data.get('expiry_date')}")
+                return False
+            
+            if data.get("subscription") is not None:
+                print_test("TEST B", "FAIL", f"Expected subscription=null, got {data.get('subscription')}")
+                return False
+            
+            if "plan" not in data or not isinstance(data.get("plan"), dict):
+                print_test("TEST B", "FAIL", f"Expected plan object, got {data.get('plan')}")
+                return False
+            
+            print_test("TEST B", "PASS", "Subscription status correct for free plan")
+            return True
+        else:
+            print_test("TEST B", "FAIL", f"Expected 200, got {response.status_code}: {response.text}")
+            return False
+    except Exception as e:
+        print_test("TEST B", "FAIL", f"Exception: {e}")
+        return False
+
+
+def test_c_create_order():
+    """C) POST /api/salons/{salon_id}/subscription/create-order"""
+    print_section("TEST C: POST /api/salons/{salon_id}/subscription/create-order")
+    
+    try:
+        url = f"{BACKEND_URL}/salons/{salon_id}/subscription/create-order"
+        response = requests.post(url, json={}, headers=headers, timeout=15)
+        
+        print(f"URL: {url}")
+        print(f"Status: {response.status_code}")
+        
+        if response.status_code == 200:
+            data = response.json()
+            print(f"Response: {json.dumps(data, indent=2)}")
+            
+            # Verify required fields
+            required_fields = ["order_id", "payment_session_id", "amount", "currency", "plan", "subscription_id", "cashfree_env"]
+            missing_fields = [f for f in required_fields if f not in data]
+            
+            if missing_fields:
+                print_test("TEST C", "FAIL", f"Missing fields: {missing_fields}")
+                return False
+            
+            # Verify values
+            if not data.get("order_id", "").startswith("SH-"):
+                print_test("TEST C", "FAIL", f"Expected order_id to start with 'SH-', got '{data.get('order_id')}'")
+                return False
+            
+            if not data.get("payment_session_id"):
+                print_test("TEST C", "FAIL", f"Expected non-empty payment_session_id")
+                return False
+            
+            if data.get("amount") != 499.0:
+                print_test("TEST C", "FAIL", f"Expected amount=499.0, got {data.get('amount')}")
+                return False
+            
+            if data.get("currency") != "INR":
+                print_test("TEST C", "FAIL", f"Expected currency='INR', got '{data.get('currency')}'")
+                return False
+            
+            if data.get("cashfree_env") != "PROD":
+                print_test("TEST C", "FAIL", f"Expected cashfree_env='PROD', got '{data.get('cashfree_env')}'")
+                return False
+            
+            # Verify transaction was created - check via transactions endpoint
+            order_id = data.get("order_id")
+            print(f"\n   Verifying transaction record for order_id: {order_id}")
+            
+            tx_url = f"{BACKEND_URL}/salons/{salon_id}/subscription/transactions"
+            tx_response = requests.get(tx_url, headers=headers, timeout=10)
+            
+            if tx_response.status_code == 200:
+                transactions = tx_response.json()
+                print(f"   Found {len(transactions)} transaction(s)")
+                
+                # Find the transaction for this order
+                matching_tx = None
+                for tx in transactions:
+                    if tx.get("gateway_order_id") == order_id:
+                        matching_tx = tx
+                        break
+                
+                if matching_tx:
+                    print(f"   ✅ Transaction found with payment_status: {matching_tx.get('payment_status')}")
+                    if matching_tx.get("payment_status") != "pending":
+                        print_test("TEST C", "FAIL", f"Expected transaction payment_status='pending', got '{matching_tx.get('payment_status')}'")
+                        return False
+                else:
+                    print_test("TEST C", "FAIL", f"Transaction not found for order_id {order_id}")
+                    return False
+            else:
+                print(f"   ⚠️  Could not verify transaction (status {tx_response.status_code})")
+            
+            print_test("TEST C", "PASS", f"Order created successfully: {order_id}")
+            
+            # Store order_id for test D
+            global created_order_id
+            created_order_id = order_id
+            
+            return True
+        else:
+            print_test("TEST C", "FAIL", f"Expected 200, got {response.status_code}: {response.text}")
+            return False
+    except Exception as e:
+        print_test("TEST C", "FAIL", f"Exception: {e}")
+        return False
+
+
+def test_d_verify_payment():
+    """D) POST /api/salons/{salon_id}/subscription/verify-payment"""
+    print_section("TEST D: POST /api/salons/{salon_id}/subscription/verify-payment")
+    
+    if not created_order_id:
+        print_test("TEST D", "SKIP", "No order_id from test C")
+        return False
+    
+    try:
+        url = f"{BACKEND_URL}/salons/{salon_id}/subscription/verify-payment"
+        payload = {"order_id": created_order_id}
+        response = requests.post(url, json=payload, headers=headers, timeout=15)
+        
+        print(f"URL: {url}")
+        print(f"Payload: {json.dumps(payload)}")
+        print(f"Status: {response.status_code}")
+        
+        if response.status_code == 200:
+            data = response.json()
+            print(f"Response: {json.dumps(data, indent=2)}")
+            
+            # For an unpaid order, expect success=false and status in ("pending", "payment_failed")
+            if data.get("success") != False:
+                print_test("TEST D", "FAIL", f"Expected success=false, got {data.get('success')}")
+                return False
+            
+            status = data.get("status")
+            if status not in ("pending", "payment_failed"):
+                print_test("TEST D", "FAIL", f"Expected status in ('pending', 'payment_failed'), got '{status}'")
+                return False
+            
+            print_test("TEST D", "PASS", f"Verify payment returned success=false, status='{status}' (expected for unpaid order)")
+            return True
+        else:
+            print_test("TEST D", "FAIL", f"Expected 200, got {response.status_code}: {response.text}")
+            return False
+    except Exception as e:
+        print_test("TEST D", "FAIL", f"Exception: {e}")
+        return False
+
+
+def test_e_paywall_branches():
+    """E) PAYWALL - branches (POST /api/salons/{salon_id}/branches)"""
+    print_section("TEST E: PAYWALL - POST /api/salons/{salon_id}/branches")
+    
+    try:
+        url = f"{BACKEND_URL}/salons/{salon_id}/branches"
+        payload = {
+            "branch_name": "Test Branch",
+            "branch_code": "TST",
+            "city": "Bangalore"
+        }
+        response = requests.post(url, json=payload, headers=headers, timeout=10)
+        
+        print(f"URL: {url}")
+        print(f"Payload: {json.dumps(payload)}")
+        print(f"Status: {response.status_code}")
+        
+        if response.status_code == 402:
+            data = response.json()
+            print(f"Response: {json.dumps(data, indent=2)}")
+            
+            # Verify the error structure
+            detail = data.get("detail", {})
+            
+            if detail.get("error") != "subscription_required":
+                print_test("TEST E", "FAIL", f"Expected error='subscription_required', got '{detail.get('error')}'")
+                return False
+            
+            if detail.get("limit_type") != "max_branches":
+                print_test("TEST E", "FAIL", f"Expected limit_type='max_branches', got '{detail.get('limit_type')}'")
+                return False
+            
+            if not isinstance(detail.get("current_count"), int) or detail.get("current_count") < 1:
+                print_test("TEST E", "FAIL", f"Expected current_count >= 1, got {detail.get('current_count')}")
+                return False
+            
+            if detail.get("max_allowed") != 1:
+                print_test("TEST E", "FAIL", f"Expected max_allowed=1, got {detail.get('max_allowed')}")
+                return False
+            
+            if detail.get("plan_price") != 499.0:
+                print_test("TEST E", "FAIL", f"Expected plan_price=499.0, got {detail.get('plan_price')}")
+                return False
+            
+            if detail.get("plan_name") != "SalonHub Pro":
+                print_test("TEST E", "FAIL", f"Expected plan_name='SalonHub Pro', got '{detail.get('plan_name')}'")
+                return False
+            
+            if not detail.get("message"):
+                print_test("TEST E", "FAIL", f"Expected non-empty message")
+                return False
+            
+            print_test("TEST E", "PASS", f"Paywall correctly blocked branch creation (current: {detail.get('current_count')}, max: {detail.get('max_allowed')})")
+            return True
+        else:
+            print_test("TEST E", "FAIL", f"Expected 402, got {response.status_code}: {response.text}")
+            return False
+    except Exception as e:
+        print_test("TEST E", "FAIL", f"Exception: {e}")
+        return False
+
+
+def test_f_paywall_staff():
+    """F) PAYWALL - staff/barbers (POST /api/salons/{salon_id}/barbers)"""
+    print_section("TEST F: PAYWALL - POST /api/salons/{salon_id}/barbers")
+    
+    try:
+        # First, check current barber count
+        barbers_url = f"{BACKEND_URL}/salons/{salon_id}/barbers"
+        barbers_response = requests.get(barbers_url, timeout=10)
+        
+        if barbers_response.status_code == 200:
+            barbers = barbers_response.json()
+            active_barbers = [b for b in barbers if b.get("is_active") == True]
+            print(f"Current active barbers: {len(active_barbers)}")
+            
+            if len(active_barbers) < 1:
+                print_test("TEST F", "SKIP", "Need at least 1 active barber for paywall test")
+                return False
+        
+        # Now try to add a new barber
+        url = f"{BACKEND_URL}/salons/{salon_id}/barbers"
+        payload = {
+            "name": "TestBarber",
+            "experience": 3,
+            "category": "junior",
+            "mobile": "+919999999999",
+            "salon_id": salon_id
+        }
+        response = requests.post(url, json=payload, headers=headers, timeout=10)
+        
+        print(f"URL: {url}")
+        print(f"Payload: {json.dumps(payload)}")
+        print(f"Status: {response.status_code}")
+        
+        if response.status_code == 402:
+            data = response.json()
+            print(f"Response: {json.dumps(data, indent=2)}")
+            
+            # Verify the error structure
+            detail = data.get("detail", {})
+            
+            if detail.get("error") != "subscription_required":
+                print_test("TEST F", "FAIL", f"Expected error='subscription_required', got '{detail.get('error')}'")
+                return False
+            
+            if detail.get("limit_type") != "max_staff":
+                print_test("TEST F", "FAIL", f"Expected limit_type='max_staff', got '{detail.get('limit_type')}'")
+                return False
+            
+            if not isinstance(detail.get("current_count"), int) or detail.get("current_count") < 1:
+                print_test("TEST F", "FAIL", f"Expected current_count >= 1, got {detail.get('current_count')}")
+                return False
+            
+            if detail.get("max_allowed") != 1:
+                print_test("TEST F", "FAIL", f"Expected max_allowed=1, got {detail.get('max_allowed')}")
+                return False
+            
+            if detail.get("plan_price") != 499.0:
+                print_test("TEST F", "FAIL", f"Expected plan_price=499.0, got {detail.get('plan_price')}")
+                return False
+            
+            if detail.get("plan_name") != "SalonHub Pro":
+                print_test("TEST F", "FAIL", f"Expected plan_name='SalonHub Pro', got '{detail.get('plan_name')}'")
+                return False
+            
+            if not detail.get("message"):
+                print_test("TEST F", "FAIL", f"Expected non-empty message")
+                return False
+            
+            print_test("TEST F", "PASS", f"Paywall correctly blocked staff creation (current: {detail.get('current_count')}, max: {detail.get('max_allowed')})")
+            return True
+        else:
+            print_test("TEST F", "FAIL", f"Expected 402, got {response.status_code}: {response.text}")
+            return False
+    except Exception as e:
+        print_test("TEST F", "FAIL", f"Exception: {e}")
+        return False
+
+
+def test_g_webhook():
+    """G) WEBHOOK (POST /api/subscriptions/webhook)"""
+    print_section("TEST G: POST /api/subscriptions/webhook")
+    
+    try:
+        url = f"{BACKEND_URL}/subscriptions/webhook"
+        payload = {"data": {"order": {"order_id": "FAKE"}}}
+        # No signature headers
+        response = requests.post(url, json=payload, timeout=10)
+        
+        print(f"URL: {url}")
+        print(f"Payload: {json.dumps(payload)}")
+        print(f"Status: {response.status_code}")
+        
+        if response.status_code == 200:
+            data = response.json()
+            print(f"Response: {json.dumps(data, indent=2)}")
+            
+            # Expect received: true, verified: false
+            if data.get("received") != True:
+                print_test("TEST G", "FAIL", f"Expected received=true, got {data.get('received')}")
+                return False
+            
+            if data.get("verified") != False:
+                print_test("TEST G", "FAIL", f"Expected verified=false, got {data.get('verified')}")
+                return False
+            
+            print_test("TEST G", "PASS", "Webhook endpoint handled invalid signature correctly")
+            return True
+        else:
+            print_test("TEST G", "FAIL", f"Expected 200, got {response.status_code}: {response.text}")
+            return False
+    except Exception as e:
+        print_test("TEST G", "FAIL", f"Exception: {e}")
+        return False
+
+
+def test_h_admin_plan_update():
+    """H) ADMIN PLAN UPDATE (PUT /api/admin/subscription-plans/{plan_id})"""
+    print_section("TEST H: PUT /api/admin/subscription-plans/{plan_id}")
+    
+    try:
+        # First, get the active plan to get its ID
+        plan_url = f"{BACKEND_URL}/subscription-plans/active"
+        plan_response = requests.get(plan_url, timeout=10)
+        
+        if plan_response.status_code != 200:
+            print_test("TEST H", "FAIL", f"Could not get active plan: {plan_response.status_code}")
+            return False
+        
+        plan = plan_response.json()
+        plan_id = plan.get("id")
+        print(f"Active plan ID: {plan_id}")
+        
+        # Update price to 599
+        url = f"{BACKEND_URL}/admin/subscription-plans/{plan_id}"
+        payload = {"price": 599}
+        response = requests.put(url, json=payload, headers=headers, timeout=10)
+        
+        print(f"\nURL: {url}")
+        print(f"Payload: {json.dumps(payload)}")
+        print(f"Status: {response.status_code}")
+        
+        if response.status_code == 200:
+            data = response.json()
+            print(f"Response: {json.dumps(data, indent=2)}")
+            
+            if data.get("price") != 599.0:
+                print_test("TEST H", "FAIL", f"Expected price=599.0, got {data.get('price')}")
+                return False
+            
+            print(f"✅ Price updated to 599")
+            
+            # Reset price to 499
+            print(f"\nResetting price to 499...")
+            reset_payload = {"price": 499}
+            reset_response = requests.put(url, json=reset_payload, headers=headers, timeout=10)
+            
+            if reset_response.status_code == 200:
+                reset_data = reset_response.json()
+                print(f"Reset response: {json.dumps(reset_data, indent=2)}")
+                
+                if reset_data.get("price") != 499.0:
+                    print_test("TEST H", "FAIL", f"Expected reset price=499.0, got {reset_data.get('price')}")
+                    return False
+                
+                print(f"✅ Price reset to 499")
+                print_test("TEST H", "PASS", "Admin plan update working correctly")
+                return True
+            else:
+                print_test("TEST H", "FAIL", f"Reset failed with status {reset_response.status_code}: {reset_response.text}")
+                return False
+        else:
+            print_test("TEST H", "FAIL", f"Expected 200, got {response.status_code}: {response.text}")
+            return False
+    except Exception as e:
+        print_test("TEST H", "FAIL", f"Exception: {e}")
+        return False
+
+
+def main():
+    """Run all tests."""
+    print("\n" + "=" * 80)
+    print("  SALONHUB PRO SUBSCRIPTION SYSTEM - BACKEND TESTING")
+    print("=" * 80)
+    
+    # Login first
+    if not login():
+        print("\n❌ AUTHENTICATION FAILED - Cannot proceed with tests")
+        sys.exit(1)
+    
+    # Run all tests
+    results = {}
+    
+    results["A"] = test_a_get_active_plan()
+    results["B"] = test_b_subscription_status()
+    results["C"] = test_c_create_order()
+    results["D"] = test_d_verify_payment()
+    results["E"] = test_e_paywall_branches()
+    results["F"] = test_f_paywall_staff()
+    results["G"] = test_g_webhook()
+    results["H"] = test_h_admin_plan_update()
+    
+    # Summary
+    print_section("TEST SUMMARY")
+    passed = sum(1 for v in results.values() if v)
+    total = len(results)
+    
+    for test, result in results.items():
+        status = "✅ PASS" if result else "❌ FAIL"
+        print(f"  Test {test}: {status}")
+    
+    print(f"\n  Total: {passed}/{total} tests passed")
+    
+    if passed == total:
+        print("\n🎉 ALL TESTS PASSED!")
+        sys.exit(0)
+    else:
+        print(f"\n⚠️  {total - passed} test(s) failed")
+        sys.exit(1)
+
+
+# Global variable to store order_id from test C
+created_order_id = None
+
+if __name__ == "__main__":
+    main()

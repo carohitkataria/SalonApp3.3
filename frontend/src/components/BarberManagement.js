@@ -15,6 +15,7 @@ import {
 import { motion, AnimatePresence } from 'framer-motion';
 import { useAuth } from '@/contexts/AuthContext';
 import { useBranch } from '@/contexts/BranchContext';
+import { useSubscription, parseSubscriptionError } from '@/contexts/SubscriptionContext';
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
 const API = `${BACKEND_URL}/api`;
@@ -42,6 +43,7 @@ export default function BarberManagement({ salonId, getAuthHeaders }) {
   const navigate = useNavigate();
   const { isAdmin, isBranchManager, getSalonUserHeaders } = useAuth();
   const { branches, refreshBranches } = useBranch();
+  const { openPaywall, isPremium } = useSubscription();
   const [barbers, setBarbers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showAddForm, setShowAddForm] = useState(false);
@@ -199,6 +201,12 @@ export default function BarberManagement({ salonId, getAuthHeaders }) {
       setShowAddForm(false);
       toast.success('Barber added successfully');
     } catch (error) {
+      const subErr = parseSubscriptionError(error);
+      if (subErr) {
+        setShowAddForm(false);
+        openPaywall(subErr);
+        return;
+      }
       toast.error(error.response?.data?.detail || 'Failed to add barber');
     }
   };
@@ -247,7 +255,18 @@ export default function BarberManagement({ salonId, getAuthHeaders }) {
           Staff Management
         </h2>
         <Button 
-          onClick={() => setShowAddForm(!showAddForm)}
+          onClick={() => {
+            // Pre-emptive paywall: free plan + already 1 active staff blocks add
+            const activeCount = barbers.filter(b => b.is_active).length;
+            if (!isPremium && activeCount >= 1) {
+              openPaywall({
+                limit_type: 'max_staff',
+                message: 'Free plan allows only 1 staff member. Upgrade to SalonHub Pro for unlimited staff.',
+              });
+              return;
+            }
+            setShowAddForm(!showAddForm);
+          }}
           className="bg-gold text-black hover:bg-gold/90"
           data-testid="add-barber-btn"
         >
