@@ -350,7 +350,8 @@ class Barber(BaseModel):
     last_working_date: Optional[str] = None  # If set + today > this date, barber is hidden from customers
     leave_dates: List[str] = []  # YYYY-MM-DD list; barber on leave on those days
     compensation: Optional[float] = None
-    documents: List[str] = []  # URLs to uploaded documents
+    documents: List[str] = []  # URLs to uploaded documents (legacy)
+    staff_documents: List[Dict[str, Any]] = []  # Structured docs: {id, doc_type, label, file_data, mime_type, file_name, size_kb, uploaded_at}
     # Customer-view-only flag: True when this barber is on leave for the requested date.
     # Set by GET /salons/{id}/barbers?customer_view=true&date=YYYY-MM-DD so the UI
     # can render the staff card greyed-out with an "On Leave" tag.
@@ -3921,14 +3922,191 @@ async def update_barber(barber_id: str, barber_update: BarberUpdate, current_use
     return Barber(**updated)
 
 @api_router.delete("/barbers/{barber_id}")
-async def delete_barber(barber_id: str, current_salon=Depends(get_current_salon)):
-    """Soft delete barber"""
+async def delete_barber(
+    barber_id: str,
+    current_user=Depends(get_current_salon_user),
+):
+    """
+    Hard delete a staff member.
+
+    Removes the barber document and all operational data linked to them
+    (services mapping, attendance overrides, branch transfers, ratings,
+    notification settings, salon_user login access).
+
+    PRESERVES financial history: financial_transactions, salary_records,
+    incentive_payouts — for audit/accounting purposes.
+    """
+    if current_user.get("role") not in ("salon", "salon_admin"):
+        raise HTTPException(status_code=403, detail="Admin access required to delete staff")
+
     existing = await db.barbers.find_one({"id": barber_id}, {"_id": 0})
     if not existing:
         raise HTTPException(status_code=404, detail="Barber not found")
-    
-    await db.barbers.update_one({"id": barber_id}, {"$set": {"is_active": False}})
-    return {"message": "Barber deleted"}
+
+    salon_id = existing.get("salon_id")
+    _check_salon_admin_for_salon(current_user, salon_id)
+
+    # Aggregate counts of preserved items for the response (for transparency)
+    preserved = {
+        "financial_transactions": await db.financial_transactions.count_documents(
+            {"barber_id": barber_id}
+        ),
+        "salary_records": await db.salary_records.count_documents(
+            {"barber_id": barber_id}
+        ),
+        "incentive_payouts": await db.incentive_payouts.count_documents(
+            {"barber_id": barber_id}
+        ),
+    }
+
+    # Hard-delete the barber and operational data
+    await db.barbers.delete_one({"id": barber_id})
+    await db.barber_services.delete_many({"barber_id": barber_id})
+    await db.staff_branch_transfers.delete_many({"barber_id": barber_id})
+    await db.attendance.delete_many({"barber_id": barber_id})
+    await db.notifications.delete_many({"barber_id": barber_id})
+    await db.ratings.delete_many({"barber_id": barber_id})
+    # Free up tokens that referenced this barber so customer queue stays clean
+    await db.tokens.delete_many({"barber_id": barber_id, "status": {"$in": ["waiting", "in_progress"]}})
+
+    # Remove staff login access (salon_user records linked to this barber)
+    login_removed = await db.salon_users.delete_many({"barber_id": barber_id})
+
+    # Anonymize barber_id references in preserved financial collections so future
+    # joins don't blow up (we keep the row but null out the link).
+    await db.financial_transactions.update_many(
+        {"barber_id": barber_id},
+        {"$set": {"barber_id": None, "barber_name_snapshot": existing.get("name")}},
+    )
+    await db.salary_records.update_many(
+        {"barber_id": barber_id},
+        {"$set": {"barber_id": None, "barber_name_snapshot": existing.get("name")}},
+    )
+    await db.incentive_payouts.update_many(
+        {"barber_id": barber_id},
+        {"$set": {"barber_id": None, "barber_name_snapshot": existing.get("name")}},
+    )
+
+    return {
+        "message": "Staff deleted permanently",
+        "barber_id": barber_id,
+        "barber_name": existing.get("name"),
+        "login_access_removed": login_removed.deleted_count > 0,
+        "preserved_records": preserved,
+    }
+
+
+# ============ STAFF DOCUMENTS (Aadhar / PAN / Photo / etc) ============
+
+class StaffDocumentUpload(BaseModel):
+    doc_type: str  # 'aadhar_front' | 'aadhar_back' | 'pan' | 'photo' | 'other'
+    label: Optional[str] = None  # custom label, e.g., for "other"
+    file_data: str  # base64-encoded data URL or raw base64
+    mime_type: Optional[str] = None
+    file_name: Optional[str] = None
+
+
+def _doc_size_kb(data: str) -> int:
+    """Estimate base64 payload size in KB."""
+    if not data:
+        return 0
+    payload = data.split(",", 1)[1] if "," in data else data
+    return int(len(payload) * 3 / 4 / 1024)
+
+
+@api_router.get("/barbers/{barber_id}/documents")
+async def list_staff_documents(
+    barber_id: str, current_user=Depends(get_current_salon_user)
+):
+    """List documents (without file_data — to keep payload small)."""
+    barber = await db.barbers.find_one({"id": barber_id}, {"_id": 0})
+    if not barber:
+        raise HTTPException(status_code=404, detail="Barber not found")
+    _check_salon_admin_for_salon(current_user, barber.get("salon_id"))
+    docs = barber.get("staff_documents") or []
+    summary = [
+        {
+            "id": d.get("id"),
+            "doc_type": d.get("doc_type"),
+            "label": d.get("label"),
+            "file_name": d.get("file_name"),
+            "mime_type": d.get("mime_type"),
+            "size_kb": d.get("size_kb"),
+            "uploaded_at": d.get("uploaded_at"),
+        }
+        for d in docs
+    ]
+    return {"barber_id": barber_id, "documents": summary}
+
+
+@api_router.get("/barbers/{barber_id}/documents/{doc_id}")
+async def get_staff_document(
+    barber_id: str, doc_id: str, current_user=Depends(get_current_salon_user)
+):
+    """Return a single document with its file_data."""
+    barber = await db.barbers.find_one({"id": barber_id}, {"_id": 0})
+    if not barber:
+        raise HTTPException(status_code=404, detail="Barber not found")
+    _check_salon_admin_for_salon(current_user, barber.get("salon_id"))
+    docs = barber.get("staff_documents") or []
+    doc = next((d for d in docs if d.get("id") == doc_id), None)
+    if not doc:
+        raise HTTPException(status_code=404, detail="Document not found")
+    return doc
+
+
+@api_router.post("/barbers/{barber_id}/documents")
+async def upload_staff_document(
+    barber_id: str,
+    payload: StaffDocumentUpload,
+    current_user=Depends(get_current_salon_user),
+):
+    """Add a new document for a staff member (base64 inline)."""
+    barber = await db.barbers.find_one({"id": barber_id}, {"_id": 0})
+    if not barber:
+        raise HTTPException(status_code=404, detail="Barber not found")
+    _check_salon_admin_for_salon(current_user, barber.get("salon_id"))
+
+    # Size guard (keep mongo doc reasonably small ~10MB total per barber)
+    size_kb = _doc_size_kb(payload.file_data)
+    if size_kb > 10 * 1024:  # 10MB per file
+        raise HTTPException(status_code=400, detail="File too large (max 10 MB)")
+
+    doc = {
+        "id": str(uuid.uuid4()),
+        "doc_type": payload.doc_type,
+        "label": payload.label or payload.doc_type,
+        "file_data": payload.file_data,
+        "mime_type": payload.mime_type,
+        "file_name": payload.file_name,
+        "size_kb": size_kb,
+        "uploaded_at": datetime.now(timezone.utc).isoformat(),
+    }
+    await db.barbers.update_one(
+        {"id": barber_id},
+        {"$push": {"staff_documents": doc}},
+    )
+    summary = {k: v for k, v in doc.items() if k != "file_data"}
+    return {"document": summary}
+
+
+@api_router.delete("/barbers/{barber_id}/documents/{doc_id}")
+async def delete_staff_document(
+    barber_id: str, doc_id: str, current_user=Depends(get_current_salon_user)
+):
+    """Remove a document from a staff member."""
+    barber = await db.barbers.find_one({"id": barber_id}, {"_id": 0})
+    if not barber:
+        raise HTTPException(status_code=404, detail="Barber not found")
+    _check_salon_admin_for_salon(current_user, barber.get("salon_id"))
+
+    res = await db.barbers.update_one(
+        {"id": barber_id},
+        {"$pull": {"staff_documents": {"id": doc_id}}},
+    )
+    if res.modified_count == 0:
+        raise HTTPException(status_code=404, detail="Document not found")
+    return {"message": "Document removed", "doc_id": doc_id}
 
 @api_router.get("/barbers/{barber_id}/services")
 async def get_barber_services(barber_id: str):

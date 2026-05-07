@@ -10,7 +10,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '
 import { toast } from 'sonner';
 import GenderBadge from '@/components/GenderBadge';
 import { 
-  User, Plus, Save, ArrowRightLeft, Loader2, X
+  User, Plus, Save, ArrowRightLeft, Loader2, X, ChevronDown, ChevronUp
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useAuth } from '@/contexts/AuthContext';
@@ -47,6 +47,20 @@ export default function BarberManagement({ salonId, getAuthHeaders }) {
   const [barbers, setBarbers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showAddForm, setShowAddForm] = useState(false);
+  const [inactiveExpanded, setInactiveExpanded] = useState(false);
+
+  // Helper: classify a barber as Active or Inactive
+  // Inactive when: is_active=false OR last_working_date is set and < today
+  const isInactive = (b) => {
+    if (b.is_active === false) return true;
+    const lwd = b.last_working_date;
+    if (!lwd) return false;
+    const today = new Date();
+    const todayStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+    return lwd < todayStr;
+  };
+  const activeBarbers = barbers.filter((b) => !isInactive(b));
+  const inactiveBarbers = barbers.filter(isInactive);
 
   // Staff transfer dialog state
   const [transferStaff, setTransferStaff] = useState(null);
@@ -257,8 +271,8 @@ export default function BarberManagement({ salonId, getAuthHeaders }) {
         <Button 
           onClick={() => {
             // Pre-emptive paywall: free plan + already 1 active staff blocks add
-            const activeCount = barbers.filter(b => b.is_active).length;
-            if (!isPremium && activeCount >= 1) {
+            // (uses same active-classification as the list above)
+            if (!isPremium && activeBarbers.length >= 1) {
               openPaywall({
                 limit_type: 'max_staff',
                 message: 'Free plan allows only 1 staff member. Upgrade to SalonHub Pro for unlimited staff.',
@@ -504,12 +518,12 @@ export default function BarberManagement({ salonId, getAuthHeaders }) {
         )}
       </AnimatePresence>
 
-      {/* Staff List */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-        {barbers.map((barber) => (
+      {/* Staff List - split into Active / Inactive sections */}
+      {(() => {
+        const renderCard = (barber, inactive = false) => (
           <motion.div
             key={barber.id}
-            whileHover={{ scale: 1.02 }}
+            whileHover={{ scale: inactive ? 1.0 : 1.02 }}
             onClick={() => navigate(`/salon/staff/${barber.id}`)}
             role="button"
             tabIndex={0}
@@ -519,7 +533,11 @@ export default function BarberManagement({ salonId, getAuthHeaders }) {
                 navigate(`/salon/staff/${barber.id}`);
               }
             }}
-            className="bg-card border border-border rounded-lg p-4 hover:border-gold transition-all cursor-pointer focus:outline-none focus:ring-2 focus:ring-gold"
+            className={`bg-card border rounded-lg p-4 transition-all cursor-pointer focus:outline-none focus:ring-2 focus:ring-gold ${
+              inactive
+                ? 'border-border/40 opacity-70 hover:opacity-100 hover:border-border'
+                : 'border-border hover:border-gold'
+            }`}
           >
             <div className="flex items-start justify-between mb-3">
               <div className="flex-1">
@@ -536,11 +554,15 @@ export default function BarberManagement({ salonId, getAuthHeaders }) {
                   {barber.experience} years experience
                 </p>
               </div>
-              {barber.on_leave && (
+              {inactive ? (
+                <span className="text-xs bg-zinc-500/20 text-zinc-400 px-2 py-1 rounded font-medium">
+                  Inactive
+                </span>
+              ) : barber.on_leave ? (
                 <span className="text-xs bg-yellow-500/20 text-yellow-500 px-2 py-1 rounded">
                   On Leave
                 </span>
-              )}
+              ) : null}
             </div>
 
             <div className="space-y-2 mb-4">
@@ -559,6 +581,11 @@ export default function BarberManagement({ salonId, getAuthHeaders }) {
                   📍 {branches.find(b => b.id === barber.branch_id)?.branch_name || 'Branch'}
                 </p>
               )}
+              {inactive && barber.last_working_date && (
+                <p className="text-xs text-rose-400">
+                  🚫 Last day: {new Date(barber.last_working_date).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}
+                </p>
+              )}
               <div className="flex items-center gap-2">
                 {barber.is_barber ? (
                   <span className="text-xs bg-gold/20 text-gold px-2 py-0.5 rounded">
@@ -573,16 +600,17 @@ export default function BarberManagement({ salonId, getAuthHeaders }) {
             </div>
 
             <div className="flex gap-2">
-              <Button 
+              <Button
                 onClick={(e) => {
                   e.stopPropagation();
                   navigate(`/salon/staff/${barber.id}`);
                 }}
-                className="flex-1 bg-gold text-black hover:bg-gold/90"
+                className={inactive ? 'flex-1' : 'flex-1 bg-gold text-black hover:bg-gold/90'}
+                variant={inactive ? 'outline' : 'default'}
               >
                 View Profile
               </Button>
-              {canTransferStaff && branches.length > 1 && (
+              {!inactive && canTransferStaff && branches.length > 1 && (
                 <Button
                   onClick={(e) => {
                     e.stopPropagation();
@@ -598,16 +626,78 @@ export default function BarberManagement({ salonId, getAuthHeaders }) {
               )}
             </div>
           </motion.div>
-        ))}
+        );
 
-        {barbers.length === 0 && (
-          <div className="col-span-full text-center py-12 bg-card border border-border rounded-lg">
-            <User className="w-16 h-16 text-muted-foreground mx-auto mb-4" />
-            <p className="text-muted-foreground">No staff members added yet</p>
-            <p className="text-sm text-muted-foreground mt-2">Click "Add Staff" to get started</p>
+        return (
+          <div className="space-y-6">
+            {/* Active section */}
+            <div>
+              <div className="flex items-center justify-between mb-3">
+                <h3 className="text-lg font-semibold flex items-center gap-2">
+                  <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
+                  Active Staff
+                  <span className="text-sm text-muted-foreground font-normal">
+                    ({activeBarbers.length})
+                  </span>
+                </h3>
+              </div>
+              {activeBarbers.length === 0 ? (
+                <div className="text-center py-12 bg-card border border-border rounded-lg">
+                  <User className="w-16 h-16 text-muted-foreground mx-auto mb-4" />
+                  <p className="text-muted-foreground">No active staff members</p>
+                  <p className="text-sm text-muted-foreground mt-2">Click "Add Staff" to get started</p>
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                  {activeBarbers.map((b) => renderCard(b, false))}
+                </div>
+              )}
+            </div>
+
+            {/* Inactive section (collapsible, default collapsed) */}
+            {inactiveBarbers.length > 0 && (
+              <div>
+                <button
+                  type="button"
+                  onClick={() => setInactiveExpanded((v) => !v)}
+                  className="w-full flex items-center justify-between mb-3 px-4 py-3 bg-muted/30 hover:bg-muted/50 border border-border rounded-lg transition-colors"
+                  data-testid="toggle-inactive-staff"
+                >
+                  <h3 className="text-lg font-semibold flex items-center gap-2">
+                    <span className="w-2 h-2 rounded-full bg-zinc-500"></span>
+                    Inactive Staff
+                    <span className="text-sm text-muted-foreground font-normal">
+                      ({inactiveBarbers.length})
+                    </span>
+                  </h3>
+                  {inactiveExpanded ? (
+                    <ChevronUp className="w-5 h-5 text-muted-foreground" />
+                  ) : (
+                    <ChevronDown className="w-5 h-5 text-muted-foreground" />
+                  )}
+                </button>
+
+                <AnimatePresence initial={false}>
+                  {inactiveExpanded && (
+                    <motion.div
+                      key="inactive-list"
+                      initial={{ height: 0, opacity: 0 }}
+                      animate={{ height: 'auto', opacity: 1 }}
+                      exit={{ height: 0, opacity: 0 }}
+                      transition={{ duration: 0.2 }}
+                      className="overflow-hidden"
+                    >
+                      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 pt-1 pb-1">
+                        {inactiveBarbers.map((b) => renderCard(b, true))}
+                      </div>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+              </div>
+            )}
           </div>
-        )}
-      </div>
+        );
+      })()}
 
       {/* Staff Transfer Dialog */}
       <Dialog open={!!transferStaff} onOpenChange={(o) => { if (!o) setTransferStaff(null); }}>

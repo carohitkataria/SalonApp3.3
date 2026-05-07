@@ -1,598 +1,481 @@
 #!/usr/bin/env python3
 """
-Backend API Testing Script for SalonHub Pro Subscription System
-Tests all subscription endpoints (A-H) as specified in the review request.
+Backend API Testing Script for Staff Documents and Hard Delete Endpoints
+Tests staff document upload/list/delete and hardened DELETE staff endpoint
 """
+
 import requests
 import json
 import sys
 from typing import Dict, Any, Optional
 
-# Backend URL from environment
-BACKEND_URL = "https://staff-management-pro-2.preview.emergentagent.com/api"
+# Base URL from frontend/.env
+BASE_URL = "https://staff-management-pro-2.preview.emergentagent.com/api"
 
 # Test credentials from /app/memory/test_credentials.md
-LOGIN_ENDPOINT = f"{BACKEND_URL}/salon/users/login"
-LOGIN_CREDENTIALS = {
+ADMIN_CREDENTIALS = {
     "identifier": "admin",
     "password": "salon123"
 }
 
-# Global variables for auth
-access_token: Optional[str] = None
-salon_id: Optional[str] = None
-headers: Dict[str, str] = {}
+# Test results tracking
+test_results = []
 
-
-def print_section(title: str):
-    """Print a formatted section header."""
-    print("\n" + "=" * 80)
-    print(f"  {title}")
-    print("=" * 80)
-
-
-def print_test(test_name: str, status: str, details: str = ""):
-    """Print test result."""
-    status_symbol = "✅" if status == "PASS" else "❌"
-    print(f"\n{status_symbol} {test_name}: {status}")
+def log_test(test_name: str, passed: bool, details: str = ""):
+    """Log test result"""
+    status = "✅ PASS" if passed else "❌ FAIL"
+    result = f"{status} - {test_name}"
     if details:
-        print(f"   {details}")
+        result += f"\n    {details}"
+    test_results.append((test_name, passed, details))
+    print(result)
 
-
-def login() -> bool:
-    """Login and get access token and salon_id."""
-    global access_token, salon_id, headers
-    
-    print_section("AUTHENTICATION")
-    print(f"Logging in with credentials: {LOGIN_CREDENTIALS['identifier']}")
-    
+def make_request(method: str, endpoint: str, headers: Optional[Dict] = None, 
+                 json_data: Optional[Dict] = None, params: Optional[Dict] = None) -> tuple:
+    """Make HTTP request and return (status_code, response_json, error)"""
+    url = f"{BASE_URL}{endpoint}"
     try:
-        response = requests.post(LOGIN_ENDPOINT, json=LOGIN_CREDENTIALS, timeout=10)
-        print(f"Status: {response.status_code}")
-        
-        if response.status_code == 200:
-            data = response.json()
-            access_token = data.get("access_token")
-            salon_id = data.get("salon_id")
-            
-            if access_token and salon_id:
-                headers = {"Authorization": f"Bearer {access_token}"}
-                print(f"✅ Login successful!")
-                print(f"   Salon ID: {salon_id}")
-                print(f"   Token: {access_token[:20]}...")
-                return True
-            else:
-                print(f"❌ Login response missing access_token or salon_id")
-                print(f"   Response: {json.dumps(data, indent=2)}")
-                return False
+        if method == "GET":
+            resp = requests.get(url, headers=headers, params=params, timeout=30)
+        elif method == "POST":
+            resp = requests.post(url, headers=headers, json=json_data, timeout=30)
+        elif method == "PUT":
+            resp = requests.put(url, headers=headers, json=json_data, timeout=30)
+        elif method == "DELETE":
+            resp = requests.delete(url, headers=headers, timeout=30)
         else:
-            print(f"❌ Login failed with status {response.status_code}")
-            print(f"   Response: {response.text}")
-            return False
+            return (0, None, f"Unsupported method: {method}")
+        
+        try:
+            return (resp.status_code, resp.json(), None)
+        except:
+            return (resp.status_code, resp.text, None)
     except Exception as e:
-        print(f"❌ Login error: {e}")
-        return False
+        return (0, None, str(e))
 
-
-def test_a_get_active_plan():
-    """A) GET /api/subscription-plans/active"""
-    print_section("TEST A: GET /api/subscription-plans/active")
+def test_admin_login() -> tuple:
+    """Test A: Admin login and get salon_id + access_token"""
+    print("\n" + "="*80)
+    print("AUTHENTICATION TEST")
+    print("="*80)
     
-    try:
-        url = f"{BACKEND_URL}/subscription-plans/active"
-        response = requests.get(url, timeout=10)
+    status, data, error = make_request("POST", "/salon/users/login", json_data=ADMIN_CREDENTIALS)
+    
+    if error:
+        log_test("Admin Login", False, f"Request failed: {error}")
+        return None, None
+    
+    if status != 200:
+        log_test("Admin Login", False, f"Expected 200, got {status}: {data}")
+        return None, None
+    
+    if not isinstance(data, dict) or "access_token" not in data or "salon_id" not in data:
+        log_test("Admin Login", False, f"Missing access_token or salon_id in response: {data}")
+        return None, None
+    
+    access_token = data["access_token"]
+    salon_id = data["salon_id"]
+    
+    log_test("Admin Login", True, f"salon_id={salon_id}, token received")
+    return salon_id, access_token
+
+def get_active_barber(salon_id: str, auth_headers: Dict) -> Optional[str]:
+    """Get first active barber ID"""
+    print("\n" + "="*80)
+    print("GET ACTIVE BARBER")
+    print("="*80)
+    
+    status, data, error = make_request("GET", f"/salons/{salon_id}/barbers", headers=auth_headers)
+    
+    if error or status != 200:
+        log_test("Get Active Barber", False, f"Failed to get barbers: {status} {data}")
+        return None
+    
+    if not isinstance(data, list):
+        log_test("Get Active Barber", False, f"Expected list, got: {type(data)}")
+        return None
+    
+    # Find first active barber
+    for barber in data:
+        if barber.get("is_active") == True:
+            barber_id = barber.get("id")
+            barber_name = barber.get("name", "Unknown")
+            log_test("Get Active Barber", True, f"Found barber: {barber_name} (ID: {barber_id})")
+            return barber_id
+    
+    log_test("Get Active Barber", False, "No active barbers found")
+    return None
+
+def test_staff_documents(barber_id: str, auth_headers: Dict):
+    """Test A: Staff Documents endpoints"""
+    print("\n" + "="*80)
+    print("A) STAFF DOCUMENTS TESTS")
+    print("="*80)
+    
+    # A1) GET /api/barbers/{barber_id}/documents - expect empty list initially
+    print("\nA1) GET /api/barbers/{barber_id}/documents (list without file_data)")
+    status, data, error = make_request("GET", f"/barbers/{barber_id}/documents", headers=auth_headers)
+    
+    if error:
+        log_test("A1: List documents", False, f"Request failed: {error}")
+        return None
+    
+    if status != 200:
+        log_test("A1: List documents", False, f"Expected 200, got {status}: {data}")
+        return None
+    
+    if not isinstance(data, dict) or "barber_id" not in data or "documents" not in data:
+        log_test("A1: List documents", False, f"Missing barber_id or documents in response: {data}")
+        return None
+    
+    if data["barber_id"] != barber_id:
+        log_test("A1: List documents", False, f"barber_id mismatch: expected {barber_id}, got {data['barber_id']}")
+        return None
+    
+    if not isinstance(data["documents"], list):
+        log_test("A1: List documents", False, f"documents should be a list, got: {type(data['documents'])}")
+        return None
+    
+    initial_doc_count = len(data["documents"])
+    log_test("A1: List documents", True, f"Returns {barber_id=}, documents list with {initial_doc_count} items")
+    
+    # A2) POST /api/barbers/{barber_id}/documents - upload document
+    print("\nA2) POST /api/barbers/{barber_id}/documents (upload)")
+    
+    # Small 1x1 PNG base64 (valid image)
+    test_file_data = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNgAAIAAAUAAen63NgAAAAASUVORK5CYII="
+    
+    upload_body = {
+        "doc_type": "aadhar_front",
+        "label": "Aadhar (Front)",
+        "file_data": test_file_data,
+        "mime_type": "image/png",
+        "file_name": "test.png"
+    }
+    
+    status, data, error = make_request("POST", f"/barbers/{barber_id}/documents", 
+                                       headers=auth_headers, json_data=upload_body)
+    
+    if error:
+        log_test("A2: Upload document", False, f"Request failed: {error}")
+        return None
+    
+    if status != 200:
+        log_test("A2: Upload document", False, f"Expected 200, got {status}: {data}")
+        return None
+    
+    # Handle response wrapper
+    if isinstance(data, dict) and "document" in data:
+        data = data["document"]
+    
+    # Verify response structure
+    required_fields = ["id", "doc_type", "label", "file_name", "mime_type", "size_kb", "uploaded_at"]
+    missing_fields = [f for f in required_fields if f not in data]
+    
+    if missing_fields:
+        log_test("A2: Upload document", False, f"Missing required fields: {missing_fields}")
+        return None
+    
+    # Verify file_data is NOT in response
+    if "file_data" in data:
+        log_test("A2: Upload document", False, "file_data should NOT be in upload response")
+        return None
+    
+    # Verify field values
+    if data["doc_type"] != "aadhar_front":
+        log_test("A2: Upload document", False, f"doc_type mismatch: expected 'aadhar_front', got {data['doc_type']}")
+        return None
+    
+    if data["label"] != "Aadhar (Front)":
+        log_test("A2: Upload document", False, f"label mismatch: expected 'Aadhar (Front)', got {data['label']}")
+        return None
+    
+    if data["file_name"] != "test.png":
+        log_test("A2: Upload document", False, f"file_name mismatch: expected 'test.png', got {data['file_name']}")
+        return None
+    
+    if data["mime_type"] != "image/png":
+        log_test("A2: Upload document", False, f"mime_type mismatch: expected 'image/png', got {data['mime_type']}")
+        return None
+    
+    if not isinstance(data["size_kb"], (int, float)) or data["size_kb"] < 0:
+        log_test("A2: Upload document", False, f"size_kb should be >= 0, got {data['size_kb']}")
+        return None
+    
+    doc_id = data["id"]
+    log_test("A2: Upload document", True, 
+             f"Document uploaded: id={doc_id}, doc_type={data['doc_type']}, label={data['label']}, "
+             f"file_name={data['file_name']}, size_kb={data['size_kb']}, file_data NOT in response ✓")
+    
+    # A3) GET /api/barbers/{barber_id}/documents/{doc_id} - get single document WITH file_data
+    print("\nA3) GET /api/barbers/{barber_id}/documents/{doc_id} (get single with file_data)")
+    status, data, error = make_request("GET", f"/barbers/{barber_id}/documents/{doc_id}", headers=auth_headers)
+    
+    if error:
+        log_test("A3: Get single document", False, f"Request failed: {error}")
+        return None
+    
+    if status != 200:
+        log_test("A3: Get single document", False, f"Expected 200, got {status}: {data}")
+        return None
+    
+    # Verify all fields including file_data
+    required_fields_with_data = required_fields + ["file_data"]
+    missing_fields = [f for f in required_fields_with_data if f not in data]
+    
+    if missing_fields:
+        log_test("A3: Get single document", False, f"Missing required fields: {missing_fields}")
+        return None
+    
+    # Verify file_data matches what we uploaded
+    if data["file_data"] != test_file_data:
+        log_test("A3: Get single document", False, "file_data does not match uploaded data")
+        return None
+    
+    log_test("A3: Get single document", True, 
+             f"Document retrieved with file_data: id={data['id']}, file_data matches uploaded ✓")
+    
+    # A4) GET /api/barbers/{barber_id}/documents - verify document is in list
+    print("\nA4) GET /api/barbers/{barber_id}/documents (verify uploaded doc in list)")
+    status, data, error = make_request("GET", f"/barbers/{barber_id}/documents", headers=auth_headers)
+    
+    if error or status != 200:
+        log_test("A4: Verify doc in list", False, f"Failed to list documents: {status} {data}")
+        return None
+    
+    documents = data.get("documents", [])
+    doc_found = any(doc.get("id") == doc_id for doc in documents)
+    
+    if not doc_found:
+        log_test("A4: Verify doc in list", False, f"Uploaded document {doc_id} not found in list")
+        return None
+    
+    log_test("A4: Verify doc in list", True, f"Uploaded document found in list (total: {len(documents)} docs)")
+    
+    # A5) DELETE /api/barbers/{barber_id}/documents/{doc_id}
+    print("\nA5) DELETE /api/barbers/{barber_id}/documents/{doc_id}")
+    status, data, error = make_request("DELETE", f"/barbers/{barber_id}/documents/{doc_id}", headers=auth_headers)
+    
+    if error:
+        log_test("A5: Delete document", False, f"Request failed: {error}")
+        return None
+    
+    if status != 200:
+        log_test("A5: Delete document", False, f"Expected 200, got {status}: {data}")
+        return None
+    
+    if not isinstance(data, dict) or "message" not in data or "doc_id" not in data:
+        log_test("A5: Delete document", False, f"Missing message or doc_id in response: {data}")
+        return None
+    
+    if data["doc_id"] != doc_id:
+        log_test("A5: Delete document", False, f"doc_id mismatch in response: expected {doc_id}, got {data['doc_id']}")
+        return None
+    
+    log_test("A5: Delete document", True, f"Document deleted: {data['message']}, doc_id={data['doc_id']}")
+    
+    # A6) GET /api/barbers/{barber_id}/documents - verify document is removed
+    print("\nA6) GET /api/barbers/{barber_id}/documents (verify doc removed)")
+    status, data, error = make_request("GET", f"/barbers/{barber_id}/documents", headers=auth_headers)
+    
+    if error or status != 200:
+        log_test("A6: Verify doc removed", False, f"Failed to list documents: {status} {data}")
+        return None
+    
+    documents = data.get("documents", [])
+    doc_still_exists = any(doc.get("id") == doc_id for doc in documents)
+    
+    if doc_still_exists:
+        log_test("A6: Verify doc removed", False, f"Document {doc_id} still exists after deletion")
+        return None
+    
+    log_test("A6: Verify doc removed", True, f"Document successfully removed from list (total: {len(documents)} docs)")
+    
+    # A7) GET /api/barbers/{barber_id}/documents WITHOUT auth - expect 401/403
+    print("\nA7) GET /api/barbers/{barber_id}/documents WITHOUT auth (expect 401/403)")
+    status, data, error = make_request("GET", f"/barbers/{barber_id}/documents")
+    
+    if error:
+        log_test("A7: No auth rejection", False, f"Request failed: {error}")
+        return None
+    
+    if status not in [401, 403]:
+        log_test("A7: No auth rejection", False, f"Expected 401 or 403, got {status}: {data}")
+        return None
+    
+    log_test("A7: No auth rejection", True, f"Correctly rejected with {status}")
+    
+    # A8) GET /api/barbers/{barber_id}/documents/non-existent-id - expect 404
+    print("\nA8) GET /api/barbers/{barber_id}/documents/non-existent-id (expect 404)")
+    status, data, error = make_request("GET", f"/barbers/{barber_id}/documents/non-existent-id-xyz", 
+                                       headers=auth_headers)
+    
+    if error:
+        log_test("A8: Not found 404", False, f"Request failed: {error}")
+        return None
+    
+    if status != 404:
+        log_test("A8: Not found 404", False, f"Expected 404, got {status}: {data}")
+        return None
+    
+    if isinstance(data, dict) and "detail" in data:
+        if data["detail"] != "Document not found":
+            log_test("A8: Not found 404", False, f"Expected detail 'Document not found', got: {data['detail']}")
+            return None
+    
+    log_test("A8: Not found 404", True, f"Correctly returned 404 with detail: {data.get('detail', 'N/A')}")
+    
+    return doc_id
+
+def test_hard_delete_staff(salon_id: str, auth_headers: Dict):
+    """Test B: Hard DELETE staff endpoint"""
+    print("\n" + "="*80)
+    print("B) HARD DELETE STAFF TESTS")
+    print("="*80)
+    
+    # B1) Try to create temp barber - expect 402 paywall
+    print("\nB1) POST /api/salons/{salon_id}/barbers (expect 402 paywall)")
+    
+    temp_barber_body = {
+        "name": "TempDeleteMe",
+        "experience": 1,
+        "category": "junior",
+        "mobile": "+919900000000",
+        "salon_id": salon_id
+    }
+    
+    status, data, error = make_request("POST", f"/salons/{salon_id}/barbers", 
+                                       headers=auth_headers, json_data=temp_barber_body)
+    
+    if error:
+        log_test("B1: Create temp barber (paywall)", False, f"Request failed: {error}")
+        return
+    
+    if status == 402:
+        log_test("B1: Create temp barber (paywall)", True, 
+                 f"Correctly blocked by paywall (402): {data.get('detail', 'N/A')}")
+        print("\n⚠️  SKIPPING B2 - Cannot create temp barber due to paywall (expected behavior)")
+    elif status == 200 or status == 201:
+        temp_barber_id = data.get("id")
+        log_test("B1: Create temp barber (paywall)", True, 
+                 f"Temp barber created (no paywall): {temp_barber_id}")
         
-        print(f"URL: {url}")
-        print(f"Status: {response.status_code}")
+        # B2) DELETE the temp barber
+        print("\nB2) DELETE /api/barbers/{temp_barber_id} (delete temp barber)")
+        status, data, error = make_request("DELETE", f"/barbers/{temp_barber_id}", headers=auth_headers)
         
-        if response.status_code == 200:
-            data = response.json()
-            print(f"Response: {json.dumps(data, indent=2)}")
-            
-            # Verify required fields
-            required_fields = ["id", "plan_name", "price", "billing_cycle", "status", "is_default", "features"]
+        if error:
+            log_test("B2: Delete temp barber", False, f"Request failed: {error}")
+        elif status != 200:
+            log_test("B2: Delete temp barber", False, f"Expected 200, got {status}: {data}")
+        else:
+            # Verify response structure
+            required_fields = ["message", "barber_id", "barber_name", "login_access_removed", "preserved_records"]
             missing_fields = [f for f in required_fields if f not in data]
             
             if missing_fields:
-                print_test("TEST A", "FAIL", f"Missing fields: {missing_fields}")
-                return False
-            
-            # Verify values
-            if data.get("plan_name") != "SalonHub Pro":
-                print_test("TEST A", "FAIL", f"Expected plan_name='SalonHub Pro', got '{data.get('plan_name')}'")
-                return False
-            
-            if data.get("price") != 499.0:
-                print_test("TEST A", "FAIL", f"Expected price=499.0, got {data.get('price')}")
-                return False
-            
-            if data.get("billing_cycle") != "monthly":
-                print_test("TEST A", "FAIL", f"Expected billing_cycle='monthly', got '{data.get('billing_cycle')}'")
-                return False
-            
-            if data.get("status") != "active":
-                print_test("TEST A", "FAIL", f"Expected status='active', got '{data.get('status')}'")
-                return False
-            
-            if data.get("is_default") != True:
-                print_test("TEST A", "FAIL", f"Expected is_default=true, got {data.get('is_default')}")
-                return False
-            
-            if not isinstance(data.get("features"), list) or len(data.get("features", [])) == 0:
-                print_test("TEST A", "FAIL", f"Expected non-empty features list, got {data.get('features')}")
-                return False
-            
-            print_test("TEST A", "PASS", "All fields present and correct")
-            return True
-        else:
-            print_test("TEST A", "FAIL", f"Expected 200, got {response.status_code}: {response.text}")
-            return False
-    except Exception as e:
-        print_test("TEST A", "FAIL", f"Exception: {e}")
-        return False
-
-
-def test_b_subscription_status():
-    """B) GET /api/salons/{salon_id}/subscription/status"""
-    print_section("TEST B: GET /api/salons/{salon_id}/subscription/status")
-    
-    try:
-        url = f"{BACKEND_URL}/salons/{salon_id}/subscription/status"
-        response = requests.get(url, timeout=10)
-        
-        print(f"URL: {url}")
-        print(f"Status: {response.status_code}")
-        
-        if response.status_code == 200:
-            data = response.json()
-            print(f"Response: {json.dumps(data, indent=2)}")
-            
-            # For a salon that has never paid, expect:
-            # is_premium=false, status="free", expiry_date=null, subscription=null, plan object present
-            
-            if data.get("is_premium") != False:
-                print_test("TEST B", "FAIL", f"Expected is_premium=false, got {data.get('is_premium')}")
-                return False
-            
-            if data.get("status") != "free":
-                print_test("TEST B", "FAIL", f"Expected status='free', got '{data.get('status')}'")
-                return False
-            
-            if data.get("expiry_date") is not None:
-                print_test("TEST B", "FAIL", f"Expected expiry_date=null, got {data.get('expiry_date')}")
-                return False
-            
-            if data.get("subscription") is not None:
-                print_test("TEST B", "FAIL", f"Expected subscription=null, got {data.get('subscription')}")
-                return False
-            
-            if "plan" not in data or not isinstance(data.get("plan"), dict):
-                print_test("TEST B", "FAIL", f"Expected plan object, got {data.get('plan')}")
-                return False
-            
-            print_test("TEST B", "PASS", "Subscription status correct for free plan")
-            return True
-        else:
-            print_test("TEST B", "FAIL", f"Expected 200, got {response.status_code}: {response.text}")
-            return False
-    except Exception as e:
-        print_test("TEST B", "FAIL", f"Exception: {e}")
-        return False
-
-
-def test_c_create_order():
-    """C) POST /api/salons/{salon_id}/subscription/create-order"""
-    print_section("TEST C: POST /api/salons/{salon_id}/subscription/create-order")
-    
-    try:
-        url = f"{BACKEND_URL}/salons/{salon_id}/subscription/create-order"
-        response = requests.post(url, json={}, headers=headers, timeout=15)
-        
-        print(f"URL: {url}")
-        print(f"Status: {response.status_code}")
-        
-        if response.status_code == 200:
-            data = response.json()
-            print(f"Response: {json.dumps(data, indent=2)}")
-            
-            # Verify required fields
-            required_fields = ["order_id", "payment_session_id", "amount", "currency", "plan", "subscription_id", "cashfree_env"]
-            missing_fields = [f for f in required_fields if f not in data]
-            
-            if missing_fields:
-                print_test("TEST C", "FAIL", f"Missing fields: {missing_fields}")
-                return False
-            
-            # Verify values
-            if not data.get("order_id", "").startswith("SH-"):
-                print_test("TEST C", "FAIL", f"Expected order_id to start with 'SH-', got '{data.get('order_id')}'")
-                return False
-            
-            if not data.get("payment_session_id"):
-                print_test("TEST C", "FAIL", f"Expected non-empty payment_session_id")
-                return False
-            
-            if data.get("amount") != 499.0:
-                print_test("TEST C", "FAIL", f"Expected amount=499.0, got {data.get('amount')}")
-                return False
-            
-            if data.get("currency") != "INR":
-                print_test("TEST C", "FAIL", f"Expected currency='INR', got '{data.get('currency')}'")
-                return False
-            
-            if data.get("cashfree_env") != "PROD":
-                print_test("TEST C", "FAIL", f"Expected cashfree_env='PROD', got '{data.get('cashfree_env')}'")
-                return False
-            
-            # Verify transaction was created - check via transactions endpoint
-            order_id = data.get("order_id")
-            print(f"\n   Verifying transaction record for order_id: {order_id}")
-            
-            tx_url = f"{BACKEND_URL}/salons/{salon_id}/subscription/transactions"
-            tx_response = requests.get(tx_url, headers=headers, timeout=10)
-            
-            if tx_response.status_code == 200:
-                transactions = tx_response.json()
-                print(f"   Found {len(transactions)} transaction(s)")
-                
-                # Find the transaction for this order
-                matching_tx = None
-                for tx in transactions:
-                    if tx.get("gateway_order_id") == order_id:
-                        matching_tx = tx
-                        break
-                
-                if matching_tx:
-                    print(f"   ✅ Transaction found with payment_status: {matching_tx.get('payment_status')}")
-                    if matching_tx.get("payment_status") != "pending":
-                        print_test("TEST C", "FAIL", f"Expected transaction payment_status='pending', got '{matching_tx.get('payment_status')}'")
-                        return False
-                else:
-                    print_test("TEST C", "FAIL", f"Transaction not found for order_id {order_id}")
-                    return False
+                log_test("B2: Delete temp barber", False, f"Missing required fields: {missing_fields}")
             else:
-                print(f"   ⚠️  Could not verify transaction (status {tx_response.status_code})")
-            
-            print_test("TEST C", "PASS", f"Order created successfully: {order_id}")
-            
-            # Store order_id for test D
-            global created_order_id
-            created_order_id = order_id
-            
-            return True
-        else:
-            print_test("TEST C", "FAIL", f"Expected 200, got {response.status_code}: {response.text}")
-            return False
-    except Exception as e:
-        print_test("TEST C", "FAIL", f"Exception: {e}")
-        return False
-
-
-def test_d_verify_payment():
-    """D) POST /api/salons/{salon_id}/subscription/verify-payment"""
-    print_section("TEST D: POST /api/salons/{salon_id}/subscription/verify-payment")
+                preserved = data.get("preserved_records", {})
+                log_test("B2: Delete temp barber", True, 
+                         f"Deleted: {data['barber_name']}, login_access_removed={data['login_access_removed']}, "
+                         f"preserved_records={preserved}")
+    else:
+        log_test("B1: Create temp barber (paywall)", False, 
+                 f"Unexpected status {status}: {data}")
     
-    if not created_order_id:
-        print_test("TEST D", "SKIP", "No order_id from test C")
-        return False
+    # B3) DELETE without auth - expect 401/403
+    print("\nB3) DELETE /api/barbers/dummy-id-123 WITHOUT auth (expect 401/403)")
+    status, data, error = make_request("DELETE", "/barbers/dummy-id-123")
     
-    try:
-        url = f"{BACKEND_URL}/salons/{salon_id}/subscription/verify-payment"
-        payload = {"order_id": created_order_id}
-        response = requests.post(url, json=payload, headers=headers, timeout=15)
-        
-        print(f"URL: {url}")
-        print(f"Payload: {json.dumps(payload)}")
-        print(f"Status: {response.status_code}")
-        
-        if response.status_code == 200:
-            data = response.json()
-            print(f"Response: {json.dumps(data, indent=2)}")
-            
-            # For an unpaid order, expect success=false and status in ("pending", "payment_failed")
-            if data.get("success") != False:
-                print_test("TEST D", "FAIL", f"Expected success=false, got {data.get('success')}")
-                return False
-            
-            status = data.get("status")
-            if status not in ("pending", "payment_failed"):
-                print_test("TEST D", "FAIL", f"Expected status in ('pending', 'payment_failed'), got '{status}'")
-                return False
-            
-            print_test("TEST D", "PASS", f"Verify payment returned success=false, status='{status}' (expected for unpaid order)")
-            return True
-        else:
-            print_test("TEST D", "FAIL", f"Expected 200, got {response.status_code}: {response.text}")
-            return False
-    except Exception as e:
-        print_test("TEST D", "FAIL", f"Exception: {e}")
-        return False
-
-
-def test_e_paywall_branches():
-    """E) PAYWALL - branches (POST /api/salons/{salon_id}/branches)"""
-    print_section("TEST E: PAYWALL - POST /api/salons/{salon_id}/branches")
+    if error:
+        log_test("B3: Delete without auth", False, f"Request failed: {error}")
+    elif status not in [401, 403]:
+        log_test("B3: Delete without auth", False, f"Expected 401 or 403, got {status}: {data}")
+    else:
+        log_test("B3: Delete without auth", True, f"Correctly rejected with {status}")
     
-    try:
-        url = f"{BACKEND_URL}/salons/{salon_id}/branches"
-        payload = {
-            "branch_name": "Test Branch",
-            "branch_code": "TST",
-            "city": "Bangalore"
-        }
-        response = requests.post(url, json=payload, headers=headers, timeout=10)
-        
-        print(f"URL: {url}")
-        print(f"Payload: {json.dumps(payload)}")
-        print(f"Status: {response.status_code}")
-        
-        if response.status_code == 402:
-            data = response.json()
-            print(f"Response: {json.dumps(data, indent=2)}")
-            
-            # Verify the error structure
-            detail = data.get("detail", {})
-            
-            if detail.get("error") != "subscription_required":
-                print_test("TEST E", "FAIL", f"Expected error='subscription_required', got '{detail.get('error')}'")
-                return False
-            
-            if detail.get("limit_type") != "max_branches":
-                print_test("TEST E", "FAIL", f"Expected limit_type='max_branches', got '{detail.get('limit_type')}'")
-                return False
-            
-            if not isinstance(detail.get("current_count"), int) or detail.get("current_count") < 1:
-                print_test("TEST E", "FAIL", f"Expected current_count >= 1, got {detail.get('current_count')}")
-                return False
-            
-            if detail.get("max_allowed") != 1:
-                print_test("TEST E", "FAIL", f"Expected max_allowed=1, got {detail.get('max_allowed')}")
-                return False
-            
-            if detail.get("plan_price") != 499.0:
-                print_test("TEST E", "FAIL", f"Expected plan_price=499.0, got {detail.get('plan_price')}")
-                return False
-            
-            if detail.get("plan_name") != "SalonHub Pro":
-                print_test("TEST E", "FAIL", f"Expected plan_name='SalonHub Pro', got '{detail.get('plan_name')}'")
-                return False
-            
-            if not detail.get("message"):
-                print_test("TEST E", "FAIL", f"Expected non-empty message")
-                return False
-            
-            print_test("TEST E", "PASS", f"Paywall correctly blocked branch creation (current: {detail.get('current_count')}, max: {detail.get('max_allowed')})")
-            return True
-        else:
-            print_test("TEST E", "FAIL", f"Expected 402, got {response.status_code}: {response.text}")
-            return False
-    except Exception as e:
-        print_test("TEST E", "FAIL", f"Exception: {e}")
-        return False
-
-
-def test_f_paywall_staff():
-    """F) PAYWALL - staff/barbers (POST /api/salons/{salon_id}/barbers)"""
-    print_section("TEST F: PAYWALL - POST /api/salons/{salon_id}/barbers")
+    # B4) DELETE non-existent barber - expect 404
+    print("\nB4) DELETE /api/barbers/non-existent-id-xyz WITH auth (expect 404)")
+    status, data, error = make_request("DELETE", "/barbers/non-existent-id-xyz", headers=auth_headers)
     
-    try:
-        # First, check current barber count
-        barbers_url = f"{BACKEND_URL}/salons/{salon_id}/barbers"
-        barbers_response = requests.get(barbers_url, timeout=10)
-        
-        if barbers_response.status_code == 200:
-            barbers = barbers_response.json()
-            active_barbers = [b for b in barbers if b.get("is_active") == True]
-            print(f"Current active barbers: {len(active_barbers)}")
-            
-            if len(active_barbers) < 1:
-                print_test("TEST F", "SKIP", "Need at least 1 active barber for paywall test")
-                return False
-        
-        # Now try to add a new barber
-        url = f"{BACKEND_URL}/salons/{salon_id}/barbers"
-        payload = {
-            "name": "TestBarber",
-            "experience": 3,
-            "category": "junior",
-            "mobile": "+919999999999",
-            "salon_id": salon_id
-        }
-        response = requests.post(url, json=payload, headers=headers, timeout=10)
-        
-        print(f"URL: {url}")
-        print(f"Payload: {json.dumps(payload)}")
-        print(f"Status: {response.status_code}")
-        
-        if response.status_code == 402:
-            data = response.json()
-            print(f"Response: {json.dumps(data, indent=2)}")
-            
-            # Verify the error structure
-            detail = data.get("detail", {})
-            
-            if detail.get("error") != "subscription_required":
-                print_test("TEST F", "FAIL", f"Expected error='subscription_required', got '{detail.get('error')}'")
-                return False
-            
-            if detail.get("limit_type") != "max_staff":
-                print_test("TEST F", "FAIL", f"Expected limit_type='max_staff', got '{detail.get('limit_type')}'")
-                return False
-            
-            if not isinstance(detail.get("current_count"), int) or detail.get("current_count") < 1:
-                print_test("TEST F", "FAIL", f"Expected current_count >= 1, got {detail.get('current_count')}")
-                return False
-            
-            if detail.get("max_allowed") != 1:
-                print_test("TEST F", "FAIL", f"Expected max_allowed=1, got {detail.get('max_allowed')}")
-                return False
-            
-            if detail.get("plan_price") != 499.0:
-                print_test("TEST F", "FAIL", f"Expected plan_price=499.0, got {detail.get('plan_price')}")
-                return False
-            
-            if detail.get("plan_name") != "SalonHub Pro":
-                print_test("TEST F", "FAIL", f"Expected plan_name='SalonHub Pro', got '{detail.get('plan_name')}'")
-                return False
-            
-            if not detail.get("message"):
-                print_test("TEST F", "FAIL", f"Expected non-empty message")
-                return False
-            
-            print_test("TEST F", "PASS", f"Paywall correctly blocked staff creation (current: {detail.get('current_count')}, max: {detail.get('max_allowed')})")
-            return True
-        else:
-            print_test("TEST F", "FAIL", f"Expected 402, got {response.status_code}: {response.text}")
-            return False
-    except Exception as e:
-        print_test("TEST F", "FAIL", f"Exception: {e}")
-        return False
-
-
-def test_g_webhook():
-    """G) WEBHOOK (POST /api/subscriptions/webhook)"""
-    print_section("TEST G: POST /api/subscriptions/webhook")
-    
-    try:
-        url = f"{BACKEND_URL}/subscriptions/webhook"
-        payload = {"data": {"order": {"order_id": "FAKE"}}}
-        # No signature headers
-        response = requests.post(url, json=payload, timeout=10)
-        
-        print(f"URL: {url}")
-        print(f"Payload: {json.dumps(payload)}")
-        print(f"Status: {response.status_code}")
-        
-        if response.status_code == 200:
-            data = response.json()
-            print(f"Response: {json.dumps(data, indent=2)}")
-            
-            # Expect received: true, verified: false
-            if data.get("received") != True:
-                print_test("TEST G", "FAIL", f"Expected received=true, got {data.get('received')}")
-                return False
-            
-            if data.get("verified") != False:
-                print_test("TEST G", "FAIL", f"Expected verified=false, got {data.get('verified')}")
-                return False
-            
-            print_test("TEST G", "PASS", "Webhook endpoint handled invalid signature correctly")
-            return True
-        else:
-            print_test("TEST G", "FAIL", f"Expected 200, got {response.status_code}: {response.text}")
-            return False
-    except Exception as e:
-        print_test("TEST G", "FAIL", f"Exception: {e}")
-        return False
-
-
-def test_h_admin_plan_update():
-    """H) ADMIN PLAN UPDATE (PUT /api/admin/subscription-plans/{plan_id})"""
-    print_section("TEST H: PUT /api/admin/subscription-plans/{plan_id}")
-    
-    try:
-        # First, get the active plan to get its ID
-        plan_url = f"{BACKEND_URL}/subscription-plans/active"
-        plan_response = requests.get(plan_url, timeout=10)
-        
-        if plan_response.status_code != 200:
-            print_test("TEST H", "FAIL", f"Could not get active plan: {plan_response.status_code}")
-            return False
-        
-        plan = plan_response.json()
-        plan_id = plan.get("id")
-        print(f"Active plan ID: {plan_id}")
-        
-        # Update price to 599
-        url = f"{BACKEND_URL}/admin/subscription-plans/{plan_id}"
-        payload = {"price": 599}
-        response = requests.put(url, json=payload, headers=headers, timeout=10)
-        
-        print(f"\nURL: {url}")
-        print(f"Payload: {json.dumps(payload)}")
-        print(f"Status: {response.status_code}")
-        
-        if response.status_code == 200:
-            data = response.json()
-            print(f"Response: {json.dumps(data, indent=2)}")
-            
-            if data.get("price") != 599.0:
-                print_test("TEST H", "FAIL", f"Expected price=599.0, got {data.get('price')}")
-                return False
-            
-            print(f"✅ Price updated to 599")
-            
-            # Reset price to 499
-            print(f"\nResetting price to 499...")
-            reset_payload = {"price": 499}
-            reset_response = requests.put(url, json=reset_payload, headers=headers, timeout=10)
-            
-            if reset_response.status_code == 200:
-                reset_data = reset_response.json()
-                print(f"Reset response: {json.dumps(reset_data, indent=2)}")
-                
-                if reset_data.get("price") != 499.0:
-                    print_test("TEST H", "FAIL", f"Expected reset price=499.0, got {reset_data.get('price')}")
-                    return False
-                
-                print(f"✅ Price reset to 499")
-                print_test("TEST H", "PASS", "Admin plan update working correctly")
-                return True
+    if error:
+        log_test("B4: Delete non-existent", False, f"Request failed: {error}")
+    elif status != 404:
+        log_test("B4: Delete non-existent", False, f"Expected 404, got {status}: {data}")
+    else:
+        if isinstance(data, dict) and "detail" in data:
+            if data["detail"] != "Barber not found":
+                log_test("B4: Delete non-existent", False, 
+                         f"Expected detail 'Barber not found', got: {data['detail']}")
             else:
-                print_test("TEST H", "FAIL", f"Reset failed with status {reset_response.status_code}: {reset_response.text}")
-                return False
+                log_test("B4: Delete non-existent", True, 
+                         f"Correctly returned 404 with detail: {data['detail']}")
         else:
-            print_test("TEST H", "FAIL", f"Expected 200, got {response.status_code}: {response.text}")
-            return False
-    except Exception as e:
-        print_test("TEST H", "FAIL", f"Exception: {e}")
-        return False
+            log_test("B4: Delete non-existent", True, f"Correctly returned 404")
 
+def print_summary():
+    """Print test summary"""
+    print("\n" + "="*80)
+    print("TEST SUMMARY")
+    print("="*80)
+    
+    total = len(test_results)
+    passed = sum(1 for _, p, _ in test_results if p)
+    failed = total - passed
+    
+    print(f"\nTotal Tests: {total}")
+    print(f"✅ Passed: {passed}")
+    print(f"❌ Failed: {failed}")
+    print(f"Success Rate: {(passed/total*100):.1f}%")
+    
+    if failed > 0:
+        print("\n" + "="*80)
+        print("FAILED TESTS:")
+        print("="*80)
+        for name, passed, details in test_results:
+            if not passed:
+                print(f"\n❌ {name}")
+                if details:
+                    print(f"   {details}")
+    
+    return passed, failed
 
 def main():
-    """Run all tests."""
-    print("\n" + "=" * 80)
-    print("  SALONHUB PRO SUBSCRIPTION SYSTEM - BACKEND TESTING")
-    print("=" * 80)
+    """Main test execution"""
+    print("="*80)
+    print("STAFF DOCUMENTS & HARD DELETE BACKEND API TESTS")
+    print("="*80)
+    print(f"Base URL: {BASE_URL}")
+    print(f"Credentials: {ADMIN_CREDENTIALS['identifier']}")
     
-    # Login first
-    if not login():
-        print("\n❌ AUTHENTICATION FAILED - Cannot proceed with tests")
+    # Step 1: Admin login
+    salon_id, access_token = test_admin_login()
+    if not salon_id or not access_token:
+        print("\n❌ CRITICAL: Admin login failed. Cannot proceed with tests.")
         sys.exit(1)
     
-    # Run all tests
-    results = {}
+    auth_headers = {
+        "Authorization": f"Bearer {access_token}"
+    }
     
-    results["A"] = test_a_get_active_plan()
-    results["B"] = test_b_subscription_status()
-    results["C"] = test_c_create_order()
-    results["D"] = test_d_verify_payment()
-    results["E"] = test_e_paywall_branches()
-    results["F"] = test_f_paywall_staff()
-    results["G"] = test_g_webhook()
-    results["H"] = test_h_admin_plan_update()
-    
-    # Summary
-    print_section("TEST SUMMARY")
-    passed = sum(1 for v in results.values() if v)
-    total = len(results)
-    
-    for test, result in results.items():
-        status = "✅ PASS" if result else "❌ FAIL"
-        print(f"  Test {test}: {status}")
-    
-    print(f"\n  Total: {passed}/{total} tests passed")
-    
-    if passed == total:
-        print("\n🎉 ALL TESTS PASSED!")
-        sys.exit(0)
-    else:
-        print(f"\n⚠️  {total - passed} test(s) failed")
+    # Step 2: Get active barber
+    barber_id = get_active_barber(salon_id, auth_headers)
+    if not barber_id:
+        print("\n❌ CRITICAL: No active barber found. Cannot proceed with document tests.")
         sys.exit(1)
-
-
-# Global variable to store order_id from test C
-created_order_id = None
+    
+    # Step 3: Test staff documents
+    test_staff_documents(barber_id, auth_headers)
+    
+    # Step 4: Test hard delete staff
+    test_hard_delete_staff(salon_id, auth_headers)
+    
+    # Step 5: Print summary
+    passed, failed = print_summary()
+    
+    # Exit with appropriate code
+    sys.exit(0 if failed == 0 else 1)
 
 if __name__ == "__main__":
     main()

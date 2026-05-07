@@ -9,10 +9,17 @@ import { toast } from 'sonner';
 import { 
   ArrowLeft, User, Save, Scissors, Shield, Edit2, Phone, Calendar, 
   Briefcase, CreditCard, FileText, X, ChevronLeft, ChevronRight,
-  Check, Loader2, DollarSign, Clock
+  Check, Loader2, DollarSign, Clock, Trash2, AlertTriangle, Upload, Download, Eye
 } from 'lucide-react';
 import { motion } from 'framer-motion';
 import StaffAttendanceTab from '@/components/StaffAttendanceTab';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+} from '@/components/ui/dialog';
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
 const API = `${BACKEND_URL}/api`;
@@ -181,6 +188,255 @@ function CreateStaffUserForm({ staffId, staffName, staffMobile, salonId, onSucce
   );
 }
 
+
+// ============ Staff Documents Tab ============
+const DOC_TYPES = [
+  { value: 'aadhar_front', label: 'Aadhar (Front)' },
+  { value: 'aadhar_back', label: 'Aadhar (Back)' },
+  { value: 'pan', label: 'PAN Card' },
+  { value: 'photo', label: 'Photo' },
+  { value: 'other', label: 'Other' },
+];
+
+function StaffDocumentsTab({ staffId, getAuthToken }) {
+  const [documents, setDocuments] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [uploading, setUploading] = useState(false);
+  const [uploadType, setUploadType] = useState('aadhar_front');
+  const [customLabel, setCustomLabel] = useState('');
+  const [previewDoc, setPreviewDoc] = useState(null);
+
+  const fetchDocs = async () => {
+    setLoading(true);
+    try {
+      const token = getAuthToken();
+      const r = await axios.get(`${API}/barbers/${staffId}/documents`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      setDocuments(r.data?.documents || []);
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || 'Failed to load documents');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchDocs();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [staffId]);
+
+  const handleFileSelect = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (file.size > 10 * 1024 * 1024) {
+      toast.error('File too large (max 10 MB)');
+      e.target.value = '';
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = async () => {
+      setUploading(true);
+      try {
+        const token = getAuthToken();
+        const labelToUse = uploadType === 'other'
+          ? (customLabel || 'Other')
+          : (DOC_TYPES.find((t) => t.value === uploadType)?.label || uploadType);
+        await axios.post(
+          `${API}/barbers/${staffId}/documents`,
+          {
+            doc_type: uploadType,
+            label: labelToUse,
+            file_data: reader.result,
+            mime_type: file.type,
+            file_name: file.name,
+          },
+          { headers: { Authorization: `Bearer ${token}` } }
+        );
+        toast.success('Document uploaded');
+        setCustomLabel('');
+        await fetchDocs();
+      } catch (err) {
+        toast.error(err?.response?.data?.detail || 'Upload failed');
+      } finally {
+        setUploading(false);
+        e.target.value = '';
+      }
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const handleDelete = async (docId) => {
+    if (!window.confirm('Remove this document?')) return;
+    try {
+      const token = getAuthToken();
+      await axios.delete(`${API}/barbers/${staffId}/documents/${docId}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      toast.success('Document removed');
+      await fetchDocs();
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || 'Failed to remove');
+    }
+  };
+
+  const handlePreview = async (docId) => {
+    try {
+      const token = getAuthToken();
+      const r = await axios.get(`${API}/barbers/${staffId}/documents/${docId}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      setPreviewDoc(r.data);
+    } catch (e) {
+      toast.error('Failed to load document');
+    }
+  };
+
+  const handleDownload = async (docId, fileName) => {
+    try {
+      const token = getAuthToken();
+      const r = await axios.get(`${API}/barbers/${staffId}/documents/${docId}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const a = document.createElement('a');
+      a.href = r.data.file_data;
+      a.download = fileName || 'document';
+      a.click();
+    } catch (e) {
+      toast.error('Failed to download');
+    }
+  };
+
+  return (
+    <div className="space-y-6">
+      <div className="bg-card border border-border rounded-lg p-6">
+        <h3 className="text-lg font-semibold mb-1">Upload Document</h3>
+        <p className="text-sm text-muted-foreground mb-4">
+          Aadhar, PAN, Photo, etc. Stored securely for salon records (max 10 MB per file).
+        </p>
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+          <div>
+            <Label>Document Type</Label>
+            <select
+              className="w-full h-10 px-3 rounded-md border border-input bg-background text-sm"
+              value={uploadType}
+              onChange={(e) => setUploadType(e.target.value)}
+              disabled={uploading}
+            >
+              {DOC_TYPES.map((t) => (
+                <option key={t.value} value={t.value}>{t.label}</option>
+              ))}
+            </select>
+          </div>
+          {uploadType === 'other' && (
+            <div>
+              <Label>Custom Label</Label>
+              <Input
+                value={customLabel}
+                onChange={(e) => setCustomLabel(e.target.value)}
+                placeholder="e.g. Voter ID"
+                disabled={uploading}
+              />
+            </div>
+          )}
+          <div className="sm:col-span-1">
+            <Label>File</Label>
+            <Input
+              type="file"
+              accept="image/*,application/pdf"
+              onChange={handleFileSelect}
+              disabled={uploading}
+            />
+          </div>
+        </div>
+        {uploading && (
+          <div className="mt-4 flex items-center gap-2 text-sm text-muted-foreground">
+            <Loader2 className="w-4 h-4 animate-spin" /> Uploading…
+          </div>
+        )}
+      </div>
+
+      <div className="bg-card border border-border rounded-lg p-6">
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="text-lg font-semibold">Uploaded Documents</h3>
+          <span className="text-sm text-muted-foreground">{documents.length} file{documents.length === 1 ? '' : 's'}</span>
+        </div>
+
+        {loading ? (
+          <div className="flex justify-center py-6">
+            <Loader2 className="w-5 h-5 animate-spin text-muted-foreground" />
+          </div>
+        ) : documents.length === 0 ? (
+          <p className="text-sm text-muted-foreground text-center py-8">
+            No documents uploaded yet.
+          </p>
+        ) : (
+          <div className="space-y-2">
+            {documents.map((d) => (
+              <div
+                key={d.id}
+                className="flex items-center justify-between gap-3 p-3 border border-border rounded-md bg-muted/20 hover:bg-muted/40 transition-colors"
+              >
+                <div className="flex items-center gap-3 min-w-0">
+                  <div className="w-10 h-10 rounded bg-gold/15 text-gold flex items-center justify-center shrink-0">
+                    <FileText className="w-5 h-5" />
+                  </div>
+                  <div className="min-w-0">
+                    <div className="font-medium truncate">{d.label || d.doc_type}</div>
+                    <div className="text-xs text-muted-foreground truncate">
+                      {d.file_name || 'untitled'} · {d.size_kb ? `${d.size_kb} KB` : ''}
+                      {d.uploaded_at ? ` · ${new Date(d.uploaded_at).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}` : ''}
+                    </div>
+                  </div>
+                </div>
+                <div className="flex items-center gap-1 shrink-0">
+                  <Button variant="ghost" size="sm" onClick={() => handlePreview(d.id)} title="Preview">
+                    <Eye className="w-4 h-4" />
+                  </Button>
+                  <Button variant="ghost" size="sm" onClick={() => handleDownload(d.id, d.file_name)} title="Download">
+                    <Download className="w-4 h-4" />
+                  </Button>
+                  <Button variant="ghost" size="sm" onClick={() => handleDelete(d.id)} title="Remove" className="text-rose-400 hover:text-rose-500">
+                    <Trash2 className="w-4 h-4" />
+                  </Button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* Preview dialog */}
+      <Dialog open={!!previewDoc} onOpenChange={(open) => { if (!open) setPreviewDoc(null); }}>
+        <DialogContent className="max-w-3xl">
+          <DialogHeader>
+            <DialogTitle>{previewDoc?.label}</DialogTitle>
+          </DialogHeader>
+          {previewDoc?.mime_type?.startsWith('image/') ? (
+            <img
+              src={previewDoc.file_data}
+              alt={previewDoc.label}
+              className="max-h-[70vh] mx-auto rounded"
+            />
+          ) : previewDoc?.mime_type === 'application/pdf' ? (
+            <iframe
+              src={previewDoc.file_data}
+              title={previewDoc.label}
+              className="w-full h-[70vh] rounded"
+            />
+          ) : (
+            <p className="text-sm text-muted-foreground py-8 text-center">
+              Cannot preview this file type. Download to view.
+            </p>
+          )}
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+}
+
+
 export default function StaffProfilePage() {
   const { staffId } = useParams();
   const navigate = useNavigate();
@@ -190,6 +446,40 @@ export default function StaffProfilePage() {
   const [loading, setLoading] = useState(true);
   const [editMode, setEditMode] = useState(false);
   const [activeTab, setActiveTab] = useState('profile');
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [deleteConfirmText, setDeleteConfirmText] = useState('');
+  const [deleting, setDeleting] = useState(false);
+
+  const getAuthToken = () => (
+    localStorage.getItem('salon_admin_token') ||
+    JSON.parse(localStorage.getItem('salon_user_auth') || '{}').token
+  );
+
+  const handleDeleteStaff = async () => {
+    if (deleteConfirmText.trim().toUpperCase() !== 'DELETE') {
+      toast.error('Type DELETE to confirm');
+      return;
+    }
+    setDeleting(true);
+    try {
+      const token = getAuthToken();
+      const r = await axios.delete(`${API}/barbers/${staffId}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const preserved = r.data?.preserved_records || {};
+      const total = (preserved.financial_transactions || 0) + (preserved.salary_records || 0) + (preserved.incentive_payouts || 0);
+      toast.success(
+        `Staff deleted${total ? ` — ${total} financial record${total === 1 ? '' : 's'} preserved for audit` : ''}`,
+        { duration: 5000 }
+      );
+      setShowDeleteConfirm(false);
+      navigate(-1);
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || 'Failed to delete staff');
+    } finally {
+      setDeleting(false);
+    }
+  };
 
   const [profileData, setProfileData] = useState({
     name: '',
@@ -456,6 +746,18 @@ export default function StaffProfilePage() {
                 </Button>
               </div>
             )}
+            {!editMode && activeTab === 'profile' && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => { setDeleteConfirmText(''); setShowDeleteConfirm(true); }}
+                className="text-rose-500 border-rose-500/40 hover:bg-rose-500/10 hover:text-rose-500"
+                data-testid="delete-staff-btn"
+              >
+                <Trash2 className="w-4 h-4 mr-2" />
+                Delete Staff
+              </Button>
+            )}
           </div>
 
           {/* Tabs */}
@@ -464,6 +766,7 @@ export default function StaffProfilePage() {
               { id: 'profile', label: 'Profile', icon: User },
               { id: 'attendance', label: 'Attendance', icon: Calendar },
               { id: 'services', label: 'Services', icon: Scissors },
+              { id: 'documents', label: 'Documents', icon: FileText },
               { id: 'access', label: 'Access', icon: Shield }
             ].map(tab => {
               const Icon = tab.icon;
@@ -820,6 +1123,16 @@ export default function StaffProfilePage() {
           </motion.div>
         )}
 
+        {/* Documents Tab */}
+        {activeTab === 'documents' && (
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+          >
+            <StaffDocumentsTab staffId={staffId} getAuthToken={getAuthToken} />
+          </motion.div>
+        )}
+
         {/* Access Control Tab */}
         {activeTab === 'access' && (
           <motion.div
@@ -949,6 +1262,57 @@ export default function StaffProfilePage() {
           </motion.div>
         )}
       </div>
+
+      {/* Delete Confirmation Dialog */}
+      <Dialog open={showDeleteConfirm} onOpenChange={(open) => { if (!open && !deleting) setShowDeleteConfirm(false); }}>
+        <DialogContent className="max-w-md border-rose-500/40">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-rose-500">
+              <AlertTriangle className="w-5 h-5" />
+              Delete Staff Permanently
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3 text-sm">
+            <p className="text-foreground">
+              You are about to delete <strong>{staff?.name || 'this staff member'}</strong>.
+            </p>
+            <div className="bg-rose-500/10 border border-rose-500/30 rounded p-3 space-y-2">
+              <p className="font-semibold text-rose-400">⚠ This action is NOT reversible.</p>
+              <ul className="list-disc list-inside text-xs text-rose-300/90 space-y-1">
+                <li>All staff data will be permanently removed</li>
+                <li>Service mappings, attendance, branch transfers, ratings, notification settings deleted</li>
+                <li>Login access (if assigned) will be revoked</li>
+                <li className="text-emerald-400/90">
+                  Past financial records (salary payments, incentives, transactions) will be PRESERVED for audit
+                </li>
+              </ul>
+            </div>
+            <div>
+              <Label htmlFor="confirm-delete">Type <code className="px-1 py-0.5 bg-muted rounded text-xs">DELETE</code> to confirm</Label>
+              <Input
+                id="confirm-delete"
+                value={deleteConfirmText}
+                onChange={(e) => setDeleteConfirmText(e.target.value)}
+                placeholder="DELETE"
+                className="mt-1"
+                autoFocus
+              />
+            </div>
+          </div>
+          <DialogFooter className="gap-2">
+            <Button variant="outline" onClick={() => setShowDeleteConfirm(false)} disabled={deleting}>
+              Cancel
+            </Button>
+            <Button
+              onClick={handleDeleteStaff}
+              disabled={deleting || deleteConfirmText.trim().toUpperCase() !== 'DELETE'}
+              className="bg-rose-600 hover:bg-rose-700 text-white"
+            >
+              {deleting ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" /> Deleting…</> : <><Trash2 className="w-4 h-4 mr-2" /> Delete Permanently</>}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
