@@ -23,6 +23,29 @@ A multi-tenant salon management SaaS (React + FastAPI + MongoDB). Most recent fe
 
 ## Implemented (CHANGELOG)
 
+### Feb 2026 — Phase 2: Branch Manager Role + Staff Transfers (Iteration 12) ✅
+- ✅ **New role `branch_manager`** in `salon_users`. Coexists with `admin` & `staff`. Multi-branch support via `assigned_branch_ids: List[str]`. SalonUser validation: a branch_manager **must** have at least one assigned branch (400 otherwise) and every branch id must belong to the same salon.
+- ✅ **JWT now carries `assigned_branch_ids`**. `SalonUserToken` exposes them so the frontend can scope before any API call.
+- ✅ **Mobile-number login** alongside `login_id` — `POST /api/salon/users/login`'s `identifier` field already accepted both; verified end-to-end with `+91…` formatted numbers in tests.
+- ✅ **PUT `/api/salon/users/{user_id}`** now also updates `role` and `assigned_branch_ids`, validates branch ownership, and **returns the updated user document** so the frontend can re-render immediately.
+- ✅ **Server-side RBAC helpers** (`is_branch_manager`, `assigned_branch_ids_for`, `enforce_branch_for_manager`). Behaviour for branch-manager calls:
+  - No `branch_id` query param → auto-scope to `assigned_branch_ids[0]`.
+  - Explicit `branch_id` not in their list → 403.
+  - Empty `assigned_branch_ids` → 403 on data endpoints.
+- ✅ **Scoped endpoints**: `GET /branches`, `GET /queue`, `GET /barbers/{id}/queue`, `GET /barbers` (admin view only), `GET /today-sales`, `GET /financials/transactions`, `GET /financials/dashboard`, `GET /customers`. Customer-view of barbers stays open (public booking).
+- ✅ **Staff Branch Transfer API**:
+  - `POST /api/salons/{salon_id}/staff-branch-transfers` — admin can transfer any staff between any active branches; branch_manager can only transfer when **both** `from_branch_id` and `to_branch_id` are in their assigned list; staff role → 403; same-branch → 400. Inserts a `staff_branch_transfers` row + updates `barbers.branch_id` immediately.
+  - `GET /api/salons/{salon_id}/staff-branch-transfers?staff_id=…&branch_id=…` returns history. Branch_manager auto-scoped to transfers touching their assigned branches.
+- ✅ **Frontend `AuthContext`** exposes `isBranchManager()`, `getAssignedBranchIds()`, persists `assignedBranchIds` in localStorage.
+- ✅ **Frontend StaffAccessManagement** (`Salon Users` page) gains a **Role dropdown** (Staff / Branch Manager / Admin) and a multi-select **Assigned Branches** panel that appears for branch_manager. The user list shows a purple "Branch Manager" badge + the names of their branches.
+- ✅ **Frontend BarberManagement** (`Staff Management`):
+  - Each staff card now shows a **📍 branch pill** ("Main Branch" / "Whitefield Branch" etc.).
+  - When ≥ 2 branches exist and the current user is admin or branch_manager, an **arrow icon "Transfer"** opens a dialog with target-branch dropdown, transfer-date picker and remarks. On submit it calls the new transfer API and refreshes the list.
+- ✅ **Frontend BranchManagement** (`Branches` admin page) is **read-only** for branch_manager: Add disabled, Set-Main / Deactivate / Edit hidden; QR generation stays available.
+- ✅ **Frontend dashboard left-menu**: branch_manager sees Home, Token Queue, Staff Management, Services, Financials, Customer Master, Analytics, Gallery, Branches. Salon Settings stays admin-only.
+- ✅ **HTTPException leak fix**: the `try/except` wrapping `GET /barbers` was swallowing 403 RBAC errors and returning 500. Now re-raises HTTPException correctly.
+- ✅ **Tests**: 36/36 backend pytest assertions pass — `tests/test_branches_phase1.py` (5) + `test_branches_phase1_extra.py` (12) + `test_branches_phase2.py` (9) + `test_branches_phase2_extra.py` (10). Frontend smoke verified end-to-end via Playwright (admin transferred Imran Main → Whitefield with success toast; BM login showed scoped header dropdown listing only Whitefield).
+
 ### Feb 2026 — Phase 1: Branch Model Foundation (Iteration 11) ✅
 - ✅ **New collections**: `salon_branches`, `staff_branch_transfers`. Models: `Branch{Create,Update}`, `StaffBranchTransfer{Create}`.
 - ✅ **Migration on startup** (`migrate_branches`): for every existing salon → auto-create one "Main Branch" (`is_main_branch=true`, code "MAIN") inheriting salon address/coords/phone. Idempotent. Back-fills `branch_id` on every existing doc in 11 collections (tokens, barbers, attendance, financial_transactions, salon_customers, invoices, salon_users, customer_memberships, wallet_transactions, incentive_payouts, salary_records). Successfully back-filled 3 legacy docs in dev seed.
@@ -78,26 +101,18 @@ A multi-tenant salon management SaaS (React + FastAPI + MongoDB). Most recent fe
 
 ## Roadmap (P0/P1/P2)
 
-### P0 — Phase 2: Branch Manager Role + Staff Transfers
-- New `branch_manager` role in `salon_users` (extends current `admin`/`staff` roles). Add `assigned_branch_ids: List[str]` so a manager can be tied to one or more branches.
-- **Mobile-number login** alongside `login_id` in `POST /api/salon/users/login` (already supports `identifier` = mobile or login_id; verify & document).
-- Frontend `AuthContext` to surface branch-manager role + assigned branches; menu items filtered accordingly.
-- **Staff transfer UI + backend**:
-  - `POST /api/salons/{salon_id}/staff-branch-transfers` body `{ staff_id, from_branch_id, to_branch_id, transfer_date, remarks }`.
-  - `GET /api/salons/{salon_id}/staff-branch-transfers?staff_id=...`.
-  - On submit: insert transfer row + update `barbers.branch_id`. Persist history.
-  - Frontend dialog inside Staff Management to "Transfer to another branch".
-- **RBAC enforcement**: branch managers should only see data for their assigned branches in queues, financials, customer master, analytics.
+### P0 — Phase 3: Customer UX
+- Customer booking flow submits `branch_id` (default to nearest active branch by lat/long, fall back to main).
+- "Switch Branch" dropdown on `/salon/:salonId` page so customers can navigate between branches of the same brand.
+- Per-branch operational hours + holidays (currently shared at salon level).
 
 ### P1
-- Phase 3 Customer UX:
-  - Customer booking flow submits `branch_id` (default to nearest active branch by lat/long).
-  - "Switch Branch" dropdown on `/salon/:salonId` page so customers can navigate between branches of the same brand.
-  - Per-branch operational hours + holidays (currently shared at salon level).
 - Reverse-sync incentives (Paid → Approved should offer to reverse-credit the linked financial txn).
+- BM dashboard "All My Branches" rollup card.
+- Email/SMS notification when a staff is transferred.
 
 ### P2
-- Modularize `server.py` (split into routes/, models/, services/) — over 9.9k lines now.
+- Modularize `server.py` (split into routes/, models/, services/) — over 10k lines now.
 - Per-branch loyalty rules (chain-wide vs branch-specific) — sold at one branch, valid at all.
 - Per-branch reports / analytics rollups.
 - Code review backlog from Iteration 11:
@@ -112,6 +127,8 @@ A multi-tenant salon management SaaS (React + FastAPI + MongoDB). Most recent fe
 - `DELETE /api/salons/{salon_id}/branches/{branch_id}` (soft delete)
 - `POST   /api/salons/{salon_id}/branches/{branch_id}/set-main`
 - `GET    /api/salons/{salon_id}/branches/{branch_id}/qr-code[?base_url=...]` (public)
+- `POST   /api/salons/{salon_id}/staff-branch-transfers` (Phase 2)
+- `GET    /api/salons/{salon_id}/staff-branch-transfers[?staff_id=&branch_id=]` (Phase 2)
 - All listed legacy endpoints accept optional `branch_id` query param.
 
 ## Known Notes

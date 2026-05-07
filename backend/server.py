@@ -3533,6 +3533,9 @@ async def get_salon_barbers(
             logger.info(f"After customer_view filter: {len(barbers)} barbers")
 
         return barbers
+    except HTTPException:
+        # Don't swallow auth/RBAC errors raised intentionally above.
+        raise
     except Exception as e:
         logger.error(f"Error fetching barbers for salon {salon_id}: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Failed to fetch barbers: {str(e)}")
@@ -4145,7 +4148,13 @@ async def update_salon_user(user_id: str, update_data: SalonUserUpdate, current_
             {"$set": update_fields}
         )
     
-    return {"message": "User updated successfully"}
+    # Return the fully updated user (without password_hash) so callers can render
+    # the new role / branch list immediately.
+    updated = await db.salon_users.find_one(
+        {"id": user_id, "salon_id": salon_id},
+        {"_id": 0, "password_hash": 0},
+    )
+    return updated or {"message": "User updated successfully"}
 
 @api_router.delete("/salon/users/{user_id}")
 async def delete_salon_user(user_id: str, current_user=Depends(get_current_salon_admin)):

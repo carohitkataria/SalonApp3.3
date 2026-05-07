@@ -103,7 +103,7 @@ def test_put_user_change_role_and_branches(admin, branches):
             "name": "Flex User",
             "mobile": _mob(),
             "login_id": login_id,
-            "password": "pw1",
+            "password": "pwd123",
             "role": "staff",
         },
         headers=admin["headers"],
@@ -145,7 +145,7 @@ def bm_main(admin, branches):
             "name": "BM Main",
             "mobile": _mob(),
             "login_id": login_id,
-            "password": "pw1",
+            "password": "pwd123",
             "role": "branch_manager",
             "assigned_branch_ids": [branches["main_id"]],
         },
@@ -153,7 +153,7 @@ def bm_main(admin, branches):
     )
     assert r.status_code == 200, r.text
     user = r.json()
-    tok = requests.post(f"{API}/salon/users/login", json={"identifier": login_id, "password": "pw1"}).json()
+    tok = requests.post(f"{API}/salon/users/login", json={"identifier": login_id, "password": "pwd123"}).json()
     info = {"user_id": user["id"], "headers": {"Authorization": f"Bearer {tok['access_token']}"}}
     yield info
     requests.delete(f"{API}/salon/users/{user['id']}", headers=admin["headers"])
