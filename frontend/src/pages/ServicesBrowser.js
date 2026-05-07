@@ -1,6 +1,6 @@
 import React from 'react';
 import { useState, useEffect } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import axios from 'axios';
 import { Button } from '@/components/ui/button';
@@ -16,6 +16,8 @@ const API = `${BACKEND_URL}/api`;
 export default function ServicesBrowser() {
   const { salonId } = useParams();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const branchId = searchParams.get('branch') || '';
   const { user, isUserLoggedIn } = useAuth();
 
   const [salon, setSalon] = useState(null);
@@ -190,7 +192,7 @@ export default function ServicesBrowser() {
             </Button>
             <Button
               size="sm"
-              onClick={() => navigate(`/book/${salonId}`)}
+              onClick={() => navigate(`/book/${salonId}${branchId ? `?branch=${branchId}` : ''}`)}
               className="bg-gold text-black hover:bg-gold/90"
             >
               Book Now

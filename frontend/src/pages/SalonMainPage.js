@@ -28,6 +28,12 @@ export default function SalonMainPage() {
   const [searchParams] = useSearchParams();
   const { isUserLoggedIn, user } = useAuth();
   
+  // Phase 3: branch the customer is currently viewing/booking at.
+  // Comes from `?branch=` in the URL (set by the Find-a-salon flow / QR code).
+  // Falls back to the salon's main branch on first load.
+  const branchIdFromUrl = searchParams.get('branch') || '';
+  const [branchId, setBranchId] = useState(branchIdFromUrl);
+  const [branch, setBranch] = useState(null);
   const [salon, setSalon] = useState(null);
   const [loading, setLoading] = useState(true);
   const [liveStatus, setLiveStatus] = useState(null);
@@ -78,6 +84,22 @@ export default function SalonMainPage() {
     try {
       const response = await axios.get(`${API}/salons/${salonId}`);
       setSalon(response.data);
+
+      // Resolve the branch:
+      //  - if branch_id was in URL, fetch its detail
+      //  - else fetch the salon's branches and pick the main one
+      try {
+        const bRes = await axios.get(`${API}/public/salons/${salonId}/branches`);
+        const branches = Array.isArray(bRes.data) ? bRes.data : [];
+        let chosen = branches.find(b => b.id === branchIdFromUrl);
+        if (!chosen) chosen = branches.find(b => b.is_main_branch) || branches[0] || null;
+        if (chosen) {
+          setBranch(chosen);
+          setBranchId(chosen.id);
+        }
+      } catch (e) {
+        console.error('Failed to load branches', e);
+      }
     } catch (error) {
       console.error('Error fetching salon:', error);
       toast.error('Failed to load salon information');
@@ -89,7 +111,8 @@ export default function SalonMainPage() {
 
   const fetchLiveStatus = async () => {
     try {
-      const response = await axios.get(`${API}/salons/${salonId}/live-status`);
+      const params = branchId ? `?branch_id=${branchId}` : '';
+      const response = await axios.get(`${API}/salons/${salonId}/live-status${params}`);
       setLiveStatus(response.data);
     } catch (error) {
       console.error('Error fetching live status:', error);
@@ -200,11 +223,11 @@ export default function SalonMainPage() {
   const renderTabContent = () => {
     switch (activeTab) {
       case 'services':
-        return <SalonServicesTab salonId={salonId} />;
+        return <SalonServicesTab salonId={salonId} branchId={branchId} />;
       case 'barbers':
-        return <SalonBarbersTab salonId={salonId} />;
+        return <SalonBarbersTab salonId={salonId} branchId={branchId} />;
       case 'shop':
-        return <SalonShopTab salonId={salonId} />;
+        return <SalonShopTab salonId={salonId} branchId={branchId} />;
       case 'gallery':
         return <SalonGalleryTab salon={salon} />;
       case 'profile':
@@ -316,7 +339,7 @@ export default function SalonMainPage() {
       {/* Quick Actions - Three Cards like the image */}
       <div className="grid grid-cols-3 gap-3">
         <button
-          onClick={() => navigate(`/book/${salonId}`)}
+          onClick={() => navigate(`/book/${salonId}${branchId ? `?branch=${branchId}` : ''}`)}
           className="p-4 bg-card rounded-xl border border-border hover:border-gold transition-colors text-left"
         >
           <Calendar className="w-8 h-8 text-gold mb-3" />
@@ -447,16 +470,21 @@ export default function SalonMainPage() {
             <div className="min-w-0">
               <h1 className="text-lg font-playfair font-bold text-foreground truncate">
                 {salon.salon_name}
+                {branch && !branch.is_main_branch && (
+                  <span className="text-sm font-normal text-gold ml-1.5">· {branch.branch_name}</span>
+                )}
               </h1>
               <div className="flex items-center text-xs text-muted-foreground">
                 <MapPin className="w-3 h-3 mr-1 flex-shrink-0" />
-                <span className="truncate">{salon.address}</span>
+                <span className="truncate" data-testid="customer-branch-address">
+                  {(branch && branch.address) || salon.address}
+                </span>
               </div>
             </div>
           </div>
 
           <Button 
-            onClick={() => navigate(`/book/${salonId}`)}
+            onClick={() => navigate(`/book/${salonId}${branchId ? `?branch=${branchId}` : ''}`)}
             className="bg-gold text-black hover:bg-gold/90"
             size="sm"
           >

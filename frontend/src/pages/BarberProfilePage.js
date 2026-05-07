@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import axios from 'axios';
 import { Star, User, MessageSquare, ArrowLeft, Camera, Send, Calendar, Clock } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -13,6 +13,8 @@ const API = `${BACKEND_URL}/api`;
 export default function BarberProfilePage() {
   const { salonId, barberId } = useParams();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const branchId = searchParams.get('branch') || '';
   const { user } = useAuth();
   
   const [barber, setBarber] = useState(null);
@@ -111,7 +113,9 @@ export default function BarberProfilePage() {
   );
 
   const handleBookNow = () => {
-    navigate(`/book/${salonId}?barber=${barberId}`);
+    const params = new URLSearchParams({ barber: barberId });
+    if (branchId) params.set('branch', branchId);
+    navigate(`/book/${salonId}?${params.toString()}`);
   };
 
   if (loading) {

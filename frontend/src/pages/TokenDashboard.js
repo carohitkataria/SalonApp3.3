@@ -1,6 +1,6 @@
 import React from 'react';
 import { useState, useEffect } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { useWebSocket } from '@/contexts/WebSocketContext';
 import axios from 'axios';
@@ -15,6 +15,8 @@ const API = `${BACKEND_URL}/api`;
 export default function TokenDashboard() {
   const { salonId } = useParams();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const branchId = searchParams.get('branch') || '';
   const { user, isUserLoggedIn } = useAuth();
   const { socket } = useWebSocket();
   
@@ -107,7 +109,8 @@ export default function TokenDashboard() {
   const fetchTokenStatus = async () => {
     try {
       setLoading(true);
-      const response = await axios.get(`${API}/salons/${salonId}/token-status?shift=${selectedShift}&date=${date}`);
+      const branchSuffix = branchId ? `&branch_id=${branchId}` : '';
+      const response = await axios.get(`${API}/salons/${salonId}/token-status?shift=${selectedShift}&date=${date}${branchSuffix}`);
       setTokenStatus(response.data);
     } catch (error) {
       console.error('Error fetching token status:', error);
@@ -184,7 +187,7 @@ export default function TokenDashboard() {
             <Button
               variant="outline"
               size="sm"
-              onClick={() => navigate(`/book/${salonId}`)}
+              onClick={() => navigate(`/book/${salonId}${branchId ? `?branch=${branchId}` : ''}`)}
               className="border-gold text-gold hover:bg-gold hover:text-black"
             >
               Book Now

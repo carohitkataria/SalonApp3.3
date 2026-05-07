@@ -2425,6 +2425,127 @@ async def get_cities():
     cities = await db.salons.distinct("city", {"is_active": True})
     return {"cities": [c for c in cities if c]}
 
+
+def _build_location_row(salon: dict, branch: dict, lat: Optional[float], lng: Optional[float]) -> dict:
+    """Compose one customer-facing location row per branch.
+    Uses the BRANCH's address/coords when present (so each branch is its own
+    bookable destination), with fallbacks to the salon for fields the branch
+    doesn't override (logo, gallery, gender_tag, ratings)."""
+    # Each branch is shown as a separate "salon" on the Find a Salon screen.
+    branch_addr = branch.get("address") or salon.get("address")
+    branch_city = branch.get("city") or salon.get("city")
+    branch_lat = branch.get("latitude") if branch.get("latitude") is not None else salon.get("latitude")
+    branch_lng = branch.get("longitude") if branch.get("longitude") is not None else salon.get("longitude")
+    branch_phone = branch.get("phone") or salon.get("phone")
+
+    salon_name_base = salon.get("salon_name") or "Salon"
+    branch_name = branch.get("branch_name") or "Main Branch"
+    # If only a Main Branch, just show the salon name.
+    display_name = salon_name_base if branch.get("is_main_branch") else f"{salon_name_base} – {branch_name}"
+
+    row = {
+        "id": branch["id"],  # the BRANCH id is what the customer card represents
+        "salon_id": salon["id"],
+        "branch_id": branch["id"],
+        "branch_name": branch_name,
+        "is_main_branch": bool(branch.get("is_main_branch")),
+        "salon_name": display_name,
+        "address": branch_addr,
+        "city": branch_city,
+        "latitude": branch_lat,
+        "longitude": branch_lng,
+        "phone": branch_phone,
+        "logo_url": salon.get("logo_url"),
+        "photo_gallery": salon.get("photo_gallery") or [],
+        "gender_tag": salon.get("gender_tag"),
+        "rating": salon.get("rating") or 0,
+        "total_reviews": salon.get("total_reviews") or 0,
+        "manual_toggle": salon.get("manual_toggle"),
+    }
+    if lat is not None and lng is not None and branch_lat is not None and branch_lng is not None:
+        row["distance"] = round(calculate_distance(lat, lng, branch_lat, branch_lng), 2)
+    return row
+
+
+async def _list_salon_locations(
+    name: Optional[str] = None,
+    city: Optional[str] = None,
+    lat: Optional[float] = None,
+    lng: Optional[float] = None,
+    radius: Optional[float] = None,
+) -> List[dict]:
+    """Fan out one row per active branch joined with salon details. Used by the
+    customer-side 'Find a salon' screen so chains appear as one entry per branch."""
+    salon_query = {"is_active": True}
+    if name:
+        salon_query["salon_name"] = {"$regex": name, "$options": "i"}
+    salons = await db.salons.find(salon_query, {"_id": 0}).to_list(500)
+    if not salons:
+        return []
+
+    salon_ids = [s["id"] for s in salons]
+    branch_query = {"salon_id": {"$in": salon_ids}, "status": "active"}
+    if city:
+        # Match either the branch city or the salon city below
+        branch_query_or = [{"city": {"$regex": city, "$options": "i"}}]
+        branch_query["$or"] = branch_query_or
+    branches = await db.salon_branches.find(branch_query, {"_id": 0}).to_list(2000)
+
+    salon_by_id = {s["id"]: s for s in salons}
+    rows: List[dict] = []
+    for b in branches:
+        s = salon_by_id.get(b["salon_id"])
+        if not s:
+            continue
+        # When city was passed but the BRANCH didn't match, also accept salon-level city match
+        if city and not b.get("city") and s.get("city"):
+            if city.lower() not in s["city"].lower():
+                continue
+        rows.append(_build_location_row(s, b, lat, lng))
+
+    if lat is not None and lng is not None and radius is not None:
+        rows = [r for r in rows if r.get("distance") is not None and r["distance"] <= radius]
+        rows.sort(key=lambda r: r.get("distance", float("inf")))
+    elif lat is not None and lng is not None:
+        rows.sort(key=lambda r: r.get("distance", float("inf")))
+    else:
+        rows.sort(key=lambda r: ((r.get("salon_name") or "").lower(), not r.get("is_main_branch")))
+
+    return rows
+
+
+@api_router.get("/public/salon-locations")
+async def list_salon_locations(
+    lat: Optional[float] = None,
+    lng: Optional[float] = None,
+    radius: Optional[float] = None,
+    name: Optional[str] = None,
+    city: Optional[str] = None,
+):
+    """Public 'Find a salon' listing — one row per active branch.
+
+    Used by the customer-facing salon picker. A salon with N branches appears N
+    times here (each row carries `salon_id` + `branch_id`). The card title
+    follows the rule: main branch → just the salon name; non-main → "Salon – Branch".
+    """
+    rows = await _list_salon_locations(name=name, city=city, lat=lat, lng=lng, radius=radius)
+    return rows
+
+
+@api_router.get("/public/salons/{salon_id}/branches", response_model=List[Branch])
+async def list_public_branches(salon_id: str):
+    """Public listing of a salon's active branches — used by the customer
+    booking page to populate per-branch selectors / verification."""
+    salon = await db.salons.find_one({"id": salon_id}, {"_id": 0, "id": 1})
+    if not salon:
+        raise HTTPException(status_code=404, detail="Salon not found")
+    branches = await db.salon_branches.find(
+        {"salon_id": salon_id, "status": "active"}, {"_id": 0}
+    ).to_list(length=None)
+    branches.sort(key=lambda b: (not b.get("is_main_branch"), b.get("created_at", "")))
+    return [Branch(**b) for b in branches]
+
+
 @api_router.get("/salons/{salon_id}", response_model=Salon)
 async def get_salon(salon_id: str):
     salon = await db.salons.find_one({"id": salon_id}, {"_id": 0})
@@ -7795,13 +7916,16 @@ async def get_user_recent_services(user_id: str):
     return {"services": []}
 
 @api_router.get("/salons/{salon_id}/token-status")
-async def get_salon_token_status(salon_id: str, shift: Optional[str] = None, date: Optional[str] = None):
+async def get_salon_token_status(salon_id: str, shift: Optional[str] = None, date: Optional[str] = None, branch_id: Optional[str] = None):
     """Get current token status for salon (overall and per barber)"""
     today = date or datetime.now().date().isoformat()
     
     # Get all barbers for this salon
+    barber_query = {"salon_id": salon_id, "is_active": True}
+    if branch_id:
+        barber_query["branch_id"] = branch_id
     barbers = await db.barbers.find(
-        {"salon_id": salon_id, "is_active": True},
+        barber_query,
         {"_id": 0}
     ).to_list(100)
     
@@ -7815,6 +7939,8 @@ async def get_salon_token_status(salon_id: str, shift: Optional[str] = None, dat
     query = {"salon_id": salon_id, "date": today, "status": {"$in": ["waiting", "called"]}}
     if shift:
         query["shift"] = shift
+    if branch_id:
+        query["branch_id"] = branch_id
     
     waiting_tokens = await db.tokens.find(query, {"_id": 0}).to_list(1000)
     
@@ -7822,6 +7948,8 @@ async def get_salon_token_status(salon_id: str, shift: Optional[str] = None, dat
     called_query = {"salon_id": salon_id, "date": today, "status": "called"}
     if shift:
         called_query["shift"] = shift
+    if branch_id:
+        called_query["branch_id"] = branch_id
     
     called_token = await db.tokens.find_one(called_query, {"_id": 0}, sort=[("called_at", -1)])
     
@@ -7911,9 +8039,9 @@ async def get_salon_token_status(salon_id: str, shift: Optional[str] = None, dat
     return result
 
 @api_router.get("/salons/{salon_id}/live-status")
-async def get_salon_live_status(salon_id: str, shift: Optional[str] = None, date: Optional[str] = None):
+async def get_salon_live_status(salon_id: str, shift: Optional[str] = None, date: Optional[str] = None, branch_id: Optional[str] = None):
     """Get current live status for salon (alias for token-status)"""
-    return await get_salon_token_status(salon_id, shift, date)
+    return await get_salon_token_status(salon_id, shift, date, branch_id)
 
 # ============ RATING/REVIEW ROUTES ============
 
@@ -9069,6 +9197,14 @@ async def get_customer_active_bookings(phone: str):
                 "city": salon.get("city"),
                 "logo_url": salon.get("logo_url")
             }
+        # Branch enrichment so the customer card can show "Salon · Whitefield" + branch address
+        if token.get("branch_id"):
+            branch = await db.salon_branches.find_one(
+                {"id": token["branch_id"]}, {"_id": 0, "branch_name": 1, "address": 1, "is_main_branch": 1}
+            )
+            if branch and not branch.get("is_main_branch"):
+                token["branch_name"] = branch.get("branch_name")
+                token["branch_address"] = branch.get("address")
         # Live queue context (customer-facing only)
         try:
             q = await compute_queue_status_for_token(token)

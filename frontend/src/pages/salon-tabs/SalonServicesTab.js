@@ -10,7 +10,7 @@ import { useAuth } from '@/contexts/AuthContext';
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
 const API = `${BACKEND_URL}/api`;
 
-export default function SalonServicesTab({ salonId }) {
+export default function SalonServicesTab({ salonId, branchId }) {
   const navigate = useNavigate();
   const { user } = useAuth();
   const [services, setServices] = useState([]);
@@ -21,7 +21,8 @@ export default function SalonServicesTab({ salonId }) {
 
   useEffect(() => {
     fetchServices();
-  }, [salonId]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [salonId, branchId]);
 
   const fetchServices = async () => {
     try {
@@ -50,8 +51,10 @@ export default function SalonServicesTab({ salonId }) {
   };
 
   const handleBookNow = () => {
-    const serviceIds = selectedServices.join(',');
-    navigate(`/book/${salonId}?services=${serviceIds}`);
+    const params = new URLSearchParams();
+    if (selectedServices.length) params.set('services', selectedServices.join(','));
+    if (branchId) params.set('branch', branchId);
+    navigate(`/book/${salonId}?${params.toString()}`);
   };
 
   // Filter services by gender + search + category

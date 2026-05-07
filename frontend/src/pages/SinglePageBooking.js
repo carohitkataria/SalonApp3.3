@@ -252,7 +252,9 @@ export default function SinglePageBooking() {
   const preselectedBarber = searchParams.get('barber');
   const preselectedServices = searchParams.get('services');
   const modifyTokenId = searchParams.get('modify'); // WhatsApp reschedule flow
+  const branchIdFromUrl = searchParams.get('branch') || ''; // Phase 3: customer-selected branch
   const [rescheduleBooking, setRescheduleBooking] = useState(null);
+  const [branchId, setBranchId] = useState(branchIdFromUrl);
 
   const [salon, setSalon] = useState(null);
   const [barbers, setBarbers] = useState([]);
@@ -387,11 +389,26 @@ export default function SinglePageBooking() {
 
   const fetchSalonData = async () => {
     try {
+      // Resolve effective branch_id: explicit URL > main branch (fetched fresh).
+      let effectiveBranchId = branchId;
+      if (!effectiveBranchId) {
+        try {
+          const bRes = await axios.get(`${API}/public/salons/${salonId}/branches`);
+          const list = Array.isArray(bRes.data) ? bRes.data : [];
+          const main = list.find(b => b.is_main_branch) || list[0];
+          if (main) {
+            effectiveBranchId = main.id;
+            setBranchId(main.id);
+          }
+        } catch (e) { /* fall through */ }
+      }
+
+      const branchSuffix = effectiveBranchId ? `&branch_id=${effectiveBranchId}` : '';
       const [salonRes, barbersRes, servicesRes, categoriesRes] = await Promise.all([
         axios.get(`${API}/salons/${salonId}`),
         // Customer view with the active date so the backend marks `is_on_leave` per-date
         // (we no longer pass available_only — we want on-leave barbers visible but greyed-out).
-        axios.get(`${API}/salons/${salonId}/barbers?customer_view=true&date=${formData.date || getTodayIST()}`),
+        axios.get(`${API}/salons/${salonId}/barbers?customer_view=true&date=${formData.date || getTodayIST()}${branchSuffix}`),
         axios.get(`${API}/salons/${salonId}/services/enabled`),
         axios.get(`${API}/services/categories`)
       ]);
@@ -777,6 +794,7 @@ export default function SinglePageBooking() {
 
       const bookingData = {
         salon_id: salonId,
+        branch_id: branchId || undefined,
         user_id: user.id,
         customer_name: bookingForSelf ? user.name : otherPersonName,
         phone: bookingForSelf ? user.phone : otherPersonPhone,
@@ -850,6 +868,7 @@ export default function SinglePageBooking() {
       // First create the booking
       const bookingData = {
         salon_id: salonId,
+        branch_id: branchId || undefined,
         user_id: user.id,
         customer_name: bookingForSelf ? user.name : otherPersonName,
         phone: bookingForSelf ? user.phone : otherPersonPhone,

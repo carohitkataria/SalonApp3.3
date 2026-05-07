@@ -111,10 +111,13 @@ export default function ActiveBookingTracker({ userPhone, userName }) {
                     </div>
                     <h3 className="text-white text-xl font-bold">
                       {booking.salon_details.salon_name}
+                      {booking.branch_name && (
+                        <span className="text-amber-300 text-base font-normal ml-2">· {booking.branch_name}</span>
+                      )}
                     </h3>
                     <p className="text-white/70 text-sm flex items-center gap-1 mt-1">
                       <MapPin size={14} />
-                      {booking.salon_details.address}
+                      {booking.branch_address || booking.salon_details.address}
                     </p>
                   </div>
                   <div className="text-right">
@@ -195,7 +198,7 @@ export default function ActiveBookingTracker({ userPhone, userName }) {
 
                 {/* View Salon Button */}
                 <Button
-                  onClick={() => navigate(`/salon/${booking.salon_id}`)}
+                  onClick={() => navigate(`/salon/${booking.salon_id}${booking.branch_id ? `?branch=${booking.branch_id}` : ''}`)}
                   className="w-full bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-600 hover:to-amber-700 text-white font-bold py-3 rounded-xl shadow-lg hover:shadow-xl transition-all duration-300 flex items-center justify-center gap-2"
                   data-testid="view-salon-btn"
                 >

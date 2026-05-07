@@ -8,18 +8,21 @@ import { Button } from '@/components/ui/button';
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
 const API = `${BACKEND_URL}/api`;
 
-export default function SalonBarbersTab({ salonId }) {
+export default function SalonBarbersTab({ salonId, branchId }) {
   const navigate = useNavigate();
   const [barbers, setBarbers] = useState([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     fetchBarbers();
-  }, [salonId]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [salonId, branchId]);
 
   const fetchBarbers = async () => {
     try {
-      const response = await axios.get(`${API}/salons/${salonId}/barbers`);
+      const params = new URLSearchParams({ customer_view: 'true' });
+      if (branchId) params.set('branch_id', branchId);
+      const response = await axios.get(`${API}/salons/${salonId}/barbers?${params.toString()}`);
       setBarbers(response.data);
     } catch (error) {
       console.error('Error fetching barbers:', error);
@@ -29,11 +32,13 @@ export default function SalonBarbersTab({ salonId }) {
   };
 
   const handleViewProfile = (barberId) => {
-    navigate(`/salon/${salonId}/barber/${barberId}`);
+    navigate(`/salon/${salonId}/barber/${barberId}${branchId ? `?branch=${branchId}` : ''}`);
   };
 
   const handleBookNow = (barberId) => {
-    navigate(`/book/${salonId}?barber=${barberId}`);
+    const params = new URLSearchParams({ barber: barberId });
+    if (branchId) params.set('branch', branchId);
+    navigate(`/book/${salonId}?${params.toString()}`);
   };
 
   if (loading) {

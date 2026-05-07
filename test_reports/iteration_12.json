@@ -1,0 +1,34 @@
+{
+  "summary": "Phase 3 Branch Model — Customer UX. Backend: 50/50 pytest assertions PASS (8 phase-3 + 6 phase-3-extra written by me + 5 phase-1 + 12 phase-1-extra + 9 phase-2 + 10 phase-2-extra). All Phase 3 endpoints behave per spec: /api/public/salon-locations returns one row per ACTIVE branch with main branch keeping the salon name as-is and non-main appending '– Branch'; lat/lng radius/distance sort works; city + name filters work; /api/public/salons/{id}/branches works without auth and 404s for unknown salon; bookings persist supplied branch_id; token-status scopes by branch_id; active-bookings enriches with branch_name (only for non-main) and branch_address (verified for main: empty branch_name; for non-main: 'Whitefield Phase3' / 'P3-WF address'). Frontend: confirmed via captured network calls that SalonSelectionPage now hits /api/public/salon-locations (NOT legacy /api/salons). Static review of SalonMainPage / SinglePageBooking / TokenDashboard / ServicesBrowser / BarberProfilePage / SalonBarbersTab / SalonServicesTab / ActiveBookingTracker confirms: (a) ?branch= is read & forwarded across navigations, (b) data-testid='customer-branch-address' is rendered, (c) booking POST includes branch_id, (d) ActiveBookingTracker shows · {branch_name} and preserves ?branch= on the View-Salon button. Customer-mode redirect to OTP /login on minimally-seeded localStorage is the existing expected behaviour (matches main agent's note).",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_branches_phase3.py",
+    "/app/backend/tests/test_branches_phase3_extra.py",
+    "/app/test_reports/pytest/branches_phase3_full.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "server.py _build_location_row: naming rule uses U+2013 (en-dash) for non-main labels. Frontend display, search, and tests all align — but if any future filter does a strict '-' (hyphen) match, it will silently miss. Document this constant or extract a SALON_BRANCH_LABEL_SEPARATOR constant.",
+    "/api/public/salon-locations has no rate-limit / pagination. With many salons & branches the unauthenticated payload could grow large. Consider page+limit or server-side cap (e.g., 200 rows).",
+    "SalonSelectionPage.js line 324: `const branchId = salon.branch_id || salon.id;` — backend always returns branch_id from /salon-locations, so the `|| salon.id` fallback is dead code. Harmless, but worth removing to avoid implying salon-level navigation is supported.",
+    "SalonMainPage data-testid='customer-branch-address' is on a <span> wrapping the address text — selector works, but if the address is empty the span still renders. A small null-guard would prevent an empty visible bullet.",
+    "SinglePageBooking.js: branchId state is initialized from URL but also auto-set to main branch in fetch (line 401). If a user manually edits the URL to remove ?branch=, the booking silently posts main-branch. This is correct per BRD ('fall back to main') but could be logged for traceability.",
+    "ActiveBookingTracker shows '· {branch_name}' only when truthy (line 114) — works because backend leaves branch_name empty/None for main-branch tokens (verified by test_active_bookings_branch_address_for_main).",
+    "/api/public/salons/{id}/branches returns full branch documents including coords/address. Acceptable for booking-context display, but contains operational fields (capacity, working_hours). Consider a slimmer DTO if any field becomes sensitive."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_branches_phase3_extra.py"
+  ],
+  "success_rate": {"backend": "100% (50/50 — 8 phase-3 + 6 phase-3-extra + 5 phase-1 + 12 phase-1-extra + 9 phase-2 + 10 phase-2-extra)", "frontend": "Static + network verified — /api/public/salon-locations is hit (not legacy /api/salons); all Phase-3 wiring (testids, ?branch= forwarding, branch_id in POST body, branch_name in ActiveBookingTracker) confirmed in source. End-to-end UI click could not be fully exercised because customer-mode requires OTP — main agent already flagged this as expected."},
+  "test_credentials": "Salon admin: identifier='admin' password='salon123' (salon_id b5c6b0ca-66ec-431b-8dc8-387de72fa67c). Customer: phone +919998887766 (Phase3Tester) — created/used in tests.",
+  "seed_data_creation": "All test data is auto-cleaned: temp branches 'Phase3Extra'/'P3xInactive'/'P3-WF'/'P3-OFF' (codes P3X-EXTRA / P3X-INACT / P3-WF / P3-OFF) created and DELETEd in fixture/finally blocks. Test booking tokens cancelled. Staff transfers to active branch are reverted at end of test_booking_creation_with_branch_id. No production data mutated.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Phase 3 backend + frontend wiring is verified and stable. Run regression via:\n  REACT_APP_BACKEND_URL=https://model-branch.preview.emergentagent.com python -m pytest backend/tests/test_branches_phase1.py backend/tests/test_branches_phase1_extra.py backend/tests/test_branches_phase2.py backend/tests/test_branches_phase2_extra.py backend/tests/test_branches_phase3.py backend/tests/test_branches_phase3_extra.py -v\nAll 50 tests must continue to pass. The customer flow (find-a-salon → branch card → booking) cannot be exercised end-to-end via Playwright because the app gates customer routes behind OTP login (existing flow). To test UI clicks you would need to mock an OTP-verified session (set is_otp_verified=true in DB before seeding salon_user localStorage). Frontend smoke confirmed /api/public/salon-locations is being called instead of legacy /api/salons. The salon used has 1 main branch (id d7424ca0-6625-4b41-9084-30de9d873ca2, code MAIN); transient branches created during tests are auto-cleaned.",
+  "rca_of_the_issue": "No bugs found. The single ambiguous 'redirect to /login' observed during Playwright smoke is the app's expected OTP-gated customer route — confirmed in /app/frontend/src/contexts/AuthContext.js (loads salon_user on mount only, OTP page additionally redirects unverified users)."
+}

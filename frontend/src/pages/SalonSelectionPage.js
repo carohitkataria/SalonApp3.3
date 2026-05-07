@@ -193,8 +193,8 @@ export default function SalonSelectionPage() {
 
   const fetchNearbySalons = async (lat, lng) => {
     try {
-      const response = await axios.get(`${API}/salons?lat=${lat}&lng=${lng}&radius=5`);
-      setSalons(response.data);
+      const response = await axios.get(`${API}/public/salon-locations?lat=${lat}&lng=${lng}&radius=5`);
+      setSalons(response.data || []);
       setSearchType('nearby');
     } catch (error) {
       console.error('Error fetching salons:', error);
@@ -206,9 +206,9 @@ export default function SalonSelectionPage() {
 
   const fetchAllSalons = async () => {
     try {
-      const response = await axios.get(`${API}/salons`);
-      setSalons(response.data);
-      setAllSalons(response.data);
+      const response = await axios.get(`${API}/public/salon-locations`);
+      setSalons(response.data || []);
+      setAllSalons(response.data || []);
     } catch (error) {
       console.error('Error fetching salons:', error);
       toast.error('Failed to load salons');
@@ -252,12 +252,12 @@ export default function SalonSelectionPage() {
     // Also fire server search for comprehensive results
     if (query.length >= 2) {
       try {
-        let url = `${API}/salons/search?name=${encodeURIComponent(query)}`;
+        let url = `${API}/public/salon-locations?name=${encodeURIComponent(query)}`;
         if (selectedCity) {
           url += `&city=${encodeURIComponent(selectedCity)}`;
         }
         const response = await axios.get(url);
-        setSalons(response.data.salons || []);
+        setSalons(response.data || []);
       } catch (error) {
         // Client-side results are already shown
       }
@@ -300,9 +300,9 @@ export default function SalonSelectionPage() {
 
     // Also server-side
     try {
-      let url = `${API}/salons/by-city?city=${encodeURIComponent(city)}`;
+      let url = `${API}/public/salon-locations?city=${encodeURIComponent(city)}`;
       const response = await axios.get(url);
-      let results = response.data.salons || [];
+      let results = response.data || [];
       if (searchQuery) {
         results = results.filter(s => 
           s.salon_name.toLowerCase().includes(searchQuery.toLowerCase())
@@ -319,7 +319,11 @@ export default function SalonSelectionPage() {
   );
 
   const handleSelectSalon = (salon) => {
-    navigate(`/salon/${salon.id}`);
+    // Each row is one branch; carry both salon_id (URL) + branch_id (query) so
+    // every downstream call can scope to the chosen branch.
+    const branchId = salon.branch_id || salon.id;
+    const salonId = salon.salon_id || salon.id;
+    navigate(`/salon/${salonId}?branch=${branchId}`);
   };
 
   const SalonCard = ({ salon }) => {
