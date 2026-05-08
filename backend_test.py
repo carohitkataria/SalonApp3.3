@@ -10,7 +10,7 @@ import sys
 from typing import Dict, Any, Optional
 
 # Base URL from frontend/.env
-BASE_URL = "https://staff-management-pro-2.preview.emergentagent.com/api"
+BASE_URL = "https://menu-parser-1.preview.emergentagent.com/api"
 
 # Test credentials from /app/memory/test_credentials.md
 ADMIN_CREDENTIALS = {
