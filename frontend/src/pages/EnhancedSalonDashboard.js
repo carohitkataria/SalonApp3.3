@@ -23,7 +23,7 @@ import OperationalHoursModule from '@/components/OperationalHoursModule';
 import Analytics from '@/components/Analytics';
 import EmployeeRewardPlan from '@/components/EmployeeRewardPlan';
 import SubscriptionPaywallModal from '@/components/SubscriptionPaywallModal';
-import SubscriptionPanel from '@/components/SubscriptionPanel';
+import SubscriptionBadge from '@/components/SubscriptionBadge';
 import { SubscriptionProvider } from '@/contexts/SubscriptionContext';
 import { getSession, clearSession } from '@/utils/sessionManager';
 import {
@@ -987,7 +987,6 @@ export default function EnhancedSalonDashboard() {
     { id: 'analytics', label: 'Analytics', icon: TrendingUp, show: checkIsAdmin() || checkIsBranchManager() || checkHasPermission('can_access_analytics') },
     { id: 'gallery', label: 'Gallery', icon: FileText, show: true },
     { id: 'branches', label: 'Branches', icon: Building2, show: checkIsAdmin() || checkIsBranchManager() },
-    { id: 'subscription', label: 'Subscription', icon: CreditCard, show: checkIsAdmin() },
     { id: 'salon', label: 'Salon Settings', icon: Settings, show: checkIsAdmin() || checkHasPermission('can_edit_salon') }
   ].filter(item => item.show);
 
@@ -1894,6 +1893,9 @@ export default function EnhancedSalonDashboard() {
 
         {activeTab === 'salon' && (
           <div className="space-y-6">
+            {checkIsAdmin() && salonId && (
+              <SubscriptionBadge salonId={salonId} />
+            )}
             <MyProfile 
               salon={salon}
               onUpdate={(updatedSalon) => setSalon(updatedSalon)}
@@ -1912,10 +1914,6 @@ export default function EnhancedSalonDashboard() {
 
         {activeTab === 'branches' && salonId && checkIsAdmin() && (
           <BranchManagement salonId={salonId} />
-        )}
-
-        {activeTab === 'subscription' && salonId && checkIsAdmin() && (
-          <SubscriptionPanel salonId={salonId} />
         )}
 
         {activeTab === 'notifications' && salonId && (
