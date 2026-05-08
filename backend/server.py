@@ -3222,14 +3222,15 @@ async def get_operational_hours(salon_id: str):
     if not salon:
         raise HTTPException(status_code=404, detail="Salon not found")
     
-    # Return default if not set
+    # Return default operational_hours if not set, but always use real manual_toggle from DB
+    actual_manual_toggle = salon.get("manual_toggle") or {"is_overridden": False, "is_open": True, "closed_mode": None, "overridden_at": None}
     if not salon.get("operational_hours"):
         default_hours = OperationalHours().model_dump()
-        return {"operational_hours": default_hours, "manual_toggle": {"is_overridden": False, "is_open": True, "closed_mode": None, "overridden_at": None}}
+        return {"operational_hours": default_hours, "manual_toggle": actual_manual_toggle}
     
     return {
         "operational_hours": salon.get("operational_hours", OperationalHours().model_dump()),
-        "manual_toggle": salon.get("manual_toggle", {"is_overridden": False, "is_open": True, "closed_mode": None, "overridden_at": None})
+        "manual_toggle": actual_manual_toggle
     }
 
 @api_router.put("/salons/{salon_id}/operational-hours")
