@@ -3279,15 +3279,15 @@ async def update_operational_hours(
     return {"message": "Operational hours updated successfully", "operational_hours": hours.model_dump()}
 
 @api_router.put("/salons/{salon_id}/manual-toggle")
-async def update_manual_toggle(salon_id: str, toggle_data: dict, current_salon=Depends(get_current_salon)):
-    """Toggle salon open/close manually"""
+async def update_manual_toggle(salon_id: str, toggle_data: dict, current_user=Depends(get_current_salon_user)):
+    """Toggle salon open/close manually (admin / branch_manager)"""
     existing = await db.salons.find_one({"id": salon_id}, {"_id": 0})
     if not existing:
         raise HTTPException(status_code=404, detail="Salon not found")
     
-    # Verify ownership (JWT payload uses "sub" for salon ID)
-    salon_id_from_token = current_salon.get("sub") or current_salon.get("id")
-    if salon_id_from_token != salon_id:
+    # Verify the authenticated user belongs to this salon
+    user_salon_id = current_user.get("salon_id") or current_user.get("sub") or current_user.get("id")
+    if user_salon_id != salon_id:
         raise HTTPException(status_code=403, detail="Unauthorized")
     
     is_overridden = toggle_data.get("is_overridden", True)
@@ -5414,31 +5414,60 @@ async def parse_salon_menu(
     if not api_key:
         raise HTTPException(status_code=500, detail="EMERGENT_LLM_KEY not configured")
 
-    # Save temp file (LlmChat FileContentWithMimeType requires a file path)
-    import tempfile
-    suffix = os.path.splitext(fname)[1]
-    mime_map = {
-        ".pdf": "application/pdf",
-        ".png": "image/png",
-        ".jpg": "image/jpeg",
-        ".jpeg": "image/jpeg",
-        ".webp": "image/webp",
-    }
-    mime = mime_map.get(suffix, "application/octet-stream")
-
-    tmp_path = None
+    # Build a list of base64-encoded images we will feed to GPT-5.
+    # OpenAI provider in emergentintegrations supports ImageContent (base64 image)
+    # but NOT FileContentWithMimeType (PDF-as-file). For PDFs we render each page
+    # to a PNG using PyMuPDF and pass them as multiple images.
+    image_b64_list: List[str] = []
     try:
-        with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
-            tmp.write(content)
-            tmp_path = tmp.name
+        if fname.endswith(".pdf"):
+            import fitz  # PyMuPDF
+            try:
+                doc = fitz.open(stream=content, filetype="pdf")
+            except Exception as e:
+                raise HTTPException(status_code=400, detail=f"Could not open PDF: {e}")
+            try:
+                # Cap to first 5 pages — sufficient for most salon menus.
+                page_count = min(len(doc), 5)
+                # Render at ~150 dpi (zoom 2.0) for legibility without huge payload.
+                mat = fitz.Matrix(2.0, 2.0)
+                for page_idx in range(page_count):
+                    page = doc.load_page(page_idx)
+                    pix = page.get_pixmap(matrix=mat, alpha=False)
+                    png_bytes = pix.tobytes("png")
+                    image_b64_list.append(base64.b64encode(png_bytes).decode("utf-8"))
+            finally:
+                doc.close()
+            if not image_b64_list:
+                raise HTTPException(status_code=400, detail="PDF has no pages")
+        else:
+            # Already an image — use as-is. Re-encode WEBP via Pillow if available
+            # but fall back to passing raw bytes for png/jpg.
+            if fname.endswith(".webp"):
+                try:
+                    from PIL import Image as PILImage
+                    pil = PILImage.open(io.BytesIO(content)).convert("RGB")
+                    out_buf = io.BytesIO()
+                    pil.save(out_buf, format="JPEG", quality=88)
+                    image_b64_list.append(base64.b64encode(out_buf.getvalue()).decode("utf-8"))
+                except Exception:
+                    image_b64_list.append(base64.b64encode(content).decode("utf-8"))
+            else:
+                image_b64_list.append(base64.b64encode(content).decode("utf-8"))
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("Menu file conversion failed: %s", e)
+        raise HTTPException(status_code=400, detail=f"Failed to read file: {e}")
 
-        from emergentintegrations.llm.chat import LlmChat, UserMessage, FileContentWithMimeType
+    try:
+        from emergentintegrations.llm.chat import LlmChat, UserMessage, ImageContent
 
         system_message = (
             "You are an expert salon-services extraction assistant. The user will upload a "
-            "salon menu (PDF, photo, or image). Extract every service and package on the menu. "
-            "Return ONLY a valid JSON object with the following shape and NOTHING ELSE — no "
-            "prose, no markdown fences, no explanations:\n"
+            "salon menu (PDF rendered as page images, photo, or image). Extract every service "
+            "and package on the menu. Return ONLY a valid JSON object with the following shape "
+            "and NOTHING ELSE — no prose, no markdown fences, no explanations:\n"
             "{\n"
             '  "services": [\n'
             "    {\n"
@@ -5447,26 +5476,27 @@ async def parse_salon_menu(
             '      "category": "string — best-fit category like Hair, Facial, Spa, Bleach, '
             'Pedicure, Manicure, Wax, Threading, Massage, etc.",\n'
             '      "gender": "Men | Women | Unisex",\n'
-            '      "default_duration": 30, // integer minutes; estimate if not on menu\n'
-            '      "base_price": 0 // integer rupees, no currency symbol\n'
+            '      "default_duration": 30,\n'
+            '      "base_price": 0\n'
             "    }\n"
             "  ],\n"
             '  "packages": [\n'
             "    {\n"
             '      "package_name": "string",\n'
-            '      "service_names": ["service 1", "service 2"], // names that match services above where possible\n'
+            '      "service_names": ["service 1", "service 2"],\n'
             '      "description": "string (optional)",\n'
             '      "gender": "Men | Women | Unisex",\n'
-            '      "package_price": 0 // integer rupees\n'
+            '      "package_price": 0\n'
             "    }\n"
             "  ]\n"
             "}\n"
             "Rules:\n"
-            "1. Strip currency symbols (₹, Rs., INR) — return integer prices only.\n"
+            "1. Strip currency symbols (Rs, INR, ₹) — return integer prices only.\n"
             "2. If gender is unclear, default to 'Unisex'.\n"
-            "3. If duration is not specified, estimate based on the service type (e.g., haircut=30, facial=60, spa=75, threading=15, massage=60).\n"
+            "3. If duration is missing, estimate by service type (haircut=30, facial=60, "
+            "spa=75, threading=15, massage=60).\n"
             "4. Skip non-service items (taxes, addresses, phone numbers, contact info).\n"
-            "5. Ensure JSON is parseable — no trailing commas, no comments in the output, no markdown."
+            "5. Ensure JSON is parseable — no trailing commas, no comments, no markdown."
         )
 
         chat = LlmChat(
@@ -5475,17 +5505,14 @@ async def parse_salon_menu(
             system_message=system_message,
         ).with_model("openai", "gpt-5")
 
-        file_content = FileContentWithMimeType(
-            file_path=tmp_path,
-            mime_type=mime,
-        )
+        image_contents = [ImageContent(image_base64=b64) for b64 in image_b64_list]
         msg = UserMessage(
             text=(
                 "Extract every salon service and package from this menu and return strict JSON "
                 "in the exact schema described in the system prompt. Do not include any markdown "
                 "or prose outside the JSON object."
             ),
-            file_contents=[file_content],
+            file_contents=image_contents,
         )
 
         try:
@@ -5497,11 +5524,9 @@ async def parse_salon_menu(
         # Best-effort JSON extraction (model may include code fences)
         raw_text = (raw or "").strip()
         if raw_text.startswith("```"):
-            # strip fence
             raw_text = raw_text.strip("`")
             if raw_text.lower().startswith("json"):
                 raw_text = raw_text[4:].strip()
-            # Find first { ... }
         first = raw_text.find("{")
         last = raw_text.rfind("}")
         if first == -1 or last == -1:
@@ -5510,7 +5535,6 @@ async def parse_salon_menu(
         try:
             data = json.loads(json_str)
         except Exception:
-            # Try a softer fix — remove trailing commas
             import re as _re
             cleaned = _re.sub(r",\s*([}\]])", r"\1", json_str)
             try:
@@ -5550,12 +5574,11 @@ async def parse_salon_menu(
             "package_count": len(packages_out),
             "message": f"Parsed {len(services_out)} services and {len(packages_out)} packages from the menu.",
         }
-    finally:
-        if tmp_path and os.path.exists(tmp_path):
-            try:
-                os.unlink(tmp_path)
-            except Exception:
-                pass
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("Menu parse unexpected error: %s", e)
+        raise HTTPException(status_code=500, detail=f"Menu parse failed: {e}")
 
 
 @api_router.post("/salons/{salon_id}/services/apply-parsed")
