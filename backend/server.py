@@ -1,6 +1,6 @@
-from fastapi import FastAPI, APIRouter, HTTPException, Depends, status, Body, Request
+from fastapi import FastAPI, APIRouter, HTTPException, Depends, status, Body, Request, UploadFile, File, Form
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
-from fastapi.responses import Response, HTMLResponse
+from fastapi.responses import Response, HTMLResponse, StreamingResponse
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
@@ -129,9 +129,17 @@ class OperationalHours(BaseModel):
     sunday: DayOperationalHours = Field(default_factory=DayOperationalHours)
 
 class ManualToggle(BaseModel):
-    """Manual open/close override"""
+    """Manual open/close override.
+
+    closed_mode values:
+      - None / not set: not closed (is_open=True)
+      - 'full': salon is fully closed (online + offline). No bookings via any channel.
+      - 'online_only': salon is closed for online bookings; walk-in / QR / salon-side
+        manual bookings still work.
+    """
     is_overridden: bool = False
     is_open: bool = True
+    closed_mode: Optional[str] = None  # 'full' | 'online_only' | None
     overridden_at: Optional[str] = None  # ISO timestamp
 
 class Salon(BaseModel):
@@ -3217,11 +3225,11 @@ async def get_operational_hours(salon_id: str):
     # Return default if not set
     if not salon.get("operational_hours"):
         default_hours = OperationalHours().model_dump()
-        return {"operational_hours": default_hours, "manual_toggle": {"is_overridden": False, "is_open": True, "overridden_at": None}}
+        return {"operational_hours": default_hours, "manual_toggle": {"is_overridden": False, "is_open": True, "closed_mode": None, "overridden_at": None}}
     
     return {
         "operational_hours": salon.get("operational_hours", OperationalHours().model_dump()),
-        "manual_toggle": salon.get("manual_toggle", {"is_overridden": False, "is_open": True, "overridden_at": None})
+        "manual_toggle": salon.get("manual_toggle", {"is_overridden": False, "is_open": True, "closed_mode": None, "overridden_at": None})
     }
 
 @api_router.put("/salons/{salon_id}/operational-hours")
@@ -3284,19 +3292,43 @@ async def update_manual_toggle(salon_id: str, toggle_data: dict, current_salon=D
     
     is_overridden = toggle_data.get("is_overridden", True)
     is_open = toggle_data.get("is_open", True)
-    
+    closed_mode = toggle_data.get("closed_mode")  # 'full' | 'online_only' | None
+
+    # Validate closed_mode
+    if closed_mode is not None and closed_mode not in ("full", "online_only"):
+        raise HTTPException(status_code=400, detail="closed_mode must be 'full' or 'online_only' or null")
+
+    # When salon is open, clear closed_mode
+    if is_open:
+        closed_mode = None
+    else:
+        # When closing, require a closed_mode (default to 'full' for backward compat)
+        if not closed_mode:
+            closed_mode = "full"
+
     manual_toggle = {
         "is_overridden": is_overridden,
         "is_open": is_open,
+        "closed_mode": closed_mode,
         "overridden_at": datetime.now(timezone.utc).isoformat() if is_overridden else None
     }
-    
+
     await db.salons.update_one(
         {"id": salon_id},
         {"$set": {"manual_toggle": manual_toggle}}
     )
-    
-    return {"message": f"Salon manually {'opened' if is_open else 'closed'}" if is_overridden else "Manual override cleared", "manual_toggle": manual_toggle}
+
+    if is_overridden:
+        if is_open:
+            msg = "Salon manually opened"
+        elif closed_mode == "online_only":
+            msg = "Salon closed for online bookings only (walk-in & QR still allowed)"
+        else:
+            msg = "Salon manually closed (online + offline)"
+    else:
+        msg = "Manual override cleared"
+
+    return {"message": msg, "manual_toggle": manual_toggle}
 
 @api_router.get("/salons/{salon_id}/is-accepting-bookings")
 async def check_booking_availability(salon_id: str):
@@ -3317,16 +3349,34 @@ async def check_booking_availability(salon_id: str):
                 # Day has changed, clear the override
                 await db.salons.update_one(
                     {"id": salon_id},
-                    {"$set": {"manual_toggle": {"is_overridden": False, "is_open": True, "overridden_at": None}}}
+                    {"$set": {"manual_toggle": {"is_overridden": False, "is_open": True, "closed_mode": None, "overridden_at": None}}}
                 )
-                manual_toggle = {"is_overridden": False, "is_open": True, "overridden_at": None}
+                manual_toggle = {"is_overridden": False, "is_open": True, "closed_mode": None, "overridden_at": None}
         
         # If still overridden, return manual status
         if manual_toggle.get("is_overridden"):
+            closed_mode = manual_toggle.get("closed_mode")
+            is_open = manual_toggle.get("is_open", True)
+            if is_open:
+                return {
+                    "is_accepting_bookings": True,
+                    "reason": "manual_override",
+                    "closed_mode": None,
+                    "message": "Salon is manually open"
+                }
+            if closed_mode == "online_only":
+                return {
+                    "is_accepting_bookings": False,
+                    "reason": "closed_online_only",
+                    "closed_mode": "online_only",
+                    "message": "Closed Online — Visit Salon"
+                }
+            # full close
             return {
-                "is_accepting_bookings": manual_toggle.get("is_open", True),
+                "is_accepting_bookings": False,
                 "reason": "manual_override",
-                "message": f"Salon is manually {'open' if manual_toggle.get('is_open') else 'closed'}"
+                "closed_mode": "full",
+                "message": "Salon is manually closed"
             }
     
     # Check operational hours
@@ -5027,9 +5077,639 @@ async def add_salon_customer(salon_id: str, body: dict, current_user=Depends(get
     
     return {"message": "Customer added", "customer": customer}
 
+
+# ============================================================================
+# BULK CUSTOMER UPLOAD (Excel)
+# ============================================================================
+
+@api_router.get("/salons/{salon_id}/customers/template")
+async def download_customer_template(salon_id: str, current_user=Depends(get_current_salon_user)):
+    """Download an Excel template for bulk customer upload.
+
+    Columns: Name, Mobile No., Gender, Date of Birth (YYYY-MM-DD)
+    """
+    try:
+        from openpyxl import Workbook
+        from openpyxl.styles import Font, PatternFill, Alignment
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"openpyxl unavailable: {e}")
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Customers"
+
+    headers = ["Name", "Mobile No.", "Gender", "Date of Birth"]
+    header_font = Font(bold=True, color="FFFFFF")
+    header_fill = PatternFill(start_color="B8860B", end_color="B8860B", fill_type="solid")
+    center = Alignment(horizontal="center", vertical="center")
+
+    for col_idx, h in enumerate(headers, start=1):
+        cell = ws.cell(row=1, column=col_idx, value=h)
+        cell.font = header_font
+        cell.fill = header_fill
+        cell.alignment = center
+
+    # Sample rows (will be visible to user as a guide)
+    samples = [
+        ["Rahul Sharma", "9876543210", "Men", "1990-05-15"],
+        ["Priya Singh", "9123456789", "Women", "1995-11-23"],
+        ["Aman Verma", "+919999988888", "Men", ""],
+    ]
+    for r_idx, row in enumerate(samples, start=2):
+        for c_idx, val in enumerate(row, start=1):
+            ws.cell(row=r_idx, column=c_idx, value=val)
+
+    # Set column widths
+    ws.column_dimensions["A"].width = 24
+    ws.column_dimensions["B"].width = 18
+    ws.column_dimensions["C"].width = 12
+    ws.column_dimensions["D"].width = 18
+
+    # Add an instructions sheet
+    ws2 = wb.create_sheet("Instructions")
+    instructions = [
+        "Bulk Customer Upload — Instructions",
+        "",
+        "1. Fill rows starting from row 2 in the 'Customers' sheet.",
+        "2. Required columns:",
+        "   • Name           — full name of the customer",
+        "   • Mobile No.     — 10 digits or +91 prefixed (used as the unique key)",
+        "   • Gender         — Men / Women / Kids",
+        "   • Date of Birth  — YYYY-MM-DD (optional, leave blank if unknown)",
+        "3. Duplicate phone numbers are skipped (existing customers are NOT overwritten).",
+        "4. Save as .xlsx and upload via the 'Bulk Upload' button.",
+    ]
+    for i, line in enumerate(instructions, start=1):
+        cell = ws2.cell(row=i, column=1, value=line)
+        if i == 1:
+            cell.font = Font(bold=True, size=14)
+    ws2.column_dimensions["A"].width = 80
+
+    buf = io.BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+
+    return StreamingResponse(
+        buf,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": "attachment; filename=customer_upload_template.xlsx"},
+    )
+
+
+def _normalize_phone_for_bulk(raw) -> Optional[str]:
+    if raw is None:
+        return None
+    s = str(raw).strip()
+    if not s:
+        return None
+    # Excel may give floats like 9876543210.0 — strip trailing .0
+    if s.endswith(".0"):
+        s = s[:-2]
+    # Remove non-digits except leading +
+    digits = "".join(ch for ch in s if ch.isdigit() or ch == "+")
+    if digits.startswith("+91"):
+        digits = digits[3:]
+    elif digits.startswith("+"):
+        digits = digits.lstrip("+")
+    # Strip Indian country code if duplicated
+    if len(digits) > 10 and digits.startswith("91"):
+        digits = digits[-10:]
+    if len(digits) != 10 or not digits.isdigit():
+        return None
+    return f"+91{digits}"
+
+
+def _normalize_gender_for_bulk(raw) -> str:
+    if raw is None:
+        return "Men"
+    s = str(raw).strip().lower()
+    if s in ("m", "male", "men", "man", "boy"):
+        return "Men"
+    if s in ("f", "female", "women", "woman", "girl", "lady"):
+        return "Women"
+    if s in ("k", "kid", "kids", "child", "children"):
+        return "Kids"
+    if s in ("o", "other", "others"):
+        return "Other"
+    return "Men"
+
+
+def _normalize_dob_for_bulk(raw) -> Optional[str]:
+    if raw is None:
+        return None
+    # If Excel passes a datetime
+    if isinstance(raw, datetime):
+        return raw.strftime("%Y-%m-%d")
+    s = str(raw).strip()
+    if not s or s.lower() == "nan":
+        return None
+    # Try ISO YYYY-MM-DD first
+    fmts = ["%Y-%m-%d", "%d-%m-%Y", "%d/%m/%Y", "%m/%d/%Y", "%Y/%m/%d", "%d %b %Y", "%d %B %Y"]
+    for fmt in fmts:
+        try:
+            return datetime.strptime(s, fmt).strftime("%Y-%m-%d")
+        except Exception:
+            continue
+    return None
+
+
+@api_router.post("/salons/{salon_id}/customers/bulk-upload")
+async def bulk_upload_customers(
+    salon_id: str,
+    file: UploadFile = File(...),
+    branch_id: Optional[str] = Form(None),
+    current_user=Depends(get_current_salon_user),
+):
+    """Bulk upload customers from an Excel file.
+
+    Accepts .xlsx and .xls. Required columns (case-insensitive):
+    Name, Mobile No., Gender, Date of Birth.
+    Duplicate phone numbers are skipped (existing customers preserved).
+    """
+    if not file or not file.filename:
+        raise HTTPException(status_code=400, detail="No file provided")
+
+    fname = file.filename.lower()
+    if not (fname.endswith(".xlsx") or fname.endswith(".xls") or fname.endswith(".csv")):
+        raise HTTPException(status_code=400, detail="File must be .xlsx, .xls or .csv")
+
+    content = await file.read()
+    if len(content) > 5 * 1024 * 1024:
+        raise HTTPException(status_code=400, detail="File too large (max 5 MB)")
+
+    rows: List[dict] = []
+    try:
+        if fname.endswith(".csv"):
+            import csv as _csv
+            text = content.decode("utf-8", errors="ignore")
+            reader = _csv.DictReader(io.StringIO(text))
+            for r in reader:
+                rows.append({k.strip().lower(): v for k, v in r.items() if k})
+        else:
+            from openpyxl import load_workbook
+            wb = load_workbook(io.BytesIO(content), data_only=True)
+            # Try the first sheet that looks like 'Customers' or just the active one
+            ws = None
+            for name in ("Customers", "customers"):
+                if name in wb.sheetnames:
+                    ws = wb[name]
+                    break
+            if ws is None:
+                ws = wb.active
+
+            # Header detection (first non-empty row)
+            header_row = None
+            for r in ws.iter_rows(min_row=1, max_row=5, values_only=True):
+                if any((c is not None and str(c).strip() != "") for c in r):
+                    header_row = [str(c).strip().lower() if c is not None else "" for c in r]
+                    break
+            if not header_row:
+                raise HTTPException(status_code=400, detail="Excel file is empty")
+
+            for r in ws.iter_rows(min_row=2, values_only=True):
+                if all(c is None or str(c).strip() == "" for c in r):
+                    continue
+                row = {}
+                for idx, val in enumerate(r):
+                    if idx < len(header_row):
+                        key = header_row[idx]
+                        row[key] = val
+                rows.append(row)
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Failed to parse file: {e}")
+
+    if not rows:
+        raise HTTPException(status_code=400, detail="No data rows found")
+
+    # Map flexible header names to canonical fields
+    def _find(d: dict, *keys: str):
+        for k in keys:
+            if k in d:
+                return d[k]
+            for actual in d.keys():
+                if actual.replace(" ", "").replace(".", "").replace("_", "").lower() == k.replace(" ", "").replace(".", "").replace("_", "").lower():
+                    return d[actual]
+        return None
+
+    resolved_branch = await resolve_branch_id(salon_id, branch_id)
+    now_iso = datetime.now(timezone.utc).isoformat()
+
+    inserted = 0
+    skipped_duplicate = 0
+    skipped_invalid = 0
+    errors: List[dict] = []
+
+    # Pre-fetch existing phones for dedup
+    existing_docs = await db.salon_customers.find(
+        {"salon_id": salon_id},
+        {"_id": 0, "phone": 1}
+    ).to_list(20000)
+    existing_phones = {d.get("phone") for d in existing_docs if d.get("phone")}
+
+    # Also dedup against existing tokens phones
+    token_phones = await db.tokens.distinct("phone", {"salon_id": salon_id})
+    existing_phones.update(p for p in token_phones if p)
+
+    new_docs: List[dict] = []
+    for idx, row in enumerate(rows, start=2):
+        name = _find(row, "name", "customername", "customer name")
+        mobile = _find(row, "mobile no", "mobile", "mobileno", "phone", "mobile no.", "mobilenumber", "mobile number")
+        gender = _find(row, "gender")
+        dob = _find(row, "date of birth", "dob", "dateofbirth", "birthday", "birth date")
+
+        name_str = (str(name).strip() if name is not None else "")
+        phone_norm = _normalize_phone_for_bulk(mobile)
+        gender_norm = _normalize_gender_for_bulk(gender)
+        dob_norm = _normalize_dob_for_bulk(dob)
+
+        if not name_str or not phone_norm:
+            skipped_invalid += 1
+            errors.append({"row": idx, "reason": "Missing/invalid Name or Mobile No.", "raw": {"name": name, "mobile": mobile}})
+            continue
+
+        if phone_norm in existing_phones:
+            skipped_duplicate += 1
+            continue
+
+        new_docs.append({
+            "id": str(uuid.uuid4()),
+            "salon_id": salon_id,
+            "branch_id": resolved_branch,
+            "name": name_str,
+            "phone": phone_norm,
+            "gender": gender_norm,
+            "dob": dob_norm,
+            "created_at": now_iso,
+            "source": "bulk_upload",
+        })
+        existing_phones.add(phone_norm)
+
+    if new_docs:
+        await db.salon_customers.insert_many(new_docs)
+        inserted = len(new_docs)
+
+        # Optionally, upsert into users collection (for DOB tracking, no auth)
+        for d in new_docs:
+            try:
+                await db.users.update_one(
+                    {"phone": d["phone"]},
+                    {"$setOnInsert": {
+                        "id": str(uuid.uuid4()),
+                        "name": d["name"],
+                        "phone": d["phone"],
+                        "gender": d["gender"],
+                        "dob": d.get("dob"),
+                        "is_otp_verified": False,
+                        "created_at": now_iso,
+                    },
+                     "$set": {
+                         "name": d["name"],
+                         "gender": d["gender"],
+                         **({"dob": d["dob"]} if d.get("dob") else {}),
+                     }},
+                    upsert=True,
+                )
+            except Exception:
+                pass
+
+    return {
+        "inserted": inserted,
+        "skipped_duplicate": skipped_duplicate,
+        "skipped_invalid": skipped_invalid,
+        "total_rows": len(rows),
+        "errors": errors[:50],  # cap
+        "message": f"Imported {inserted} customers · {skipped_duplicate} duplicates skipped · {skipped_invalid} invalid rows.",
+    }
+
+
+# ============================================================================
+# MENU PARSING via OpenAI GPT-5 (Vision)
+# ============================================================================
+
+@api_router.post("/salons/{salon_id}/services/parse-menu")
+async def parse_salon_menu(
+    salon_id: str,
+    file: UploadFile = File(...),
+    current_user=Depends(get_current_salon_user),
+):
+    """Parse a salon menu (PDF/PNG/JPG) using GPT-5 vision and return a list of
+    services and packages extracted from the menu. The salon can then choose to
+    'add' (merge with existing) or 'replace' the predefined services.
+    """
+    if not file or not file.filename:
+        raise HTTPException(status_code=400, detail="No file provided")
+
+    fname = file.filename.lower()
+    allowed_exts = (".pdf", ".png", ".jpg", ".jpeg", ".webp")
+    if not fname.endswith(allowed_exts):
+        raise HTTPException(status_code=400, detail="File must be PDF, PNG, JPG, JPEG or WEBP")
+
+    content = await file.read()
+    if len(content) > 10 * 1024 * 1024:
+        raise HTTPException(status_code=400, detail="File too large (max 10 MB)")
+
+    api_key = os.environ.get("EMERGENT_LLM_KEY")
+    if not api_key:
+        raise HTTPException(status_code=500, detail="EMERGENT_LLM_KEY not configured")
+
+    # Save temp file (LlmChat FileContentWithMimeType requires a file path)
+    import tempfile
+    suffix = os.path.splitext(fname)[1]
+    mime_map = {
+        ".pdf": "application/pdf",
+        ".png": "image/png",
+        ".jpg": "image/jpeg",
+        ".jpeg": "image/jpeg",
+        ".webp": "image/webp",
+    }
+    mime = mime_map.get(suffix, "application/octet-stream")
+
+    tmp_path = None
+    try:
+        with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
+            tmp.write(content)
+            tmp_path = tmp.name
+
+        from emergentintegrations.llm.chat import LlmChat, UserMessage, FileContentWithMimeType
+
+        system_message = (
+            "You are an expert salon-services extraction assistant. The user will upload a "
+            "salon menu (PDF, photo, or image). Extract every service and package on the menu. "
+            "Return ONLY a valid JSON object with the following shape and NOTHING ELSE — no "
+            "prose, no markdown fences, no explanations:\n"
+            "{\n"
+            '  "services": [\n'
+            "    {\n"
+            '      "service_name": "string",\n'
+            '      "description": "string (optional, may be empty)",\n'
+            '      "category": "string — best-fit category like Hair, Facial, Spa, Bleach, '
+            'Pedicure, Manicure, Wax, Threading, Massage, etc.",\n'
+            '      "gender": "Men | Women | Unisex",\n'
+            '      "default_duration": 30, // integer minutes; estimate if not on menu\n'
+            '      "base_price": 0 // integer rupees, no currency symbol\n'
+            "    }\n"
+            "  ],\n"
+            '  "packages": [\n'
+            "    {\n"
+            '      "package_name": "string",\n'
+            '      "service_names": ["service 1", "service 2"], // names that match services above where possible\n'
+            '      "description": "string (optional)",\n'
+            '      "gender": "Men | Women | Unisex",\n'
+            '      "package_price": 0 // integer rupees\n'
+            "    }\n"
+            "  ]\n"
+            "}\n"
+            "Rules:\n"
+            "1. Strip currency symbols (₹, Rs., INR) — return integer prices only.\n"
+            "2. If gender is unclear, default to 'Unisex'.\n"
+            "3. If duration is not specified, estimate based on the service type (e.g., haircut=30, facial=60, spa=75, threading=15, massage=60).\n"
+            "4. Skip non-service items (taxes, addresses, phone numbers, contact info).\n"
+            "5. Ensure JSON is parseable — no trailing commas, no comments in the output, no markdown."
+        )
+
+        chat = LlmChat(
+            api_key=api_key,
+            session_id=f"menu-parse-{salon_id}-{uuid.uuid4()}",
+            system_message=system_message,
+        ).with_model("openai", "gpt-5")
+
+        file_content = FileContentWithMimeType(
+            file_path=tmp_path,
+            mime_type=mime,
+        )
+        msg = UserMessage(
+            text=(
+                "Extract every salon service and package from this menu and return strict JSON "
+                "in the exact schema described in the system prompt. Do not include any markdown "
+                "or prose outside the JSON object."
+            ),
+            file_contents=[file_content],
+        )
+
+        try:
+            raw = await chat.send_message(msg)
+        except Exception as e:
+            logger.exception("Menu parse LLM error: %s", e)
+            raise HTTPException(status_code=502, detail=f"AI parsing failed: {e}")
+
+        # Best-effort JSON extraction (model may include code fences)
+        raw_text = (raw or "").strip()
+        if raw_text.startswith("```"):
+            # strip fence
+            raw_text = raw_text.strip("`")
+            if raw_text.lower().startswith("json"):
+                raw_text = raw_text[4:].strip()
+            # Find first { ... }
+        first = raw_text.find("{")
+        last = raw_text.rfind("}")
+        if first == -1 or last == -1:
+            raise HTTPException(status_code=502, detail="AI response was not valid JSON")
+        json_str = raw_text[first:last + 1]
+        try:
+            data = json.loads(json_str)
+        except Exception:
+            # Try a softer fix — remove trailing commas
+            import re as _re
+            cleaned = _re.sub(r",\s*([}\]])", r"\1", json_str)
+            try:
+                data = json.loads(cleaned)
+            except Exception as e:
+                raise HTTPException(status_code=502, detail=f"AI returned invalid JSON: {e}")
+
+        services_out = []
+        for s in (data.get("services") or []):
+            if not s.get("service_name"):
+                continue
+            services_out.append({
+                "service_name": str(s.get("service_name")).strip()[:120],
+                "description": str(s.get("description") or "").strip()[:500],
+                "category": str(s.get("category") or "General").strip()[:60] or "General",
+                "gender": (s.get("gender") if s.get("gender") in ("Men", "Women", "Unisex") else "Unisex"),
+                "default_duration": int(s.get("default_duration") or 30) or 30,
+                "base_price": int(round(float(s.get("base_price") or 0))),
+            })
+
+        packages_out = []
+        for p in (data.get("packages") or []):
+            if not p.get("package_name"):
+                continue
+            packages_out.append({
+                "package_name": str(p.get("package_name")).strip()[:120],
+                "service_names": [str(x).strip()[:120] for x in (p.get("service_names") or []) if x],
+                "description": str(p.get("description") or "").strip()[:500],
+                "gender": (p.get("gender") if p.get("gender") in ("Men", "Women", "Unisex") else "Unisex"),
+                "package_price": int(round(float(p.get("package_price") or 0))),
+            })
+
+        return {
+            "services": services_out,
+            "packages": packages_out,
+            "service_count": len(services_out),
+            "package_count": len(packages_out),
+            "message": f"Parsed {len(services_out)} services and {len(packages_out)} packages from the menu.",
+        }
+    finally:
+        if tmp_path and os.path.exists(tmp_path):
+            try:
+                os.unlink(tmp_path)
+            except Exception:
+                pass
+
+
+@api_router.post("/salons/{salon_id}/services/apply-parsed")
+async def apply_parsed_menu_services(
+    salon_id: str,
+    body: dict = Body(...),
+    current_user=Depends(get_current_salon_user),
+):
+    """Apply previously parsed services/packages to the salon.
+
+    Body:
+      {
+        "services": [...],            # list returned from parse-menu (or edited by salon)
+        "packages": [...],            # optional list of packages
+        "mode": "add" | "replace"     # 'add' merges with existing, 'replace' wipes salon services & packages first
+      }
+    Returns counts of created services, skipped duplicates, packages created.
+    """
+    salon = await db.salons.find_one({"id": salon_id}, {"_id": 0})
+    if not salon:
+        raise HTTPException(status_code=404, detail="Salon not found")
+
+    services_in = body.get("services") or []
+    packages_in = body.get("packages") or []
+    mode = (body.get("mode") or "add").lower()
+    if mode not in ("add", "replace"):
+        raise HTTPException(status_code=400, detail="mode must be 'add' or 'replace'")
+
+    now_iso = datetime.now(timezone.utc).isoformat()
+
+    if mode == "replace":
+        # Disable all currently-enabled services for this salon and remove its custom services.
+        # We do NOT delete global predefined services — just disable them for this salon.
+        await db.salon_services.update_many(
+            {"salon_id": salon_id},
+            {"$set": {"is_enabled": False, "updated_at": now_iso}}
+        )
+        # Delete salon-only services that were imported previously
+        await db.services.delete_many({"salon_id": salon_id})
+        await db.salon_packages.delete_many({"salon_id": salon_id})
+
+    # Insert new services as salon-scoped services (services collection stores both)
+    created_services = 0
+    skipped_services = 0
+    name_to_service_id: Dict[str, str] = {}
+
+    # Load existing services for dedup by name
+    existing = await db.services.find(
+        {"$or": [{"salon_id": salon_id}, {"salon_id": {"$exists": False}}]},
+        {"_id": 0, "id": 1, "service_name": 1}
+    ).to_list(5000)
+    name_to_existing = {(s.get("service_name") or "").strip().lower(): s.get("id") for s in existing}
+
+    docs_to_insert: List[dict] = []
+    for s in services_in:
+        sname = str(s.get("service_name") or "").strip()
+        if not sname:
+            continue
+        key = sname.lower()
+        if key in name_to_existing and mode == "add":
+            skipped_services += 1
+            name_to_service_id[key] = name_to_existing[key]
+            continue
+        sid = str(uuid.uuid4())
+        doc = {
+            "id": sid,
+            "salon_id": salon_id,
+            "service_name": sname[:120],
+            "description": str(s.get("description") or "").strip()[:500],
+            "category": str(s.get("category") or "General").strip()[:60] or "General",
+            "gender": (s.get("gender") if s.get("gender") in ("Men", "Women", "Unisex") else "Unisex"),
+            "default_duration": int(s.get("default_duration") or 30) or 30,
+            "base_price": float(s.get("base_price") or 0),
+            "is_active": True,
+            "thumbnail_url": s.get("thumbnail_url") or None,
+            "source": "menu_parse",
+            "created_at": now_iso,
+        }
+        docs_to_insert.append(doc)
+        name_to_service_id[key] = sid
+
+    if docs_to_insert:
+        await db.services.insert_many(docs_to_insert)
+        created_services = len(docs_to_insert)
+        # Enable each new service for this salon
+        salon_service_docs = []
+        for d in docs_to_insert:
+            salon_service_docs.append({
+                "id": str(uuid.uuid4()),
+                "salon_id": salon_id,
+                "service_id": d["id"],
+                "is_enabled": True,
+                "created_at": now_iso,
+                "updated_at": now_iso,
+            })
+        if salon_service_docs:
+            await db.salon_services.insert_many(salon_service_docs)
+
+    # Packages
+    created_packages = 0
+    if packages_in:
+        for p in packages_in:
+            pname = str(p.get("package_name") or "").strip()
+            if not pname:
+                continue
+            svc_ids: List[str] = []
+            for sn in (p.get("service_names") or []):
+                key = str(sn).strip().lower()
+                if key in name_to_service_id:
+                    svc_ids.append(name_to_service_id[key])
+                elif key in name_to_existing:
+                    svc_ids.append(name_to_existing[key])
+            pkg_doc = {
+                "id": str(uuid.uuid4()),
+                "salon_id": salon_id,
+                "package_name": pname[:120],
+                "description": str(p.get("description") or "").strip()[:500],
+                "service_ids": svc_ids,
+                "gender": (p.get("gender") if p.get("gender") in ("Men", "Women", "Unisex") else "Unisex"),
+                "package_price": float(p.get("package_price") or 0),
+                "is_active": True,
+                "source": "menu_parse",
+                "created_at": now_iso,
+            }
+            await db.salon_packages.insert_one(pkg_doc)
+            created_packages += 1
+
+    return {
+        "mode": mode,
+        "created_services": created_services,
+        "skipped_services": skipped_services,
+        "created_packages": created_packages,
+        "message": (
+            f"Imported {created_services} new services"
+            + (f" (skipped {skipped_services} duplicates)" if mode == "add" and skipped_services else "")
+            + (f" and {created_packages} packages." if created_packages else ".")
+        ),
+    }
+
+
 @api_router.post("/salons/{salon_id}/salon-booking")
 async def create_salon_booking(salon_id: str, body: dict, current_user=Depends(get_current_salon_user)):
     """Create a booking from the salon side (walk-in, phone call, etc.)"""
+    # === Manual close (full only) enforcement for salon-side manual bookings ===
+    salon_for_close = await db.salons.find_one({"id": salon_id}, {"_id": 0, "manual_toggle": 1})
+    mt = (salon_for_close or {}).get("manual_toggle") or {}
+    if mt.get("is_overridden") and not mt.get("is_open", True):
+        if (mt.get("closed_mode") or "full") == "full":
+            raise HTTPException(
+                status_code=400,
+                detail="Salon is fully closed (online + offline). Please open the salon to take bookings."
+            )
+        # online_only: salon-side manual booking is allowed
+    
     customer_name = body.get("customer_name", "Walk-in").strip()
     phone = body.get("phone", "").strip()
     gender = body.get("gender", "Men")
@@ -6129,6 +6809,25 @@ async def create_booking(booking: BookingCreate):
             status_code=400,
             detail=f"Salon is closed on {booking_date}. Please select another date."
         )
+    
+    # === Manual close (online/full) enforcement for online customer bookings ===
+    salon_for_close = await db.salons.find_one({"id": booking.salon_id}, {"_id": 0, "manual_toggle": 1})
+    mt = (salon_for_close or {}).get("manual_toggle") or {}
+    if mt.get("is_overridden") and not mt.get("is_open", True):
+        closed_mode = mt.get("closed_mode") or "full"
+        # Allow QR-scan walk-in flow even when online_only closed
+        src_lower = (booking.source or "").lower()
+        is_qr = src_lower in ("qr_scan", "qr", "qr_walkin")
+        if closed_mode == "full":
+            raise HTTPException(
+                status_code=400,
+                detail="Salon is currently closed. Bookings are not being accepted right now."
+            )
+        if closed_mode == "online_only" and not is_qr:
+            raise HTTPException(
+                status_code=400,
+                detail="Closed Online — Visit Salon. Online bookings are paused; please book at the salon."
+            )
     
     # Check if day is marked as holiday in operational hours
     salon_for_hours = await db.salons.find_one({"id": booking.salon_id}, {"_id": 0, "operational_hours": 1})

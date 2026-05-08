@@ -8,7 +8,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/u
 import { toast } from 'sonner';
 import {
   Users, Search, ArrowLeft, Plus, Calendar, Package, Percent, IndianRupee, Save, Crown, Wallet, CreditCard,
-  Edit2, Check, X, ArrowUpCircle, ArrowDownCircle
+  Edit2, Check, X, ArrowUpCircle, ArrowDownCircle, Upload, FileSpreadsheet, Download, Loader2
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import MembershipManagement from './MembershipManagement';
@@ -43,6 +43,59 @@ export default function CustomerMaster({ salonId, getAuthHeaders }) {
     phone: '',
     gender: 'Men'
   });
+
+  // Bulk Upload Modal State
+  const [showBulkUploadModal, setShowBulkUploadModal] = useState(false);
+  const [bulkUploadFile, setBulkUploadFile] = useState(null);
+  const [bulkUploading, setBulkUploading] = useState(false);
+  const [bulkUploadResult, setBulkUploadResult] = useState(null);
+
+  const handleDownloadTemplate = async () => {
+    try {
+      const response = await axios.get(
+        `${API}/salons/${salonId}/customers/template`,
+        { headers: getAuthHeaders(), responseType: 'blob' }
+      );
+      const url = window.URL.createObjectURL(new Blob([response.data]));
+      const link = document.createElement('a');
+      link.href = url;
+      link.setAttribute('download', 'customer_upload_template.xlsx');
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.URL.revokeObjectURL(url);
+      toast.success('Template downloaded');
+    } catch (error) {
+      toast.error('Failed to download template');
+    }
+  };
+
+  const handleBulkUpload = async () => {
+    if (!bulkUploadFile) {
+      toast.error('Please select a file');
+      return;
+    }
+    setBulkUploading(true);
+    setBulkUploadResult(null);
+    try {
+      const fd = new FormData();
+      fd.append('file', bulkUploadFile);
+      const response = await axios.post(
+        `${API}/salons/${salonId}/customers/bulk-upload`,
+        fd,
+        {
+          headers: { ...getAuthHeaders(), 'Content-Type': 'multipart/form-data' },
+        }
+      );
+      setBulkUploadResult(response.data);
+      toast.success(response.data.message || 'Customers imported');
+      fetchCustomers();
+    } catch (error) {
+      toast.error(error.response?.data?.detail || 'Bulk upload failed');
+    } finally {
+      setBulkUploading(false);
+    }
+  };
 
   
   const [packageForm, setPackageForm] = useState({
@@ -830,6 +883,14 @@ export default function CustomerMaster({ salonId, getAuthHeaders }) {
             Add Customer
           </Button>
           <Button
+            onClick={() => { setBulkUploadFile(null); setBulkUploadResult(null); setShowBulkUploadModal(true); }}
+            variant="outline"
+            className="border-gold text-gold hover:bg-gold/10"
+          >
+            <Upload className="w-4 h-4 mr-2" />
+            Bulk Upload
+          </Button>
+          <Button
             onClick={() => setShowMembershipManagement(true)}
             variant="outline"
             className="border-gold text-gold hover:bg-gold/10"
@@ -913,6 +974,96 @@ export default function CustomerMaster({ salonId, getAuthHeaders }) {
                 variant="outline"
               >
                 Cancel
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Bulk Upload Customers Modal */}
+      <Dialog open={showBulkUploadModal} onOpenChange={(open) => {
+        setShowBulkUploadModal(open);
+        if (!open) { setBulkUploadFile(null); setBulkUploadResult(null); }
+      }}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <FileSpreadsheet className="w-5 h-5 text-gold" />
+              Bulk Upload Customers
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 mt-4">
+            <div className="p-3 rounded-lg bg-blue-50 border border-blue-200 text-sm text-blue-900 dark:bg-blue-900/20 dark:text-blue-200 dark:border-blue-800">
+              <p className="font-semibold mb-1">How it works</p>
+              <ul className="list-disc list-inside space-y-0.5 text-xs">
+                <li>Download the Excel template below.</li>
+                <li>Fill in <b>Name</b>, <b>Mobile No.</b>, <b>Gender</b>, <b>Date of Birth</b> (YYYY-MM-DD).</li>
+                <li>Mobile number is the unique key — duplicates are skipped automatically.</li>
+              </ul>
+            </div>
+
+            <Button
+              onClick={handleDownloadTemplate}
+              variant="outline"
+              className="w-full border-gold text-gold hover:bg-gold/10"
+              type="button"
+            >
+              <Download className="w-4 h-4 mr-2" />
+              Download Excel Template
+            </Button>
+
+            <div>
+              <Label htmlFor="bulk-file" className="text-sm font-medium">Upload filled Excel (.xlsx / .xls / .csv)</Label>
+              <Input
+                id="bulk-file"
+                type="file"
+                accept=".xlsx,.xls,.csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel,text/csv"
+                onChange={(e) => { setBulkUploadFile(e.target.files?.[0] || null); setBulkUploadResult(null); }}
+                className="mt-2"
+              />
+              {bulkUploadFile && (
+                <p className="text-xs text-muted-foreground mt-1">Selected: {bulkUploadFile.name}</p>
+              )}
+            </div>
+
+            {bulkUploadResult && (
+              <div className="p-3 rounded-lg bg-green-50 border border-green-200 text-sm text-green-900 dark:bg-green-900/20 dark:text-green-200 dark:border-green-800">
+                <p className="font-semibold mb-1">Result</p>
+                <ul className="text-xs space-y-0.5">
+                  <li>✓ Imported: <b>{bulkUploadResult.inserted}</b></li>
+                  <li>↩ Skipped (duplicate phone): <b>{bulkUploadResult.skipped_duplicate}</b></li>
+                  <li>⚠ Invalid rows: <b>{bulkUploadResult.skipped_invalid}</b></li>
+                </ul>
+                {bulkUploadResult.errors && bulkUploadResult.errors.length > 0 && (
+                  <details className="mt-2">
+                    <summary className="cursor-pointer text-xs text-amber-700">View {bulkUploadResult.errors.length} errors</summary>
+                    <ul className="text-[11px] mt-1 max-h-32 overflow-auto pr-2">
+                      {bulkUploadResult.errors.map((er, i) => (
+                        <li key={i}>Row {er.row}: {er.reason}</li>
+                      ))}
+                    </ul>
+                  </details>
+                )}
+              </div>
+            )}
+
+            <div className="flex gap-2 pt-2">
+              <Button
+                onClick={handleBulkUpload}
+                disabled={!bulkUploadFile || bulkUploading}
+                className="flex-1 bg-gold text-black hover:bg-gold/90"
+              >
+                {bulkUploading ? (
+                  <><Loader2 className="w-4 h-4 mr-2 animate-spin" /> Uploading...</>
+                ) : (
+                  <><Upload className="w-4 h-4 mr-2" /> Upload &amp; Import</>
+                )}
+              </Button>
+              <Button
+                onClick={() => { setShowBulkUploadModal(false); setBulkUploadFile(null); setBulkUploadResult(null); }}
+                variant="outline"
+              >
+                Close
               </Button>
             </div>
           </div>

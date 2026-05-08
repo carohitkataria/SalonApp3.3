@@ -8,7 +8,8 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '
 import { 
   Search, Plus, Star, Package, Sparkles, 
   ChevronDown, ChevronRight, Edit, Trash2,
-  Image as ImageIcon, Heart, Home, Save, X, GripVertical
+  Image as ImageIcon, Heart, Home, Save, X, GripVertical,
+  Upload, FileText, Loader2, RefreshCw
 } from 'lucide-react';
 import axios from 'axios';
 import { toast } from 'sonner';
@@ -34,6 +35,78 @@ export default function OfferingsModule({ salonId, token }) {
   const [showPackageModal, setShowPackageModal] = useState(false);
   const [editingService, setEditingService] = useState(null);
   const [editingPackage, setEditingPackage] = useState(null);
+
+  // Menu Parsing modal state
+  const [showMenuModal, setShowMenuModal] = useState(false);
+  const [menuFile, setMenuFile] = useState(null);
+  const [menuParsing, setMenuParsing] = useState(false);
+  const [menuApplying, setMenuApplying] = useState(false);
+  const [parsedServices, setParsedServices] = useState([]);
+  const [parsedPackages, setParsedPackages] = useState([]);
+  const [showApplyChoice, setShowApplyChoice] = useState(false);
+
+  const handleParseMenu = async () => {
+    if (!menuFile) {
+      toast.error('Please select a menu file (PDF or image)');
+      return;
+    }
+    setMenuParsing(true);
+    setParsedServices([]);
+    setParsedPackages([]);
+    setShowApplyChoice(false);
+    try {
+      const fd = new FormData();
+      fd.append('file', menuFile);
+      const response = await axios.post(
+        `${API}/salons/${salonId}/services/parse-menu`,
+        fd,
+        {
+          headers: {
+            Authorization: `Bearer ${token}`,
+            'Content-Type': 'multipart/form-data',
+          },
+        }
+      );
+      setParsedServices(response.data.services || []);
+      setParsedPackages(response.data.packages || []);
+      setShowApplyChoice(true);
+      toast.success(response.data.message || 'Menu parsed successfully');
+    } catch (error) {
+      console.error('Parse menu error:', error);
+      toast.error(error.response?.data?.detail || 'Failed to parse menu');
+    } finally {
+      setMenuParsing(false);
+    }
+  };
+
+  const handleApplyParsed = async (mode) => {
+    if (parsedServices.length === 0 && parsedPackages.length === 0) {
+      toast.error('No services to apply');
+      return;
+    }
+    if (mode === 'replace' && !window.confirm(
+      'This will REPLACE all your existing services and packages with the parsed ones. Continue?'
+    )) return;
+    setMenuApplying(true);
+    try {
+      const response = await axios.post(
+        `${API}/salons/${salonId}/services/apply-parsed`,
+        { services: parsedServices, packages: parsedPackages, mode },
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      toast.success(response.data.message || 'Services applied');
+      setShowMenuModal(false);
+      setMenuFile(null);
+      setParsedServices([]);
+      setParsedPackages([]);
+      setShowApplyChoice(false);
+      fetchAllData();
+    } catch (error) {
+      toast.error(error.response?.data?.detail || 'Failed to apply services');
+    } finally {
+      setMenuApplying(false);
+    }
+  };
 
   useEffect(() => {
     initializeSalonServices();
@@ -231,18 +304,167 @@ export default function OfferingsModule({ salonId, token }) {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between flex-wrap gap-2">
         <h2 className="text-2xl font-bold text-foreground">Offerings</h2>
-        <Button
-          onClick={forceReinitialize}
-          variant="outline"
-          size="sm"
-          className="text-xs"
-        >
-          <Sparkles className="w-3 h-3 mr-1" />
-          Load Predefined Services
-        </Button>
+        <div className="flex flex-wrap gap-2">
+          <Button
+            onClick={() => { setMenuFile(null); setParsedServices([]); setParsedPackages([]); setShowApplyChoice(false); setShowMenuModal(true); }}
+            size="sm"
+            className="bg-gold text-black hover:bg-gold/90 text-xs"
+          >
+            <Upload className="w-3 h-3 mr-1" />
+            Upload Menu (PDF / Image)
+          </Button>
+          <Button
+            onClick={forceReinitialize}
+            variant="outline"
+            size="sm"
+            className="text-xs"
+          >
+            <Sparkles className="w-3 h-3 mr-1" />
+            Load Predefined Services
+          </Button>
+        </div>
       </div>
+
+      {/* Upload Menu Modal */}
+      <Dialog open={showMenuModal} onOpenChange={(open) => {
+        setShowMenuModal(open);
+        if (!open) {
+          setMenuFile(null);
+          setParsedServices([]);
+          setParsedPackages([]);
+          setShowApplyChoice(false);
+        }
+      }}>
+        <DialogContent className="max-w-2xl max-h-[85vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <FileText className="w-5 h-5 text-gold" />
+              Upload Menu — AI Service Extraction
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 mt-4">
+            <div className="p-3 rounded-lg bg-blue-50 border border-blue-200 text-sm text-blue-900 dark:bg-blue-900/20 dark:text-blue-200 dark:border-blue-800">
+              <p className="font-semibold mb-1">How it works</p>
+              <ul className="list-disc list-inside space-y-0.5 text-xs">
+                <li>Upload your salon menu as <b>PDF</b> or an <b>image</b> (PNG / JPG / WEBP).</li>
+                <li>Our AI extracts every service with name, category, gender, duration and price.</li>
+                <li>Review the parsed list below, then choose to <b>Add</b> (merge with existing) or <b>Replace</b> all your services.</li>
+              </ul>
+            </div>
+
+            {!showApplyChoice && (
+              <>
+                <div>
+                  <Label htmlFor="menu-file" className="text-sm font-medium">Menu file</Label>
+                  <Input
+                    id="menu-file"
+                    type="file"
+                    accept=".pdf,.png,.jpg,.jpeg,.webp,application/pdf,image/png,image/jpeg,image/webp"
+                    onChange={(e) => setMenuFile(e.target.files?.[0] || null)}
+                    className="mt-2"
+                  />
+                  {menuFile && (
+                    <p className="text-xs text-muted-foreground mt-1">Selected: {menuFile.name} ({Math.round(menuFile.size / 1024)} KB)</p>
+                  )}
+                </div>
+
+                <div className="flex gap-2 pt-2">
+                  <Button
+                    onClick={handleParseMenu}
+                    disabled={!menuFile || menuParsing}
+                    className="flex-1 bg-gold text-black hover:bg-gold/90"
+                  >
+                    {menuParsing ? (
+                      <><Loader2 className="w-4 h-4 mr-2 animate-spin" /> Parsing menu (this may take 30–60s)...</>
+                    ) : (
+                      <><Sparkles className="w-4 h-4 mr-2" /> Parse Menu with AI</>
+                    )}
+                  </Button>
+                  <Button onClick={() => setShowMenuModal(false)} variant="outline">
+                    Cancel
+                  </Button>
+                </div>
+              </>
+            )}
+
+            {showApplyChoice && (
+              <>
+                <div className="border border-border rounded-lg overflow-hidden">
+                  <div className="px-3 py-2 bg-muted text-sm font-semibold flex items-center justify-between">
+                    <span>Parsed Services ({parsedServices.length})</span>
+                    {parsedPackages.length > 0 && <span className="text-xs">+ {parsedPackages.length} packages</span>}
+                  </div>
+                  <div className="max-h-64 overflow-y-auto divide-y divide-border">
+                    {parsedServices.length === 0 ? (
+                      <p className="p-4 text-sm text-muted-foreground text-center">No services were extracted from the menu.</p>
+                    ) : parsedServices.map((s, idx) => (
+                      <div key={idx} className="px-3 py-2 text-xs flex items-center justify-between gap-2">
+                        <div className="flex-1 min-w-0">
+                          <p className="font-medium truncate">{s.service_name}</p>
+                          <p className="text-muted-foreground truncate">
+                            {s.category} · {s.gender} · {s.default_duration} min
+                          </p>
+                        </div>
+                        <span className="font-bold text-gold">₹{s.base_price}</span>
+                      </div>
+                    ))}
+                  </div>
+                  {parsedPackages.length > 0 && (
+                    <div className="border-t border-border">
+                      <div className="px-3 py-2 bg-muted/50 text-xs font-semibold">Packages</div>
+                      <div className="max-h-32 overflow-y-auto divide-y divide-border">
+                        {parsedPackages.map((p, idx) => (
+                          <div key={idx} className="px-3 py-2 text-xs flex items-center justify-between gap-2">
+                            <div className="flex-1 min-w-0">
+                              <p className="font-medium truncate">{p.package_name}</p>
+                              <p className="text-muted-foreground truncate">{(p.service_names || []).join(', ')}</p>
+                            </div>
+                            <span className="font-bold text-gold">₹{p.package_price}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-2">
+                  <Button
+                    onClick={() => handleApplyParsed('add')}
+                    disabled={menuApplying || parsedServices.length === 0}
+                    className="bg-green-600 text-white hover:bg-green-700"
+                  >
+                    {menuApplying ? (
+                      <><Loader2 className="w-4 h-4 mr-2 animate-spin" /> Adding...</>
+                    ) : (
+                      <><Plus className="w-4 h-4 mr-2" /> Add to existing</>
+                    )}
+                  </Button>
+                  <Button
+                    onClick={() => handleApplyParsed('replace')}
+                    disabled={menuApplying || parsedServices.length === 0}
+                    className="bg-red-600 text-white hover:bg-red-700"
+                  >
+                    {menuApplying ? (
+                      <><Loader2 className="w-4 h-4 mr-2 animate-spin" /> Replacing...</>
+                    ) : (
+                      <><RefreshCw className="w-4 h-4 mr-2" /> Replace all existing</>
+                    )}
+                  </Button>
+                </div>
+                <Button
+                  onClick={() => { setShowApplyChoice(false); setParsedServices([]); setParsedPackages([]); setMenuFile(null); }}
+                  variant="outline"
+                  className="w-full"
+                >
+                  Re-upload a different menu
+                </Button>
+              </>
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
 
       <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
         <TabsList className="grid w-full grid-cols-3">

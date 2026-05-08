@@ -91,23 +91,37 @@ export default function OperationalHoursModule({ salonId }) {
     }
   };
 
-  const handleManualToggle = async () => {
+  const handleManualToggle = async (action) => {
+    // action: 'open' | 'close_full' | 'close_online'
     setToggling(true);
     try {
       const session = getSession();
-      const newState = !manualToggle.is_open;
+      let payload;
+      if (action === 'open') {
+        payload = { is_overridden: false, is_open: true, closed_mode: null };
+      } else if (action === 'close_full') {
+        payload = { is_overridden: true, is_open: false, closed_mode: 'full' };
+      } else if (action === 'close_online') {
+        payload = { is_overridden: true, is_open: false, closed_mode: 'online_only' };
+      }
       const response = await axios.put(
         `${API}/salons/${salonId}/manual-toggle`,
-        { is_open: newState },
+        payload,
         {
           headers: { Authorization: `Bearer ${session.token}` }
         }
       );
       setManualToggle(response.data.manual_toggle);
-      toast.success(`Salon manually ${newState ? 'opened' : 'closed'}`);
+      if (action === 'open') {
+        toast.success('Salon is now Open');
+      } else if (action === 'close_full') {
+        toast.success('Salon fully closed (online + offline)');
+      } else {
+        toast.success('Closed for online bookings only');
+      }
     } catch (error) {
       console.error('Error toggling salon:', error);
-      toast.error('Failed to toggle salon status');
+      toast.error('Failed to update salon status');
     } finally {
       setToggling(false);
     }
@@ -125,37 +139,75 @@ export default function OperationalHoursModule({ salonId }) {
     <div className="p-6 max-w-5xl mx-auto">
       {/* Manual Toggle Section */}
       <div className="mb-8 p-6 bg-gradient-to-r from-blue-50 to-green-50 dark:from-gray-800 dark:to-gray-800 rounded-xl border border-gray-200 dark:border-gray-700">
-        <div className="flex items-center justify-between">
-          <div>
-            <h3 className="text-lg font-bold text-gray-800 dark:text-white mb-1 flex items-center gap-2">
-              <Calendar size={20} />
-              Manual Open/Close Control
-            </h3>
-            <p className="text-sm text-gray-600 dark:text-gray-400">
-              {manualToggle.is_overridden 
-                ? `Manually ${manualToggle.is_open ? 'opened' : 'closed'} - Override active`
-                : 'Following automatic schedule'}
-            </p>
+        <div>
+          <h3 className="text-lg font-bold text-gray-800 dark:text-white mb-1 flex items-center gap-2">
+            <Calendar size={20} />
+            Manual Open / Close Control
+          </h3>
+          <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
+            {manualToggle.is_overridden ? (
+              manualToggle.is_open ? (
+                <span className="inline-flex items-center gap-2">
+                  <span className="w-2 h-2 rounded-full bg-green-500" />
+                  Manually <strong>Open</strong> — override active
+                </span>
+              ) : (manualToggle.closed_mode === 'online_only') ? (
+                <span className="inline-flex items-center gap-2">
+                  <span className="w-2 h-2 rounded-full bg-amber-500" />
+                  <strong>Closed Online</strong> — Walk-in & QR bookings still allowed
+                </span>
+              ) : (
+                <span className="inline-flex items-center gap-2">
+                  <span className="w-2 h-2 rounded-full bg-red-500" />
+                  <strong>Fully Closed</strong> — Online & Offline bookings paused
+                </span>
+              )
+            ) : 'Following automatic schedule'}
+          </p>
+
+          <div className="flex flex-wrap gap-3">
+            <Button
+              onClick={() => handleManualToggle('open')}
+              disabled={toggling || (!manualToggle.is_overridden && manualToggle.is_open)}
+              className={`${
+                manualToggle.is_open && !manualToggle.is_overridden
+                  ? 'bg-green-600 ring-2 ring-green-300'
+                  : 'bg-green-500 hover:bg-green-600'
+              } text-white font-semibold px-4 py-2 rounded-lg shadow`}
+              title="Salon is open and accepting all bookings"
+            >
+              {toggling ? <Loader2 className="animate-spin mr-2" size={18} /> : <ToggleRight className="mr-2" size={18} />}
+              Open Salon
+            </Button>
+
+            <Button
+              onClick={() => handleManualToggle('close_online')}
+              disabled={toggling || (manualToggle.is_overridden && manualToggle.closed_mode === 'online_only')}
+              className={`${
+                manualToggle.is_overridden && manualToggle.closed_mode === 'online_only'
+                  ? 'bg-amber-600 ring-2 ring-amber-300'
+                  : 'bg-amber-500 hover:bg-amber-600'
+              } text-white font-semibold px-4 py-2 rounded-lg shadow`}
+              title="Stop online bookings — walk-ins / QR / salon-side bookings still work"
+            >
+              {toggling ? <Loader2 className="animate-spin mr-2" size={18} /> : null}
+              Close Online Only
+            </Button>
+
+            <Button
+              onClick={() => handleManualToggle('close_full')}
+              disabled={toggling || (manualToggle.is_overridden && manualToggle.closed_mode === 'full')}
+              className={`${
+                manualToggle.is_overridden && manualToggle.closed_mode === 'full'
+                  ? 'bg-red-700 ring-2 ring-red-300'
+                  : 'bg-red-500 hover:bg-red-600'
+              } text-white font-semibold px-4 py-2 rounded-lg shadow`}
+              title="Salon is fully closed — no bookings via any channel"
+            >
+              {toggling ? <Loader2 className="animate-spin mr-2" size={18} /> : <ToggleLeft className="mr-2" size={18} />}
+              Close Salon (Online &amp; Offline)
+            </Button>
           </div>
-          <Button
-            onClick={handleManualToggle}
-            disabled={toggling}
-            size="lg"
-            className={`${
-              manualToggle.is_open
-                ? 'bg-green-500 hover:bg-green-600'
-                : 'bg-red-500 hover:bg-red-600'
-            } text-white font-bold px-6 py-3 rounded-lg shadow-lg transition-all duration-300`}
-          >
-            {toggling ? (
-              <Loader2 className="animate-spin mr-2" size={20} />
-            ) : manualToggle.is_open ? (
-              <ToggleRight className="mr-2" size={20} />
-            ) : (
-              <ToggleLeft className="mr-2" size={20} />
-            )}
-            {manualToggle.is_open ? 'Open Now' : 'Closed Now'}
-          </Button>
         </div>
       </div>
 

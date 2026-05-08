@@ -1816,6 +1816,49 @@ export default function EnhancedSalonDashboard() {
                 <p className="text-xs text-muted-foreground">Photos up to 5MB each • Videos up to 25MB each</p>
               </div>
 
+              {/* Social Media Integration (Coming Soon) */}
+              <div className="mb-6 p-4 bg-gradient-to-br from-purple-500/5 via-pink-500/5 to-amber-500/5 rounded-lg border border-gold/20">
+                <div className="flex items-start justify-between flex-wrap gap-2 mb-3">
+                  <div>
+                    <Label className="font-semibold flex items-center gap-2">
+                      Connect Social Media
+                      <span className="text-[10px] uppercase tracking-wide bg-amber-500/20 text-amber-700 dark:text-amber-300 border border-amber-500/40 px-2 py-0.5 rounded-full font-bold">
+                        Coming Soon
+                      </span>
+                    </Label>
+                    <p className="text-xs text-muted-foreground mt-1">
+                      Auto-import posts from your Instagram, YouTube and Facebook into your gallery.
+                    </p>
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                  {[
+                    { name: 'Instagram', color: 'from-pink-500 to-purple-600', emoji: '\uD83D\uDCF8', hint: 'Pull latest posts &amp; reels' },
+                    { name: 'YouTube',   color: 'from-red-500 to-red-700',     emoji: '\u25B6',     hint: 'Embed channel videos' },
+                    { name: 'Facebook',  color: 'from-blue-500 to-blue-700',   emoji: '\uD83D\uDC4D', hint: 'Sync page posts' },
+                    { name: 'TikTok',    color: 'from-gray-700 to-black',      emoji: '\uD83C\uDFB5', hint: 'Bring TikTok videos' },
+                  ].map((sm) => (
+                    <button
+                      key={sm.name}
+                      type="button"
+                      disabled
+                      title={`${sm.name} integration — Coming Soon`}
+                      onClick={() => toast.info(`${sm.name} integration is coming soon!`)}
+                      className={`group relative overflow-hidden rounded-xl p-3 text-left bg-gradient-to-br ${sm.color} text-white shadow-md opacity-80 cursor-not-allowed border border-white/10`}
+                    >
+                      <div className="flex items-center gap-2">
+                        <span className="text-xl">{sm.emoji}</span>
+                        <span className="font-bold text-sm">{sm.name}</span>
+                      </div>
+                      <p className="text-[10px] mt-1 opacity-90 leading-tight">{sm.hint}</p>
+                      <span className="absolute top-1 right-1 text-[8px] uppercase font-bold bg-black/40 px-1.5 py-0.5 rounded">
+                        Soon
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+
               {/* Gallery Grid */}
               {salon?.photo_gallery && salon.photo_gallery.length > 0 ? (
                 <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">

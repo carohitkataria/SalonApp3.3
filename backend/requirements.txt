@@ -69,6 +69,9 @@ oauthlib==3.3.1
 openai==1.99.9
 packaging==26.0
 pandas==3.0.1
+openpyxl==3.1.5
+xlsxwriter==3.2.9
+
 passlib==1.7.4
 pathspec==1.0.4
 pillow==12.1.1
