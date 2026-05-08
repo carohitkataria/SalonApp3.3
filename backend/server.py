@@ -5415,60 +5415,32 @@ async def parse_salon_menu(
     if not api_key:
         raise HTTPException(status_code=500, detail="EMERGENT_LLM_KEY not configured")
 
-    # Build a list of base64-encoded images we will feed to GPT-5.
-    # OpenAI provider in emergentintegrations supports ImageContent (base64 image)
-    # but NOT FileContentWithMimeType (PDF-as-file). For PDFs we render each page
-    # to a PNG using PyMuPDF and pass them as multiple images.
-    image_b64_list: List[str] = []
-    try:
-        if fname.endswith(".pdf"):
-            import fitz  # PyMuPDF
-            try:
-                doc = fitz.open(stream=content, filetype="pdf")
-            except Exception as e:
-                raise HTTPException(status_code=400, detail=f"Could not open PDF: {e}")
-            try:
-                # Cap to first 5 pages — sufficient for most salon menus.
-                page_count = min(len(doc), 5)
-                # Render at ~150 dpi (zoom 2.0) for legibility without huge payload.
-                mat = fitz.Matrix(2.0, 2.0)
-                for page_idx in range(page_count):
-                    page = doc.load_page(page_idx)
-                    pix = page.get_pixmap(matrix=mat, alpha=False)
-                    png_bytes = pix.tobytes("png")
-                    image_b64_list.append(base64.b64encode(png_bytes).decode("utf-8"))
-            finally:
-                doc.close()
-            if not image_b64_list:
-                raise HTTPException(status_code=400, detail="PDF has no pages")
-        else:
-            # Already an image — use as-is. Re-encode WEBP via Pillow if available
-            # but fall back to passing raw bytes for png/jpg.
-            if fname.endswith(".webp"):
-                try:
-                    from PIL import Image as PILImage
-                    pil = PILImage.open(io.BytesIO(content)).convert("RGB")
-                    out_buf = io.BytesIO()
-                    pil.save(out_buf, format="JPEG", quality=88)
-                    image_b64_list.append(base64.b64encode(out_buf.getvalue()).decode("utf-8"))
-                except Exception:
-                    image_b64_list.append(base64.b64encode(content).decode("utf-8"))
-            else:
-                image_b64_list.append(base64.b64encode(content).decode("utf-8"))
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.exception("Menu file conversion failed: %s", e)
-        raise HTTPException(status_code=400, detail=f"Failed to read file: {e}")
+    # Gemini supports both PDFs and images natively via FileContentWithMimeType,
+    # and has a more generous budget on the Emergent Universal LLM Key than GPT-5.
+    import tempfile
+    suffix = os.path.splitext(fname)[1]
+    mime_map = {
+        ".pdf": "application/pdf",
+        ".png": "image/png",
+        ".jpg": "image/jpeg",
+        ".jpeg": "image/jpeg",
+        ".webp": "image/webp",
+    }
+    mime = mime_map.get(suffix, "application/octet-stream")
 
+    tmp_path = None
     try:
-        from emergentintegrations.llm.chat import LlmChat, UserMessage, ImageContent
+        with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
+            tmp.write(content)
+            tmp_path = tmp.name
+
+        from emergentintegrations.llm.chat import LlmChat, UserMessage, FileContentWithMimeType
 
         system_message = (
             "You are an expert salon-services extraction assistant. The user will upload a "
-            "salon menu (PDF rendered as page images, photo, or image). Extract every service "
-            "and package on the menu. Return ONLY a valid JSON object with the following shape "
-            "and NOTHING ELSE — no prose, no markdown fences, no explanations:\n"
+            "salon menu (PDF, photo, or image). Extract every service and package on the menu. "
+            "Return ONLY a valid JSON object with the following shape and NOTHING ELSE — no "
+            "prose, no markdown fences, no explanations:\n"
             "{\n"
             '  "services": [\n'
             "    {\n"
@@ -5504,16 +5476,19 @@ async def parse_salon_menu(
             api_key=api_key,
             session_id=f"menu-parse-{salon_id}-{uuid.uuid4()}",
             system_message=system_message,
-        ).with_model("openai", "gpt-5")
+        ).with_model("gemini", "gemini-2.5-pro")
 
-        image_contents = [ImageContent(image_base64=b64) for b64 in image_b64_list]
+        file_content = FileContentWithMimeType(
+            file_path=tmp_path,
+            mime_type=mime,
+        )
         msg = UserMessage(
             text=(
                 "Extract every salon service and package from this menu and return strict JSON "
                 "in the exact schema described in the system prompt. Do not include any markdown "
                 "or prose outside the JSON object."
             ),
-            file_contents=image_contents,
+            file_contents=[file_content],
         )
 
         try:
@@ -5575,11 +5550,12 @@ async def parse_salon_menu(
             "package_count": len(packages_out),
             "message": f"Parsed {len(services_out)} services and {len(packages_out)} packages from the menu.",
         }
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.exception("Menu parse unexpected error: %s", e)
-        raise HTTPException(status_code=500, detail=f"Menu parse failed: {e}")
+    finally:
+        if tmp_path and os.path.exists(tmp_path):
+            try:
+                os.unlink(tmp_path)
+            except Exception:
+                pass
 
 
 @api_router.post("/salons/{salon_id}/services/apply-parsed")

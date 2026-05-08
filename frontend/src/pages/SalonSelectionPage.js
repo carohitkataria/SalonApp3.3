@@ -505,6 +505,11 @@ export default function SalonSelectionPage() {
                       <span className="w-1 h-1 bg-white rounded-full animate-pulse"></span>
                       OPEN
                     </span>
+                  ) : salon.manual_toggle.closed_mode === 'online_only' ? (
+                    <span className="text-[10px] bg-amber-500 text-white font-bold px-2 py-0.5 rounded-full flex items-center gap-1" title="Closed Online — Visit Salon">
+                      <span className="w-1 h-1 bg-white rounded-full"></span>
+                      CLOSED ONLINE
+                    </span>
                   ) : (
                     <span className="text-[10px] bg-red-500 text-white font-bold px-2 py-0.5 rounded-full flex items-center gap-1">
                       <span className="w-1 h-1 bg-white rounded-full"></span>

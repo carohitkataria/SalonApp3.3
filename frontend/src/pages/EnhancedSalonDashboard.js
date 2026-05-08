@@ -24,6 +24,7 @@ import Analytics from '@/components/Analytics';
 import EmployeeRewardPlan from '@/components/EmployeeRewardPlan';
 import SubscriptionPaywallModal from '@/components/SubscriptionPaywallModal';
 import SubscriptionBadge from '@/components/SubscriptionBadge';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { SubscriptionProvider } from '@/contexts/SubscriptionContext';
 import { getSession, clearSession } from '@/utils/sessionManager';
 import {
@@ -32,7 +33,7 @@ import {
   getSeenIds,
   setSeenIds,
 } from '@/utils/browserNotifications';
-import { 
+import {
   Scissors, LogOut, ChevronRight, SkipForward, RotateCcw, XCircle,
   Clock, User, Phone, Bell, MapPin, Settings, CheckCircle, Calendar,
   Users, ArrowLeft, FileText, Download, Plus, X, TrendingUp, Menu,
@@ -986,7 +987,6 @@ export default function EnhancedSalonDashboard() {
     { id: 'customer-master', label: 'Customer Master', icon: Database, show: true },
     { id: 'analytics', label: 'Analytics', icon: TrendingUp, show: checkIsAdmin() || checkIsBranchManager() || checkHasPermission('can_access_analytics') },
     { id: 'gallery', label: 'Gallery', icon: FileText, show: true },
-    { id: 'branches', label: 'Branches', icon: Building2, show: checkIsAdmin() || checkIsBranchManager() },
     { id: 'salon', label: 'Salon Settings', icon: Settings, show: checkIsAdmin() || checkHasPermission('can_edit_salon') }
   ].filter(item => item.show);
 
@@ -1211,22 +1211,29 @@ export default function EnhancedSalonDashboard() {
                   </button>
                 </div>
                 {/* Manual Toggle Status Badge */}
-                {salon?.manual_toggle?.is_overridden && (
-                  <div className={`flex items-center gap-2 px-3 py-1.5 rounded-full ${
-                    salon.manual_toggle.is_open 
-                      ? 'bg-green-500/10 border border-green-500/30' 
-                      : 'bg-red-500/10 border border-red-500/30'
-                  }`}>
-                    <span className={`w-2 h-2 rounded-full ${
-                      salon.manual_toggle.is_open ? 'bg-green-500 animate-pulse' : 'bg-red-500'
-                    }`}></span>
-                    <span className={`text-xs font-bold ${
-                      salon.manual_toggle.is_open ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'
-                    }`}>
-                      {salon.manual_toggle.is_open ? 'MANUALLY OPEN' : 'MANUALLY CLOSED'}
-                    </span>
-                  </div>
-                )}
+                {salon?.manual_toggle?.is_overridden && (() => {
+                  const mt = salon.manual_toggle;
+                  const isOnlineOnly = !mt.is_open && mt.closed_mode === 'online_only';
+                  const isFullClosed = !mt.is_open && (mt.closed_mode === 'full' || !mt.closed_mode);
+                  const isOpen = mt.is_open;
+                  const cls = isOpen
+                    ? 'bg-green-500/10 border-green-500/30 text-green-600 dark:text-green-400'
+                    : isOnlineOnly
+                      ? 'bg-amber-500/10 border-amber-500/30 text-amber-700 dark:text-amber-400'
+                      : 'bg-red-500/10 border-red-500/30 text-red-600 dark:text-red-400';
+                  const dot = isOpen ? 'bg-green-500 animate-pulse' : isOnlineOnly ? 'bg-amber-500' : 'bg-red-500';
+                  const label = isOpen
+                    ? 'MANUALLY OPEN'
+                    : isOnlineOnly
+                      ? 'CLOSED ONLINE'
+                      : 'MANUALLY CLOSED';
+                  return (
+                    <div className={`flex items-center gap-2 px-3 py-1.5 rounded-full border ${cls}`}>
+                      <span className={`w-2 h-2 rounded-full ${dot}`}></span>
+                      <span className="text-xs font-bold">{label}</span>
+                    </div>
+                  );
+                })()}
                 <div className="flex items-center gap-2">
                   <Activity className="w-4 h-4 text-green-500 animate-pulse" />
                   <span className="text-xs text-green-500 font-medium">Live</span>
@@ -1935,23 +1942,58 @@ export default function EnhancedSalonDashboard() {
         )}
 
         {activeTab === 'salon' && (
-          <div className="space-y-6">
+          <div className="space-y-4">
             {checkIsAdmin() && salonId && (
               <SubscriptionBadge salonId={salonId} />
             )}
-            <MyProfile 
-              salon={salon}
-              onUpdate={(updatedSalon) => setSalon(updatedSalon)}
-              getAuthHeaders={getAuthHeaders}
-              onDeleteSalon={handleLogout}
-            />
-            <SalonNotificationSettings
-              salonId={salonId}
-              getAuthHeaders={getAuthHeaders}
-            />
-            <OperationalHoursModule
-              salonId={salonId}
-            />
+            <Tabs defaultValue="profile" className="w-full">
+              <TabsList className="w-full grid grid-cols-2 sm:grid-cols-4 h-auto bg-muted/40 p-1 rounded-xl">
+                <TabsTrigger value="profile" className="flex items-center gap-2 data-[state=active]:bg-gold data-[state=active]:text-black py-2.5">
+                  <User className="w-4 h-4" />
+                  <span className="text-xs sm:text-sm font-semibold">Profile</span>
+                </TabsTrigger>
+                <TabsTrigger value="operations" className="flex items-center gap-2 data-[state=active]:bg-gold data-[state=active]:text-black py-2.5">
+                  <Clock className="w-4 h-4" />
+                  <span className="text-xs sm:text-sm font-semibold">Operations</span>
+                </TabsTrigger>
+                {(checkIsAdmin() || checkIsBranchManager()) && (
+                  <TabsTrigger value="branch" className="flex items-center gap-2 data-[state=active]:bg-gold data-[state=active]:text-black py-2.5">
+                    <Building2 className="w-4 h-4" />
+                    <span className="text-xs sm:text-sm font-semibold">Branch</span>
+                  </TabsTrigger>
+                )}
+                <TabsTrigger value="notifications-cfg" className="flex items-center gap-2 data-[state=active]:bg-gold data-[state=active]:text-black py-2.5">
+                  <Bell className="w-4 h-4" />
+                  <span className="text-xs sm:text-sm font-semibold">Notification</span>
+                </TabsTrigger>
+              </TabsList>
+
+              <TabsContent value="profile" className="mt-4">
+                <MyProfile
+                  salon={salon}
+                  onUpdate={(updatedSalon) => setSalon(updatedSalon)}
+                  getAuthHeaders={getAuthHeaders}
+                  onDeleteSalon={handleLogout}
+                />
+              </TabsContent>
+
+              <TabsContent value="operations" className="mt-4">
+                <OperationalHoursModule salonId={salonId} />
+              </TabsContent>
+
+              {(checkIsAdmin() || checkIsBranchManager()) && (
+                <TabsContent value="branch" className="mt-4">
+                  <BranchManagement salonId={salonId} />
+                </TabsContent>
+              )}
+
+              <TabsContent value="notifications-cfg" className="mt-4">
+                <SalonNotificationSettings
+                  salonId={salonId}
+                  getAuthHeaders={getAuthHeaders}
+                />
+              </TabsContent>
+            </Tabs>
           </div>
         )}
 
