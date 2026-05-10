@@ -7,6 +7,7 @@ import {
 import { motion } from 'framer-motion';
 import SalonHubLogo from '@/components/SalonHubLogo';
 import ThemePicker from '@/components/ThemePicker';
+import Footer from '@/components/Footer';
 
 export default function LandingPage() {
   const navigate = useNavigate();
@@ -316,22 +317,7 @@ export default function LandingPage() {
       </section>
 
       {/* Footer */}
-      <footer className="border-t border-border/60">
-        <div className="max-w-7xl mx-auto px-6 lg:px-10 py-12 flex flex-col sm:flex-row items-center justify-between gap-6">
-          <div className="flex items-center gap-3">
-            <SalonHubLogo size={28} showText={false} />
-            <span className="font-fraunces text-base">
-              Salon<span className="text-brass italic">hub</span>
-            </span>
-            <span className="text-xs text-muted-foreground">© {new Date().getFullYear()}</span>
-          </div>
-          <div className="flex items-center gap-6 text-xs text-muted-foreground">
-            <button onClick={() => navigate('/login')} className="hover:text-brass transition-colors uppercase tracking-widest" data-testid="footer-customer-login-btn">Guest login</button>
-            <span className="text-border">·</span>
-            <button onClick={() => navigate('/salon/login')} className="hover:text-brass transition-colors uppercase tracking-widest" data-testid="footer-salon-login-btn">Salon login</button>
-          </div>
-        </div>
-      </footer>
+      <Footer />
     </div>
   );
 }

@@ -9,9 +9,10 @@ import CustomerOtpVerification from '@/components/CustomerOtpVerification';
 import {
   Scissors, Calendar, User, MapPin, Star, Clock,
   ArrowLeft, Users, CheckCircle, AlertCircle, ChevronRight, X, Wallet, History,
-  ChevronDown, Quote, Phone
+  ChevronDown, Quote, Phone, Share2
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
+import Footer from '@/components/Footer';
 
 // Import tab components
 import SalonServicesTab from './salon-tabs/SalonServicesTab';
@@ -396,7 +397,116 @@ export default function SalonMainPage() {
       {/* OTP Verification Banner */}
       <CustomerOtpVerification showAs="banner" />
 
-      {/* === HERO GALLERY (luzo-inspired: 1 large + 2 thumbs) === */}
+      {/* === SALON IDENTITY (luzo-style: big name → tagline → action chips → gallery) === */}
+      <section className="space-y-5" data-testid="salon-identity">
+        <div className="flex items-start justify-between gap-4">
+          <div className="min-w-0 flex-1">
+            <h1 className="font-fraunces text-[36px] sm:text-[48px] lg:text-[56px] leading-[1.02] font-medium tracking-tight">
+              {salon.salon_name}
+              {branch && !branch.is_main_branch && (
+                <span className="block text-2xl sm:text-3xl font-normal text-brass serif-italic mt-1">{branch.branch_name}</span>
+              )}
+            </h1>
+            <div className="mt-3 flex items-center gap-2 text-[15px] text-muted-foreground flex-wrap">
+              <span>{(branch && branch.address) ? branch.address.split(',').slice(0, 2).join(', ') : (salon.address?.split(',').slice(0, 2).join(', ') || '')}</span>
+              <span className="opacity-50">•</span>
+              <span>{salon.gender_tag || 'Unisex'}</span>
+              <span className="opacity-50">|</span>
+              <span className="font-semibold text-foreground">₹₹</span>
+              {branches.length > 1 && (
+                <>
+                  <span className="opacity-50">•</span>
+                  <button
+                    onClick={() => setShowBranchDropdown(true)}
+                    className="text-brass hover:underline font-medium"
+                    data-testid="view-branches-link"
+                  >
+                    View Branches ({branches.length})
+                  </button>
+                </>
+              )}
+            </div>
+          </div>
+
+          {/* Share button (top-right of header) */}
+          <button
+            onClick={async () => {
+              const url = window.location.href;
+              try {
+                if (navigator.share) {
+                  await navigator.share({ title: salon.salon_name, url });
+                } else {
+                  await navigator.clipboard.writeText(url);
+                  toast.success('Link copied to clipboard');
+                }
+              } catch { /* user cancelled */ }
+            }}
+            className="inline-flex items-center justify-center h-10 w-10 rounded-full border border-border bg-card hover:border-brass/60 transition-colors flex-shrink-0"
+            aria-label="Share"
+            data-testid="salon-share-btn"
+          >
+            <Share2 className="w-4 h-4 text-foreground" strokeWidth={1.6} />
+          </button>
+        </div>
+
+        {/* Action chips row — Open Now / Get Directions / Contact */}
+        <div className="flex items-center gap-2.5 flex-wrap">
+          <span
+            className={`inline-flex items-center gap-2 px-3.5 py-2 rounded-xl border text-sm ${
+              isOpen
+                ? 'bg-card border-border text-foreground'
+                : 'bg-card border-border text-foreground'
+            }`}
+            data-testid="salon-status-chip"
+          >
+            <span className={`w-2 h-2 rounded-full flex-shrink-0 ${isOpen ? 'bg-sage' : 'bg-[color:var(--status-closed,_#A85D52)]'}`} />
+            <span className="font-medium">
+              {isOpen ? 'Open Now' : 'Closed Now'}
+            </span>
+            {todayHours && !todayHours.closed && (
+              <>
+                <span className="opacity-40">|</span>
+                <span className="text-muted-foreground">{todayHours.open} – {todayHours.close}</span>
+              </>
+            )}
+          </span>
+
+          {salon.latitude && salon.longitude && (
+            <a
+              href={`https://www.google.com/maps?q=${salon.latitude},${salon.longitude}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl border border-border bg-card hover:border-brass/60 transition-colors text-sm text-foreground"
+              data-testid="salon-directions-chip"
+            >
+              <MapPin className="w-3.5 h-3.5 text-brass" strokeWidth={1.7} />
+              <span className="font-medium">Get Directions</span>
+              <ChevronRight className="w-3.5 h-3.5 text-muted-foreground" strokeWidth={1.7} />
+            </a>
+          )}
+
+          {salon.phone && (
+            <a
+              href={`tel:${salon.phone}`}
+              className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl border border-border bg-card hover:border-brass/60 transition-colors text-sm text-foreground"
+              data-testid="salon-contact-chip"
+            >
+              <Phone className="w-3.5 h-3.5 text-brass" strokeWidth={1.7} />
+              <span className="font-medium">Contact</span>
+            </a>
+          )}
+
+          {salon.rating > 0 && salon.total_reviews > 0 && (
+            <span className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl border border-border bg-card text-sm">
+              <Star className="w-3.5 h-3.5 text-brass fill-brass" />
+              <span className="font-semibold">{salon.rating}</span>
+              <span className="text-muted-foreground">· {salon.total_reviews} reviews</span>
+            </span>
+          )}
+        </div>
+      </section>
+
+      {/* === HERO GALLERY (1 large left + 2 thumbs right) === */}
       {(() => {
         const photos = (salon.photo_gallery && salon.photo_gallery.length)
           ? salon.photo_gallery.slice(0, 5)
@@ -406,14 +516,13 @@ export default function SalonMainPage() {
         if (!main) return null;
         return (
           <section className="rise-in" data-testid="salon-hero-gallery">
-            <div className="grid grid-cols-3 gap-2 h-56 sm:h-72">
-              <div className={`${thumbs.length > 0 ? 'col-span-2' : 'col-span-3'} relative rounded-2xl overflow-hidden bg-muted`}>
+            <div className="grid grid-cols-3 gap-3 h-72 sm:h-96">
+              <div className={`${thumbs.length > 0 ? 'col-span-2' : 'col-span-3'} relative rounded-3xl overflow-hidden bg-muted shadow-lux`}>
                 <img src={main} alt={salon.salon_name} className="w-full h-full object-cover" />
-                <div className="absolute inset-0 bg-gradient-to-t from-black/40 via-transparent to-transparent pointer-events-none" />
                 {salon.photo_gallery?.length > 0 && (
                   <button
                     onClick={() => setActiveTab('gallery')}
-                    className="absolute bottom-3 right-3 glass-warm text-foreground text-xs px-3 py-1.5 rounded-full inline-flex items-center gap-1.5 hover:bg-card transition-colors"
+                    className="absolute bottom-4 right-4 glass-warm text-foreground text-xs px-4 py-2 rounded-full inline-flex items-center gap-1.5 hover:bg-card transition-colors"
                     data-testid="hero-view-photos-btn"
                   >
                     <span>View all photos</span>
@@ -422,9 +531,9 @@ export default function SalonMainPage() {
                 )}
               </div>
               {thumbs.length > 0 && (
-                <div className="col-span-1 grid grid-rows-2 gap-2 h-full">
+                <div className="col-span-1 grid grid-rows-2 gap-3 h-full">
                   {thumbs.map((src, i) => (
-                    <div key={i} className="relative rounded-2xl overflow-hidden bg-muted">
+                    <div key={i} className="relative rounded-3xl overflow-hidden bg-muted shadow-lux">
                       <img src={src} alt={`${salon.salon_name} ${i + 2}`} className="w-full h-full object-cover" />
                     </div>
                   ))}
@@ -435,96 +544,79 @@ export default function SalonMainPage() {
         );
       })()}
 
-      {/* === SALON IDENTITY (name + status + offers) === */}
-      <section className="space-y-3" data-testid="salon-identity">
-        <div className="flex items-end justify-between gap-4 flex-wrap">
-          <div className="min-w-0">
-            <span className="eyebrow-brass">{salon.gender_tag || 'Unisex'}</span>
-            <h1 className="font-fraunces text-3xl sm:text-4xl font-medium leading-[1.05] mt-1">
-              {salon.salon_name}
-              {branch && !branch.is_main_branch && (
-                <span className="block text-lg font-normal text-brass serif-italic mt-1">· {branch.branch_name}</span>
-              )}
-            </h1>
-            <div className="flex items-center gap-3 mt-2 text-sm text-muted-foreground flex-wrap">
-              <span className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-semibold tracking-widest uppercase ${isOpen ? 'pill-open' : 'pill-closed'}`}>
-                <span className={`w-1.5 h-1.5 rounded-full ${isOpen ? 'bg-sage animate-pulse' : 'bg-current'}`} />
-                {isOpen ? 'Open Now' : 'Closed Now'}
-              </span>
-              {todayHours && !todayHours.closed && (
-                <span className="flex items-center gap-1">
-                  <Clock className="w-3.5 h-3.5 text-brass/70" strokeWidth={1.6} />
-                  {todayHours.open} – {todayHours.close}
-                </span>
-              )}
-              {salon.rating > 0 && salon.total_reviews > 0 && (
-                <span className="flex items-center gap-1 pill-brass px-2 py-0.5 rounded-full text-[11px] font-semibold">
-                  <Star className="w-3 h-3 fill-current" />
-                  {salon.rating} <span className="opacity-70">· {salon.total_reviews} reviews</span>
-                </span>
-              )}
-            </div>
-          </div>
-        </div>
-
-        {salon.description && (
-          <p className="text-muted-foreground leading-relaxed max-w-3xl">
-            {salon.description}
-          </p>
-        )}
-      </section>
-
-      {/* === SERVICES === */}
-      <section className="space-y-4" data-testid="salon-services-section">
+      {/* === SERVICES (luzo-style: image-first square cards, name below) === */}
+      <section className="space-y-5 pt-2" data-testid="salon-services-section">
         <header className="flex items-end justify-between">
-          <div>
-            <span className="eyebrow-brass">Curated</span>
-            <h2 className="font-fraunces text-2xl font-medium mt-1 leading-none">Services</h2>
-          </div>
-          <button
-            onClick={() => setActiveTab('services')}
-            className="text-sm text-brass hover:underline inline-flex items-center gap-1"
-            data-testid="services-view-all-btn"
-          >
-            View all <ChevronRight className="w-4 h-4" />
-          </button>
+          <h2 className="font-fraunces text-3xl sm:text-4xl font-medium leading-none">Services</h2>
+          {services.length > 0 && (
+            <button
+              onClick={() => setActiveTab('services')}
+              className="text-sm text-brass hover:underline inline-flex items-center gap-1"
+              data-testid="services-view-all-btn"
+            >
+              View all <ChevronRight className="w-4 h-4" />
+            </button>
+          )}
         </header>
 
-        {services.length === 0 ? (
-          <div className="lux-card rounded-2xl p-8 text-center text-muted-foreground text-sm">
-            No services listed yet.
-          </div>
-        ) : (
-          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
-            {services.slice(0, 8).map((sv) => (
-              <button
-                key={sv.id}
-                onClick={() => navigate(`/book/${salonId}${branchId ? `?branch=${branchId}` : ''}`)}
-                className="group lux-card rounded-2xl overflow-hidden bg-card text-left flex flex-col"
-                data-testid={`service-tile-${sv.id}`}
-              >
-                <div className="aspect-square bg-muted relative overflow-hidden">
-                  {sv.image_url ? (
-                    <img src={sv.image_url} alt={sv.name} className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105" />
-                  ) : (
-                    <div className="w-full h-full flex items-center justify-center bg-gradient-to-br from-brass-soft to-card">
-                      <Scissors className="w-7 h-7 text-brass" strokeWidth={1.4} />
-                    </div>
-                  )}
-                </div>
-                <div className="p-3 flex-1">
-                  <p className="font-medium text-sm text-foreground line-clamp-2 leading-snug">{sv.name}</p>
-                  {sv.price != null && (
-                    <p className="text-xs text-muted-foreground mt-1">
-                      <span className="font-semibold text-brass">₹{sv.price}</span>
-                      {sv.duration && <span> · {sv.duration} min</span>}
-                    </p>
-                  )}
-                </div>
-              </button>
-            ))}
-          </div>
-        )}
+        {(() => {
+          // Group services by category — luzo shows categories as the primary tile.
+          const categoryMap = new Map();
+          services.forEach(sv => {
+            const cat = sv.category || 'General';
+            if (!categoryMap.has(cat)) {
+              categoryMap.set(cat, { name: cat, image: sv.thumbnail_url || sv.image_url || null, count: 0 });
+            }
+            const entry = categoryMap.get(cat);
+            entry.count += 1;
+            if (!entry.image && (sv.thumbnail_url || sv.image_url)) entry.image = sv.thumbnail_url || sv.image_url;
+          });
+          const categories = Array.from(categoryMap.values());
+
+          if (categories.length === 0) {
+            return (
+              <div className="lux-card rounded-2xl p-10 text-center text-muted-foreground text-sm">
+                No services listed yet.
+              </div>
+            );
+          }
+
+          // Soft pastel placeholder colors that adapt to theme via brass-soft-ish tints
+          const placeholderTints = [
+            'bg-[rgb(var(--brass-rgb)/0.10)]',
+            'bg-[rgb(var(--bronze-rgb)/0.10)]',
+            'bg-[rgb(var(--sage-rgb)/0.10)]',
+            'bg-[rgb(var(--brass-rgb)/0.14)]',
+          ];
+
+          return (
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4 sm:gap-5">
+              {categories.map((cat, idx) => (
+                <button
+                  key={cat.name}
+                  onClick={() => navigate(`/book/${salonId}${branchId ? `?branch=${branchId}` : ''}`)}
+                  className="group flex flex-col items-center text-center"
+                  data-testid={`service-category-${cat.name.toLowerCase().replace(/[^a-z0-9]+/g,'-')}`}
+                >
+                  <div className={`w-full aspect-square rounded-3xl overflow-hidden ring-1 ring-border ${!cat.image ? placeholderTints[idx % placeholderTints.length] : 'bg-muted'} group-hover:ring-brass/60 transition-all duration-300 group-hover:-translate-y-1 group-hover:shadow-lux flex items-center justify-center`}>
+                    {cat.image ? (
+                      <img
+                        src={cat.image}
+                        alt={cat.name}
+                        className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
+                      />
+                    ) : (
+                      <Scissors className="w-9 h-9 text-brass/70" strokeWidth={1.4} />
+                    )}
+                  </div>
+                  <p className="mt-3.5 font-medium text-[15px] text-foreground leading-snug px-1">
+                    {cat.name}
+                  </p>
+                </button>
+              ))}
+            </div>
+          );
+        })()}
       </section>
 
       {/* === STYLISTS (chips) === */}
@@ -832,6 +924,9 @@ export default function SalonMainPage() {
       <div className="max-w-5xl mx-auto p-4 sm:p-6">
         {renderTabContent()}
       </div>
+
+      {/* Footer (only on the dashboard view) */}
+      {activeTab === 'dashboard' && <Footer />}
 
       {/* Live Queue Modal */}
       <AnimatePresence>
