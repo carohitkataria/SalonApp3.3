@@ -352,7 +352,7 @@ export default function CustomerLayout({ children }) {
                 <ThemeToggle />
                 <button
                   onClick={handleLogout}
-                  className="flex-1 flex items-center justify-center gap-2 px-3 py-2 rounded-lg border border-border hover:border-bronze hover:text-bronze-light transition-colors text-sm font-medium text-muted-foreground"
+                  className="flex-1 flex items-center justify-center gap-2 px-3 py-2 rounded-lg border border-border hover:border-bronze hover:text-bronze transition-colors text-sm font-medium text-muted-foreground"
                   data-testid="sidebar-logout-btn"
                 >
                   <LogOut className="w-4 h-4" strokeWidth={1.6} />

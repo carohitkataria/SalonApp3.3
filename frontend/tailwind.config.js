@@ -21,6 +21,8 @@ module.exports = {
           700: '#A88438',       // light-mode brass
           800: '#8C6C26',       // hover (light)
           900: '#6B521C',
+          soft:  'rgba(201, 169, 97, 0.12)',
+          glow:  'rgba(201, 169, 97, 0.32)',
         },
         champagne: '#E8D6A6',
         bronze: {
