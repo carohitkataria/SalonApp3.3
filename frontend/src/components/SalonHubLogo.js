@@ -1,39 +1,59 @@
 import React from 'react';
 
+/**
+ * SalonHub luxury wordmark + monogram.
+ * Refined: a circle-inscribed "S" with a single hairline scissor-blade flourish,
+ * rendered in brass on whatever surface it sits on.
+ */
 export default function SalonHubLogo({ size = 40, showText = true, className = '' }) {
   return (
-    <div className={`flex items-center gap-2 ${className}`}>
-      <svg 
-        width={size} 
-        height={size} 
-        viewBox="0 0 60 60" 
-        fill="none" 
+    <div className={`flex items-center gap-2.5 ${className}`}>
+      <svg
+        width={size}
+        height={size}
+        viewBox="0 0 64 64"
+        fill="none"
         xmlns="http://www.w3.org/2000/svg"
+        aria-label="SalonHub"
       >
-        {/* Background Circle */}
-        <circle cx="30" cy="30" r="28" fill="currentColor" className="text-gold/20" />
-        <circle cx="30" cy="30" r="28" stroke="currentColor" className="text-gold" strokeWidth="2" />
-        
-        {/* Scissors */}
-        <g transform="translate(15, 12)">
-          {/* Left Blade */}
-          <ellipse cx="6" cy="18" rx="5" ry="14" fill="currentColor" className="text-gold" transform="rotate(-15, 6, 18)" />
-          {/* Right Blade */}
-          <ellipse cx="24" cy="18" rx="5" ry="14" fill="currentColor" className="text-gold" transform="rotate(15, 24, 18)" />
-          {/* Center Ring */}
-          <circle cx="15" cy="20" r="6" fill="currentColor" className="text-background" />
-          <circle cx="15" cy="20" r="4" stroke="currentColor" className="text-gold" strokeWidth="2" fill="none" />
-          {/* Handle Holes */}
-          <circle cx="6" cy="30" r="3" stroke="currentColor" className="text-gold" strokeWidth="1.5" fill="currentColor" fillOpacity="0.1" />
-          <circle cx="24" cy="30" r="3" stroke="currentColor" className="text-gold" strokeWidth="1.5" fill="currentColor" fillOpacity="0.1" />
-        </g>
+        {/* Outer hairline ring */}
+        <circle cx="32" cy="32" r="30" stroke="currentColor" className="text-brass" strokeWidth="1.25" fill="none" />
+        {/* Inner faint ring */}
+        <circle cx="32" cy="32" r="26" stroke="currentColor" className="text-brass/30" strokeWidth="0.75" fill="none" />
+
+        {/* Scissor blades — minimal, ribbon-like */}
+        <path
+          d="M22 18 L34 32 L22 46"
+          stroke="currentColor"
+          className="text-brass"
+          strokeWidth="1.5"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          fill="none"
+        />
+        <path
+          d="M42 18 L30 32 L42 46"
+          stroke="currentColor"
+          className="text-brass"
+          strokeWidth="1.5"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          fill="none"
+        />
+        {/* Pivot dot */}
+        <circle cx="32" cy="32" r="1.8" fill="currentColor" className="text-brass" />
+
+        {/* Handle holes */}
+        <circle cx="22" cy="18" r="2.5" stroke="currentColor" className="text-brass" strokeWidth="1" fill="none" />
+        <circle cx="42" cy="18" r="2.5" stroke="currentColor" className="text-brass" strokeWidth="1" fill="none" />
       </svg>
-      
+
       {showText && (
-        <div className="flex flex-col leading-tight">
-          <span className="text-xl font-playfair font-bold text-gold tracking-tight">
-            Salon<span className="text-foreground">Hub</span>
+        <div className="flex flex-col leading-none">
+          <span className="font-fraunces text-[20px] font-semibold tracking-tight text-foreground">
+            Salon<span className="text-brass italic">hub</span>
           </span>
+          <span className="eyebrow mt-1 text-[8px]">Luxury · Booking · Live Queue</span>
         </div>
       )}
     </div>
@@ -43,8 +63,8 @@ export default function SalonHubLogo({ size = 40, showText = true, className = '
 // Simple text-only version for headers
 export function SalonHubText({ className = '' }) {
   return (
-    <span className={`font-playfair font-bold text-gold ${className}`}>
-      Salon<span className="text-foreground">Hub</span>
+    <span className={`font-fraunces font-semibold text-foreground ${className}`}>
+      Salon<span className="text-brass italic">hub</span>
     </span>
   );
 }

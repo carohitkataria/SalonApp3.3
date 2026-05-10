@@ -157,13 +157,13 @@ export default function SalonMainPage() {
   const getStatusIcon = (status) => {
     switch (status) {
       case 'waiting':
-        return <Clock className="w-5 h-5 text-yellow-500" />;
+        return <Clock className="w-5 h-5 text-brass" strokeWidth={1.6} />;
       case 'called':
-        return <AlertCircle className="w-5 h-5 text-blue-500 animate-pulse" />;
+        return <AlertCircle className="w-5 h-5 text-brass animate-pulse" strokeWidth={1.6} />;
       case 'in_progress':
-        return <Scissors className="w-5 h-5 text-green-500 animate-spin" />;
+        return <Scissors className="w-5 h-5 text-sage animate-spin" strokeWidth={1.6} />;
       default:
-        return <CheckCircle className="w-5 h-5 text-green-500" />;
+        return <CheckCircle className="w-5 h-5 text-sage" strokeWidth={1.6} />;
     }
   };
 
@@ -199,8 +199,8 @@ export default function SalonMainPage() {
     return (
       <div className="min-h-screen bg-background flex items-center justify-center">
         <div className="text-center">
-          <Scissors className="w-16 h-16 text-gold animate-spin mx-auto mb-4" />
-          <p className="text-foreground">Loading salon...</p>
+          <Scissors className="w-12 h-12 text-brass animate-spin mx-auto mb-4" strokeWidth={1.4} />
+          <p className="eyebrow">Loading salon</p>
         </div>
       </div>
     );
@@ -253,43 +253,44 @@ export default function SalonMainPage() {
                 key={booking.id}
                 initial={{ opacity: 0, y: -10 }}
                 animate={{ opacity: 1, y: 0 }}
-                className={`p-4 rounded-xl border-2 ${
+                className={`p-5 rounded-2xl border ${
                   booking.status === 'called' || booking.status === 'in_progress' || booking.status === 'in_service'
-                    ? 'bg-green-500/10 border-green-500'
-                    : 'bg-gold/10 border-gold/50'
+                    ? 'bg-card border-sage/40 brass-glow-pulse'
+                    : 'lux-card bg-card'
                 }`}
+                data-testid={`active-booking-${booking.id}`}
               >
                 {/* Header: status + total token */}
                 <div className="flex items-start justify-between gap-3">
                   <div className="flex items-center gap-3">
                     {getStatusIcon(booking.status)}
                     <div>
-                      <p className="font-bold text-foreground">{getStatusMessage(booking)}</p>
-                      <p className="text-sm text-muted-foreground">
-                        Barber: <span className="font-semibold text-foreground">{booking.barber_name}</span>
-                        {' '}• {booking.shift}
+                      <p className="font-fraunces text-lg text-foreground font-medium leading-tight">{getStatusMessage(booking)}</p>
+                      <p className="text-sm text-muted-foreground mt-0.5">
+                        Stylist: <span className="font-medium text-foreground">{booking.barber_name}</span>
+                        {' '}· {booking.shift}
                       </p>
                     </div>
                   </div>
                   <div className="text-right shrink-0">
-                    <p className="text-[10px] uppercase tracking-wider text-muted-foreground">Total token</p>
-                    <p className="text-2xl font-bebas text-gold leading-none">{booking.token_number}</p>
+                    <p className="eyebrow">Token</p>
+                    <p className="text-3xl font-bebas brass-text leading-none mt-1">{booking.token_number}</p>
                   </div>
                 </div>
 
                 {/* Key metrics — position / people before / wait */}
-                <div className="mt-3 grid grid-cols-3 gap-2">
-                  <div className="bg-background/70 rounded-lg p-2 border border-border/50 text-center">
-                    <p className="text-[10px] uppercase text-muted-foreground">Your position</p>
-                    <p className="text-xl font-bold text-gold">#{position}</p>
+                <div className="mt-4 grid grid-cols-3 gap-2">
+                  <div className="bg-muted/40 rounded-xl p-3 border border-border/60 text-center">
+                    <p className="eyebrow">Your position</p>
+                    <p className="text-xl font-bebas text-brass mt-1">#{position}</p>
                   </div>
-                  <div className="bg-background/70 rounded-lg p-2 border border-border/50 text-center">
-                    <p className="text-[10px] uppercase text-muted-foreground">Before you</p>
-                    <p className="text-xl font-bold text-foreground">{peopleBefore}</p>
+                  <div className="bg-muted/40 rounded-xl p-3 border border-border/60 text-center">
+                    <p className="eyebrow">Before you</p>
+                    <p className="text-xl font-bebas text-foreground mt-1">{peopleBefore}</p>
                   </div>
-                  <div className="bg-background/70 rounded-lg p-2 border border-border/50 text-center">
-                    <p className="text-[10px] uppercase text-muted-foreground">Est. wait</p>
-                    <p className="text-xl font-bold text-foreground">
+                  <div className="bg-muted/40 rounded-xl p-3 border border-border/60 text-center">
+                    <p className="eyebrow">Est. wait</p>
+                    <p className="text-xl font-bebas text-foreground mt-1">
                       {formatWait(waitMin) ?? '—'}
                     </p>
                   </div>
@@ -323,11 +324,13 @@ export default function SalonMainPage() {
 
       {/* Welcome Banner - Only when no active booking */}
       {userBookings.length === 0 && (
-        <div className="bg-gradient-to-r from-gold/20 to-gold/5 rounded-2xl p-6 border border-gold/30">
-          <h2 className="text-2xl font-playfair font-bold text-foreground mb-2">
-            Welcome to {salon.salon_name}
+        <div className="lux-card bg-gradient-to-r from-brass-soft via-card to-card rounded-2xl p-7 relative overflow-hidden">
+          <div className="absolute top-0 right-0 w-40 h-40 bg-brass/10 rounded-full blur-3xl pointer-events-none" />
+          <span className="eyebrow-brass relative">An invitation</span>
+          <h2 className="font-fraunces text-2xl sm:text-3xl mt-2 mb-2 font-medium relative leading-tight">
+            Welcome to <span className="serif-italic">{salon.salon_name}</span>
           </h2>
-          <p className="text-muted-foreground mb-4">
+          <p className="text-muted-foreground relative max-w-2xl">
             {salon.description || 'Your trusted destination for premium grooming services.'}
           </p>
         </div>
@@ -336,98 +339,107 @@ export default function SalonMainPage() {
       {/* OTP Verification Banner - Show after welcome banner */}
       <CustomerOtpVerification showAs="banner" />
 
-      {/* Quick Actions - Three Cards like the image */}
+      {/* Quick Actions - Three Cards */}
       <div className="grid grid-cols-3 gap-3">
         <button
           onClick={() => navigate(`/book/${salonId}${branchId ? `?branch=${branchId}` : ''}`)}
-          className="p-4 bg-card rounded-xl border border-border hover:border-gold transition-colors text-left"
+          className="lux-card p-5 bg-card rounded-2xl text-left group"
+          data-testid="quick-action-book-btn"
         >
-          <Calendar className="w-8 h-8 text-gold mb-3" />
-          <p className="font-bold text-foreground">Book Appointment</p>
-          <p className="text-xs text-muted-foreground">Schedule your visit</p>
+          <Calendar className="w-7 h-7 text-brass mb-3" strokeWidth={1.5} />
+          <p className="font-fraunces text-lg text-foreground font-medium leading-tight">Book Appointment</p>
+          <p className="text-xs text-muted-foreground mt-1">Schedule your visit</p>
         </button>
-        
+
         <button
           onClick={() => setShowLiveQueue(true)}
-          className="p-4 bg-card rounded-xl border border-border hover:border-gold transition-colors text-left"
+          className="lux-card p-5 bg-card rounded-2xl text-left group"
+          data-testid="quick-action-queue-btn"
         >
-          <Clock className="w-8 h-8 text-gold mb-3" />
-          <p className="font-bold text-foreground">Live Queue</p>
-          <p className="text-xs text-muted-foreground">Check wait times</p>
+          <Clock className="w-7 h-7 text-brass mb-3" strokeWidth={1.5} />
+          <p className="font-fraunces text-lg text-foreground font-medium leading-tight">Live Queue</p>
+          <p className="text-xs text-muted-foreground mt-1">Check wait times</p>
         </button>
 
         <button
           onClick={() => setActiveTab('services')}
-          className="p-4 bg-card rounded-xl border border-border hover:border-gold transition-colors text-left"
+          className="lux-card p-5 bg-card rounded-2xl text-left group"
+          data-testid="quick-action-services-btn"
         >
-          <Scissors className="w-8 h-8 text-gold mb-3" />
-          <p className="font-bold text-foreground">Our Services</p>
-          <p className="text-xs text-muted-foreground">Browse all services</p>
+          <Scissors className="w-7 h-7 text-brass mb-3" strokeWidth={1.5} />
+          <p className="font-fraunces text-lg text-foreground font-medium leading-tight">Our Services</p>
+          <p className="text-xs text-muted-foreground mt-1">Browse all services</p>
         </button>
       </div>
 
       {/* Live Status Summary Cards */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-        <div 
-          className="bg-card rounded-xl p-4 border border-border cursor-pointer hover:border-gold/50 transition-colors"
+        <div
+          className="lux-card bg-card rounded-2xl p-4 cursor-pointer"
           onClick={() => navigate(`/salon/${salonId}/wallet`)}
+          data-testid="dashboard-wallet-card"
         >
           <div className="flex items-center gap-3">
-            <div className="p-2 bg-green-500/10 rounded-lg">
-              <Wallet className="w-5 h-5 text-green-500" />
+            <div className="p-2.5 bg-brass-soft rounded-xl border border-brass/20">
+              <Wallet className="w-5 h-5 text-brass" strokeWidth={1.6} />
             </div>
             <div>
-              <p className="text-xs text-muted-foreground">My Wallet</p>
-              <p className="text-2xl font-bold text-foreground">
+              <p className="eyebrow">My Wallet</p>
+              <p className="font-fraunces text-2xl text-foreground mt-0.5">
                 ₹{walletBalance.toFixed(0)}
               </p>
             </div>
           </div>
         </div>
 
-        <div 
-          className="bg-card rounded-xl p-4 border border-border cursor-pointer hover:border-gold/50 transition-colors"
+        <div
+          className="lux-card bg-card rounded-2xl p-4 cursor-pointer"
           onClick={() => navigate('/history')}
+          data-testid="dashboard-history-card"
         >
           <div className="flex items-center gap-3">
-            <div className="p-2 bg-blue-500/10 rounded-lg">
-              <History className="w-5 h-5 text-blue-500" />
+            <div className="p-2.5 bg-muted rounded-xl border border-border">
+              <History className="w-5 h-5 text-foreground/80" strokeWidth={1.6} />
             </div>
             <div>
-              <p className="text-xs text-muted-foreground">My History</p>
-              <p className="text-2xl font-bold text-foreground">
+              <p className="eyebrow">My History</p>
+              <p className="font-fraunces text-2xl text-foreground mt-0.5">
                 View →
               </p>
             </div>
           </div>
         </div>
 
-        <div className="bg-card rounded-xl p-4 border border-border cursor-pointer hover:border-gold/50 transition-colors"
+        <div
+          className="lux-card bg-card rounded-2xl p-4 cursor-pointer"
           onClick={() => navigate(`/salon/${salonId}/ratings`)}
+          data-testid="dashboard-rating-card"
         >
           <div className="flex items-center gap-3">
-            <div className="p-2 bg-gold/10 rounded-lg">
-              <Star className="w-5 h-5 text-gold" />
+            <div className="p-2.5 bg-brass-soft rounded-xl border border-brass/20">
+              <Star className="w-5 h-5 text-brass" strokeWidth={1.6} />
             </div>
             <div>
-              <p className="text-xs text-muted-foreground">Rating</p>
-              <p className="text-2xl font-bold text-foreground">
-                {(salon.rating && salon.total_reviews > 0) ? salon.rating : '-'}
+              <p className="eyebrow">Rating</p>
+              <p className="font-fraunces text-2xl text-foreground mt-0.5">
+                {(salon.rating && salon.total_reviews > 0) ? salon.rating : '—'}
               </p>
             </div>
           </div>
         </div>
 
-        <div className="bg-card rounded-xl p-4 border border-border cursor-pointer hover:border-gold/50 transition-colors"
+        <div
+          className="lux-card bg-card rounded-2xl p-4 cursor-pointer"
           onClick={() => setActiveTab('barbers')}
+          data-testid="dashboard-stylists-card"
         >
           <div className="flex items-center gap-3">
-            <div className="p-2 bg-purple-500/10 rounded-lg">
-              <User className="w-5 h-5 text-purple-500" />
+            <div className="p-2.5 bg-muted rounded-xl border border-border">
+              <User className="w-5 h-5 text-bronze-light" strokeWidth={1.6} />
             </div>
             <div>
-              <p className="text-xs text-muted-foreground">Barbers</p>
-              <p className="text-2xl font-bold text-foreground">
+              <p className="eyebrow">Stylists</p>
+              <p className="font-fraunces text-2xl text-foreground mt-0.5">
                 {liveStatus?.barbers?.length || 0}
               </p>
             </div>
@@ -438,11 +450,11 @@ export default function SalonMainPage() {
   );
 
   return (
-    <div className="min-h-screen bg-background">
+    <div className="min-h-screen bg-background bg-grain">
       {/* Compact Header */}
-      <div className="bg-card border-b border-border sticky top-0 z-20">
-        <div className="max-w-4xl mx-auto flex items-center p-3 gap-3">
-          <button 
+      <div className="bg-card/70 glass-warm border-b border-border/60 sticky top-0 z-20">
+        <div className="max-w-4xl mx-auto flex items-center p-3 gap-3 ml-14 mr-14">
+          <button
             onClick={() => {
               if (activeTab !== 'dashboard') {
                 setActiveTab('dashboard');
@@ -451,31 +463,32 @@ export default function SalonMainPage() {
               }
             }}
             className="p-2 rounded-full hover:bg-muted transition-colors"
+            data-testid="salon-back-btn"
           >
-            <ArrowLeft className="w-5 h-5 text-foreground" />
+            <ArrowLeft className="w-5 h-5 text-foreground" strokeWidth={1.6} />
           </button>
-          
-          <div className="flex items-center gap-2 flex-1">
+
+          <div className="flex items-center gap-3 flex-1 min-w-0">
             {salon.logo_url ? (
-              <img 
-                src={salon.logo_url} 
+              <img
+                src={salon.logo_url}
                 alt={salon.salon_name}
-                className="w-10 h-10 rounded-full object-cover border-2 border-gold"
+                className="w-10 h-10 rounded-full object-cover ring-1 ring-brass/40"
               />
             ) : (
-              <div className="w-10 h-10 rounded-full bg-gold/20 flex items-center justify-center">
-                <Scissors className="w-5 h-5 text-gold" />
+              <div className="w-10 h-10 rounded-full bg-brass-soft border border-brass/30 flex items-center justify-center">
+                <Scissors className="w-4 h-4 text-brass" strokeWidth={1.6} />
               </div>
             )}
             <div className="min-w-0">
-              <h1 className="text-lg font-playfair font-bold text-foreground truncate">
+              <h1 className="font-fraunces text-[18px] font-medium text-foreground truncate leading-tight">
                 {salon.salon_name}
                 {branch && !branch.is_main_branch && (
-                  <span className="text-sm font-normal text-gold ml-1.5">· {branch.branch_name}</span>
+                  <span className="text-sm font-normal text-brass ml-1.5 serif-italic">· {branch.branch_name}</span>
                 )}
               </h1>
-              <div className="flex items-center text-xs text-muted-foreground">
-                <MapPin className="w-3 h-3 mr-1 flex-shrink-0" />
+              <div className="flex items-center text-[11px] text-muted-foreground mt-0.5">
+                <MapPin className="w-3 h-3 mr-1 flex-shrink-0 text-brass/70" strokeWidth={1.5} />
                 <span className="truncate" data-testid="customer-branch-address">
                   {(branch && branch.address) || salon.address}
                 </span>
@@ -483,18 +496,19 @@ export default function SalonMainPage() {
             </div>
           </div>
 
-          <Button 
+          <Button
             onClick={() => navigate(`/book/${salonId}${branchId ? `?branch=${branchId}` : ''}`)}
-            className="bg-gold text-black hover:bg-gold/90"
+            className="bg-brass text-espresso hover:bg-brass-hover rounded-full font-semibold"
             size="sm"
+            data-testid="salon-header-book-btn"
           >
-            <Calendar className="w-4 h-4 mr-1" />
+            <Calendar className="w-4 h-4 mr-1.5" strokeWidth={1.6} />
             Book
           </Button>
         </div>
       </div>
 
-      <div className="max-w-4xl mx-auto p-4">
+      <div className="max-w-4xl mx-auto p-4 sm:p-6">
         {renderTabContent()}
       </div>
 
@@ -516,47 +530,48 @@ export default function SalonMainPage() {
               className="bg-card rounded-2xl w-full max-w-lg max-h-[80vh] overflow-hidden"
             >
               {/* Header */}
-              <div className="p-4 border-b border-border flex items-center justify-between">
+              <div className="p-5 border-b border-border/60 flex items-center justify-between">
                 <div>
-                  <h2 className="text-xl font-bold text-foreground">Live Queue</h2>
-                  <p className="text-sm text-muted-foreground">Real-time wait times</p>
+                  <span className="eyebrow-brass">Live</span>
+                  <h2 className="font-fraunces text-2xl font-medium text-foreground mt-1 leading-none">Queue</h2>
                 </div>
                 <button
                   onClick={() => setShowLiveQueue(false)}
                   className="p-2 rounded-full hover:bg-muted"
+                  data-testid="live-queue-close-btn"
                 >
-                  <X className="w-5 h-5 text-foreground" />
+                  <X className="w-5 h-5 text-foreground" strokeWidth={1.6} />
                 </button>
               </div>
 
               {/* Content */}
               <div className="p-4 overflow-y-auto max-h-[60vh]">
                 {/* Overall Status */}
-                <div className="bg-gradient-to-r from-gold/20 to-gold/5 rounded-xl p-4 mb-4">
+                <div className="bg-gradient-to-r from-brass-soft via-card to-card rounded-2xl p-5 mb-4 border border-brass/20">
                   <div className="grid grid-cols-3 gap-4 text-center">
                     <div>
-                      <p className="text-3xl font-bebas text-gold">
+                      <p className="text-3xl font-bebas text-brass">
                         {liveStatus?.overall?.waiting_count || 0}
                       </p>
-                      <p className="text-xs text-muted-foreground">In Queue</p>
+                      <p className="eyebrow mt-1">In Queue</p>
                     </div>
                     <div>
                       <p className="text-3xl font-bebas text-foreground">
-                        #{liveStatus?.overall?.current_token || '-'}
+                        #{liveStatus?.overall?.current_token || '—'}
                       </p>
-                      <p className="text-xs text-muted-foreground">Now Serving</p>
+                      <p className="eyebrow mt-1">Now Serving</p>
                     </div>
                     <div>
-                      <p className="text-3xl font-bebas text-green-500">
+                      <p className="text-3xl font-bebas text-sage">
                         {liveStatus?.overall?.completed_today || 0}
                       </p>
-                      <p className="text-xs text-muted-foreground">Completed</p>
+                      <p className="eyebrow mt-1">Completed</p>
                     </div>
                   </div>
                 </div>
 
-                {/* Barber-wise Queue */}
-                <h3 className="font-bold text-foreground mb-3">Barber Queue Status</h3>
+                {/* Stylist-wise Queue */}
+                <h3 className="font-fraunces text-base font-medium text-foreground mb-3 mt-2">Stylist queue</h3>
                 <div className="space-y-3">
                   {liveStatus?.barbers && liveStatus.barbers.length > 0 ? (
                     liveStatus.barbers.map((barber) => (
@@ -566,8 +581,8 @@ export default function SalonMainPage() {
                       >
                         <div className="flex items-center justify-between mb-3">
                           <div className="flex items-center gap-3">
-                            <div className="w-10 h-10 rounded-full bg-gold/20 flex items-center justify-center">
-                              <User className="w-5 h-5 text-gold" />
+                            <div className="w-10 h-10 rounded-full bg-brass-soft border border-brass/30 flex items-center justify-center">
+                              <User className="w-4 h-4 text-brass" strokeWidth={1.6} />
                             </div>
                             <div>
                               <p className="font-bold text-foreground">{barber.barber_name}</p>
@@ -577,8 +592,8 @@ export default function SalonMainPage() {
                             </div>
                           </div>
                           {barber.current_token && (
-                            <div className="px-3 py-1 bg-green-500/10 rounded-full">
-                              <span className="text-green-500 font-bold">Serving #{barber.current_token}</span>
+                            <div className="px-2.5 py-1 pill-brass rounded-full">
+                              <span className="font-semibold text-[11px]">Serving #{barber.current_token}</span>
                             </div>
                           )}
                         </div>
@@ -608,10 +623,10 @@ export default function SalonMainPage() {
                               {barber.waiting_tokens.slice(0, 10).map((token, idx) => (
                                 <span
                                   key={token}
-                                  className={`px-2 py-1 rounded text-xs font-bold ${
-                                    idx === 0 
-                                      ? 'bg-gold/20 text-gold' 
-                                      : 'bg-muted text-foreground'
+                                  className={`px-2 py-1 rounded-full text-xs font-semibold ${
+                                    idx === 0
+                                      ? 'pill-brass'
+                                      : 'bg-muted text-foreground border border-border'
                                   }`}
                                 >
                                   #{token}

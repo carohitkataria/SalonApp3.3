@@ -16,7 +16,7 @@ import openpyxl
 import base64
 
 # Configuration
-BASE_URL = "https://menu-parser-1.preview.emergentagent.com/api"
+BASE_URL = "https://elegant-salon-ui.preview.emergentagent.com/api"
 ADMIN_IDENTIFIER = "admin"
 ADMIN_PASSWORD = "salon123"
 

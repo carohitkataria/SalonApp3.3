@@ -1,321 +1,334 @@
 import { useNavigate } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
-import { 
-  Scissors, Clock, Bell, Star, Users, Calendar, 
-  Smartphone, MapPin, TrendingUp, CheckCircle, Sparkles,
-  MessageSquare, Shield, Zap
+import {
+  Scissors, Clock, Bell, Star, Users, Calendar,
+  Smartphone, MapPin, Sparkles, MessageSquare, Zap, ArrowUpRight, Quote
 } from 'lucide-react';
 import { motion } from 'framer-motion';
 import SalonHubLogo from '@/components/SalonHubLogo';
-
-// Google Color Palette
-const colors = {
-  blue: '#4285F4',
-  red: '#EA4335',
-  yellow: '#FBBC05',
-  green: '#34A853'
-};
+import ThemeToggle from '@/components/ThemeToggle';
 
 export default function LandingPage() {
   const navigate = useNavigate();
 
   const features = [
-    {
-      icon: Clock,
-      title: 'Real-Time Queue Management',
-      description: 'Skip the wait! Get live token updates and know exactly when it\'s your turn.',
-      color: colors.blue,
-      gradient: 'from-blue-500 to-blue-600'
-    },
-    {
-      icon: Bell,
-      title: 'WhatsApp Notifications',
-      description: 'Receive instant booking confirmations and queue updates right on WhatsApp.',
-      color: colors.green,
-      gradient: 'from-green-500 to-green-600'
-    },
-    {
-      icon: Users,
-      title: 'Choose Your Barber',
-      description: 'Book with your favorite barber or discover new talent. View ratings and specialties.',
-      color: colors.red,
-      gradient: 'from-red-500 to-red-600'
-    },
-    {
-      icon: Sparkles,
-      title: 'Membership & Rewards',
-      description: 'Unlock exclusive benefits with salon membership plans and loyalty rewards.',
-      color: colors.yellow,
-      gradient: 'from-yellow-500 to-yellow-600'
-    },
-    {
-      icon: MapPin,
-      title: 'Find Salons Nearby',
-      description: 'Discover top-rated salons near you with interactive maps and filters.',
-      color: colors.blue,
-      gradient: 'from-blue-500 to-cyan-500'
-    },
-    {
-      icon: Star,
-      title: 'Reviews & Ratings',
-      description: 'Make informed choices with authentic reviews and detailed barber ratings.',
-      color: colors.green,
-      gradient: 'from-green-500 to-emerald-600'
-    }
+    { icon: Clock,         eyebrow: '01 · LIVE QUEUE',     title: 'Real-time queue, no waiting room',         description: 'Track your token with live position, ETA, and "now serving" status — from anywhere.' },
+    { icon: Bell,          eyebrow: '02 · NOTIFICATIONS',  title: 'Whispered when it\'s your turn',           description: 'Browser push and WhatsApp confirmations the moment your stylist calls you in.' },
+    { icon: Users,         eyebrow: '03 · YOUR STYLIST',   title: 'Choose the artist, not just the salon',     description: 'Browse stylist portfolios, ratings, and specialties. Book the hands you trust.' },
+    { icon: Sparkles,      eyebrow: '04 · MEMBERSHIPS',    title: 'Memberships that pay you back',            description: 'Unlock exclusive house benefits, prepaid wallets, and curated loyalty rewards.' },
+    { icon: MapPin,        eyebrow: '05 · DISCOVERY',      title: 'A curated atlas of salons',                 description: 'Find ateliers nearby with maps, filters, and guided previews of each space.' },
+    { icon: Star,          eyebrow: '06 · REVIEWS',        title: 'Honest words from real chairs',             description: 'Authentic reviews with photo evidence and per-stylist ratings — no inflation.' },
   ];
 
   const stats = [
-    { label: 'Active Salons', value: '500+', color: colors.blue },
-    { label: 'Happy Customers', value: '50K+', color: colors.red },
-    { label: 'Bookings Daily', value: '2K+', color: colors.yellow },
-    { label: 'Avg Rating', value: '4.8★', color: colors.green }
+    { label: 'Active salons',       value: '500+'  },
+    { label: 'Members served',      value: '50K+'  },
+    { label: 'Bookings each day',   value: '2K+'   },
+    { label: 'Average rating',      value: '4.8'   },
+  ];
+
+  const steps = [
+    { step: 'I',   title: 'Discover',  description: 'Browse curated salons near you and explore their stylists, services, and ambience.', icon: MapPin },
+    { step: 'II',  title: 'Reserve',   description: 'Pick services, choose your stylist, and confirm your token in seconds.',              icon: Calendar },
+    { step: 'III', title: 'Arrive',    description: 'Track the queue live. Walk in only when it\'s your turn — never sooner.',             icon: MessageSquare },
   ];
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-gray-50 via-white to-gray-100">
+    <div className="min-h-screen bg-background text-foreground bg-grain">
       {/* Header */}
-      <header className="sticky top-0 z-50 bg-white/80 backdrop-blur-lg border-b border-gray-200 shadow-sm">
-        <div className="container mx-auto px-4 py-4 flex items-center justify-between">
-          <SalonHubLogo size={40} showText={true} />
-          <Button 
-            onClick={() => navigate('/login')}
-            className="bg-gradient-to-r from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700 text-white font-semibold px-6 py-2 rounded-full shadow-lg hover:shadow-xl transition-all duration-300"
-          >
-            Login
-          </Button>
+      <header className="sticky top-0 z-50 glass-warm border-b border-border/60">
+        <div className="max-w-7xl mx-auto px-6 lg:px-10 h-16 flex items-center justify-between">
+          <SalonHubLogo size={36} showText={true} />
+
+          <nav className="hidden md:flex items-center gap-8 text-sm text-muted-foreground">
+            <a href="#features" className="hover:text-foreground transition-colors">Experience</a>
+            <a href="#how" className="hover:text-foreground transition-colors">How it works</a>
+            <a href="#stats" className="hover:text-foreground transition-colors">House notes</a>
+          </nav>
+
+          <div className="flex items-center gap-2">
+            <ThemeToggle />
+            <Button
+              variant="ghost"
+              onClick={() => navigate('/salon/login')}
+              className="hidden sm:inline-flex text-muted-foreground hover:text-foreground hover:bg-transparent"
+              data-testid="landing-salon-login-btn"
+            >
+              For Salons
+            </Button>
+            <Button
+              onClick={() => navigate('/login')}
+              className="bg-brass hover:bg-brass-hover text-espresso font-semibold rounded-full px-5 h-9"
+              data-testid="landing-login-btn"
+            >
+              Sign in
+            </Button>
+          </div>
         </div>
       </header>
 
-      {/* Hero Section */}
-      <section className="relative overflow-hidden py-20 px-4">
-        <div className="absolute inset-0 bg-gradient-to-br from-blue-50 via-green-50 to-yellow-50 opacity-50"></div>
-        <div className="container mx-auto relative z-10">
-          <motion.div 
-            initial={{ opacity: 0, y: 30 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.8 }}
-            className="text-center max-w-4xl mx-auto"
-          >
-            <div className="inline-flex items-center gap-2 bg-gradient-to-r from-blue-500/10 to-green-500/10 border border-blue-200 rounded-full px-4 py-2 mb-6">
-              <Zap size={16} className="text-blue-600" />
-              <span className="text-sm font-medium text-gray-700">Smart Salon Booking Platform</span>
-            </div>
-            
-            <h1 className="text-4xl sm:text-5xl lg:text-6xl font-extrabold mb-6 leading-tight">
-              <span className="bg-gradient-to-r from-blue-600 via-green-600 to-red-600 bg-clip-text text-transparent">
-                Book Your Perfect
-              </span>
-              <br />
-              <span className="text-gray-800">Salon Experience</span>
-            </h1>
-            
-            <p className="text-base sm:text-lg text-gray-600 mb-8 max-w-2xl mx-auto leading-relaxed">
-              Skip the queues, choose your barber, and get real-time updates. 
-              Discover the smartest way to book salon appointments with live queue management and WhatsApp notifications.
-            </p>
-            
-            <div className="flex flex-col sm:flex-row gap-4 justify-center items-center">
-              <Button 
-                onClick={() => navigate('/login')}
-                size="lg"
-                className="bg-gradient-to-r from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700 text-white font-bold px-8 py-6 text-lg rounded-full shadow-xl hover:shadow-2xl transition-all duration-300 transform hover:scale-105"
-              >
-                <Smartphone className="mr-2" size={20} />
-                Get Started
-              </Button>
-              <Button 
-                onClick={() => navigate('/salon/login')}
-                size="lg"
-                variant="outline"
-                className="border-2 border-green-500 text-green-600 hover:bg-green-50 font-bold px-8 py-6 text-lg rounded-full shadow-lg hover:shadow-xl transition-all duration-300"
-              >
-                <Scissors className="mr-2" size={20} />
-                For Salons
-              </Button>
-            </div>
-          </motion.div>
+      {/* Hero */}
+      <section className="relative hero-wash overflow-hidden">
+        <div className="absolute inset-0 pointer-events-none">
+          <div className="absolute -top-40 left-1/2 -translate-x-1/2 w-[80vw] h-[80vw] max-w-[1100px] max-h-[1100px] rounded-full bg-brass/[0.06] blur-3xl" />
+        </div>
 
-          {/* Stats Bar */}
-          <motion.div 
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.8, delay: 0.3 }}
-            className="mt-16 grid grid-cols-2 md:grid-cols-4 gap-6 max-w-4xl mx-auto"
+        <div className="relative max-w-7xl mx-auto px-6 lg:px-10 pt-24 pb-20">
+          <div className="grid lg:grid-cols-12 gap-12 items-end">
+            {/* Headline column */}
+            <motion.div
+              initial={{ opacity: 0, y: 24 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.7, ease: [0.22, 0.61, 0.36, 1] }}
+              className="lg:col-span-8"
+            >
+              <div className="inline-flex items-center gap-2 mb-8">
+                <span className="h-px w-10 bg-brass/60" />
+                <span className="eyebrow-brass">A modern atelier of booking</span>
+              </div>
+
+              <h1 className="font-fraunces text-[44px] sm:text-[60px] lg:text-[88px] leading-[0.96] font-light tracking-tightest">
+                Book your <span className="serif-italic font-medium brass-text">perfect</span>
+                <br />
+                salon experience.
+              </h1>
+
+              <p className="mt-8 max-w-xl text-base sm:text-lg text-muted-foreground leading-relaxed">
+                Skip the queues. Choose your stylist. Arrive in time for the chair, not the wait.
+                A quiet, considered way to book the salons you love.
+              </p>
+
+              <div className="mt-10 flex flex-col sm:flex-row gap-3">
+                <Button
+                  onClick={() => navigate('/login')}
+                  className="bg-brass hover:bg-brass-hover text-espresso font-semibold px-7 h-12 rounded-full shadow-brass"
+                  data-testid="hero-get-started-btn"
+                >
+                  <Smartphone className="mr-2 w-4 h-4" />
+                  Begin booking
+                </Button>
+                <Button
+                  onClick={() => navigate('/salon/login')}
+                  variant="outline"
+                  className="bg-transparent border-border hover:border-brass/60 text-foreground hover:bg-transparent px-7 h-12 rounded-full"
+                  data-testid="hero-salon-login-btn"
+                >
+                  <Scissors className="mr-2 w-4 h-4" strokeWidth={1.6} />
+                  I run a salon
+                </Button>
+              </div>
+            </motion.div>
+
+            {/* Hero card column */}
+            <motion.div
+              initial={{ opacity: 0, y: 30 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.8, delay: 0.2 }}
+              className="lg:col-span-4"
+            >
+              <div className="lux-card p-6 rounded-2xl bg-card/80">
+                <div className="flex items-center justify-between mb-5">
+                  <span className="eyebrow">Token</span>
+                  <span className="pill-open inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-semibold tracking-wide">
+                    <span className="w-1.5 h-1.5 rounded-full bg-sage animate-pulse" />
+                    NOW SERVING
+                  </span>
+                </div>
+                <div className="font-bebas text-[88px] leading-none brass-text">#12</div>
+                <div className="mt-4 space-y-3">
+                  <div className="flex items-center justify-between text-sm">
+                    <span className="text-muted-foreground">Stylist</span>
+                    <span className="font-medium">Aanya M.</span>
+                  </div>
+                  <div className="flex items-center justify-between text-sm">
+                    <span className="text-muted-foreground">Before you</span>
+                    <span className="font-medium">2 guests</span>
+                  </div>
+                  <div className="flex items-center justify-between text-sm">
+                    <span className="text-muted-foreground">Estimated</span>
+                    <span className="font-medium">~18 min</span>
+                  </div>
+                </div>
+                <div className="mt-5 pt-5 border-t border-border/60 flex items-center gap-2 text-[12px] text-muted-foreground">
+                  <Bell className="w-3.5 h-3.5 text-brass" strokeWidth={1.6} />
+                  We'll ping you when it's your turn.
+                </div>
+              </div>
+            </motion.div>
+          </div>
+
+          {/* Stats strip */}
+          <motion.div
+            id="stats"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            transition={{ duration: 0.6, delay: 0.4 }}
+            className="mt-20 pt-10 border-t border-border/60 grid grid-cols-2 md:grid-cols-4 gap-y-8 gap-x-6"
           >
             {stats.map((stat, idx) => (
-              <div 
-                key={idx}
-                className="bg-white rounded-2xl p-6 shadow-lg border border-gray-100 hover:shadow-xl transition-shadow duration-300"
-              >
-                <div className="text-3xl font-bold mb-1" style={{ color: stat.color }}>
+              <div key={idx} className="flex flex-col">
+                <span className="font-bebas text-[44px] leading-none text-foreground">
                   {stat.value}
-                </div>
-                <div className="text-sm text-gray-600 font-medium">{stat.label}</div>
+                  {stat.label === 'Average rating' && <span className="text-brass">★</span>}
+                </span>
+                <span className="eyebrow mt-2">{stat.label}</span>
               </div>
             ))}
           </motion.div>
         </div>
       </section>
 
-      {/* Features Section */}
-      <section className="py-20 px-4 bg-white">
-        <div className="container mx-auto">
-          <motion.div 
-            initial={{ opacity: 0, y: 20 }}
-            whileInView={{ opacity: 1, y: 0 }}
-            viewport={{ once: true }}
-            transition={{ duration: 0.6 }}
-            className="text-center mb-16"
-          >
-            <h2 className="text-3xl sm:text-4xl font-bold mb-4 text-gray-800">
-              Everything You Need in One App
-            </h2>
-            <p className="text-base text-gray-600 max-w-2xl mx-auto">
-              A complete booking experience designed for modern salon-goers and businesses
-            </p>
-          </motion.div>
+      {/* Features */}
+      <section id="features" className="border-t border-border/60">
+        <div className="max-w-7xl mx-auto px-6 lg:px-10 py-24">
+          <div className="grid lg:grid-cols-12 gap-12 mb-16">
+            <div className="lg:col-span-5">
+              <span className="eyebrow-brass">The experience</span>
+              <h2 className="font-fraunces text-4xl sm:text-5xl mt-4 leading-[1.05] font-light">
+                Everything you'd expect <span className="serif-italic font-medium">from your house</span> — and a little more.
+              </h2>
+            </div>
+            <div className="lg:col-span-6 lg:col-start-7 self-end">
+              <p className="text-muted-foreground leading-relaxed">
+                A booking system designed like a guestbook, not a ticketing kiosk. Considered moments,
+                tactile micro-interactions, and zero noise — so the only color you'll notice is the one
+                in the chair.
+              </p>
+            </div>
+          </div>
 
-          <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-8 max-w-6xl mx-auto">
-            {features.map((feature, idx) => (
-              <motion.div
-                key={idx}
-                initial={{ opacity: 0, y: 30 }}
-                whileInView={{ opacity: 1, y: 0 }}
-                viewport={{ once: true }}
-                transition={{ duration: 0.5, delay: idx * 0.1 }}
-                className="group bg-gradient-to-br from-white to-gray-50 rounded-2xl p-6 shadow-lg border border-gray-100 hover:shadow-2xl hover:border-gray-200 transition-all duration-300 cursor-pointer"
-              >
-                <div 
-                  className={`w-14 h-14 rounded-xl bg-gradient-to-br ${feature.gradient} flex items-center justify-center mb-4 group-hover:scale-110 transition-transform duration-300 shadow-md`}
+          <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-px bg-border/60 rounded-2xl overflow-hidden">
+            {features.map((feature, idx) => {
+              const Icon = feature.icon;
+              return (
+                <motion.div
+                  key={idx}
+                  initial={{ opacity: 0, y: 20 }}
+                  whileInView={{ opacity: 1, y: 0 }}
+                  viewport={{ once: true, margin: '-60px' }}
+                  transition={{ duration: 0.5, delay: idx * 0.06 }}
+                  className="group relative bg-card p-8 hover:bg-card/60 transition-colors"
                 >
-                  <feature.icon size={28} className="text-white" />
-                </div>
-                <h3 className="text-xl font-bold mb-3 text-gray-800 group-hover:text-gray-900">
-                  {feature.title}
-                </h3>
-                <p className="text-sm text-gray-600 leading-relaxed">
-                  {feature.description}
+                  <div className="flex items-start justify-between mb-6">
+                    <div className="w-12 h-12 rounded-full border border-brass/40 flex items-center justify-center text-brass group-hover:bg-brass-soft transition-colors">
+                      <Icon className="w-5 h-5" strokeWidth={1.5} />
+                    </div>
+                    <ArrowUpRight className="w-4 h-4 text-muted-foreground/50 group-hover:text-brass transition-colors" strokeWidth={1.4} />
+                  </div>
+                  <span className="eyebrow">{feature.eyebrow}</span>
+                  <h3 className="font-fraunces text-xl mt-2 mb-3 leading-snug font-medium">
+                    {feature.title}
+                  </h3>
+                  <p className="text-sm text-muted-foreground leading-relaxed">
+                    {feature.description}
+                  </p>
+                </motion.div>
+              );
+            })}
+          </div>
+        </div>
+      </section>
+
+      {/* How it works */}
+      <section id="how" className="border-t border-border/60 bg-card/40">
+        <div className="max-w-7xl mx-auto px-6 lg:px-10 py-24">
+          <div className="text-center mb-16">
+            <span className="eyebrow-brass">The ritual</span>
+            <h2 className="font-fraunces text-4xl sm:text-5xl mt-4 font-light">
+              Three steps, <span className="serif-italic font-medium">no fuss</span>.
+            </h2>
+          </div>
+
+          <div className="grid md:grid-cols-3 gap-px bg-border/60 rounded-2xl overflow-hidden">
+            {steps.map((item, idx) => {
+              const Icon = item.icon;
+              return (
+                <motion.div
+                  key={idx}
+                  initial={{ opacity: 0, y: 18 }}
+                  whileInView={{ opacity: 1, y: 0 }}
+                  viewport={{ once: true }}
+                  transition={{ duration: 0.5, delay: idx * 0.1 }}
+                  className="bg-card p-10 relative"
+                >
+                  <span className="font-fraunces text-[80px] leading-none brass-text serif-italic font-light absolute top-6 right-8 opacity-30 select-none">
+                    {item.step}
+                  </span>
+                  <Icon className="w-7 h-7 text-brass mb-6" strokeWidth={1.5} />
+                  <h3 className="font-fraunces text-2xl mb-3 font-medium">{item.title}</h3>
+                  <p className="text-sm text-muted-foreground leading-relaxed max-w-xs">
+                    {item.description}
+                  </p>
+                </motion.div>
+              );
+            })}
+          </div>
+        </div>
+      </section>
+
+      {/* Quote / closing */}
+      <section className="border-t border-border/60">
+        <div className="max-w-4xl mx-auto px-6 lg:px-10 py-24 text-center">
+          <Quote className="w-8 h-8 text-brass mx-auto mb-6" strokeWidth={1.4} />
+          <p className="font-fraunces text-3xl sm:text-4xl leading-tight font-light serif-italic">
+            "The chair shouldn't have to wait — and neither should you."
+          </p>
+          <p className="eyebrow mt-6">— A note from the house</p>
+        </div>
+      </section>
+
+      {/* Final CTA */}
+      <section className="border-t border-border/60 bg-card/40">
+        <div className="max-w-7xl mx-auto px-6 lg:px-10 py-20">
+          <div className="lux-card rounded-3xl p-12 lg:p-16 relative overflow-hidden">
+            <div className="absolute inset-0 hero-wash opacity-60 pointer-events-none" />
+            <div className="relative grid lg:grid-cols-2 gap-10 items-center">
+              <div>
+                <span className="eyebrow-brass">Ready when you are</span>
+                <h2 className="font-fraunces text-4xl sm:text-5xl mt-4 leading-[1.05] font-light">
+                  Step inside <span className="serif-italic font-medium brass-text">SalonHub</span>.
+                </h2>
+                <p className="mt-4 text-muted-foreground leading-relaxed max-w-md">
+                  Join thousands of guests who skipped the wait and walked straight to their chair.
                 </p>
-              </motion.div>
-            ))}
-          </div>
-        </div>
-      </section>
-
-      {/* How It Works Section */}
-      <section className="py-20 px-4 bg-gradient-to-br from-blue-50 via-white to-green-50">
-        <div className="container mx-auto max-w-5xl">
-          <motion.div 
-            initial={{ opacity: 0, y: 20 }}
-            whileInView={{ opacity: 1, y: 0 }}
-            viewport={{ once: true }}
-            className="text-center mb-16"
-          >
-            <h2 className="text-3xl sm:text-4xl font-bold mb-4 text-gray-800">
-              How It Works
-            </h2>
-            <p className="text-base text-gray-600">
-              Get started in just three simple steps
-            </p>
-          </motion.div>
-
-          <div className="grid md:grid-cols-3 gap-8">
-            {[
-              {
-                step: '1',
-                title: 'Find & Choose',
-                description: 'Browse nearby salons, view services, and pick your favorite barber',
-                icon: MapPin,
-                color: colors.blue
-              },
-              {
-                step: '2',
-                title: 'Book Instantly',
-                description: 'Select your services and confirm your booking in seconds',
-                icon: Calendar,
-                color: colors.red
-              },
-              {
-                step: '3',
-                title: 'Track Live',
-                description: 'Get real-time queue updates and WhatsApp notifications',
-                icon: MessageSquare,
-                color: colors.green
-              }
-            ].map((item, idx) => (
-              <motion.div
-                key={idx}
-                initial={{ opacity: 0, x: -20 }}
-                whileInView={{ opacity: 1, x: 0 }}
-                viewport={{ once: true }}
-                transition={{ duration: 0.5, delay: idx * 0.15 }}
-                className="relative bg-white rounded-2xl p-8 shadow-xl border border-gray-100 hover:shadow-2xl transition-all duration-300"
-              >
-                <div 
-                  className="absolute -top-4 -left-4 w-12 h-12 rounded-full flex items-center justify-center text-white font-bold text-xl shadow-lg"
-                  style={{ backgroundColor: item.color }}
+              </div>
+              <div className="flex flex-col sm:flex-row gap-3 lg:justify-end">
+                <Button
+                  onClick={() => navigate('/login')}
+                  className="bg-brass hover:bg-brass-hover text-espresso font-semibold px-7 h-12 rounded-full shadow-brass"
+                  data-testid="cta-start-booking-btn"
                 >
-                  {item.step}
-                </div>
-                <div className="mb-4 mt-4">
-                  <item.icon size={40} style={{ color: item.color }} />
-                </div>
-                <h3 className="text-xl font-bold mb-3 text-gray-800">{item.title}</h3>
-                <p className="text-sm text-gray-600">{item.description}</p>
-              </motion.div>
-            ))}
+                  Start booking
+                  <ArrowUpRight className="ml-2 w-4 h-4" />
+                </Button>
+                <Button
+                  onClick={() => navigate('/salon/login')}
+                  variant="outline"
+                  className="bg-transparent border-border hover:border-brass/60 text-foreground px-7 h-12 rounded-full"
+                  data-testid="cta-salon-portal-btn"
+                >
+                  Salon portal
+                </Button>
+              </div>
+            </div>
           </div>
-        </div>
-      </section>
-
-      {/* CTA Section */}
-      <section className="py-20 px-4 bg-gradient-to-r from-blue-600 via-green-600 to-blue-600">
-        <div className="container mx-auto max-w-4xl text-center">
-          <motion.div
-            initial={{ opacity: 0, scale: 0.9 }}
-            whileInView={{ opacity: 1, scale: 1 }}
-            viewport={{ once: true }}
-            transition={{ duration: 0.6 }}
-          >
-            <h2 className="text-3xl sm:text-4xl font-bold text-white mb-6">
-              Ready to Experience Hassle-Free Salon Booking?
-            </h2>
-            <p className="text-lg text-white/90 mb-8 max-w-2xl mx-auto">
-              Join thousands of happy customers who save time and enjoy a seamless salon experience
-            </p>
-            <Button 
-              onClick={() => navigate('/login')}
-              size="lg"
-              className="bg-white text-blue-600 hover:bg-gray-100 font-bold px-10 py-6 text-lg rounded-full shadow-2xl hover:shadow-3xl transition-all duration-300 transform hover:scale-105"
-            >
-              <Smartphone className="mr-2" size={20} />
-              Start Booking Now
-            </Button>
-          </motion.div>
         </div>
       </section>
 
       {/* Footer */}
-      <footer className="bg-gray-900 text-white py-12 px-4">
-        <div className="container mx-auto text-center">
-          <div className="flex items-center justify-center gap-3 mb-4">
-            <SalonHubLogo size={32} />
-            <span className="text-xl font-bold">SalonHub</span>
+      <footer className="border-t border-border/60">
+        <div className="max-w-7xl mx-auto px-6 lg:px-10 py-12 flex flex-col sm:flex-row items-center justify-between gap-6">
+          <div className="flex items-center gap-3">
+            <SalonHubLogo size={28} showText={false} />
+            <span className="font-fraunces text-base">
+              Salon<span className="text-brass italic">hub</span>
+            </span>
+            <span className="text-xs text-muted-foreground">© {new Date().getFullYear()}</span>
           </div>
-          <p className="text-gray-400 text-sm mb-4">
-            Modern salon booking platform with real-time queue management
-          </p>
-          <div className="flex justify-center gap-6 text-sm text-gray-400">
-            <button onClick={() => navigate('/login')} className="hover:text-white transition-colors">
-              Customer Login
-            </button>
-            <span>•</span>
-            <button onClick={() => navigate('/salon/login')} className="hover:text-white transition-colors">
-              Salon Login
-            </button>
-          </div>
-          <div className="mt-6 text-xs text-gray-500">
-            © 2024 SalonHub. All rights reserved.
+          <div className="flex items-center gap-6 text-xs text-muted-foreground">
+            <button onClick={() => navigate('/login')} className="hover:text-brass transition-colors uppercase tracking-widest" data-testid="footer-customer-login-btn">Guest login</button>
+            <span className="text-border">·</span>
+            <button onClick={() => navigate('/salon/login')} className="hover:text-brass transition-colors uppercase tracking-widest" data-testid="footer-salon-login-btn">Salon login</button>
           </div>
         </div>
       </footer>

@@ -13,7 +13,7 @@ import { toast } from 'sonner';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import { motion } from 'framer-motion';
-import SalonHubLogo from '@/components/SalonHubLogo';
+// SalonHubLogo removed: header redesigned with eyebrow + title
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
 const API = `${BACKEND_URL}/api`;
@@ -26,55 +26,58 @@ L.Icon.Default.mergeOptions({
   shadowUrl: require('leaflet/dist/images/marker-shadow.png'),
 });
 
-// Custom user location icon (blue pulsing dot)
+// User location pin — sage pulse
 const userLocationIcon = L.divIcon({
   className: 'custom-user-marker',
   html: `<div style="
-    width: 20px; height: 20px; 
-    background: #3b82f6; 
-    border: 3px solid white; 
-    border-radius: 50%; 
-    box-shadow: 0 0 0 8px rgba(59,130,246,0.25), 0 2px 6px rgba(0,0,0,0.3);
+    width: 18px; height: 18px;
+    background: #7E8B7A;
+    border: 3px solid #F4ECDD;
+    border-radius: 50%;
+    box-shadow: 0 0 0 8px rgba(126,139,122,0.22), 0 2px 6px rgba(0,0,0,0.35);
   "></div>`,
-  iconSize: [20, 20],
-  iconAnchor: [10, 10],
+  iconSize: [18, 18],
+  iconAnchor: [9, 9],
   popupAnchor: [0, -12],
 });
 
-// Custom salon marker icon (gold with label)
+// Salon marker — brass label flag
 const createSalonIcon = (name) => L.divIcon({
   className: 'custom-salon-marker',
   html: `<div style="display:flex;flex-direction:column;align-items:center;min-width:max-content;">
     <div style="
-      background: #b8860b; 
-      color: white; 
-      font-size: 10px; 
-      font-weight: 700; 
-      padding: 2px 6px; 
-      border-radius: 4px; 
-      white-space: nowrap; 
-      box-shadow: 0 2px 6px rgba(0,0,0,0.3);
-      max-width: 140px;
+      background: #C9A961;
+      color: #1A1814;
+      font-family: 'Manrope', sans-serif;
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: 0.04em;
+      padding: 3px 8px;
+      border-radius: 9999px;
+      white-space: nowrap;
+      box-shadow: 0 4px 10px rgba(0,0,0,0.3);
+      max-width: 160px;
       overflow: hidden;
       text-overflow: ellipsis;
     ">${name}</div>
     <div style="
-      width: 0; height: 0; 
-      border-left: 6px solid transparent; 
-      border-right: 6px solid transparent; 
-      border-top: 6px solid #b8860b;
+      width: 0; height: 0;
+      border-left: 5px solid transparent;
+      border-right: 5px solid transparent;
+      border-top: 5px solid #C9A961;
+      margin-top: -1px;
     "></div>
     <div style="
-      width: 10px; height: 10px; 
-      background: #b8860b; 
-      border: 2px solid white; 
-      border-radius: 50%; 
-      box-shadow: 0 1px 4px rgba(0,0,0,0.3);
-      margin-top: -2px;
+      width: 9px; height: 9px;
+      background: #C9A961;
+      border: 2px solid #F4ECDD;
+      border-radius: 50%;
+      box-shadow: 0 2px 6px rgba(0,0,0,0.35);
+      margin-top: -1px;
     "></div>
   </div>`,
-  iconSize: [120, 40],
-  iconAnchor: [60, 40],
+  iconSize: [140, 40],
+  iconAnchor: [70, 40],
   popupAnchor: [0, -42],
 });
 
@@ -94,22 +97,24 @@ function FlyToMyLocation({ userLocation }) {
         <button
           onClick={handleClick}
           style={{
-            background: 'white',
-            border: '2px solid rgba(0,0,0,0.2)',
-            borderRadius: '6px',
-            padding: '6px 10px',
+            background: '#F7F2E8',
+            border: '1px solid rgba(168,132,56,0.35)',
+            borderRadius: '9999px',
+            padding: '6px 12px',
             cursor: 'pointer',
             display: 'flex',
             alignItems: 'center',
-            gap: '4px',
-            fontSize: '12px',
+            gap: '6px',
+            fontSize: '11px',
             fontWeight: '600',
-            color: '#3b82f6',
-            boxShadow: '0 2px 6px rgba(0,0,0,0.15)',
+            letterSpacing: '0.04em',
+            textTransform: 'uppercase',
+            color: '#A88438',
+            boxShadow: '0 4px 10px rgba(0,0,0,0.18)',
           }}
           title="Go to my location"
         >
-          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#3b82f6" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+          <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#A88438" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
             <circle cx="12" cy="12" r="4"/>
             <line x1="12" y1="2" x2="12" y2="6"/>
             <line x1="12" y1="18" x2="12" y2="22"/>
@@ -352,74 +357,80 @@ export default function SalonSelectionPage() {
       
     return (
       <motion.div
-        initial={{ opacity: 0, scale: 0.95 }}
+        initial={{ opacity: 0, scale: 0.97 }}
         animate={{ opacity: 1, scale: 1 }}
-        whileHover={{ scale: 1.02 }}
-        className="bg-card rounded-xl overflow-hidden shadow-md hover:shadow-xl transition-all border border-border cursor-pointer"
+        whileHover={{ y: -2 }}
+        className="lux-card group bg-card rounded-2xl overflow-hidden cursor-pointer"
         onClick={() => handleSelectSalon(salon)}
+        data-testid={`salon-card-${salon.id}`}
       >
         {/* Image Carousel */}
-        <div className="relative h-24 sm:h-28 overflow-hidden group">
-          <img 
+        <div className="relative h-32 overflow-hidden">
+          <img
             src={images[currentImageIndex]}
             alt={salon.salon_name}
-            className="w-full h-full object-cover transition-opacity duration-300"
+            className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-105"
           />
+          <div className="absolute inset-0 bg-gradient-to-t from-black/40 via-transparent to-transparent pointer-events-none" />
+
           {salon.logo_url && (
-            <div className="absolute top-1.5 left-1.5 w-8 h-8 bg-white rounded-full p-0.5 shadow-lg">
-              <img 
+            <div className="absolute top-2 left-2 w-9 h-9 bg-card rounded-full p-0.5 ring-1 ring-brass/40 shadow-lux">
+              <img
                 src={salon.logo_url}
                 alt="Logo"
                 className="w-full h-full object-contain rounded-full"
               />
             </div>
           )}
-          
-          {/* Manual Toggle Badge */}
+
+          {/* Status badge */}
           {salon.manual_toggle?.is_overridden && (
             <>
               {salon.manual_toggle.is_open ? (
-                <div className="absolute top-1.5 right-1.5 bg-green-500 text-white text-[10px] font-bold px-2 py-0.5 rounded-full shadow-lg flex items-center gap-1">
-                  <span className="w-1.5 h-1.5 bg-white rounded-full animate-pulse"></span>
-                  OPEN
+                <div className="absolute top-2 right-2 pill-open inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-bold tracking-widest uppercase">
+                  <span className="w-1.5 h-1.5 rounded-full bg-sage animate-pulse"></span>
+                  Open
                 </div>
               ) : salon.manual_toggle.closed_mode === 'online_only' ? (
-                <div className="absolute top-1.5 right-1.5 bg-amber-500 text-white text-[10px] font-bold px-2 py-0.5 rounded-full shadow-lg flex items-center gap-1" title="Closed Online — Visit Salon">
-                  <span className="w-1.5 h-1.5 bg-white rounded-full"></span>
-                  CLOSED ONLINE
+                <div className="absolute top-2 right-2 pill-amber inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-bold tracking-widest uppercase" title="Closed Online — Visit Salon">
+                  <span className="w-1.5 h-1.5 rounded-full bg-current"></span>
+                  Visit Only
                 </div>
               ) : (
-                <div className="absolute top-1.5 right-1.5 bg-red-500 text-white text-[10px] font-bold px-2 py-0.5 rounded-full shadow-lg flex items-center gap-1">
-                  <span className="w-1.5 h-1.5 bg-white rounded-full"></span>
-                  CLOSED
+                <div className="absolute top-2 right-2 pill-closed inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-bold tracking-widest uppercase">
+                  <span className="w-1.5 h-1.5 rounded-full bg-current"></span>
+                  Closed
                 </div>
               )}
             </>
           )}
-          
+
           {/* Carousel Controls */}
           {images.length > 1 && (
             <>
               <button
                 onClick={prevImage}
-                className="absolute left-1 top-1/2 -translate-y-1/2 bg-black/50 text-white p-0.5 rounded-full opacity-0 group-hover:opacity-100 transition-opacity"
+                className="absolute left-1.5 top-1/2 -translate-y-1/2 bg-black/50 backdrop-blur-sm text-cream p-1 rounded-full opacity-0 group-hover:opacity-100 transition-opacity"
+                aria-label="Previous image"
               >
                 <ChevronLeft className="w-3 h-3" />
               </button>
               <button
                 onClick={nextImage}
-                className="absolute right-1 top-1/2 -translate-y-1/2 bg-black/50 text-white p-0.5 rounded-full opacity-0 group-hover:opacity-100 transition-opacity"
+                className="absolute right-1.5 top-1/2 -translate-y-1/2 bg-black/50 backdrop-blur-sm text-cream p-1 rounded-full opacity-0 group-hover:opacity-100 transition-opacity"
+                aria-label="Next image"
               >
                 <ChevronRight className="w-3 h-3" />
               </button>
-              <div className="absolute bottom-1 left-1/2 -translate-x-1/2 flex space-x-1">
+              <div className="absolute bottom-1.5 left-1/2 -translate-x-1/2 flex gap-1">
                 {images.map((_, index) => (
                   <button
                     key={index}
                     onClick={(e) => goToImage(e, index)}
-                    className={`w-1 h-1 rounded-full transition-all ${
-                      index === currentImageIndex ? 'bg-white w-2' : 'bg-white/50'
+                    className={`h-1 rounded-full transition-all ${
+                      index === currentImageIndex ? 'w-3 bg-cream' : 'w-1 bg-cream/50'
                     }`}
+                    aria-label={`Go to image ${index + 1}`}
                   />
                 ))}
               </div>
@@ -428,26 +439,27 @@ export default function SalonSelectionPage() {
         </div>
 
         {/* Content */}
-        <div className="p-2.5">
-          <h3 className="font-bold text-sm text-foreground mb-0.5 truncate">
-            {salon.salon_name} {salon.gender_tag && `(${salon.gender_tag})`}
+        <div className="p-3">
+          <h3 className="font-fraunces font-medium text-[15px] leading-tight text-foreground mb-1 truncate">
+            {salon.salon_name}
+            {salon.gender_tag && <span className="text-muted-foreground text-xs ml-1 font-normal">({salon.gender_tag})</span>}
           </h3>
-          <p className="text-[10px] text-muted-foreground flex items-center mb-1.5 truncate">
-            <MapPin className="w-2.5 h-2.5 mr-0.5 flex-shrink-0" />
+          <p className="text-[11px] text-muted-foreground flex items-center mb-2 truncate">
+            <MapPin className="w-3 h-3 mr-1 flex-shrink-0 text-brass/70" strokeWidth={1.5} />
             {salon.address}
-            {salon.distance && ` | ${salon.distance} Kms`}
+            {salon.distance && <span className="ml-1 text-brass">· {salon.distance} km</span>}
           </p>
-          <div className="flex items-center space-x-1">
+          <div className="flex items-center gap-1.5">
             {hasRating ? (
-              <div className="flex items-center bg-green-600 text-white px-1.5 py-0.5 rounded text-xs">
-                <Star className="w-2.5 h-2.5 mr-0.5 fill-white" />
-                <span className="font-bold">{salon.rating}</span>
+              <div className="flex items-center pill-brass px-1.5 py-0.5 rounded-full">
+                <Star className="w-2.5 h-2.5 mr-0.5 fill-current" />
+                <span className="font-semibold text-[11px]">{salon.rating}</span>
               </div>
             ) : (
-              <span className="text-[10px] text-muted-foreground">No ratings yet</span>
+              <span className="text-[10px] text-muted-foreground italic">No ratings yet</span>
             )}
             {salon.city && (
-              <span className="text-[10px] text-muted-foreground bg-muted px-1.5 py-0.5 rounded">{salon.city}</span>
+              <span className="text-[10px] text-muted-foreground bg-muted px-2 py-0.5 rounded-full">{salon.city}</span>
             )}
           </div>
         </div>
@@ -465,62 +477,64 @@ export default function SalonSelectionPage() {
       <motion.div
         initial={{ opacity: 0, x: -10 }}
         animate={{ opacity: 1, x: 0 }}
-        className="bg-card rounded-xl overflow-hidden border border-border cursor-pointer hover:border-gold/50 hover:shadow-md transition-all"
+        whileHover={{ x: 4 }}
+        className="group bg-card rounded-2xl overflow-hidden border border-border cursor-pointer hover:border-brass/50 transition-all"
         onClick={() => handleSelectSalon(salon)}
+        data-testid={`salon-list-item-${salon.id}`}
       >
         <div className="flex items-center p-3 gap-3">
-          <div className="w-14 h-14 flex-shrink-0 rounded-lg overflow-hidden">
-            <img 
+          <div className="w-16 h-16 flex-shrink-0 rounded-xl overflow-hidden ring-1 ring-border group-hover:ring-brass/40 transition-all">
+            <img
               src={image}
               alt={salon.salon_name}
               className="w-full h-full object-cover"
             />
           </div>
           <div className="flex-1 min-w-0">
-            <h3 className="font-bold text-sm text-foreground truncate">
-              {salon.salon_name} {salon.gender_tag && `(${salon.gender_tag})`}
+            <h3 className="font-fraunces font-medium text-[16px] text-foreground truncate leading-tight">
+              {salon.salon_name}
+              {salon.gender_tag && <span className="text-muted-foreground text-xs ml-1 font-normal">({salon.gender_tag})</span>}
             </h3>
-            <p className="text-xs text-muted-foreground flex items-center truncate">
-              <MapPin className="w-3 h-3 mr-0.5 flex-shrink-0" />
+            <p className="text-xs text-muted-foreground flex items-center mt-1 truncate">
+              <MapPin className="w-3 h-3 mr-1 flex-shrink-0 text-brass/70" strokeWidth={1.5} />
               {salon.address}
-              {salon.distance && ` | ${salon.distance} Kms`}
+              {salon.distance && <span className="ml-1 text-brass">· {salon.distance} km</span>}
             </p>
-            <div className="flex items-center gap-2 mt-1">
+            <div className="flex items-center gap-1.5 mt-2">
               {hasRating ? (
-                <div className="flex items-center bg-green-600 text-white px-1.5 py-0.5 rounded text-xs">
-                  <Star className="w-2.5 h-2.5 mr-0.5 fill-white" />
-                  <span className="font-bold">{salon.rating}</span>
+                <div className="flex items-center pill-brass px-2 py-0.5 rounded-full">
+                  <Star className="w-2.5 h-2.5 mr-0.5 fill-current" />
+                  <span className="font-semibold text-[11px]">{salon.rating}</span>
                 </div>
               ) : (
-                <span className="text-[10px] text-muted-foreground">No ratings yet</span>
+                <span className="text-[10px] text-muted-foreground italic">No ratings yet</span>
               )}
               {salon.city && (
-                <span className="text-[10px] text-muted-foreground bg-muted px-1.5 py-0.5 rounded">{salon.city}</span>
+                <span className="text-[10px] text-muted-foreground bg-muted px-2 py-0.5 rounded-full">{salon.city}</span>
               )}
-              {/* Manual Toggle Badge */}
               {salon.manual_toggle?.is_overridden && (
                 <>
                   {salon.manual_toggle.is_open ? (
-                    <span className="text-[10px] bg-green-500 text-white font-bold px-2 py-0.5 rounded-full flex items-center gap-1">
-                      <span className="w-1 h-1 bg-white rounded-full animate-pulse"></span>
-                      OPEN
+                    <span className="text-[9px] pill-open font-bold px-2 py-0.5 rounded-full inline-flex items-center gap-1 tracking-widest uppercase">
+                      <span className="w-1 h-1 rounded-full bg-current animate-pulse"></span>
+                      Open
                     </span>
                   ) : salon.manual_toggle.closed_mode === 'online_only' ? (
-                    <span className="text-[10px] bg-amber-500 text-white font-bold px-2 py-0.5 rounded-full flex items-center gap-1" title="Closed Online — Visit Salon">
-                      <span className="w-1 h-1 bg-white rounded-full"></span>
-                      CLOSED ONLINE
+                    <span className="text-[9px] pill-amber font-bold px-2 py-0.5 rounded-full inline-flex items-center gap-1 tracking-widest uppercase" title="Closed Online — Visit Salon">
+                      <span className="w-1 h-1 rounded-full bg-current"></span>
+                      Visit Only
                     </span>
                   ) : (
-                    <span className="text-[10px] bg-red-500 text-white font-bold px-2 py-0.5 rounded-full flex items-center gap-1">
-                      <span className="w-1 h-1 bg-white rounded-full"></span>
-                      CLOSED
+                    <span className="text-[9px] pill-closed font-bold px-2 py-0.5 rounded-full inline-flex items-center gap-1 tracking-widest uppercase">
+                      <span className="w-1 h-1 rounded-full bg-current"></span>
+                      Closed
                     </span>
                   )}
                 </>
               )}
             </div>
           </div>
-          <ChevronRight className="w-4 h-4 text-muted-foreground flex-shrink-0" />
+          <ChevronRight className="w-4 h-4 text-muted-foreground/60 group-hover:text-brass flex-shrink-0 transition-colors" strokeWidth={1.5} />
         </div>
       </motion.div>
     );
@@ -528,48 +542,52 @@ export default function SalonSelectionPage() {
 
   if (loading && salons.length === 0) {
     return (
-      <div className="min-h-screen bg-background flex items-center justify-center">
+      <div className="min-h-screen bg-background bg-grain flex items-center justify-center">
         <div className="text-center">
-          <Scissors className="w-16 h-16 text-gold animate-spin mx-auto mb-4" />
-          <p className="text-foreground">Finding salons...</p>
+          <Scissors className="w-12 h-12 text-brass animate-spin mx-auto mb-4" strokeWidth={1.4} />
+          <p className="eyebrow">Finding salons</p>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-background">
-      {/* Active Booking Tracker - REMOVED as per user request */}
-      
+    <div className="min-h-screen bg-background bg-grain">
       {/* Header */}
-      <div className="bg-card border-b border-border sticky top-0 z-30 shadow-sm">
+      <div className="bg-card/70 glass-warm border-b border-border/60 sticky top-0 z-30">
         <div className="max-w-7xl mx-auto p-4">
           <div className="flex items-center justify-between mb-4 ml-14 mr-14">
-            <SalonHubLogo size={36} showText={true} />
-            <div className="flex space-x-1 flex-wrap justify-end gap-y-1">
+            <div>
+              <span className="eyebrow-brass">Discover</span>
+              <h1 className="font-fraunces text-2xl mt-1 font-medium leading-none">Salons near you</h1>
+            </div>
+            <div className="flex items-center bg-muted rounded-full p-1 border border-border">
               <Button
-                variant={view === 'list' ? 'default' : 'outline'}
+                variant="ghost"
                 size="sm"
                 onClick={() => setView('list')}
-                className={view === 'list' ? 'bg-gold text-black' : ''}
+                data-testid="view-list-btn"
+                className={`h-8 px-3 rounded-full ${view === 'list' ? 'bg-brass text-espresso hover:bg-brass-hover' : 'text-muted-foreground hover:text-foreground hover:bg-transparent'}`}
               >
-                <List className="w-4 h-4" />
+                <List className="w-4 h-4" strokeWidth={1.6} />
               </Button>
               <Button
-                variant={view === 'chips' ? 'default' : 'outline'}
+                variant="ghost"
                 size="sm"
                 onClick={() => setView('chips')}
-                className={view === 'chips' ? 'bg-gold text-black' : ''}
+                data-testid="view-grid-btn"
+                className={`h-8 px-3 rounded-full ${view === 'chips' ? 'bg-brass text-espresso hover:bg-brass-hover' : 'text-muted-foreground hover:text-foreground hover:bg-transparent'}`}
               >
-                <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>
+                <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>
               </Button>
               <Button
-                variant={view === 'map' ? 'default' : 'outline'}
+                variant="ghost"
                 size="sm"
                 onClick={() => setView('map')}
-                className={view === 'map' ? 'bg-gold text-black' : ''}
+                data-testid="view-map-btn"
+                className={`h-8 px-3 rounded-full ${view === 'map' ? 'bg-brass text-espresso hover:bg-brass-hover' : 'text-muted-foreground hover:text-foreground hover:bg-transparent'}`}
               >
-                <MapIcon className="w-4 h-4" />
+                <MapIcon className="w-4 h-4" strokeWidth={1.6} />
               </Button>
             </div>
           </div>
@@ -578,41 +596,43 @@ export default function SalonSelectionPage() {
           <div className="space-y-3">
             <div className="flex gap-2">
               <div className="relative flex-1">
-                <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-muted-foreground w-4 h-4" />
+                <Search className="absolute left-3.5 top-1/2 transform -translate-y-1/2 text-muted-foreground w-4 h-4" strokeWidth={1.6} />
                 <Input
                   type="text"
-                  placeholder="Search salon by name..."
+                  placeholder="Search by salon name..."
                   value={searchQuery}
                   onChange={(e) => handleSearchByName(e.target.value)}
-                  className="pl-10"
+                  data-testid="salon-search-input"
+                  className="pl-10 h-11 rounded-full border-border focus-visible:border-brass focus-visible:ring-brass bg-card"
                 />
               </div>
               {/* Searchable City Dropdown */}
               <div className="relative">
                 <button
                   onClick={() => setShowCityDropdown(!showCityDropdown)}
-                  className="px-3 py-2 bg-background border border-border rounded-md text-foreground text-sm flex items-center gap-1 min-w-[120px] whitespace-nowrap"
+                  data-testid="city-dropdown-btn"
+                  className="h-11 px-4 bg-card border border-border rounded-full text-foreground text-sm flex items-center gap-1.5 min-w-[130px] whitespace-nowrap hover:border-brass/50 transition-colors"
                 >
-                  <MapPin className="w-3 h-3 flex-shrink-0" />
+                  <MapPin className="w-3.5 h-3.5 flex-shrink-0 text-brass/70" strokeWidth={1.6} />
                   {selectedCity || 'All Cities'}
-                  <ChevronRight className={`w-3 h-3 transition-transform ${showCityDropdown ? 'rotate-90' : ''}`} />
+                  <ChevronRight className={`w-3 h-3 ml-auto transition-transform ${showCityDropdown ? 'rotate-90' : ''}`} />
                 </button>
                 {showCityDropdown && (
-                  <div className="absolute right-0 top-full mt-1 bg-card border border-border rounded-lg shadow-xl z-50 w-56 max-h-64 overflow-hidden">
-                    <div className="p-2 border-b border-border">
+                  <div className="absolute right-0 top-full mt-2 lux-card bg-card rounded-2xl shadow-lux-lg z-50 w-60 max-h-72 overflow-hidden">
+                    <div className="p-2 border-b border-border/60">
                       <Input
                         type="text"
                         placeholder="Search city..."
                         value={citySearchQuery}
                         onChange={(e) => setCitySearchQuery(e.target.value)}
-                        className="h-8 text-sm"
+                        className="h-9 text-sm rounded-lg"
                         autoFocus
                       />
                     </div>
-                    <div className="max-h-48 overflow-y-auto">
+                    <div className="max-h-52 overflow-y-auto py-1">
                       <button
                         onClick={() => handleCityFilter('')}
-                        className={`w-full text-left px-3 py-2 text-sm hover:bg-muted transition-colors ${!selectedCity ? 'bg-gold/10 text-gold font-bold' : 'text-foreground'}`}
+                        className={`w-full text-left px-3 py-2 text-sm hover:bg-muted transition-colors ${!selectedCity ? 'bg-brass-soft text-brass font-semibold' : 'text-foreground'}`}
                       >
                         All Cities
                       </button>
@@ -620,7 +640,7 @@ export default function SalonSelectionPage() {
                         <button
                           key={city}
                           onClick={() => handleCityFilter(city)}
-                          className={`w-full text-left px-3 py-2 text-sm hover:bg-muted transition-colors ${selectedCity === city ? 'bg-gold/10 text-gold font-bold' : 'text-foreground'}`}
+                          className={`w-full text-left px-3 py-2 text-sm hover:bg-muted transition-colors ${selectedCity === city ? 'bg-brass-soft text-brass font-semibold' : 'text-foreground'}`}
                         >
                           {city}
                         </button>
@@ -640,20 +660,22 @@ export default function SalonSelectionPage() {
                   variant="outline"
                   size="sm"
                   onClick={() => { setSearchQuery(''); setSelectedCity(''); fetchNearbySalons(userLocation.lat, userLocation.lng); }}
-                  className="border-gold/30"
+                  data-testid="near-me-btn"
+                  className="h-9 rounded-full bg-transparent border-border hover:border-brass/50 hover:bg-transparent text-foreground"
                 >
-                  <Navigation className="w-4 h-4 mr-2" />
-                  Near Me
+                  <Navigation className="w-3.5 h-3.5 mr-2" strokeWidth={1.6} />
+                  Near me
                 </Button>
               )}
               <Button
                 variant="outline"
                 size="sm"
                 onClick={() => { setSearchQuery(''); setSelectedCity(''); setSalons(allSalons); setSearchType('nearby'); }}
-                className="border-gold/30"
+                data-testid="all-salons-btn"
+                className="h-9 rounded-full bg-transparent border-border hover:border-brass/50 hover:bg-transparent text-foreground"
               >
-                <List className="w-4 h-4 mr-2" />
-                All Salons
+                <List className="w-3.5 h-3.5 mr-2" strokeWidth={1.6} />
+                All salons
               </Button>
             </div>
           </div>
@@ -666,49 +688,51 @@ export default function SalonSelectionPage() {
       )}
 
       {/* Content */}
-      <div className="max-w-7xl mx-auto p-4">
+      <div className="max-w-7xl mx-auto p-4 sm:p-6">
         {view === 'list' ? (
           <>
-            <p className="text-sm text-muted-foreground mb-3">
+            <p className="eyebrow mb-4">
               {searchType === 'nearby' && 'Salons near you'}
-              {searchType === 'name' && `Search results for "${searchQuery}"`}
-              {searchType === 'city' && `Salons in ${selectedCity}`}
-              {' '}({salons.length} found)
+              {searchType === 'name' && `Results for "${searchQuery}"`}
+              {searchType === 'city' && `In ${selectedCity}`}
+              {' · '}{salons.length} found
             </p>
-            <div className="space-y-2">
+            <div className="space-y-2.5">
               {salons.map((salon) => (
                 <SalonListItem key={salon.id} salon={salon} />
               ))}
             </div>
             {salons.length === 0 && (
-              <div className="text-center py-12">
-                <Scissors className="w-16 h-16 text-muted-foreground mx-auto mb-4 opacity-30" />
-                <p className="text-muted-foreground">No salons found</p>
+              <div className="text-center py-20">
+                <Scissors className="w-12 h-12 text-muted-foreground/30 mx-auto mb-4" strokeWidth={1.4} />
+                <p className="font-fraunces text-lg text-foreground">No salons found</p>
+                <p className="text-sm text-muted-foreground mt-1">Try a different search.</p>
               </div>
             )}
           </>
         ) : view === 'chips' ? (
           <>
-            <p className="text-sm text-muted-foreground mb-3">
+            <p className="eyebrow mb-4">
               {searchType === 'nearby' && 'Salons near you'}
-              {searchType === 'name' && `Search results for "${searchQuery}"`}
-              {searchType === 'city' && `Salons in ${selectedCity}`}
-              {' '}({salons.length} found)
+              {searchType === 'name' && `Results for "${searchQuery}"`}
+              {searchType === 'city' && `In ${selectedCity}`}
+              {' · '}{salons.length} found
             </p>
-            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
+            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
               {salons.map((salon) => (
                 <SalonCard key={salon.id} salon={salon} />
               ))}
             </div>
             {salons.length === 0 && (
-              <div className="text-center py-12">
-                <Scissors className="w-16 h-16 text-muted-foreground mx-auto mb-4 opacity-30" />
-                <p className="text-muted-foreground">No salons found</p>
+              <div className="text-center py-20">
+                <Scissors className="w-12 h-12 text-muted-foreground/30 mx-auto mb-4" strokeWidth={1.4} />
+                <p className="font-fraunces text-lg text-foreground">No salons found</p>
+                <p className="text-sm text-muted-foreground mt-1">Try a different search.</p>
               </div>
             )}
           </>
         ) : (
-          <div className="h-[600px] rounded-lg overflow-hidden relative">
+          <div className="h-[600px] rounded-2xl overflow-hidden relative border border-border">
             {(userLocation || salons.length > 0) ? (
               <MapContainer
                 center={userLocation 

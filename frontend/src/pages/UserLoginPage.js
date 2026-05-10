@@ -1,19 +1,18 @@
 import { useState } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
-import { useTheme } from '@/contexts/ThemeContext';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { toast } from 'sonner';
-import { User, Sun, Moon, Sparkles, ArrowRight } from 'lucide-react';
+import { User, ArrowRight } from 'lucide-react';
 import { motion } from 'framer-motion';
 import SalonHubLogo from '@/components/SalonHubLogo';
+import ThemeToggle from '@/components/ThemeToggle';
 
 export default function UserLoginPage() {
   const navigate = useNavigate();
   const location = useLocation();
   const { loginUser } = useAuth();
-  const { theme, toggleTheme } = useTheme();
   const [name, setName] = useState('');
   const [phone, setPhone] = useState('');
   const [gender, setGender] = useState('Men');
@@ -23,12 +22,12 @@ export default function UserLoginPage() {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    
+
     if (!name.trim()) {
       toast.error('Please enter your name');
       return;
     }
-    
+
     if (phone.length < 10) {
       toast.error('Please enter a valid 10-digit phone number');
       return;
@@ -39,7 +38,7 @@ export default function UserLoginPage() {
     setLoading(false);
 
     if (result.success) {
-      toast.success('Welcome to SalonHub!');
+      toast.success('Welcome to SalonHub.');
       navigate(from, { replace: true });
     } else {
       toast.error(result.error);
@@ -47,117 +46,89 @@ export default function UserLoginPage() {
   };
 
   return (
-    <div className="min-h-screen bg-background relative overflow-hidden flex items-center justify-center">
-      {/* Background Pattern */}
-      <div className="absolute inset-0 overflow-hidden">
-        <div className="absolute -top-40 -right-40 w-80 h-80 bg-gold/10 rounded-full blur-3xl" />
-        <div className="absolute -bottom-40 -left-40 w-80 h-80 bg-gold/5 rounded-full blur-3xl" />
-        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[600px] h-[600px] bg-gold/5 rounded-full blur-3xl" />
+    <div className="min-h-screen bg-background bg-grain hero-wash relative overflow-hidden flex items-center justify-center px-4">
+      <div className="absolute inset-0 pointer-events-none">
+        <div className="absolute -top-40 -right-40 w-[500px] h-[500px] bg-brass/[0.06] rounded-full blur-3xl" />
+        <div className="absolute -bottom-40 -left-40 w-[500px] h-[500px] bg-bronze/[0.05] rounded-full blur-3xl" />
       </div>
 
-      {/* Theme Toggle */}
-      <motion.button
-        initial={{ opacity: 0 }}
-        animate={{ opacity: 1 }}
-        onClick={toggleTheme}
-        className="absolute top-4 right-4 p-3 rounded-full bg-card border border-border hover:border-gold transition-all z-20"
-      >
-        {theme === 'dark' ? (
-          <Sun className="w-5 h-5 text-gold" />
-        ) : (
-          <Moon className="w-5 h-5 text-gold" />
-        )}
-      </motion.button>
+      <ThemeToggle className="fixed top-4 right-4 z-20" />
 
-      <div className="relative z-10 w-full max-w-md px-4">
-        {/* Logo and Header */}
+      <div className="relative z-10 w-full max-w-md">
         <motion.div
-          initial={{ opacity: 0, y: -20 }}
+          initial={{ opacity: 0, y: -16 }}
           animate={{ opacity: 1, y: 0 }}
-          className="text-center mb-8"
+          transition={{ duration: 0.6 }}
+          className="text-center mb-10"
         >
-          <motion.div 
-            className="flex justify-center mb-6"
-            whileHover={{ scale: 1.05 }}
-            transition={{ type: "spring", stiffness: 300 }}
-          >
-            <div className="relative">
-              <SalonHubLogo size={80} showText={false} />
-              <motion.div
-                animate={{ rotate: 360 }}
-                transition={{ duration: 20, repeat: Infinity, ease: "linear" }}
-                className="absolute inset-0 rounded-full border-2 border-dashed border-gold/20"
-              />
-            </div>
-          </motion.div>
-          
-          <h1 className="text-4xl font-playfair font-bold text-foreground mb-2">
-            Salon<span className="text-gold">Hub</span>
+          <div className="flex justify-center mb-6">
+            <SalonHubLogo size={64} showText={false} />
+          </div>
+
+          <span className="eyebrow-brass">A warm welcome</span>
+          <h1 className="font-fraunces text-4xl sm:text-5xl mt-3 font-light leading-[1.05]">
+            Step into <span className="serif-italic font-medium brass-text">Salonhub</span>
           </h1>
-          <p className="text-muted-foreground flex items-center justify-center gap-2">
-            <Sparkles className="w-4 h-4 text-gold" />
-            Book Your Perfect Style
-            <Sparkles className="w-4 h-4 text-gold" />
+          <p className="text-muted-foreground mt-3 text-sm">
+            Tell us a little about you — we'll save your chair.
           </p>
         </motion.div>
 
-        {/* Login Card */}
         <motion.div
-          initial={{ opacity: 0, y: 20 }}
+          initial={{ opacity: 0, y: 18 }}
           animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.1 }}
-          className="bg-card border border-border rounded-2xl p-8 shadow-2xl shadow-black/10"
+          transition={{ delay: 0.1, duration: 0.5 }}
+          className="lux-card rounded-2xl p-8 bg-card"
         >
-          <form onSubmit={handleSubmit} className="space-y-6">
-            {/* Name Input */}
+          <form onSubmit={handleSubmit} className="space-y-5">
             <div className="space-y-2">
-              <label className="text-sm font-medium text-foreground">Full Name</label>
+              <label className="eyebrow">Full name</label>
               <div className="relative">
-                <User className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-muted-foreground" />
+                <User className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" strokeWidth={1.6} />
                 <Input
                   type="text"
                   value={name}
                   onChange={(e) => setName(e.target.value)}
-                  placeholder="Enter your name"
+                  placeholder="Your name, please"
                   required
-                  className="pl-11 h-12 bg-background border-border focus:border-gold"
+                  data-testid="login-name-input"
+                  className="pl-10 h-12 bg-background border-border focus-visible:ring-brass focus-visible:border-brass rounded-xl"
                 />
               </div>
             </div>
 
-            {/* Phone Input */}
             <div className="space-y-2">
-              <label className="text-sm font-medium text-foreground">Mobile Number</label>
+              <label className="eyebrow">Mobile number</label>
               <div className="flex gap-2">
-                <div className="h-12 px-4 flex items-center bg-muted rounded-lg border border-border">
-                  <span className="text-foreground font-medium">+91</span>
+                <div className="h-12 px-4 inline-flex items-center bg-muted rounded-xl border border-border text-foreground font-medium text-sm">
+                  +91
                 </div>
                 <Input
                   type="tel"
                   value={phone}
                   onChange={(e) => setPhone(e.target.value.replace(/\D/g, '').slice(0, 10))}
-                  placeholder="10-digit number"
+                  placeholder="98XXXXXXXX"
                   required
-                  className="flex-1 h-12 bg-background border-border focus:border-gold"
+                  data-testid="login-phone-input"
+                  className="flex-1 h-12 bg-background border-border focus-visible:ring-brass focus-visible:border-brass rounded-xl"
                 />
               </div>
             </div>
 
-            {/* Gender Selection */}
             <div className="space-y-2">
-              <label className="text-sm font-medium text-foreground">I am</label>
-              <div className="grid grid-cols-2 gap-3">
+              <label className="eyebrow">I am</label>
+              <div className="grid grid-cols-2 gap-2">
                 {['Men', 'Women'].map((g) => (
                   <motion.button
                     key={g}
                     type="button"
-                    whileHover={{ scale: 1.02 }}
                     whileTap={{ scale: 0.98 }}
                     onClick={() => setGender(g)}
-                    className={`h-12 rounded-xl font-semibold transition-all ${
+                    data-testid={`login-gender-${g.toLowerCase()}-btn`}
+                    className={`h-11 rounded-xl font-medium text-sm transition-all ${
                       gender === g
-                        ? 'bg-gold text-black shadow-lg shadow-gold/20'
-                        : 'bg-muted text-foreground hover:bg-muted/80 border border-border'
+                        ? 'bg-brass text-espresso shadow-brass'
+                        : 'bg-transparent text-foreground border border-border hover:border-brass/50'
                     }`}
                   >
                     {g}
@@ -166,39 +137,36 @@ export default function UserLoginPage() {
               </div>
             </div>
 
-            {/* Submit Button */}
-            <motion.div whileHover={{ scale: 1.01 }} whileTap={{ scale: 0.99 }}>
+            <motion.div whileTap={{ scale: 0.99 }} className="pt-2">
               <Button
                 type="submit"
                 disabled={loading}
-                className="w-full h-14 bg-gold text-black hover:bg-gold/90 font-bold text-base rounded-xl shadow-lg shadow-gold/20"
+                data-testid="login-submit-btn"
+                className="w-full h-12 bg-brass text-espresso hover:bg-brass-hover font-semibold rounded-xl shadow-brass"
               >
-                {loading ? (
-                  'Getting you in...'
-                ) : (
-                  <>
+                {loading ? 'Settling you in...' : (
+                  <span className="inline-flex items-center">
                     Continue
-                    <ArrowRight className="ml-2 w-5 h-5" />
-                  </>
+                    <ArrowRight className="ml-2 w-4 h-4" />
+                  </span>
                 )}
               </Button>
             </motion.div>
           </form>
         </motion.div>
 
-        {/* Footer Links */}
         <motion.div
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           transition={{ delay: 0.3 }}
-          className="mt-6 text-center space-y-3"
+          className="mt-8 text-center"
         >
           <button
             onClick={() => navigate('/salon/login')}
-            className="text-muted-foreground hover:text-gold transition-colors text-sm flex items-center justify-center gap-2 mx-auto"
+            data-testid="login-salon-owner-link"
+            className="text-xs uppercase tracking-[0.18em] text-muted-foreground hover:text-brass transition-colors"
           >
-            Are you a salon owner?
-            <span className="text-gold font-semibold">Salon Login →</span>
+            Salon owner? <span className="text-brass">Open your portal →</span>
           </button>
         </motion.div>
       </div>

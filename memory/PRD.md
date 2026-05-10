@@ -9,6 +9,7 @@ A multi-tenant salon management SaaS (React + FastAPI + MongoDB). Most recent fe
 5. Staff access control fixes: cache bug across logins, quick actions follow permissions, "Financials" permission via checkbox, all services visible to staff.
 6. Employee Reward Plan (Incentive Module): Global/individual plans, salary-linked or manual targets, slab-based %, automatic monthly calculation, dashboard view in Analytics, payment control linked to Financials.
 7. **Branch Model (BRD):** Convert single-location salons → multi-branch chains. New `salon_branches` & `staff_branch_transfers` tables, `branch_id` on every transactional collection, branch-aware queries, Branch Manager role, Add/Edit branch UI, branch dropdown in admin header, customer-side branch switching.
+8. **May 2026 — Luxury Redesign (P1: customer-facing).** Rethink the look and feel of the entire customer experience. Keep all functionality intact. Reduce visual noise, embrace luxury aesthetic, both light + dark themes.
 
 ## Test Credentials
 - Phone: 7503070727  •  Password: salon123
@@ -22,6 +23,16 @@ A multi-tenant salon management SaaS (React + FastAPI + MongoDB). Most recent fe
 - Frontend: React + Tailwind + shadcn/ui at `/app/frontend/src/`. New `BranchContext`, `BranchManagement` page, `BranchSelector` header dropdown.
 
 ## Implemented (CHANGELOG)
+
+### May 2026 — Phase 1: Luxury Redesign (Customer-facing) ✅
+- ✅ **Token foundations rewritten** in `frontend/src/index.css` — both light (cream/ivory) and dark (warm charcoal) modes, with brass/champagne primary, bronze accent, sage success, espresso text. All shadcn semantic tokens remapped. New utilities: `.eyebrow`, `.eyebrow-brass`, `.serif-display`, `.serif-italic`, `.lux-card`, `.brass-glow-pulse`, `.brass-text`, `.hero-wash`, `.glass-warm`, `.bg-grain`, `.pill-open/closed/amber/brass/bronze`.
+- ✅ **Tailwind config extended** with `brass`, `champagne`, `bronze`, `sage`, `ivory`, `cream`, `espresso`, `taupe` color tokens. `gold` aliased to brass for back-compat (every existing `text-gold`, `bg-gold` instance now renders brass automatically across all 60+ files without per-file edits).
+- ✅ **Typography swapped**: Fraunces (variable luxury serif, replaces Playfair as display) + Manrope (body, kept) + Bebas Neue (numerals, kept). Italic flourishes used sparingly on key words.
+- ✅ **Pages reskinned end-to-end**: `LandingPage` (full overhaul, was Google rainbow), `UserLoginPage`, `SalonSelectionPage` (cards, search, view toggles, map markers), `SalonMainPage` (welcome banner, action cards, stat cards, live queue modal, status icons), `CustomerLayout` (sidebar with eyebrow labels & footer theme toggle), `SalonHubLogo` (refined scissor-ribbon mark), `ThemeToggle` (luxe brass tile).
+- ✅ **Functionality preserved**: Login → Salons → Salon detail → Sidebar nav → Theme toggle → Mobile responsive — all flows verified working via screenshots.
+- ✅ **No backend changes**.
+- 📄 **IA proposal** documented in `/app/memory/REDESIGN_NOTES.md` — 6 IA enhancements (top bar, mobile bottom-tabs, sidebar grouping, sticky tab nav, renaming, declutter) **awaiting user confirmation** before implementation.
+
 
 ### Feb 2026 — Phase 2: Branch Manager Role + Staff Transfers (Iteration 12) ✅
 - ✅ **New role `branch_manager`** in `salon_users`. Coexists with `admin` & `staff`. Multi-branch support via `assigned_branch_ids: List[str]`. SalonUser validation: a branch_manager **must** have at least one assigned branch (400 otherwise) and every branch id must belong to the same salon.

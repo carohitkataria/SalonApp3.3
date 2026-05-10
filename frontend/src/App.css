@@ -1,68 +1,54 @@
+/* ============================================================
+   SalonHub — App-level utilities
+   Most theme tokens live in index.css (luxury redesign).
+   ============================================================ */
+
+/* Subtle film-grain overlay (very low opacity for luxury feel) */
 .grain-overlay {
   position: fixed;
   inset: 0;
   z-index: 50;
-  opacity: 0.08;
+  opacity: 0.04;
   pointer-events: none;
   background-image: url('https://grainy-gradients.vercel.app/noise.svg');
   mix-blend-mode: overlay;
 }
 
+/* Legacy aliases — preserved so existing pages still render until reskinned */
 .glassmorphism {
-  backdrop-filter: blur(24px);
-  background: rgba(0, 0, 0, 0.4);
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  backdrop-filter: blur(20px) saturate(1.2);
+  -webkit-backdrop-filter: blur(20px) saturate(1.2);
+  background: rgba(14, 12, 9, 0.55);
+  border: 1px solid rgba(201, 169, 97, 0.12);
 }
 
+/* Brass token glow (replaces the old hard gold glow) */
 .token-glow {
-  box-shadow: 0 0 30px rgba(212, 175, 55, 0.3);
+  box-shadow: 0 0 0 1px rgba(201,169,97,0.20), 0 10px 36px -10px rgba(201,169,97,0.30);
 }
 
-.slide-in {
-  animation: slideIn 0.5s ease-out;
-}
-
+/* Sidebar slide */
+.slide-in { animation: slideIn 0.5s cubic-bezier(0.22,0.61,0.36,1); }
 @keyframes slideIn {
-  from {
-    transform: translateX(-100%);
-    opacity: 0;
-  }
-  to {
-    transform: translateX(0);
-    opacity: 1;
-  }
+  from { transform: translateX(-100%); opacity: 0; }
+  to   { transform: translateX(0); opacity: 1; }
 }
 
-.fade-in {
-  animation: fadeIn 0.3s ease-in;
-}
-
+.fade-in { animation: fadeIn 0.4s ease-out; }
 @keyframes fadeIn {
-  from {
-    opacity: 0;
-  }
-  to {
-    opacity: 1;
-  }
+  from { opacity: 0; }
+  to   { opacity: 1; }
 }
 
-.pulse-glow {
-  animation: pulseGlow 2s ease-in-out infinite;
-}
-
+/* Used for active "called" tokens */
+.pulse-glow { animation: pulseGlow 2.4s ease-in-out infinite; }
 @keyframes pulseGlow {
-  0%, 100% {
-    box-shadow: 0 0 20px rgba(212, 175, 55, 0.3);
-  }
-  50% {
-    box-shadow: 0 0 40px rgba(212, 175, 55, 0.6);
-  }
+  0%, 100% { box-shadow: 0 0 0 1px rgba(201,169,97,0.18), 0 8px 28px -8px rgba(201,169,97,0.32); }
+  50%      { box-shadow: 0 0 0 1px rgba(201,169,97,0.36), 0 16px 56px -8px rgba(201,169,97,0.50); }
 }
 
 /* Scrollbar hide utility */
-.scrollbar-hide::-webkit-scrollbar {
-  display: none;
-}
+.scrollbar-hide::-webkit-scrollbar { display: none; }
 .scrollbar-hide {
   -ms-overflow-style: none;
   scrollbar-width: none;
