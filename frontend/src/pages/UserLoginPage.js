@@ -7,7 +7,7 @@ import { toast } from 'sonner';
 import { User, ArrowRight } from 'lucide-react';
 import { motion } from 'framer-motion';
 import SalonHubLogo from '@/components/SalonHubLogo';
-import ThemeToggle from '@/components/ThemeToggle';
+import ThemePicker from '@/components/ThemePicker';
 
 export default function UserLoginPage() {
   const navigate = useNavigate();
@@ -52,7 +52,7 @@ export default function UserLoginPage() {
         <div className="absolute -bottom-40 -left-40 w-[500px] h-[500px] bg-bronze/[0.05] rounded-full blur-3xl" />
       </div>
 
-      <ThemeToggle className="fixed top-4 right-4 z-20" />
+      <ThemePicker className="fixed top-4 right-4 z-20" />
 
       <div className="relative z-10 w-full max-w-md">
         <motion.div

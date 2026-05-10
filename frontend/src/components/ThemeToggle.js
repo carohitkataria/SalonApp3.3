@@ -2,9 +2,12 @@ import { Sun, Moon } from 'lucide-react';
 import { useTheme } from '@/contexts/ThemeContext';
 import { motion } from 'framer-motion';
 
+/**
+ * Legacy quick toggle — cycles light <-> dark. Kept for back-compat.
+ * Prefer <ThemePicker /> for full theme menu.
+ */
 export default function ThemeToggle({ className = '' }) {
-  const { theme, toggleTheme } = useTheme();
-  const isDark = theme === 'dark';
+  const { isDark, toggleTheme } = useTheme();
 
   return (
     <motion.button
@@ -22,7 +25,7 @@ export default function ThemeToggle({ className = '' }) {
       >
         {isDark
           ? <Sun className="h-[18px] w-[18px] text-brass" strokeWidth={1.6} />
-          : <Moon className="h-[18px] w-[18px] text-brass-700" strokeWidth={1.6} />}
+          : <Moon className="h-[18px] w-[18px] text-brass" strokeWidth={1.6} />}
       </motion.span>
     </motion.button>
   );

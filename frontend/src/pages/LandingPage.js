@@ -6,7 +6,7 @@ import {
 } from 'lucide-react';
 import { motion } from 'framer-motion';
 import SalonHubLogo from '@/components/SalonHubLogo';
-import ThemeToggle from '@/components/ThemeToggle';
+import ThemePicker from '@/components/ThemePicker';
 
 export default function LandingPage() {
   const navigate = useNavigate();
@@ -47,7 +47,7 @@ export default function LandingPage() {
           </nav>
 
           <div className="flex items-center gap-2">
-            <ThemeToggle />
+            <ThemePicker />
             <Button
               variant="ghost"
               onClick={() => navigate('/salon/login')}

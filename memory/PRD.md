@@ -33,6 +33,31 @@ A multi-tenant salon management SaaS (React + FastAPI + MongoDB). Most recent fe
 - ✅ **No backend changes**.
 - 📄 **IA proposal** documented in `/app/memory/REDESIGN_NOTES.md` — 6 IA enhancements (top bar, mobile bottom-tabs, sidebar grouping, sticky tab nav, renaming, declutter) **awaiting user confirmation** before implementation.
 
+### May 2026 — Phase 2: Multi-theme + Salon home overhaul ✅
+- ✅ **Multi-theme system** — `ThemeContext` rewritten to support 5 named themes via `data-theme` attribute on `<html>`:
+   • **Ivory** (light, pure white + brass) — replaces ad-hoc cream as the original light theme
+   • **Obsidian** (dark, warm charcoal + brass) — original dark theme preserved
+   • **Velvet Royal** (dark, deep purple `#5C2B84` + electric gold `#FFC000`)
+   • **Midnight** (dark, deep navy + champagne)
+   • **Sand** (light, warm beige + terracotta)
+   All themes wired through CSS variables (`--brass-rgb`, `--bronze-rgb`, `--sage-rgb`, etc.) so Tailwind classes (`text-brass`, `bg-brass-soft`, `pill-brass`, `lux-card`, `brass-text`, `hero-wash`) adapt automatically. Synchronous theme apply on module load avoids first-paint flash. Legacy `salon_theme` localStorage key migrated → `salon_theme_id`.
+- ✅ **`ThemePicker`** component — dropdown with named swatches (compact sidebar tile + label-pill variants). Opens up/down based on available space. Lives in CustomerLayout sidebar footer + landing-page header + login-page corner. Replaces old `ThemeToggle` (kept as legacy compatibility shim).
+- ✅ **Salon home page redesigned** as a single scrollable narrative (luzo.app-inspired), `SalonMainPage.renderDashboard`:
+   1. **Sticky top strip** (z-30): branch dropdown (with branch switching that updates `?branch=` in URL) + Book / Live Queue / Wallet (with live ₹ balance) actions. Replaces old separate header + action cards row.
+   2. **Hero gallery** (1 large + 2 thumb tiles, "View all photos" CTA → gallery tab).
+   3. **Salon identity** (gender tag eyebrow, name in Fraunces serif, branch sub-title, OPEN/CLOSED pill computed from `operational_hours` + `manual_toggle`, today's hours, rating chip).
+   4. **Services section** — fetches from `/api/salons/:id/services/enabled`, top 8 in a grid w/ image+name+price+duration, "View all" jumps to services tab.
+   5. **Stylists section** — fetches from `/api/salons/:id/barbers`, all stylists as horizontal chips with avatar + rating.
+   6. **About section** — Address card (with phone + Get Directions) + Operational Hours card (today highlighted in brass).
+   7. **Reviews section** — fetches from `/api/salons/:id/ratings?limit=10`, auto-scrolling marquee carousel of reviews with text content (paused on hover, click to view all).
+- ✅ **Branch dropdown** in sticky strip — fetches `/api/public/salons/:id/branches`, lists all branches, syncs `?branch=` URL param on switch (deep-linkable).
+- ✅ **No backend changes** — all uses pre-existing endpoints. All `data-testid`s preserved + new ones added (`branch-dropdown-btn`, `branch-option-{id}`, `strip-book-btn`, `strip-queue-btn`, `strip-wallet-btn`, `theme-picker-btn`, `theme-option-{id}`, `service-tile-{id}`, `stylist-chip-{id}`, `reviews-marquee`, etc.).
+
+### Phase 3 — Pending (awaiting user direction)
+- IA enhancements from `/app/memory/REDESIGN_NOTES.md` (6 proposals — pending confirmation).
+- Reskin remaining customer pages (`SinglePageBooking`, `HistoryPage`, `CustomerProfilePage`, `CustomerWalletPage`, etc.) with the same theme tokens (already inherit basic palette, but need component-level polish).
+- Admin dashboard reskin.
+
 
 ### Feb 2026 — Phase 2: Branch Manager Role + Staff Transfers (Iteration 12) ✅
 - ✅ **New role `branch_manager`** in `salon_users`. Coexists with `admin` & `staff`. Multi-branch support via `assigned_branch_ids: List[str]`. SalonUser validation: a branch_manager **must** have at least one assigned branch (400 otherwise) and every branch id must belong to the same salon.

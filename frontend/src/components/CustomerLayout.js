@@ -10,7 +10,7 @@ import { toast } from 'sonner';
 import { motion, AnimatePresence } from 'framer-motion';
 import axios from 'axios';
 import SalonHubLogo from './SalonHubLogo';
-import ThemeToggle from './ThemeToggle';
+import ThemePicker from './ThemePicker';
 import NotificationOptInBanner from './NotificationOptInBanner';
 import {
   showBrowserNotification,
@@ -347,9 +347,9 @@ export default function CustomerLayout({ children }) {
                 })}
               </nav>
 
-              {/* Footer with theme toggle + logout */}
+              {/* Footer with theme picker + logout */}
               <div className="px-3 py-3 border-t border-border/60 flex items-center gap-2">
-                <ThemeToggle />
+                <ThemePicker compact align="left" direction="up" />
                 <button
                   onClick={handleLogout}
                   className="flex-1 flex items-center justify-center gap-2 px-3 py-2 rounded-lg border border-border hover:border-bronze hover:text-bronze transition-colors text-sm font-medium text-muted-foreground"

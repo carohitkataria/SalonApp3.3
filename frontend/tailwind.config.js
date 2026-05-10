@@ -7,43 +7,44 @@ module.exports = {
   theme: {
     extend: {
       colors: {
-        // -- Luxury brand palette --------------------------------
-        // Brass (primary) — replaces "gold" but kept aliased for back-compat
+        // -- Theme-aware luxury palette (driven by CSS vars in index.css) --
         brass: {
-          DEFAULT: '#C9A961',   // dark-mode brass (warm)
+          DEFAULT: 'rgb(var(--brass-rgb) / <alpha-value>)',
+          hover:   'rgb(var(--brass-hover-rgb) / <alpha-value>)',
+          soft:    'rgb(var(--brass-rgb) / 0.12)',
+          glow:    'rgb(var(--brass-rgb) / 0.30)',
+          // Fixed shade fallbacks (used in a few legacy spots)
           50:  '#FBF7EC',
           100: '#F4EBD2',
-          200: '#E8D6A6',       // champagne
+          200: '#E8D6A6',
           300: '#DCC07B',
           400: '#D0AB55',
           500: '#C9A961',
-          600: '#B59343',       // hover (dark)
-          700: '#A88438',       // light-mode brass
-          800: '#8C6C26',       // hover (light)
+          600: '#B59343',
+          700: '#A88438',
+          800: '#8C6C26',
           900: '#6B521C',
-          soft:  'rgba(201, 169, 97, 0.12)',
-          glow:  'rgba(201, 169, 97, 0.32)',
         },
-        champagne: '#E8D6A6',
+        champagne: 'rgb(var(--champagne-rgb) / <alpha-value>)',
         bronze: {
-          DEFAULT: '#8E5530',
-          light: '#B07849',
-          dark:  '#6B3F20',
+          DEFAULT: 'rgb(var(--bronze-rgb) / <alpha-value>)',
+          light:   'rgb(var(--bronze-rgb) / 0.85)',
+          dark:    'rgb(var(--bronze-rgb) / 1)',
         },
         sage: {
-          DEFAULT: '#7E8B7A',
-          light:  '#A1AD9C',
-          dark:   '#5A6657',
+          DEFAULT: 'rgb(var(--sage-rgb) / <alpha-value>)',
+          light:   'rgb(var(--sage-rgb) / 0.85)',
+          dark:    'rgb(var(--sage-rgb) / 1)',
         },
-        ivory:    '#F4ECDD',
-        cream:    '#F7F2E8',
-        espresso: '#1A1814',
-        taupe:    '#5C5246',
+        ivory:    'var(--ivory)',
+        cream:    'var(--cream)',
+        espresso: 'var(--espresso)',
+        taupe:    'var(--taupe)',
 
-        // Back-compat aliases (so existing classes like text-gold still work)
+        // Back-compat aliases — `text-gold`, `bg-gold` continue to work
         gold: {
-          DEFAULT: '#C9A961',
-          hover:   '#B59343',
+          DEFAULT: 'rgb(var(--brass-rgb) / <alpha-value>)',
+          hover:   'rgb(var(--brass-hover-rgb) / <alpha-value>)',
         },
         obsidian: '#0E0C09',
         charcoal: '#18150F',
