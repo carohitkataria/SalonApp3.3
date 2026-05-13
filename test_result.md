@@ -1730,3 +1730,7 @@ agent_communication:
       Backend retest needed for: PUT /api/barbers/{barber_id} with payloads that include null and numeric compensation / experience, plus the subscription status endpoint reflecting is_premium=true for the test salon. Frontend will be retested only after user permission.
 
       Test credentials saved to /app/memory/test_credentials.md."
+
+
+    - agent: "testing"
+      message: "Iteration 3 regression — 15/15 PASS. (1) GET /api/salons/c72d0479-1131-42ec-a952-89cd33b80de0/subscription/status → is_premium=true, status=active, days_remaining=364, is_test_seed=true ✅. (2) PUT /api/barbers/{barber_id}: null payload accepted (200), numeric payload {compensation:25000, experience:5} accepted (200) and persists, empty-string compensation correctly rejected with 422 — confirming the frontend was the right fix location. No regressions on public barber list. Both Iteration 3 changes are production-ready."
