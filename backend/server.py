@@ -2441,6 +2441,64 @@ async def initialize_data():
         await db.subscription_plans.insert_one(default_plan)
         logger.info("Seeded default SalonHub Pro plan @ ₹499/month")
 
+    # Seed/refresh a 1-year premium subscription for the test salon (+917503070727)
+    # so the admin doesn't see "Upgrade to SalonHub Pro" prompts when using premium features.
+    try:
+        test_salon = await db.salons.find_one({"phone": "+917503070727"}, {"_id": 0, "id": 1})
+        if test_salon:
+            test_salon_id = test_salon["id"]
+            # Look for an existing paid subscription that is still valid for at least ~11 months.
+            existing = await db.salon_subscriptions.find_one(
+                {"salon_id": test_salon_id, "payment_status": "paid"},
+                {"_id": 0},
+                sort=[("expiry_date", -1)],
+            )
+            needs_seed = True
+            if existing and existing.get("expiry_date"):
+                try:
+                    exp_dt = datetime.fromisoformat(existing["expiry_date"].replace("Z", "+00:00"))
+                    if exp_dt.tzinfo is None:
+                        exp_dt = exp_dt.replace(tzinfo=timezone.utc)
+                    if (exp_dt - datetime.now(timezone.utc)).days >= 330:
+                        needs_seed = False
+                except Exception:
+                    needs_seed = True
+
+            if needs_seed:
+                # Pick the default active plan (or any active plan)
+                plan = await db.subscription_plans.find_one(
+                    {"status": "active", "is_default": True}, {"_id": 0}
+                )
+                if not plan:
+                    plan = await db.subscription_plans.find_one({"status": "active"}, {"_id": 0})
+
+                now_dt = datetime.now(timezone.utc)
+                expiry_dt = now_dt + timedelta(days=365)
+                sub_doc = {
+                    "id": str(uuid.uuid4()),
+                    "salon_id": test_salon_id,
+                    "plan_id": (plan or {}).get("id"),
+                    "plan_name": (plan or {}).get("plan_name", "SalonHub Pro"),
+                    "price": float((plan or {}).get("price", 0.0)),
+                    "subscription_status": "active",
+                    "start_date": now_dt.isoformat(),
+                    "expiry_date": expiry_dt.isoformat(),
+                    "payment_status": "paid",
+                    "cashfree_order_id": None,
+                    "cashfree_payment_id": "TEST_SEED_PREMIUM_1Y",
+                    "auto_renew": False,
+                    "is_test_seed": True,
+                    "created_at": now_dt.isoformat(),
+                    "updated_at": now_dt.isoformat(),
+                }
+                await db.salon_subscriptions.insert_one(sub_doc.copy())
+                logger.info(
+                    f"[Subscription Seed] Granted 1-year premium subscription to test salon "
+                    f"{test_salon_id} (phone +917503070727), expires {expiry_dt.isoformat()}"
+                )
+    except Exception as e:
+        logger.warning(f"[Subscription Seed] Skipped seeding test premium subscription: {e}")
+
 async def allocate_future_tokens():
     """Run at 5-6 AM to allocate tokens for future bookings"""
     logger.info("Running future token allocation...")

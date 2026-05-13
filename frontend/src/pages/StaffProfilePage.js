@@ -634,10 +634,27 @@ export default function StaffProfilePage() {
       const token = localStorage.getItem('salon_admin_token') || 
                     JSON.parse(localStorage.getItem('salon_user_auth') || '{}').token;
 
+      // Sanitize payload: empty strings break Pydantic validation for numeric/optional fields.
+      // - compensation is Optional[float]; '' must become null
+      // - experience is int; '' must become 0
+      // - empty date strings (doj/dob/last_working_date) should be sent as null to clear them
+      const payload = { ...profileData };
+      payload.compensation =
+        payload.compensation === '' || payload.compensation === null || payload.compensation === undefined
+          ? null
+          : Number(payload.compensation);
+      payload.experience =
+        payload.experience === '' || payload.experience === null || payload.experience === undefined
+          ? 0
+          : Number(payload.experience) || 0;
+      ['doj', 'dob', 'last_working_date'].forEach((k) => {
+        if (payload[k] === '') payload[k] = null;
+      });
+
       // Backend exposes PUT /api/barbers/{barber_id} (not scoped under salons)
       await axios.put(
         `${API}/barbers/${staffId}`,
-        profileData,
+        payload,
         { headers: { Authorization: `Bearer ${token}` } }
       );
 
@@ -645,8 +662,16 @@ export default function StaffProfilePage() {
       setEditMode(false);
       fetchStaffData();
     } catch (error) {
+      console.error('[Staff Profile Update] error:', error?.response?.data || error);
       const detail = error?.response?.data?.detail;
-      toast.error(typeof detail === 'string' ? detail : 'Failed to update profile');
+      let msg = 'Failed to update profile';
+      if (typeof detail === 'string') {
+        msg = detail;
+      } else if (Array.isArray(detail) && detail.length > 0) {
+        // Pydantic validation errors come as a list
+        msg = detail.map((d) => `${(d.loc || []).slice(-1)[0] || 'field'}: ${d.msg}`).join(', ');
+      }
+      toast.error(msg);
     }
   };
 

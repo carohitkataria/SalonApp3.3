@@ -1,774 +1,474 @@
 #!/usr/bin/env python3
 """
-RE-TEST 3 backend feature groups after fixes:
-A) Manual Toggle — verify ALL three states with admin token
-B) Booking enforcement — re-test the booking flows
-C) Bulk customer upload — re-confirm all paths still work
-D) Menu parsing — test image and PDF parsing with OpenAI gpt-5
+Focused Regression Tests for Iteration 3 Changes
+- Subscription status endpoint verification
+- Barber profile update with null/empty string handling
 """
 
 import requests
 import json
-from io import BytesIO
-from datetime import datetime, timedelta
-from PIL import Image, ImageDraw, ImageFont
-import openpyxl
-import base64
+import sys
+from typing import Dict, Any, Optional
 
 # Configuration
-BASE_URL = "https://elegant-salon-ui.preview.emergentagent.com/api"
-ADMIN_IDENTIFIER = "admin"
+BASE_URL = "https://premium-features-fix.preview.emergentagent.com/api"
+SALON_ID = "c72d0479-1131-42ec-a952-89cd33b80de0"
+
+# Test credentials
+ADMIN_PHONE = "+917503070727"
+ADMIN_LOGIN_ID = "admin"
 ADMIN_PASSWORD = "salon123"
 
-# Global variables
-access_token = None
-salon_id = None
-test_service_id = None
-test_barber_id = None
+# Color codes for output
+GREEN = '\033[92m'
+RED = '\033[91m'
+YELLOW = '\033[93m'
+BLUE = '\033[94m'
+RESET = '\033[0m'
 
-def print_section(title):
-    print(f"\n{'='*80}")
-    print(f"  {title}")
-    print(f"{'='*80}\n")
+class TestResult:
+    def __init__(self):
+        self.passed = 0
+        self.failed = 0
+        self.errors = []
+    
+    def add_pass(self, test_name: str):
+        self.passed += 1
+        print(f"{GREEN}✓ PASS{RESET}: {test_name}")
+    
+    def add_fail(self, test_name: str, reason: str):
+        self.failed += 1
+        error_msg = f"{test_name}: {reason}"
+        self.errors.append(error_msg)
+        print(f"{RED}✗ FAIL{RESET}: {error_msg}")
+    
+    def print_summary(self):
+        print(f"\n{'='*60}")
+        print(f"TEST SUMMARY")
+        print(f"{'='*60}")
+        print(f"Total Passed: {GREEN}{self.passed}{RESET}")
+        print(f"Total Failed: {RED}{self.failed}{RESET}")
+        if self.errors:
+            print(f"\n{RED}Failed Tests:{RESET}")
+            for error in self.errors:
+                print(f"  - {error}")
+        print(f"{'='*60}\n")
+        return self.failed == 0
 
-def print_test(test_name, passed, details=""):
-    status = "✅ PASS" if passed else "❌ FAIL"
-    print(f"{status} - {test_name}")
-    if details:
-        print(f"    {details}")
+def print_section(title: str):
+    print(f"\n{BLUE}{'='*60}")
+    print(f"{title}")
+    print(f"{'='*60}{RESET}\n")
 
-def login_admin():
-    """Login as admin and get access token"""
-    global access_token, salon_id
-    print_section("AUTHENTICATION")
+def print_response(response: requests.Response):
+    """Print response details for debugging"""
+    print(f"  Status: {response.status_code}")
+    try:
+        print(f"  Response: {json.dumps(response.json(), indent=2)}")
+    except:
+        print(f"  Response: {response.text[:500]}")
+
+# ============================================================================
+# TEST 1: Subscription Status Endpoint
+# ============================================================================
+
+def test_subscription_status(result: TestResult):
+    """Test GET /api/salons/{salon_id}/subscription/status"""
+    print_section("TEST 1: Subscription Status Endpoint")
+    
+    url = f"{BASE_URL}/salons/{SALON_ID}/subscription/status"
+    print(f"Testing: GET {url}")
+    
+    try:
+        response = requests.get(url, timeout=10)
+        print_response(response)
+        
+        if response.status_code != 200:
+            result.add_fail(
+                "Subscription Status - HTTP Status",
+                f"Expected 200, got {response.status_code}"
+            )
+            return
+        
+        result.add_pass("Subscription Status - HTTP 200")
+        
+        data = response.json()
+        
+        # Check is_premium
+        if data.get("is_premium") == True:
+            result.add_pass("Subscription Status - is_premium === true")
+        else:
+            result.add_fail(
+                "Subscription Status - is_premium",
+                f"Expected true, got {data.get('is_premium')}"
+            )
+        
+        # Check status
+        if data.get("status") == "active":
+            result.add_pass("Subscription Status - status === 'active'")
+        else:
+            result.add_fail(
+                "Subscription Status - status",
+                f"Expected 'active', got {data.get('status')}"
+            )
+        
+        # Check days_remaining > 300
+        days_remaining = data.get("days_remaining")
+        if days_remaining is not None and days_remaining > 300:
+            result.add_pass(f"Subscription Status - days_remaining > 300 (actual: {days_remaining})")
+        else:
+            result.add_fail(
+                "Subscription Status - days_remaining",
+                f"Expected > 300, got {days_remaining}"
+            )
+        
+        # Check subscription object
+        subscription = data.get("subscription")
+        if subscription:
+            # Check payment_status
+            if subscription.get("payment_status") == "paid":
+                result.add_pass("Subscription Status - payment_status === 'paid'")
+            else:
+                result.add_fail(
+                    "Subscription Status - payment_status",
+                    f"Expected 'paid', got {subscription.get('payment_status')}"
+                )
+            
+            # Check is_test_seed
+            if subscription.get("is_test_seed") == True:
+                result.add_pass("Subscription Status - is_test_seed === true")
+            else:
+                result.add_fail(
+                    "Subscription Status - is_test_seed",
+                    f"Expected true, got {subscription.get('is_test_seed')}"
+                )
+        else:
+            result.add_fail(
+                "Subscription Status - subscription object",
+                "subscription object is missing"
+            )
+    
+    except Exception as e:
+        result.add_fail("Subscription Status - Exception", str(e))
+
+# ============================================================================
+# TEST 2: Barber Profile Update
+# ============================================================================
+
+def login_admin() -> Optional[Dict[str, Any]]:
+    """Login as admin and return token + salon_id"""
+    print_section("Admin Login")
     
     url = f"{BASE_URL}/salon/users/login"
+    
+    # Try with login_id first
     payload = {
-        "identifier": ADMIN_IDENTIFIER,
+        "identifier": ADMIN_LOGIN_ID,
         "password": ADMIN_PASSWORD
     }
     
+    print(f"Attempting login: POST {url}")
+    print(f"Payload: {json.dumps(payload, indent=2)}")
+    
     try:
-        response = requests.post(url, json=payload)
-        print(f"Login Status: {response.status_code}")
+        response = requests.post(url, json=payload, timeout=10)
+        print_response(response)
         
         if response.status_code == 200:
             data = response.json()
-            access_token = data.get("access_token")
-            salon_id = data.get("salon_id")
-            print(f"✅ Login successful")
-            print(f"   Salon ID: {salon_id}")
-            print(f"   Token: {access_token[:20]}...")
-            return True
+            print(f"{GREEN}✓ Login successful{RESET}")
+            return {
+                "access_token": data.get("access_token"),
+                "salon_id": data.get("salon_id")
+            }
         else:
-            print(f"❌ Login failed: {response.text}")
-            return False
-    except Exception as e:
-        print(f"❌ Login error: {str(e)}")
-        return False
-
-def get_headers(auth=True):
-    """Get request headers"""
-    headers = {"Content-Type": "application/json"}
-    if auth and access_token:
-        headers["Authorization"] = f"Bearer {access_token}"
-    return headers
-
-def get_test_service_and_barber():
-    """Get a valid service and barber for testing"""
-    global test_service_id, test_barber_id
-    
-    # Get services
-    url = f"{BASE_URL}/salons/{salon_id}/services/all"
-    response = requests.get(url, headers=get_headers())
-    if response.status_code == 200:
-        data = response.json()
-        # Handle both list and dict responses
-        if isinstance(data, list):
-            services = data
-        else:
-            services = data.get("services", [])
-        
-        if services:
-            # Find an enabled service
-            enabled_services = [s for s in services if s.get("is_enabled_for_salon", False)]
-            if enabled_services:
-                test_service_id = enabled_services[0]["id"]
-                service_name = enabled_services[0].get("service_name", enabled_services[0].get("name", "Unknown"))
-                print(f"   Using test service: {service_name} (ID: {test_service_id})")
-            else:
-                # Use first service even if not enabled
-                test_service_id = services[0]["id"]
-                service_name = services[0].get("service_name", services[0].get("name", "Unknown"))
-                print(f"   Using test service: {service_name} (ID: {test_service_id})")
-    
-    # Get barbers
-    url = f"{BASE_URL}/salons/{salon_id}/barbers"
-    response = requests.get(url, headers=get_headers())
-    if response.status_code == 200:
-        data = response.json()
-        barbers = data.get("barbers", []) if isinstance(data, dict) else data
-        if barbers:
-            test_barber_id = barbers[0]["id"]
-            print(f"   Using test barber: {barbers[0]['name']} (ID: {test_barber_id})")
-
-# ============================================================================
-# GROUP A: MANUAL TOGGLE - closed_mode states
-# ============================================================================
-
-def test_group_a_manual_toggle():
-    print_section("GROUP A: MANUAL TOGGLE - closed_mode states")
-    
-    print("Testing ALL three manual toggle states with admin token:")
-    print("  1) online_only (closed for online, open for QR/manual)")
-    print("  2) full (fully closed)")
-    print("  3) open (auto-cleared closed_mode)\n")
-    
-    # A1: Set to online_only
-    print("\n[A1] PUT manual-toggle to online_only")
-    url = f"{BASE_URL}/salons/{salon_id}/manual-toggle"
-    payload = {
-        "is_overridden": True,
-        "is_open": False,
-        "closed_mode": "online_only"
-    }
-    response = requests.put(url, json=payload, headers=get_headers())
-    passed = response.status_code == 200
-    if passed:
-        data = response.json()
-        closed_mode = data.get("manual_toggle", {}).get("closed_mode")
-        passed = closed_mode == "online_only"
-        print_test("A1: Set online_only", passed, f"closed_mode={closed_mode}")
-    else:
-        print_test("A1: Set online_only", False, f"Status: {response.status_code}, {response.text[:200]}")
-    
-    # A2: GET operational-hours reflects closed_mode
-    print("\n[A2] GET operational-hours")
-    url = f"{BASE_URL}/salons/{salon_id}/operational-hours"
-    response = requests.get(url, headers=get_headers())
-    passed = response.status_code == 200
-    if passed:
-        data = response.json()
-        closed_mode = data.get("manual_toggle", {}).get("closed_mode")
-        passed = closed_mode == "online_only"
-        print_test("A2: operational-hours reflects closed_mode", passed, f"closed_mode={closed_mode}")
-    else:
-        print_test("A2: operational-hours", False, f"Status: {response.status_code}")
-    
-    # A3: GET booking-availability
-    print("\n[A3] GET booking-availability")
-    url = f"{BASE_URL}/salons/{salon_id}/booking-availability"
-    response = requests.get(url, headers=get_headers(auth=False))
-    passed = response.status_code == 200
-    if passed:
-        data = response.json()
-        closed_mode = data.get("closed_mode")
-        reason = data.get("reason", "")
-        message = data.get("message", "")
-        passed = closed_mode == "online_only"
-        print_test("A3: booking-availability online_only", passed, 
-                  f"closed_mode={closed_mode}, reason='{reason}', message='{message}'")
-    else:
-        print_test("A3: booking-availability", False, f"Status: {response.status_code}")
-    
-    # A4: Set to full close
-    print("\n[A4] PUT manual-toggle to full")
-    url = f"{BASE_URL}/salons/{salon_id}/manual-toggle"
-    payload = {
-        "is_overridden": True,
-        "is_open": False,
-        "closed_mode": "full"
-    }
-    response = requests.put(url, json=payload, headers=get_headers())
-    passed = response.status_code == 200
-    if passed:
-        data = response.json()
-        closed_mode = data.get("manual_toggle", {}).get("closed_mode")
-        passed = closed_mode == "full"
-        print_test("A4: Set full close", passed, f"closed_mode={closed_mode}")
-        
-        # Check booking-availability
-        url = f"{BASE_URL}/salons/{salon_id}/booking-availability"
-        response = requests.get(url, headers=get_headers(auth=False))
-        if response.status_code == 200:
-            data = response.json()
-            closed_mode = data.get("closed_mode")
-            reason = data.get("reason", "")
-            message = data.get("message", "")
-            print(f"    booking-availability: closed_mode={closed_mode}, reason='{reason}', message='{message}'")
-    else:
-        print_test("A4: Set full close", False, f"Status: {response.status_code}, {response.text[:200]}")
-    
-    # A5: Reset to open (closed_mode auto-cleared)
-    print("\n[A5] PUT manual-toggle to open (closed_mode should auto-clear)")
-    url = f"{BASE_URL}/salons/{salon_id}/manual-toggle"
-    payload = {
-        "is_overridden": False,
-        "is_open": True
-    }
-    response = requests.put(url, json=payload, headers=get_headers())
-    passed = response.status_code == 200
-    if passed:
-        data = response.json()
-        closed_mode = data.get("manual_toggle", {}).get("closed_mode")
-        passed = closed_mode is None
-        print_test("A5: Reset to open (closed_mode=null)", passed, f"closed_mode={closed_mode}")
-        
-        # Verify operational-hours
-        url = f"{BASE_URL}/salons/{salon_id}/operational-hours"
-        response = requests.get(url, headers=get_headers())
-        if response.status_code == 200:
-            data = response.json()
-            closed_mode = data.get("manual_toggle", {}).get("closed_mode")
-            print(f"    operational-hours: closed_mode={closed_mode} (should be null)")
-    else:
-        print_test("A5: Reset to open", False, f"Status: {response.status_code}")
-
-# ============================================================================
-# GROUP B: BOOKING ENFORCEMENT
-# ============================================================================
-
-def test_group_b_booking_enforcement():
-    print_section("GROUP B: BOOKING ENFORCEMENT")
-    
-    if not test_service_id:
-        print("❌ Cannot test - no test service available")
-        return
-    
-    today = datetime.now().strftime("%Y-%m-%d")
-    
-    # Pre-condition: Set to online_only
-    print("\n[Pre-condition] Set salon to online_only")
-    url = f"{BASE_URL}/salons/{salon_id}/manual-toggle"
-    payload = {
-        "is_overridden": True,
-        "is_open": False,
-        "closed_mode": "online_only"
-    }
-    response = requests.put(url, json=payload, headers=get_headers())
-    print(f"   Set online_only: {response.status_code}")
-    
-    # B1: POST /api/bookings with source='online' should fail with "Closed Online — Visit Salon"
-    print("\n[B1] POST /bookings with source='online' (should fail with 'Closed Online — Visit Salon')")
-    url = f"{BASE_URL}/bookings"
-    payload = {
-        "salon_id": salon_id,
-        "customer_name": "Test Customer Online",
-        "phone": "+919876543210",
-        "date": today,
-        "shift": "Morning",
-        "barber_id": "any",
-        "selected_services": [test_service_id],
-        "source": "online",
-        "booking_for_self": True,
-        "customer_gender": "Men",
-        "payment_mode": "cash"
-    }
-    response = requests.post(url, json=payload, headers=get_headers(auth=False))
-    passed = response.status_code == 400
-    if passed:
-        detail = response.json().get("detail", "")
-        passed = "Closed Online" in detail or "Visit Salon" in detail
-        print_test("B1: Online booking blocked with 'Closed Online — Visit Salon'", passed, 
-                  f"Status: {response.status_code}, detail: '{detail}'")
-    else:
-        print_test("B1: Online booking blocked", False, 
-                  f"Expected 400, got {response.status_code}: {response.text[:200]}")
-    
-    # B2: POST /api/bookings with source='qr' should NOT be blocked by online_only
-    print("\n[B2] POST /bookings with source='qr' (should NOT be blocked by online_only)")
-    payload["source"] = "qr"
-    payload["phone"] = "+919876543211"  # Different phone
-    payload["customer_name"] = "Test Customer QR"
-    response = requests.post(url, json=payload, headers=get_headers(auth=False))
-    # Should NOT be 400 with "Closed Online" message
-    if response.status_code == 400:
-        detail = response.json().get("detail", "")
-        passed = "Closed Online" not in detail and "Visit Salon" not in detail
-        print_test("B2: QR booking not blocked by online_only", passed, 
-                  f"Status: {response.status_code}, detail: '{detail}'")
-    else:
-        # 200 or other error (capacity, etc.) is fine
-        passed = True
-        print_test("B2: QR booking not blocked by online_only", passed, 
-                  f"Status: {response.status_code} (not blocked by close)")
-    
-    # B3: POST /api/salons/{salon_id}/salon-booking should succeed in online_only
-    print("\n[B3] POST /salon-booking (manual) in online_only mode (should succeed)")
-    url = f"{BASE_URL}/salons/{salon_id}/salon-booking"
-    payload = {
-        "customer_name": "Walk-in Test Online",
-        "phone": "9876543299",
-        "gender": "Men",
-        "barber_id": "any",
-        "selected_services": [test_service_id],
-        "shift": "Morning",
-        "date": today
-    }
-    response = requests.post(url, json=payload, headers=get_headers())
-    # Should succeed (200) or fail for non-close reasons
-    if response.status_code == 400:
-        detail = response.json().get("detail", "")
-        passed = "closed" not in detail.lower() or "online only" in detail.lower()
-        print_test("B3: Manual booking allowed in online_only", passed, 
-                  f"Status: {response.status_code}, detail: '{detail}'")
-    else:
-        passed = response.status_code == 200
-        print_test("B3: Manual booking allowed in online_only", passed, 
-                  f"Status: {response.status_code}")
-    
-    # Now set to full close
-    print("\n[Pre-condition] Set salon to full close")
-    url = f"{BASE_URL}/salons/{salon_id}/manual-toggle"
-    payload = {
-        "is_overridden": True,
-        "is_open": False,
-        "closed_mode": "full"
-    }
-    response = requests.put(url, json=payload, headers=get_headers())
-    print(f"   Set full close: {response.status_code}")
-    
-    # B4: POST /api/bookings with source='qr' should fail in full close with "Salon is currently closed"
-    print("\n[B4] POST /bookings with source='qr' in full close (should fail with 'Salon is currently closed')")
-    url = f"{BASE_URL}/bookings"
-    payload = {
-        "salon_id": salon_id,
-        "customer_name": "Test Customer QR Full",
-        "phone": "+919876543212",
-        "date": today,
-        "shift": "Morning",
-        "barber_id": "any",
-        "selected_services": [test_service_id],
-        "source": "qr",
-        "booking_for_self": True,
-        "customer_gender": "Men",
-        "payment_mode": "cash"
-    }
-    response = requests.post(url, json=payload, headers=get_headers(auth=False))
-    passed = response.status_code == 400
-    if passed:
-        detail = response.json().get("detail", "")
-        passed = "closed" in detail.lower()
-        print_test("B4: QR booking blocked in full close with 'Salon is currently closed'", passed, 
-                  f"Status: {response.status_code}, detail: '{detail}'")
-    else:
-        print_test("B4: QR booking blocked in full close", False, 
-                  f"Expected 400, got {response.status_code}")
-    
-    # B5: POST /api/salons/{salon_id}/salon-booking should fail in full close with "fully closed"
-    print("\n[B5] POST /salon-booking in full close (should fail with 'fully closed')")
-    url = f"{BASE_URL}/salons/{salon_id}/salon-booking"
-    payload = {
-        "customer_name": "Walk-in Test Full",
-        "phone": "9876543298",
-        "gender": "Men",
-        "barber_id": "any",
-        "selected_services": [test_service_id],
-        "shift": "Morning",
-        "date": today
-    }
-    response = requests.post(url, json=payload, headers=get_headers())
-    passed = response.status_code == 400
-    if passed:
-        detail = response.json().get("detail", "")
-        passed = "fully closed" in detail.lower() or "closed" in detail.lower()
-        print_test("B5: Manual booking blocked in full close with 'fully closed'", passed, 
-                  f"Status: {response.status_code}, detail: '{detail}'")
-    else:
-        print_test("B5: Manual booking blocked in full close", False, 
-                  f"Expected 400, got {response.status_code}")
-
-# ============================================================================
-# GROUP C: BULK CUSTOMER UPLOAD
-# ============================================================================
-
-def test_group_c_bulk_upload():
-    print_section("GROUP C: BULK CUSTOMER UPLOAD + EXCEL TEMPLATE")
-    
-    # C1: GET template
-    print("\n[C1] GET /customers/template")
-    url = f"{BASE_URL}/salons/{salon_id}/customers/template"
-    response = requests.get(url, headers=get_headers())
-    passed = response.status_code == 200
-    if passed:
-        content_type = response.headers.get("content-type", "")
-        content_disp = response.headers.get("content-disposition", "")
-        passed = "spreadsheet" in content_type and "customer_upload_template.xlsx" in content_disp
-        print_test("C1: Template download (real .xlsx, content-type spreadsheet, content-disposition with filename)", 
-                  passed, f"content-type: {content_type}, disposition: {content_disp}")
-    else:
-        print_test("C1: Template download", False, f"Status: {response.status_code}")
-    
-    # C2: Build test xlsx and upload
-    print("\n[C2] POST /customers/bulk-upload")
-    
-    # Create test Excel file
-    wb = openpyxl.Workbook()
-    ws = wb.active
-    ws.title = "Customers"
-    
-    # Header row (MUST match exactly: 'Name', 'Mobile No.', 'Gender', 'Date of Birth')
-    ws.append(['Name', 'Mobile No.', 'Gender', 'Date of Birth'])
-    
-    # Data rows
-    ws.append(['TestUser1', '9876543200', 'Men', '1990-05-15'])
-    ws.append(['TestUser2', '9876543201', 'Women', '1995-11-23'])
-    ws.append(['', 'badphone', 'Other', ''])  # Invalid
-    ws.append(['TestUser1', '9876543200', 'Men', '1990-05-15'])  # Duplicate of row 1
-    
-    # Save to BytesIO
-    excel_buffer = BytesIO()
-    wb.save(excel_buffer)
-    excel_buffer.seek(0)
-    
-    url = f"{BASE_URL}/salons/{salon_id}/customers/bulk-upload"
-    files = {"file": ("test_customers.xlsx", excel_buffer, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")}
-    
-    # Note: multipart/form-data, so we don't use get_headers()
-    headers = {"Authorization": f"Bearer {access_token}"}
-    response = requests.post(url, files=files, headers=headers)
-    
-    passed = response.status_code == 200
-    if passed:
-        data = response.json()
-        inserted = data.get("inserted", 0)
-        skipped_duplicate = data.get("skipped_duplicate", 0)
-        skipped_invalid = data.get("skipped_invalid", 0)
-        passed = inserted == 2 and skipped_duplicate == 1 and skipped_invalid == 1
-        print_test("C2: Bulk upload (inserted=2, skipped_duplicate=1, skipped_invalid=1)", passed, 
-                  f"inserted={inserted}, skipped_duplicate={skipped_duplicate}, skipped_invalid={skipped_invalid}")
-    else:
-        print_test("C2: Bulk upload", False, f"Status: {response.status_code}, {response.text[:300]}")
-    
-    # C3: Auth check
-    print("\n[C3] POST /bulk-upload without auth (should fail with 401/403)")
-    excel_buffer.seek(0)
-    url = f"{BASE_URL}/salons/{salon_id}/customers/bulk-upload"
-    files = {"file": ("test.xlsx", excel_buffer, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")}
-    response = requests.post(url, files=files)
-    passed = response.status_code in [401, 403]
-    print_test("C3: Auth required", passed, f"Status: {response.status_code}")
-
-# ============================================================================
-# GROUP D: MENU PARSING
-# ============================================================================
-
-def test_group_d_menu_parsing():
-    print_section("GROUP D: AI MENU PARSING via OpenAI GPT-5")
-    
-    # D1: Create test menu image
-    print("\n[D1] POST /services/parse-menu with PNG image")
-    
-    # Create a clear PNG with menu text (800x600 or larger, 14pt+ font)
-    img = Image.new('RGB', (1000, 800), color='white')
-    draw = ImageDraw.Draw(img)
-    
-    # Try to use a clear font
-    try:
-        font_title = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 48)
-        font_text = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 36)
-    except:
-        font_title = ImageFont.load_default()
-        font_text = ImageFont.load_default()
-    
-    # Draw menu items
-    draw.text((100, 50), "SALON PRICE LIST", fill='black', font=font_title)
-    
-    menu_items = [
-        "Men's Haircut - Rs 200",
-        "Beard Trim - Rs 100",
-        "Hair Color - Rs 500",
-        "",
-        "Women's Haircut - Rs 300",
-        "Facial - Rs 500",
-        "Hair Spa - Rs 800"
-    ]
-    
-    y = 150
-    for line in menu_items:
-        draw.text((100, y), line, fill='black', font=font_text)
-        y += 70
-    
-    # Save to BytesIO
-    img_buffer = BytesIO()
-    img.save(img_buffer, format='PNG')
-    img_buffer.seek(0)
-    
-    url = f"{BASE_URL}/salons/{salon_id}/services/parse-menu"
-    files = {"file": ("menu.png", img_buffer, "image/png")}
-    headers = {"Authorization": f"Bearer {access_token}"}
-    response = requests.post(url, files=files, headers=headers)
-    
-    parsed_services = []
-    passed = response.status_code == 200
-    if passed:
-        data = response.json()
-        parsed_services = data.get("services", [])
-        service_count = data.get("service_count", 0)
-        packages = data.get("packages", [])
-        
-        # Accept >= 1 service
-        passed = service_count >= 1
-        print_test("D1: Parse menu PNG (services_count >= 1)", passed, 
-                  f"service_count={service_count}, package_count={len(packages)}")
-        
-        if parsed_services:
-            print(f"    Sample parsed service: {parsed_services[0]}")
-        
-        # If 0 services, retry once with clearer image
-        if service_count == 0:
-            print("\n[D1-RETRY] Parsing returned 0 services, retrying with clearer/larger image")
+            # Try with phone number
+            print(f"\n{YELLOW}Retrying with phone number...{RESET}")
+            payload = {
+                "identifier": ADMIN_PHONE,
+                "password": ADMIN_PASSWORD
+            }
+            print(f"Payload: {json.dumps(payload, indent=2)}")
             
-            # Create a larger, clearer image
-            img = Image.new('RGB', (1200, 1000), color='white')
-            draw = ImageDraw.Draw(img)
-            
-            try:
-                font_title = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 60)
-                font_text = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 48)
-            except:
-                font_title = ImageFont.load_default()
-                font_text = ImageFont.load_default()
-            
-            draw.text((150, 80), "SALON MENU", fill='black', font=font_title)
-            
-            menu_items = [
-                "HAIRCUT MEN 200",
-                "BEARD TRIM 100",
-                "FACIAL WOMEN 500",
-                "HAIR SPA 800"
-            ]
-            
-            y = 200
-            for line in menu_items:
-                draw.text((150, y), line, fill='black', font=font_text)
-                y += 120
-            
-            img_buffer = BytesIO()
-            img.save(img_buffer, format='PNG')
-            img_buffer.seek(0)
-            
-            files = {"file": ("menu_clear.png", img_buffer, "image/png")}
-            response = requests.post(url, files=files, headers=headers)
+            response = requests.post(url, json=payload, timeout=10)
+            print_response(response)
             
             if response.status_code == 200:
                 data = response.json()
-                parsed_services = data.get("services", [])
-                service_count = data.get("service_count", 0)
-                passed = service_count >= 1
-                print_test("D1-RETRY: Parse clearer image", passed, f"service_count={service_count}")
-                if parsed_services:
-                    print(f"    Sample: {parsed_services[0]}")
-    else:
-        print_test("D1: Parse menu PNG", False, f"Status: {response.status_code}, {response.text[:300]}")
-    
-    # D2: Apply parsed services with mode='add'
-    print("\n[D2] POST /services/apply-parsed with mode='add'")
-    
-    if not parsed_services:
-        # Create dummy services for testing if parsing failed
-        parsed_services = [
-            {
-                "service_name": "Test Haircut",
-                "description": "Test service",
-                "category": "Haircut",
-                "gender": "Men",
-                "default_duration": 30,
-                "base_price": 200
-            }
-        ]
-        print("    Using dummy service for testing (parsing returned 0)")
-    
-    url = f"{BASE_URL}/salons/{salon_id}/services/apply-parsed"
-    payload = {
-        "services": parsed_services,
-        "packages": [],
-        "mode": "add"
-    }
-    response = requests.post(url, json=payload, headers=get_headers())
-    
-    passed = response.status_code == 200
-    if passed:
-        data = response.json()
-        created_services = data.get("created_services", 0)
-        passed = created_services >= 1
-        print_test("D2: Apply parsed (add mode, created_services >= 1)", passed, 
-                  f"created_services={created_services}")
-    else:
-        print_test("D2: Apply parsed (add mode)", False, 
-                  f"Status: {response.status_code}, {response.text[:300]}")
-    
-    # Verify services appear in list with source='menu_parse'
-    print("\n[D2-VERIFY] GET /services/all - verify source='menu_parse'")
-    url = f"{BASE_URL}/salons/{salon_id}/services/all"
-    response = requests.get(url, headers=get_headers())
-    if response.status_code == 200:
-        data = response.json()
-        # Handle both list and dict responses
-        if isinstance(data, list):
-            services = data
-        else:
-            services = data.get("services", [])
-        menu_parse_services = [s for s in services if s.get("source") == "menu_parse"]
-        predefined_services = [s for s in services if s.get("source") == "predefined"]
-        print(f"    Found {len(menu_parse_services)} services with source='menu_parse'")
-        print(f"    Found {len(predefined_services)} services with source='predefined' (preserved)")
-    
-    # D3: Apply with mode='replace'
-    print("\n[D3] POST /services/apply-parsed with mode='replace'")
-    
-    url = f"{BASE_URL}/salons/{salon_id}/services/apply-parsed"
-    payload = {
-        "services": parsed_services[:1],  # Just one service
-        "packages": [],
-        "mode": "replace"
-    }
-    response = requests.post(url, json=payload, headers=get_headers())
-    
-    passed = response.status_code == 200
-    if passed:
-        data = response.json()
-        created_services = data.get("created_services", 0)
-        print_test("D3: Apply parsed (replace mode)", passed, f"created_services={created_services}")
-        
-        # Verify services still work and contain source='menu_parse' entries
-        url = f"{BASE_URL}/salons/{salon_id}/services/all"
-        response = requests.get(url, headers=get_headers())
-        if response.status_code == 200:
-            data = response.json()
-            # Handle both list and dict responses
-            if isinstance(data, list):
-                services = data
+                print(f"{GREEN}✓ Login successful{RESET}")
+                return {
+                    "access_token": data.get("access_token"),
+                    "salon_id": data.get("salon_id")
+                }
             else:
-                services = data.get("services", [])
-            menu_parse_services = [s for s in services if s.get("source") == "menu_parse"]
-            predefined_services = [s for s in services if s.get("source") == "predefined"]
-            print(f"    After replace: {len(menu_parse_services)} services with source='menu_parse'")
-            print(f"    After replace: {len(predefined_services)} services with source='predefined' (preserved)")
-    else:
-        print_test("D3: Apply parsed (replace mode)", False, 
-                  f"Status: {response.status_code}, {response.text[:300]}")
+                print(f"{RED}✗ Login failed{RESET}")
+                return None
     
-    # D4: Auth check
-    print("\n[D4] POST /parse-menu without auth (should fail with 401/403)")
-    img_buffer.seek(0)
-    url = f"{BASE_URL}/salons/{salon_id}/services/parse-menu"
-    files = {"file": ("menu.png", img_buffer, "image/png")}
-    response = requests.post(url, files=files)
-    passed = response.status_code in [401, 403]
-    print_test("D4: Auth required", passed, f"Status: {response.status_code}")
-    
-    # BONUS: D5: Test PDF parsing (if quick)
-    print("\n[D5-BONUS] POST /parse-menu with PDF (if PyMuPDF available)")
-    try:
-        # Try to create a simple PDF using reportlab or PyMuPDF
-        try:
-            import fitz  # PyMuPDF
-            
-            # Create a simple PDF with text
-            doc = fitz.open()
-            page = doc.new_page(width=595, height=842)  # A4 size
-            
-            # Add text to the page
-            text = """
-            SALON PRICE LIST
-            
-            Men's Services:
-            Haircut - Rs 250
-            Beard Trim - Rs 120
-            
-            Women's Services:
-            Haircut - Rs 350
-            Facial - Rs 600
-            """
-            
-            page.insert_text((50, 50), text, fontsize=16)
-            
-            # Save to BytesIO
-            pdf_buffer = BytesIO()
-            pdf_bytes = doc.write()
-            pdf_buffer.write(pdf_bytes)
-            pdf_buffer.seek(0)
-            doc.close()
-            
-            url = f"{BASE_URL}/salons/{salon_id}/services/parse-menu"
-            files = {"file": ("menu.pdf", pdf_buffer, "application/pdf")}
-            headers = {"Authorization": f"Bearer {access_token}"}
-            response = requests.post(url, files=files, headers=headers)
-            
-            passed = response.status_code == 200
-            if passed:
-                data = response.json()
-                service_count = data.get("service_count", 0)
-                passed = service_count >= 1
-                print_test("D5-BONUS: Parse PDF (services_count >= 1, validates PDF→image conversion)", 
-                          passed, f"service_count={service_count}")
-            else:
-                print_test("D5-BONUS: Parse PDF", False, 
-                          f"Status: {response.status_code}, {response.text[:300]}")
-        except ImportError:
-            print("    Skipping PDF test - PyMuPDF not available")
     except Exception as e:
-        print(f"    Skipping PDF test - error: {str(e)}")
+        print(f"{RED}✗ Login exception: {e}{RESET}")
+        return None
 
-# ============================================================================
-# CLEANUP
-# ============================================================================
-
-def cleanup():
-    print_section("CLEANUP")
+def get_or_create_barber(auth_token: str, salon_id: str) -> Optional[str]:
+    """Get existing barber or create one if none exist"""
+    print_section("Get/Create Barber")
     
-    # Reset manual toggle to open
-    print("\n[CLEANUP] Reset manual toggle to open")
-    url = f"{BASE_URL}/salons/{salon_id}/manual-toggle"
-    payload = {
-        "is_overridden": False,
-        "is_open": True
+    # Try to get existing barbers
+    url = f"{BASE_URL}/salons/{salon_id}/barbers"
+    headers = {"Authorization": f"Bearer {auth_token}"}
+    
+    print(f"Getting barbers: GET {url}")
+    
+    try:
+        response = requests.get(url, headers=headers, timeout=10)
+        print_response(response)
+        
+        if response.status_code == 200:
+            barbers = response.json()
+            if barbers and len(barbers) > 0:
+                barber_id = barbers[0].get("id")
+                print(f"{GREEN}✓ Found existing barber: {barber_id}{RESET}")
+                return barber_id
+        
+        # No barbers found, create one
+        print(f"\n{YELLOW}No barbers found, creating test barber...{RESET}")
+        create_url = f"{BASE_URL}/salons/{salon_id}/barbers"
+        payload = {
+            "name": "Test Barber",
+            "mobile": "+919876543210",
+            "category": "Senior",
+            "experience": 3
+        }
+        
+        print(f"Creating barber: POST {create_url}")
+        print(f"Payload: {json.dumps(payload, indent=2)}")
+        
+        response = requests.post(create_url, json=payload, headers=headers, timeout=10)
+        print_response(response)
+        
+        if response.status_code in [200, 201]:
+            barber_id = response.json().get("id")
+            print(f"{GREEN}✓ Created barber: {barber_id}{RESET}")
+            return barber_id
+        else:
+            print(f"{RED}✗ Failed to create barber{RESET}")
+            return None
+    
+    except Exception as e:
+        print(f"{RED}✗ Exception: {e}{RESET}")
+        return None
+
+def test_barber_update(result: TestResult):
+    """Test PUT /api/barbers/{barber_id} with various payloads"""
+    print_section("TEST 2: Barber Profile Update")
+    
+    # Login
+    auth_data = login_admin()
+    if not auth_data:
+        result.add_fail("Barber Update - Login", "Failed to login as admin")
+        return
+    
+    access_token = auth_data["access_token"]
+    salon_id = auth_data["salon_id"]
+    
+    # Get or create barber
+    barber_id = get_or_create_barber(access_token, salon_id)
+    if not barber_id:
+        result.add_fail("Barber Update - Get/Create Barber", "Failed to get or create barber")
+        return
+    
+    headers = {"Authorization": f"Bearer {access_token}"}
+    url = f"{BASE_URL}/barbers/{barber_id}"
+    
+    # Test Case A: Update with null values (frontend fix - should work now)
+    print(f"\n{BLUE}Test Case A: Update with null values{RESET}")
+    payload_a = {
+        "name": "Test Name Updated",
+        "compensation": None,
+        "experience": 0,
+        "doj": None,
+        "dob": None,
+        "last_working_date": None
     }
-    response = requests.put(url, json=payload, headers=get_headers())
-    if response.status_code == 200:
-        data = response.json()
-        closed_mode = data.get("manual_toggle", {}).get("closed_mode")
-        print_test("Cleanup: Reset to open", True, f"closed_mode={closed_mode} (should be null)")
-    else:
-        print_test("Cleanup: Reset to open", False, f"Status: {response.status_code}")
     
-    print("\nNote: Bulk-uploaded test customers and parsed services are left in the system (harmless)")
+    print(f"Testing: PUT {url}")
+    print(f"Payload: {json.dumps(payload_a, indent=2)}")
+    
+    try:
+        response = requests.put(url, json=payload_a, headers=headers, timeout=10)
+        print_response(response)
+        
+        if response.status_code == 200:
+            result.add_pass("Barber Update - Test Case A (null values) - HTTP 200")
+            data = response.json()
+            if data.get("name") == "Test Name Updated":
+                result.add_pass("Barber Update - Test Case A - name updated correctly")
+        else:
+            result.add_fail(
+                "Barber Update - Test Case A (null values)",
+                f"Expected 200, got {response.status_code}"
+            )
+    except Exception as e:
+        result.add_fail("Barber Update - Test Case A", f"Exception: {e}")
+    
+    # Test Case B: Update with valid values
+    print(f"\n{BLUE}Test Case B: Update with valid values{RESET}")
+    payload_b = {
+        "compensation": 25000,
+        "experience": 5,
+        "doj": "2024-01-15",
+        "dob": "1995-06-20"
+    }
+    
+    print(f"Testing: PUT {url}")
+    print(f"Payload: {json.dumps(payload_b, indent=2)}")
+    
+    try:
+        response = requests.put(url, json=payload_b, headers=headers, timeout=10)
+        print_response(response)
+        
+        if response.status_code == 200:
+            result.add_pass("Barber Update - Test Case B (valid values) - HTTP 200")
+            data = response.json()
+            
+            if data.get("compensation") == 25000:
+                result.add_pass("Barber Update - Test Case B - compensation === 25000")
+            else:
+                result.add_fail(
+                    "Barber Update - Test Case B - compensation",
+                    f"Expected 25000, got {data.get('compensation')}"
+                )
+            
+            if data.get("experience") == 5:
+                result.add_pass("Barber Update - Test Case B - experience === 5")
+            else:
+                result.add_fail(
+                    "Barber Update - Test Case B - experience",
+                    f"Expected 5, got {data.get('experience')}"
+                )
+        else:
+            result.add_fail(
+                "Barber Update - Test Case B (valid values)",
+                f"Expected 200, got {response.status_code}"
+            )
+    except Exception as e:
+        result.add_fail("Barber Update - Test Case B", f"Exception: {e}")
+    
+    # Test Case C: Negative test - empty string (should fail with 422)
+    print(f"\n{BLUE}Test Case C: Negative test - empty string compensation{RESET}")
+    payload_c = {
+        "compensation": ""
+    }
+    
+    print(f"Testing: PUT {url}")
+    print(f"Payload: {json.dumps(payload_c, indent=2)}")
+    
+    try:
+        response = requests.put(url, json=payload_c, headers=headers, timeout=10)
+        print_response(response)
+        
+        if response.status_code == 422:
+            result.add_pass("Barber Update - Test Case C (empty string) - HTTP 422 (correctly rejected)")
+        else:
+            result.add_fail(
+                "Barber Update - Test Case C (empty string)",
+                f"Expected 422 (validation error), got {response.status_code}"
+            )
+    except Exception as e:
+        result.add_fail("Barber Update - Test Case C", f"Exception: {e}")
+    
+    # Verify GET reflects the updates from Test Case B
+    print(f"\n{BLUE}Verify GET reflects updates{RESET}")
+    get_url = f"{BASE_URL}/salons/{salon_id}/barbers"
+    
+    print(f"Testing: GET {get_url}")
+    
+    try:
+        response = requests.get(get_url, headers=headers, timeout=10)
+        print_response(response)
+        
+        if response.status_code == 200:
+            barbers = response.json()
+            updated_barber = next((b for b in barbers if b.get("id") == barber_id), None)
+            
+            if updated_barber:
+                if updated_barber.get("compensation") == 25000:
+                    result.add_pass("Barber Update - GET verification - compensation === 25000")
+                else:
+                    result.add_fail(
+                        "Barber Update - GET verification - compensation",
+                        f"Expected 25000, got {updated_barber.get('compensation')}"
+                    )
+                
+                if updated_barber.get("experience") == 5:
+                    result.add_pass("Barber Update - GET verification - experience === 5")
+                else:
+                    result.add_fail(
+                        "Barber Update - GET verification - experience",
+                        f"Expected 5, got {updated_barber.get('experience')}"
+                    )
+            else:
+                result.add_fail(
+                    "Barber Update - GET verification",
+                    f"Barber {barber_id} not found in response"
+                )
+        else:
+            result.add_fail(
+                "Barber Update - GET verification",
+                f"Expected 200, got {response.status_code}"
+            )
+    except Exception as e:
+        result.add_fail("Barber Update - GET verification", f"Exception: {e}")
+
+# ============================================================================
+# TEST 3: No Regression - Public Barbers List
+# ============================================================================
+
+def test_public_barbers_list(result: TestResult):
+    """Test GET /api/salons/{salon_id}/barbers (no auth)"""
+    print_section("TEST 3: No Regression - Public Barbers List")
+    
+    url = f"{BASE_URL}/salons/{SALON_ID}/barbers"
+    print(f"Testing: GET {url} (no auth)")
+    
+    try:
+        response = requests.get(url, timeout=10)
+        print_response(response)
+        
+        if response.status_code == 200:
+            result.add_pass("Public Barbers List - HTTP 200")
+        else:
+            result.add_fail(
+                "Public Barbers List",
+                f"Expected 200, got {response.status_code}"
+            )
+    
+    except Exception as e:
+        result.add_fail("Public Barbers List - Exception", str(e))
 
 # ============================================================================
 # MAIN
 # ============================================================================
 
 def main():
-    print("\n" + "="*80)
-    print("  RE-TEST 3 BACKEND FEATURE GROUPS AFTER FIXES")
-    print("  A) Manual Toggle — verify ALL three states with admin token")
-    print("  B) Booking enforcement — re-test the booking flows")
-    print("  C) Bulk customer upload — re-confirm all paths still work")
-    print("  D) Menu parsing — test image and PDF parsing with OpenAI gpt-5")
-    print("="*80)
+    print(f"\n{BLUE}{'='*60}")
+    print(f"FOCUSED REGRESSION TESTS - ITERATION 3")
+    print(f"{'='*60}{RESET}\n")
+    print(f"Base URL: {BASE_URL}")
+    print(f"Salon ID: {SALON_ID}")
+    print(f"Admin: {ADMIN_LOGIN_ID} / {ADMIN_PHONE}")
     
-    # Login
-    if not login_admin():
-        print("\n❌ Cannot proceed without authentication")
-        return
-    
-    # Get test data
-    print("\n[SETUP] Getting test service and barber")
-    get_test_service_and_barber()
+    result = TestResult()
     
     # Run tests
-    test_group_a_manual_toggle()
-    test_group_b_booking_enforcement()
-    test_group_c_bulk_upload()
-    test_group_d_menu_parsing()
+    test_subscription_status(result)
+    test_barber_update(result)
+    test_public_barbers_list(result)
     
-    # Cleanup
-    cleanup()
+    # Print summary
+    success = result.print_summary()
     
-    print("\n" + "="*80)
-    print("  TESTING COMPLETE")
-    print("="*80 + "\n")
+    # Exit with appropriate code
+    sys.exit(0 if success else 1)
 
 if __name__ == "__main__":
     main()
