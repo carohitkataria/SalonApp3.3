@@ -47,6 +47,9 @@ import platform_admin as platform_admin_mod
 # Import platform admin management module (Phase 5 — Part A)
 import platform_admin_management as platform_admin_mgmt_mod
 
+# Import discount codes module (Phase 4 — Part D)
+import discount_codes as discount_codes_mod
+
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
 
@@ -11718,14 +11721,28 @@ async def api_subscription_quote(
     discount_details = None
     discount_code_applied: Optional[str] = None
     if discount_code:
-        # Phase 4 (Part D) will implement full validation. For Phase 2 we treat
-        # any provided code as "unknown" so the UI can already wire up the
-        # input but no money is actually deducted yet.
-        discount_details = {
-            "code": discount_code,
-            "valid": False,
-            "reason": "Discount codes will be enabled in Phase 4.",
-        }
+        # Phase 4 (Part D) — real validation + math
+        result = await discount_codes_mod.validate_discount_code(
+            code=discount_code,
+            salon_id=salon_id,
+            billable_branch_count=billable_branch_count,
+        )
+        if result["valid"]:
+            comp = discount_codes_mod.compute_discount(
+                code_doc=result["code_doc"],
+                base_amount=base_amount,
+                price_per_branch=price_per_branch,
+                billable_branch_count=billable_branch_count,
+            )
+            discount_amount = comp["discount_amount"]
+            discount_details = comp["discount_details"]
+            discount_code_applied = result["code_doc"]["code"]
+        else:
+            discount_details = {
+                "code": discount_code.strip().upper(),
+                "valid": False,
+                "reason": result["reason"] or "Code could not be applied",
+            }
 
     total_amount = round(max(base_amount - discount_amount, 0.0), 2)
 
@@ -12184,6 +12201,10 @@ platform_admin_mgmt_mod.init_platform_management_router(
     algorithm=ALGORITHM,
 )
 fastapi_app.include_router(platform_admin_mgmt_mod.management_router)
+
+# Phase 4 (Part D) — discount codes router
+discount_codes_mod.init_discount_codes_router(db=db)
+fastapi_app.include_router(discount_codes_mod.discount_codes_router)
 
 # Health check endpoint for Kubernetes liveness/readiness probes
 @fastapi_app.get("/health")
