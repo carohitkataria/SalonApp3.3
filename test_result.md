@@ -1909,3 +1909,62 @@ agent_communication:
         - db.salon_subscriptions: all migration fields present ✅
       
       ITERATION 4 (PHASES 1+2) IS PRODUCTION-READY."
+
+
+    - agent: "main"
+      message: "Iteration 5 — Phase 5 (Part A, Platform Admin: salon management + subscription overrides) implemented end-to-end.
+
+      BACKEND — new module /app/backend/platform_admin_management.py wired into server.py. All endpoints require JWT with role=platform_admin.
+
+      New collections:
+        - subscription_overrides_log (every override write goes here; revoke flips active=false and stores revoked_at + revoked_by_admin_id)
+        - platform_audit_log (every read & write action by platform admin)
+
+      Existing collection changes:
+        - salons: added optional fields status ('active' | 'suspended'), suspension_reason, suspended_at, suspended_by_admin_id, reactivated_at, reactivated_by_admin_id. Legacy salons without `status` are treated as active (login flow + list filter both handle null/missing).
+        - salon_subscriptions: new fields grant_type, max_branches, max_branches_override, granted_by_admin_id, grant_reason, trial_ends_at, revoked_at, revoked_by_admin_id.
+
+      Endpoints added under /api/platform:
+        - GET  /salons?q=&status=&page=&page_size=         — paginated, searchable list. Status filter handles legacy salons (status missing == active).
+        - GET  /salons/{salon_id}                           — detail incl. subscription_state, subscription_history, payment_history, branches, staff_count, this_month_revenue, active_overrides, override_history.
+        - POST /salons/{salon_id}/suspend                  body {reason}, blocks salon login (verified at /salon/users/login with 403 + SALON_SUSPENDED code).
+        - POST /salons/{salon_id}/reactivate
+        - POST /salons/{salon_id}/view-as                  returns a 15-min JWT (role='salon_view_as', readonly=true).
+        - POST /salons/{salon_id}/subscription/comp                  ongoing comp access (creates granted sub with far-future expiry).
+        - POST /salons/{salon_id}/subscription/grant-pro             time-bound (duration_months, max_branches).
+        - POST /salons/{salon_id}/subscription/override-branches     raises/lowers max_branches cap on active sub.
+        - POST /salons/{salon_id}/subscription/extend-trial          push expiry/trial_ends_at by N days. If no active sub, creates one.
+        - POST /salons/{salon_id}/subscription/revoke-override/{override_id}  fully reverses comp/grant_pro (expires granted sub), override_branches (restores prior cap), extend_trial (restores prior expiry/trial_ends_at).
+
+      Shared helpers used:
+        - get_current_subscription() now treats payment_status in ['paid','granted'] as valid (so granted subs become the active sub).
+        - get_subscription_status() returns new fields: grant_type, max_branches_override, max_branches_effective (override > sub.max_branches > plan.max_branches), trial_ends_at, is_platform_granted.
+        - count_billable_branches(), get_active_branch_ids(), get_active_plan() reused for snapshot fields on granted subs.
+
+      Salon login (/api/salon/users/login) now returns 403 with {code:'SALON_SUSPENDED', message, reason} when the salon has status='suspended'.
+
+      FRONTEND — /app/frontend/src/pages/PlatformDashboardPage.js fully rebuilt:
+        - Top nav with tabs (Salons | Suppliers | Discounts | Analytics | Broadcast). Only Salons is active for Phase 5; others show 'soon'.
+        - Salon table with search (debounce-on-typing), status filter, pagination, per-row quick actions (Suspend/Reactivate/View-as/Open).
+        - Detail view (back-able) with summary cards (plan / branches / staff / month revenue), override action bar (Grant Pro / Comp / Override Branches / Extend Trial), Active Overrides panel (with Revoke), Subscription History table, Override History timeline.
+        - Five modals (suspend, grant_pro, override_branches, extend_trial, comp) with reason fields and inline validation.
+        - View-as opens the salon-side preview in a new tab with the short-lived token in a query param. Full salon-side enforcement of view-as readonly mode arrives later (Phase 6 banner + write-guard middleware).
+
+      SMOKE-TESTED VIA CURL (cleaned up before commit so DB is in a clean state):
+        - Grant Pro 3 months + max 5 branches → status=active, is_platform_granted=true, max_branches_effective=5, expiry +3m. ✅
+        - Override branches → max_branches_effective updates to override value. ✅
+        - Suspend → status=suspended, login blocked. Reactivate restores. ✅
+        - View-as → 379-char JWT, readonly=true, 15-min expiry. ✅
+        - Revoke grant_pro → granted sub expires, is_premium flips to false. ✅
+        - Audit log captured 9 entries across all actions. ✅
+        - Idempotency: re-suspending a suspended salon returns 400; re-reactivating an active salon returns 400.
+
+      Pending user permission before running deep_testing_backend_v2 on:
+        1. Auth: every Phase 5 endpoint requires platform_admin JWT (verify 401/403 without token, with salon_user token, with view-as token).
+        2. Salon list pagination/search edge cases (empty query, special chars, suspended-only filter).
+        3. Override happy paths + idempotency + revoke ordering (revoke comp after override_branches still leaves override active until it's revoked separately).
+        4. Salon login: suspended salon returns 403 with the structured detail; reactivate restores login.
+        5. Backward compatibility: existing /api/salons/{id}/subscription/status still returns the per-branch fields from Phase 2 AND the new Phase 5 fields without breaking.
+        6. Granted subscription with snapshot fields (billable_branch_count, branch_ids_snapshot) is queryable via salon detail endpoint.
+
+      Test data already cleaned up — DB has 2 salons, 1 active 1-year premium for the test salon (c72d0479-..., +917503070727), zero overrides, zero audit entries. Platform owner login still works."

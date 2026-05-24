@@ -44,6 +44,9 @@ from invoice_service import generate_invoice_pdf, save_invoice_pdf
 # Import platform admin module (Phase 1 — Part A)
 import platform_admin as platform_admin_mod
 
+# Import platform admin management module (Phase 5 — Part A)
+import platform_admin_management as platform_admin_mgmt_mod
+
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
 
@@ -2321,9 +2324,11 @@ async def get_current_subscription(salon_id: str) -> Optional[dict]:
     """
     Return the most recent (latest expiry) subscription record for the salon.
     Returns None if salon has never paid.
+
+    Phase 5: 'granted' payments (platform-comp / grant-pro) count as valid too.
     """
     sub = await db.salon_subscriptions.find_one(
-        {"salon_id": salon_id, "payment_status": "paid"},
+        {"salon_id": salon_id, "payment_status": {"$in": ["paid", "granted"]}},
         {"_id": 0},
         sort=[("expiry_date", -1)],
     )
@@ -2409,6 +2414,16 @@ async def get_subscription_status(salon_id: str) -> dict:
         "discount_code_applied": sub_discount_code,
         "discount_amount": float(sub_discount_amount) if sub_discount_amount is not None else 0.0,
         "branches_added_mid_cycle": branches_added_mid_cycle,
+        # Phase 5 (Part A) — platform admin override summary
+        "grant_type": (sub or {}).get("grant_type"),  # None | "comp" | "grant_pro"
+        "max_branches_override": (sub or {}).get("max_branches_override"),
+        "max_branches_effective": (
+            (sub or {}).get("max_branches_override")
+            or (sub or {}).get("max_branches")
+            or (plan or {}).get("max_branches")
+        ),
+        "trial_ends_at": (sub or {}).get("trial_ends_at"),
+        "is_platform_granted": bool((sub or {}).get("payment_status") == "granted"),
     }
 
 async def enforce_premium_or_within_limit(salon_id: str, *, resource: str) -> None:
@@ -4742,6 +4757,20 @@ async def salon_user_login(credentials: SalonUserLogin):
     # Verify password
     if not pwd_context.verify(credentials.password, salon_user["password_hash"]):
         raise HTTPException(status_code=401, detail="Incorrect password")
+
+    # Phase 5 (Part A) — Block login if the salon is suspended by platform admin.
+    salon_doc = await db.salons.find_one(
+        {"id": salon_user["salon_id"]}, {"_id": 0, "status": 1, "suspension_reason": 1}
+    )
+    if salon_doc and salon_doc.get("status") == "suspended":
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "code": "SALON_SUSPENDED",
+                "message": "This salon has been suspended by the platform administrator.",
+                "reason": salon_doc.get("suspension_reason"),
+            },
+        )
     
     # Generate token with role and permissions
     permissions = salon_user.get("permissions", {
@@ -12143,6 +12172,18 @@ platform_admin_mod.init_platform_admin_router(
     algorithm=ALGORITHM,
 )
 fastapi_app.include_router(platform_admin_mod.platform_router)
+
+# Phase 5 (Part A) — mount platform admin management router.
+platform_admin_mgmt_mod.init_platform_management_router(
+    db=db,
+    get_subscription_status=get_subscription_status,
+    count_billable_branches=count_billable_branches,
+    get_active_branch_ids=get_active_branch_ids,
+    get_active_plan=get_active_plan,
+    secret_key=SECRET_KEY,
+    algorithm=ALGORITHM,
+)
+fastapi_app.include_router(platform_admin_mgmt_mod.management_router)
 
 # Health check endpoint for Kubernetes liveness/readiness probes
 @fastapi_app.get("/health")
