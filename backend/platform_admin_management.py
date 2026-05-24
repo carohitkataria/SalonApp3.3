@@ -45,6 +45,7 @@ _get_active_plan = None
 _secret_key: str = "change-me"
 _algorithm: str = "HS256"
 _create_in_app_notification = None
+_send_whatsapp_notification = None
 
 management_router = APIRouter(
     prefix="/api/platform", tags=["platform-admin-management"]
@@ -973,49 +974,169 @@ async def list_broadcasts(admin=Depends(require_platform_admin)):
     return {"broadcasts": docs, "total": len(docs)}
 
 
-# ---------- Phase 6: Supplier Approval Stubs (Phase 8 will flesh these out) ----------
+# ---------- Phase 8: Supplier Approval (real impl, supersedes Phase 6 stubs) ----------
+
+
+class SupplierRejectRequest(BaseModel):
+    reason: str = Field(..., min_length=2, max_length=500)
+
+    @field_validator("reason")
+    @classmethod
+    def reason_not_blank(cls, v: str) -> str:
+        if not v or not v.strip():
+            raise ValueError("reason must not be blank")
+        return v.strip()
+
+
+class SupplierSuspendRequest(BaseModel):
+    reason: Optional[str] = Field(default=None, max_length=500)
+
+
+async def _notify_supplier_whatsapp(supplier: dict, message: str) -> None:
+    """Best-effort WhatsApp notification to a supplier. Logs failure but never raises."""
+    if not _send_whatsapp_notification or not supplier.get("mobile"):
+        return
+    try:
+        await _send_whatsapp_notification(supplier["mobile"], message, template_name="supplier_status")
+    except Exception as e:
+        logger.error(f"WhatsApp notify supplier {supplier.get('id')} failed: {e}")
+
 
 @management_router.get("/suppliers")
 async def list_suppliers(
-    status: Optional[str] = Query(None, description="pending | approved | rejected"),
+    status: Optional[str] = Query(None, description="pending_approval | active | rejected | suspended"),
+    q: Optional[str] = Query(None, description="Search business_name / owner_name / mobile"),
     admin=Depends(require_platform_admin),
 ):
-    """Return suppliers list. Empty until Phase 8 (signup) lands."""
+    """Return suppliers list, latest first."""
     if "suppliers" not in await _db.list_collection_names():
-        return {"suppliers": [], "total": 0, "note": "Supplier signup flow lands in Phase 8"}
-    q: dict = {}
+        return {"suppliers": [], "total": 0}
+
+    query: dict = {}
     if status:
-        q["approval_status"] = status
-    docs = await _db.suppliers.find(q, {"_id": 0}).sort("created_at", -1).to_list(length=500)
+        query["status"] = status
+    if q:
+        query["$or"] = [
+            {"business_name": {"$regex": q, "$options": "i"}},
+            {"owner_name": {"$regex": q, "$options": "i"}},
+            {"mobile": {"$regex": q.replace("+", ""), "$options": "i"}},
+        ]
+
+    docs = await _db.suppliers.find(query, {"_id": 0, "password_hash": 0}).sort("created_at", -1).to_list(length=500)
     return {"suppliers": docs, "total": len(docs)}
+
+
+@management_router.get("/suppliers/{supplier_id}")
+async def get_supplier(supplier_id: str, admin=Depends(require_platform_admin)):
+    supplier = await _db.suppliers.find_one({"id": supplier_id}, {"_id": 0, "password_hash": 0})
+    if not supplier:
+        raise HTTPException(status_code=404, detail="Supplier not found")
+    return supplier
 
 
 @management_router.post("/suppliers/{supplier_id}/approve")
 async def approve_supplier(supplier_id: str, admin=Depends(require_platform_admin)):
-    """Stub. Will implement signup + WhatsApp notify in Phase 8."""
-    supplier = await _db.suppliers.find_one({"id": supplier_id}, {"_id": 0}) if "suppliers" in await _db.list_collection_names() else None
+    """Approve a pending or previously rejected supplier. Sends WhatsApp notification."""
+    supplier = await _db.suppliers.find_one({"id": supplier_id}, {"_id": 0})
     if not supplier:
-        raise HTTPException(status_code=404, detail="Supplier not found (signup flow lands in Phase 8)")
+        raise HTTPException(status_code=404, detail="Supplier not found")
+    if supplier.get("status") == "active":
+        return {"ok": True, "status": "active", "message": "Already active"}
+
+    now = _now_iso()
     await _db.suppliers.update_one(
         {"id": supplier_id},
-        {"$set": {"approval_status": "approved", "approved_at": _now_iso(), "approved_by": admin.get("id")}},
+        {"$set": {
+            "status": "active",
+            "approved_by_admin_id": admin.get("id"),
+            "approved_at": now,
+            "rejection_reason": None,
+            "updated_at": now,
+        }},
     )
     await _write_audit(admin=admin, action="approve_supplier", target="supplier", target_id=supplier_id, payload={})
-    return {"ok": True, "supplier_id": supplier_id, "status": "approved"}
+
+    msg = (
+        f"🎉 *Welcome to SalonHub Marketplace!*\n\n"
+        f"Hi {supplier.get('owner_name') or 'Supplier'}, your supplier account "
+        f"({supplier.get('business_name') or ''}) has been approved.\n\n"
+        f"You can now start listing products. Log in here: /supplier/login"
+    )
+    await _notify_supplier_whatsapp({**supplier, "status": "active"}, msg)
+
+    return {"ok": True, "supplier_id": supplier_id, "status": "active"}
 
 
 @management_router.post("/suppliers/{supplier_id}/reject")
-async def reject_supplier(supplier_id: str, admin=Depends(require_platform_admin)):
-    """Stub. Will implement WhatsApp notify in Phase 8."""
-    supplier = await _db.suppliers.find_one({"id": supplier_id}, {"_id": 0}) if "suppliers" in await _db.list_collection_names() else None
+async def reject_supplier(
+    supplier_id: str,
+    body: SupplierRejectRequest,
+    admin=Depends(require_platform_admin),
+):
+    """Reject a supplier with a required reason. Sends WhatsApp notification."""
+    supplier = await _db.suppliers.find_one({"id": supplier_id}, {"_id": 0})
     if not supplier:
-        raise HTTPException(status_code=404, detail="Supplier not found (signup flow lands in Phase 8)")
+        raise HTTPException(status_code=404, detail="Supplier not found")
+
+    now = _now_iso()
     await _db.suppliers.update_one(
         {"id": supplier_id},
-        {"$set": {"approval_status": "rejected", "rejected_at": _now_iso(), "rejected_by": admin.get("id")}},
+        {"$set": {
+            "status": "rejected",
+            "rejection_reason": body.reason,
+            "updated_at": now,
+        }},
     )
-    await _write_audit(admin=admin, action="reject_supplier", target="supplier", target_id=supplier_id, payload={})
-    return {"ok": True, "supplier_id": supplier_id, "status": "rejected"}
+    await _write_audit(
+        admin=admin, action="reject_supplier", target="supplier", target_id=supplier_id,
+        payload={"reason": body.reason},
+    )
+
+    msg = (
+        f"Hello {supplier.get('owner_name') or 'there'},\n\n"
+        f"Your supplier signup for SalonHub Marketplace could not be approved at this time.\n\n"
+        f"*Reason:* {body.reason}\n\n"
+        f"You may update your details and apply again, or reach out to support."
+    )
+    await _notify_supplier_whatsapp(supplier, msg)
+
+    return {"ok": True, "supplier_id": supplier_id, "status": "rejected", "reason": body.reason}
+
+
+@management_router.post("/suppliers/{supplier_id}/suspend")
+async def suspend_supplier(
+    supplier_id: str,
+    body: SupplierSuspendRequest,
+    admin=Depends(require_platform_admin),
+):
+    """Suspend an active supplier (immediately blocks login)."""
+    supplier = await _db.suppliers.find_one({"id": supplier_id}, {"_id": 0})
+    if not supplier:
+        raise HTTPException(status_code=404, detail="Supplier not found")
+
+    now = _now_iso()
+    await _db.suppliers.update_one(
+        {"id": supplier_id},
+        {"$set": {
+            "status": "suspended",
+            "rejection_reason": body.reason,
+            "updated_at": now,
+        }},
+    )
+    await _write_audit(
+        admin=admin, action="suspend_supplier", target="supplier", target_id=supplier_id,
+        payload={"reason": body.reason or ""},
+    )
+
+    msg = (
+        f"Hello {supplier.get('owner_name') or 'there'},\n\n"
+        f"Your supplier account has been suspended. "
+        f"{('Reason: ' + body.reason) if body.reason else ''}\n\n"
+        f"Please contact support for assistance."
+    )
+    await _notify_supplier_whatsapp(supplier, msg)
+
+    return {"ok": True, "supplier_id": supplier_id, "status": "suspended"}
 
 
 # ---------- Wiring ----------
@@ -1026,11 +1147,12 @@ def init_platform_management_router(
     get_active_branch_ids, get_active_plan,
     secret_key: str, algorithm: str = "HS256",
     create_in_app_notification=None,
+    send_whatsapp_notification=None,
 ):
     """Called by server.py at import time to inject shared dependencies."""
     global _db, _get_subscription_status
     global _count_billable_branches, _get_active_branch_ids, _get_active_plan
-    global _secret_key, _algorithm, _create_in_app_notification
+    global _secret_key, _algorithm, _create_in_app_notification, _send_whatsapp_notification
     _db = db
     _get_subscription_status = get_subscription_status
     _count_billable_branches = count_billable_branches
@@ -1039,4 +1161,5 @@ def init_platform_management_router(
     _secret_key = secret_key
     _algorithm = algorithm
     _create_in_app_notification = create_in_app_notification
+    _send_whatsapp_notification = send_whatsapp_notification
     return management_router

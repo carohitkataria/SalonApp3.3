@@ -50,6 +50,12 @@ import platform_admin_management as platform_admin_mgmt_mod
 # Import discount codes module (Phase 4 — Part D)
 import discount_codes as discount_codes_mod
 
+# Phase 8 — Supplier auth/signup
+import supplier_auth as supplier_auth_mod
+
+# Phase 9 — Supplier products/dashboard
+import supplier_products as supplier_products_mod
+
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
 
@@ -12347,12 +12353,26 @@ platform_admin_mgmt_mod.init_platform_management_router(
     secret_key=SECRET_KEY,
     algorithm=ALGORITHM,
     create_in_app_notification=create_in_app_notification,
+    send_whatsapp_notification=send_whatsapp_notification,
 )
 fastapi_app.include_router(platform_admin_mgmt_mod.management_router)
 
 # Phase 4 (Part D) — discount codes router
 discount_codes_mod.init_discount_codes_router(db=db)
 fastapi_app.include_router(discount_codes_mod.discount_codes_router)
+
+# Phase 8 (Part B) — Supplier auth + signup router
+supplier_auth_mod.init_supplier_auth_router(
+    db=db,
+    send_whatsapp_otp=send_whatsapp_otp,
+    secret_key=SECRET_KEY,
+    algorithm=ALGORITHM,
+)
+fastapi_app.include_router(supplier_auth_mod.supplier_auth_router)
+
+# Phase 9 (Part B) — Supplier products / dashboard / samples router
+supplier_products_mod.init_supplier_products_router(db=db)
+fastapi_app.include_router(supplier_products_mod.supplier_products_router)
 
 # Health check endpoint for Kubernetes liveness/readiness probes
 @fastapi_app.get("/health")

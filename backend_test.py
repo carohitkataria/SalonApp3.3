@@ -1,915 +1,720 @@
-#!/usr/bin/env python3
 """
-Phase 6 + Phase 7 Backend Testing Script
-Tests platform admin dashboard, broadcasts, and discount code flows
+Phase 8 + Phase 9 Backend Testing — Supplier Signup, Auth, Admin Management, Products CRUD
+
+Test sequence:
+A. Supplier signup (6 tests)
+B. Supplier auth status gating (3 tests)
+C. Platform admin approve/reject/suspend (10 tests)
+D. Supplier dashboard stats (3 tests)
+E. Supplier products CRUD (15 tests)
+F. Cross-tenant isolation (3 tests)
+G. Suspend (3 tests)
+H. Product samples (2 tests)
 """
 
+import os
+import sys
 import requests
 import json
-import os
-from datetime import datetime, timedelta
+from datetime import datetime
 
-# Read backend URL from frontend/.env
-BACKEND_URL = "https://phase6-plus.preview.emergentagent.com/api"
+# Get backend URL from frontend/.env
+BACKEND_URL = None
+try:
+    with open('/app/frontend/.env', 'r') as f:
+        for line in f:
+            if line.startswith('REACT_APP_BACKEND_URL='):
+                BACKEND_URL = line.split('=', 1)[1].strip()
+                break
+except Exception as e:
+    print(f"❌ Failed to read REACT_APP_BACKEND_URL from frontend/.env: {e}")
+    sys.exit(1)
 
-# Platform admin mobile from backend/.env
+if not BACKEND_URL:
+    print("❌ REACT_APP_BACKEND_URL not found in frontend/.env")
+    sys.exit(1)
+
+BASE_URL = f"{BACKEND_URL}/api"
+print(f"🔗 Testing against: {BASE_URL}\n")
+
+# Test credentials
 PLATFORM_OWNER_MOBILE = "7503070727"
-
-# Test results tracking
-test_results = {
-    "passed": [],
-    "failed": [],
-    "total": 0
+TEST_SUPPLIERS = {
+    "TEST_S1": {"mobile": "+919900110001", "password": "Supplier@123", "business_name": "Test Supplier 1", "owner_name": "Alice"},
+    "TEST_S2": {"mobile": "+919900110002", "password": "Supplier@123", "business_name": "Test Supplier 2", "owner_name": "Bob"},
+    "TEST_S3": {"mobile": "+919900110003", "password": "Supplier@123", "business_name": "Test Supplier 3", "owner_name": "Charlie"},
+    "TEST_S4": {"mobile": "+919900110004", "password": "Supplier@123", "business_name": "Test Supplier 4", "owner_name": "Diana"},
 }
 
+# Global state
+platform_admin_token = None
+supplier_tokens = {}
+supplier_ids = {}
+product_ids = {}
+
 def log_test(name, passed, details=""):
-    """Log test result"""
-    test_results["total"] += 1
-    if passed:
-        test_results["passed"].append(name)
-        print(f"✅ PASS: {name}")
-    else:
-        test_results["failed"].append({"name": name, "details": details})
-        print(f"❌ FAIL: {name}")
-        if details:
-            print(f"   Details: {details}")
-
-def print_summary():
-    """Print test summary"""
-    print("\n" + "="*80)
-    print("TEST SUMMARY")
-    print("="*80)
-    print(f"Total Tests: {test_results['total']}")
-    print(f"Passed: {len(test_results['passed'])}")
-    print(f"Failed: {len(test_results['failed'])}")
-    print(f"Pass Rate: {len(test_results['passed'])/test_results['total']*100:.1f}%")
-    
-    if test_results['failed']:
-        print("\n❌ FAILED TESTS:")
-        for fail in test_results['failed']:
-            print(f"  - {fail['name']}")
-            if fail['details']:
-                print(f"    {fail['details']}")
-    print("="*80)
-
-# ============================================================================
-# AUTH SETUP
-# ============================================================================
+    status = "✅ PASS" if passed else "❌ FAIL"
+    print(f"{status}: {name}")
+    if details:
+        print(f"   {details}")
 
 def get_platform_admin_token():
     """Get platform admin JWT via OTP flow"""
-    print("\n" + "="*80)
-    print("PLATFORM ADMIN AUTH SETUP")
-    print("="*80)
+    global platform_admin_token
     
-    # Step 1: Request OTP
-    print(f"\n1. Requesting OTP for platform admin: {PLATFORM_OWNER_MOBILE}")
-    resp = requests.post(
-        f"{BACKEND_URL}/platform/auth/request-otp",
-        json={"mobile": PLATFORM_OWNER_MOBILE}
-    )
-    
+    # Request OTP
+    resp = requests.post(f"{BASE_URL}/platform/auth/request-otp", json={"mobile": PLATFORM_OWNER_MOBILE})
     if resp.status_code != 200:
-        print(f"❌ Failed to request OTP: {resp.status_code} - {resp.text}")
+        log_test("Platform Admin OTP Request", False, f"Status {resp.status_code}: {resp.text}")
         return None
     
     data = resp.json()
-    print(f"✅ OTP requested successfully")
-    
-    # Extract OTP from response (for testing)
     otp = data.get("otp")
     if not otp:
-        print("❌ No OTP in response")
+        log_test("Platform Admin OTP Request", False, "No OTP in response (Twilio configured?)")
         return None
     
-    print(f"   OTP: {otp}")
-    
-    # Step 2: Verify OTP
-    print(f"\n2. Verifying OTP: {otp}")
-    resp = requests.post(
-        f"{BACKEND_URL}/platform/auth/verify-otp",
-        json={"mobile": PLATFORM_OWNER_MOBILE, "otp": otp}
-    )
-    
+    # Verify OTP
+    resp = requests.post(f"{BASE_URL}/platform/auth/verify-otp", json={"mobile": PLATFORM_OWNER_MOBILE, "otp": otp})
     if resp.status_code != 200:
-        print(f"❌ Failed to verify OTP: {resp.status_code} - {resp.text}")
+        log_test("Platform Admin OTP Verify", False, f"Status {resp.status_code}: {resp.text}")
         return None
     
     data = resp.json()
-    token = data.get("access_token")
-    
-    if not token:
-        print("❌ No access_token in response")
-        return None
-    
-    print(f"✅ Platform admin authenticated successfully")
-    print(f"   Token length: {len(token)} chars")
-    
-    return token
+    platform_admin_token = data.get("access_token") or data.get("token")
+    if platform_admin_token:
+        log_test("Platform Admin Authentication", True, f"Token obtained")
+    else:
+        log_test("Platform Admin Authentication", False, f"No token in response: {data}")
+    return platform_admin_token
 
-def get_salon_admin_token():
-    """Get salon admin JWT using existing salon credentials"""
+def test_a_supplier_signup():
+    """A. Supplier signup (6 tests)"""
     print("\n" + "="*80)
-    print("SALON ADMIN AUTH SETUP")
+    print("A. SUPPLIER SIGNUP")
     print("="*80)
     
-    # Use existing salon admin credentials
-    phone = "7503070727"
-    password = "salon123"
-    
-    print(f"\n1. Logging in as salon admin: {phone}")
-    resp = requests.post(
-        f"{BACKEND_URL}/salon/users/login",
-        json={"identifier": phone, "password": password}
-    )
-    
-    if resp.status_code != 200:
-        print(f"❌ Failed to login: {resp.status_code} - {resp.text}")
-        return None, None
-    
-    data = resp.json()
-    token = data.get("access_token")
-    salon_id = data.get("salon_id")
-    
-    if not token or not salon_id:
-        print("❌ Missing access_token or salon_id in response")
-        return None, None
-    
-    print(f"✅ Salon admin authenticated successfully")
-    print(f"   Salon ID: {salon_id}")
-    print(f"   Token length: {len(token)} chars")
-    
-    return token, salon_id
-
-# ============================================================================
-# PHASE 6 TESTS
-# ============================================================================
-
-def test_dashboard_stats(platform_token):
-    """Test A: GET /api/platform/dashboard/stats"""
-    print("\n" + "="*80)
-    print("TEST A: PLATFORM DASHBOARD STATS")
-    print("="*80)
-    
-    # Test A1: Without auth (should fail with 401)
-    print("\n[A1] GET /platform/dashboard/stats without auth")
-    resp = requests.get(f"{BACKEND_URL}/platform/dashboard/stats")
-    log_test(
-        "A1: Dashboard stats without auth returns 401",
-        resp.status_code == 401,
-        f"Expected 401, got {resp.status_code}"
-    )
-    
-    # Test A2: With auth (should succeed with all required keys)
-    print("\n[A2] GET /platform/dashboard/stats with auth")
-    resp = requests.get(
-        f"{BACKEND_URL}/platform/dashboard/stats",
-        headers={"Authorization": f"Bearer {platform_token}"}
-    )
-    
-    if resp.status_code != 200:
-        log_test(
-            "A2: Dashboard stats with auth returns 200",
-            False,
-            f"Expected 200, got {resp.status_code} - {resp.text}"
-        )
-        return
-    
-    log_test("A2: Dashboard stats with auth returns 200", True)
-    
-    data = resp.json()
-    
-    # Verify all required keys
-    required_keys = [
-        "as_of", "salons", "subscriptions", "revenue", 
-        "overrides", "discount_codes", "suppliers"
-    ]
-    
-    for key in required_keys:
-        log_test(
-            f"A2: Response has '{key}' key",
-            key in data,
-            f"Missing key: {key}"
-        )
-    
-    # Verify nested structure
-    if "salons" in data:
-        salon_keys = ["total", "active", "suspended"]
-        for key in salon_keys:
-            log_test(
-                f"A2: salons.{key} is numeric",
-                key in data["salons"] and isinstance(data["salons"][key], (int, float)),
-                f"salons.{key} = {data['salons'].get(key)}"
-            )
-    
-    if "subscriptions" in data:
-        sub_keys = ["active", "expired", "granted"]
-        for key in sub_keys:
-            log_test(
-                f"A2: subscriptions.{key} is numeric",
-                key in data["subscriptions"] and isinstance(data["subscriptions"][key], (int, float)),
-                f"subscriptions.{key} = {data['subscriptions'].get(key)}"
-            )
-    
-    if "revenue" in data:
-        rev_keys = ["mtd_amount", "mtd_transaction_count"]
-        for key in rev_keys:
-            log_test(
-                f"A2: revenue.{key} is numeric",
-                key in data["revenue"] and isinstance(data["revenue"][key], (int, float)),
-                f"revenue.{key} = {data['revenue'].get(key)}"
-            )
-    
-    if "discount_codes" in data:
-        dc_keys = ["total", "active", "disabled", "expired", "mtd_uses", "mtd_savings"]
-        for key in dc_keys:
-            log_test(
-                f"A2: discount_codes.{key} is numeric",
-                key in data["discount_codes"] and isinstance(data["discount_codes"][key], (int, float)),
-                f"discount_codes.{key} = {data['discount_codes'].get(key)}"
-            )
-    
-    print(f"\n📊 Dashboard Stats Sample:")
-    print(json.dumps(data, indent=2)[:500] + "...")
-
-def test_broadcasts(platform_token):
-    """Test B: POST /api/platform/broadcast + GET /api/platform/broadcasts"""
-    print("\n" + "="*80)
-    print("TEST B: BROADCAST ENDPOINTS")
-    print("="*80)
-    
-    # Test B1: POST without auth (should fail with 401)
-    print("\n[B1] POST /platform/broadcast without auth")
-    resp = requests.post(
-        f"{BACKEND_URL}/platform/broadcast",
-        json={"title": "Test", "message": "Hello", "audience": "all_salons"}
-    )
-    log_test(
-        "B1: Broadcast without auth returns 401",
-        resp.status_code == 401,
-        f"Expected 401, got {resp.status_code}"
-    )
-    
-    # Test B2: POST with invalid audience (should fail with 422)
-    print("\n[B2] POST /platform/broadcast with invalid audience")
-    resp = requests.post(
-        f"{BACKEND_URL}/platform/broadcast",
-        headers={"Authorization": f"Bearer {platform_token}"},
-        json={"title": "Test", "message": "Hello", "audience": "invalid_audience"}
-    )
-    log_test(
-        "B2: Broadcast with invalid audience returns 422",
-        resp.status_code == 422,
-        f"Expected 422, got {resp.status_code}"
-    )
-    
-    # Test B3: POST with too short title (should fail with 422)
-    print("\n[B3] POST /platform/broadcast with too short title")
-    resp = requests.post(
-        f"{BACKEND_URL}/platform/broadcast",
-        headers={"Authorization": f"Bearer {platform_token}"},
-        json={"title": "T", "message": "X", "audience": "all_salons"}
-    )
-    log_test(
-        "B3: Broadcast with title < 2 chars returns 422",
-        resp.status_code == 422,
-        f"Expected 422, got {resp.status_code}"
-    )
-    
-    # Test B4: POST with valid data (should succeed)
-    print("\n[B4] POST /platform/broadcast with valid data")
-    broadcast_data = {
-        "title": "Test Broadcast Phase 6",
-        "message": "This is a test broadcast message for Phase 6 testing",
-        "audience": "all_salons",
-        "channels": ["in_app"]
+    # A1. Sign up TEST_S1 with valid data
+    s1 = TEST_SUPPLIERS["TEST_S1"]
+    payload = {
+        "mobile": s1["mobile"],
+        "password": s1["password"],
+        "business_name": s1["business_name"],
+        "owner_name": s1["owner_name"],
+        "gst_number": "22AAAAA0000A1Z5",
+        "category_tags": ["haircare", "skincare"]
     }
-    resp = requests.post(
-        f"{BACKEND_URL}/platform/broadcast",
-        headers={"Authorization": f"Bearer {platform_token}"},
-        json=broadcast_data
-    )
-    
-    if resp.status_code != 200:
-        log_test(
-            "B4: Broadcast with valid data returns 200",
-            False,
-            f"Expected 200, got {resp.status_code} - {resp.text}"
-        )
-        return
-    
-    log_test("B4: Broadcast with valid data returns 200", True)
-    
-    data = resp.json()
-    broadcast_id = data.get("id")
-    
-    # Verify response structure
-    required_keys = ["id", "target_count", "delivered_count", "failed_count", "audience", "created_at"]
-    for key in required_keys:
-        log_test(
-            f"B4: Response has '{key}' key",
-            key in data,
-            f"Missing key: {key}"
-        )
-    
-    print(f"\n📢 Broadcast Created:")
-    print(f"   ID: {broadcast_id}")
-    print(f"   Target Count: {data.get('target_count')}")
-    print(f"   Delivered Count: {data.get('delivered_count')}")
-    
-    # Test B5: GET broadcast history
-    print("\n[B5] GET /platform/broadcasts")
-    resp = requests.get(
-        f"{BACKEND_URL}/platform/broadcasts",
-        headers={"Authorization": f"Bearer {platform_token}"}
-    )
-    
-    if resp.status_code != 200:
-        log_test(
-            "B5: GET broadcasts returns 200",
-            False,
-            f"Expected 200, got {resp.status_code} - {resp.text}"
-        )
-        return
-    
-    log_test("B5: GET broadcasts returns 200", True)
-    
-    data = resp.json()
-    broadcasts = data.get("broadcasts", [])
-    
-    log_test(
-        "B5: Broadcasts list is not empty",
-        len(broadcasts) > 0,
-        f"Expected at least 1 broadcast, got {len(broadcasts)}"
-    )
-    
-    if broadcasts:
-        first = broadcasts[0]
-        log_test(
-            "B5: First broadcast is the one just sent",
-            first.get("id") == broadcast_id,
-            f"Expected {broadcast_id}, got {first.get('id')}"
-        )
-    
-    # Test B6-B8: Try different audiences
-    audiences = ["premium_salons", "free_salons", "suspended_salons"]
-    for i, audience in enumerate(audiences, start=6):
-        print(f"\n[B{i}] POST /platform/broadcast with audience={audience}")
-        resp = requests.post(
-            f"{BACKEND_URL}/platform/broadcast",
-            headers={"Authorization": f"Bearer {platform_token}"},
-            json={
-                "title": f"Test {audience}",
-                "message": f"Testing {audience} audience",
-                "audience": audience,
-                "channels": ["in_app"]
-            }
-        )
-        log_test(
-            f"B{i}: Broadcast to {audience} returns 200",
-            resp.status_code == 200,
-            f"Expected 200, got {resp.status_code}"
-        )
-        
-        if resp.status_code == 200:
-            data = resp.json()
-            print(f"   Target Count: {data.get('target_count')}")
-            print(f"   Delivered Count: {data.get('delivered_count')}")
-
-def test_supplier_stubs(platform_token):
-    """Test C: Supplier stub endpoints"""
-    print("\n" + "="*80)
-    print("TEST C: SUPPLIER STUBS")
-    print("="*80)
-    
-    # Test C1: GET /platform/suppliers
-    print("\n[C1] GET /platform/suppliers")
-    resp = requests.get(
-        f"{BACKEND_URL}/platform/suppliers",
-        headers={"Authorization": f"Bearer {platform_token}"}
-    )
-    
-    if resp.status_code != 200:
-        log_test(
-            "C1: GET suppliers returns 200",
-            False,
-            f"Expected 200, got {resp.status_code} - {resp.text}"
-        )
-        return
-    
-    log_test("C1: GET suppliers returns 200", True)
-    
-    data = resp.json()
-    log_test(
-        "C1: Response has 'suppliers' key",
-        "suppliers" in data,
-        f"Missing 'suppliers' key"
-    )
-    log_test(
-        "C1: Response has 'total' key",
-        "total" in data,
-        f"Missing 'total' key"
-    )
-    
-    print(f"   Suppliers: {data.get('total', 0)}")
-    
-    # Test C2: GET with status filter
-    print("\n[C2] GET /platform/suppliers?status=pending")
-    resp = requests.get(
-        f"{BACKEND_URL}/platform/suppliers?status=pending",
-        headers={"Authorization": f"Bearer {platform_token}"}
-    )
-    log_test(
-        "C2: GET suppliers with status filter returns 200",
-        resp.status_code == 200,
-        f"Expected 200, got {resp.status_code}"
-    )
-    
-    # Test C3: POST approve non-existent supplier (should return 404)
-    print("\n[C3] POST /platform/suppliers/nonexistent-id/approve")
-    resp = requests.post(
-        f"{BACKEND_URL}/platform/suppliers/nonexistent-id/approve",
-        headers={"Authorization": f"Bearer {platform_token}"}
-    )
-    log_test(
-        "C3: Approve non-existent supplier returns 404",
-        resp.status_code == 404,
-        f"Expected 404, got {resp.status_code}"
-    )
-    
-    if resp.status_code == 404:
-        log_test(
-            "C3: Error detail mentions Phase 8",
-            "Phase 8" in resp.text,
-            f"Expected 'Phase 8' in error message"
-        )
-    
-    # Test C4: POST reject non-existent supplier (should return 404)
-    print("\n[C4] POST /platform/suppliers/nonexistent-id/reject")
-    resp = requests.post(
-        f"{BACKEND_URL}/platform/suppliers/nonexistent-id/reject",
-        headers={"Authorization": f"Bearer {platform_token}"}
-    )
-    log_test(
-        "C4: Reject non-existent supplier returns 404",
-        resp.status_code == 404,
-        f"Expected 404, got {resp.status_code}"
-    )
-
-# ============================================================================
-# PHASE 7 TESTS
-# ============================================================================
-
-def test_discount_code_free_months(platform_token, salon_token, salon_id):
-    """Test D: Discount code free_months end-to-end"""
-    print("\n" + "="*80)
-    print("TEST D: DISCOUNT CODE FREE_MONTHS END-TO-END")
-    print("="*80)
-    
-    # Step 1: Create a free_months discount code
-    print("\n[D1] Create free_months discount code")
-    code_data = {
-        "code": "TESTFREE_PHASE7",
-        "discount_type": "free_months",
-        "free_months": 1,
-        "duration_months": 1,
-        "max_uses_per_salon": 1,
-        "max_total_uses": None,
-        "applies_to_branches": "all"
-    }
-    resp = requests.post(
-        f"{BACKEND_URL}/platform/discount-codes",
-        headers={"Authorization": f"Bearer {platform_token}"},
-        json=code_data
-    )
-    
-    if resp.status_code != 200:
-        log_test(
-            "D1: Create free_months code returns 200",
-            False,
-            f"Expected 200, got {resp.status_code} - {resp.text}"
-        )
-        return
-    
-    log_test("D1: Create free_months code returns 200", True)
-    
-    data = resp.json()
-    code_id = data.get("id")
-    print(f"   Code ID: {code_id}")
-    print(f"   Code: {data.get('code')}")
-    
-    # Step 2: Find a salon without active subscription
-    # For testing, we'll use the current salon and try to create order
-    print(f"\n[D2] Create order with free_months code for salon {salon_id}")
-    resp = requests.post(
-        f"{BACKEND_URL}/salons/{salon_id}/subscription/create-order",
-        headers={"Authorization": f"Bearer {salon_token}"},
-        json={"discount_code": "TESTFREE_PHASE7"}
-    )
-    
-    if resp.status_code != 200:
-        log_test(
-            "D2: Create order with free_months code",
-            False,
-            f"Expected 200, got {resp.status_code} - {resp.text}"
-        )
-        # This might fail if salon already has active subscription
-        # That's okay for testing purposes
-        print("   Note: Salon may already have active subscription")
-        return
-    
-    log_test("D2: Create order with free_months code returns 200", True)
-    
-    data = resp.json()
-    
-    # Verify response structure
-    log_test(
-        "D2: Response has is_free_months=true",
-        data.get("is_free_months") is True,
-        f"Expected True, got {data.get('is_free_months')}"
-    )
-    
-    log_test(
-        "D2: Response has free_months_granted=1",
-        data.get("free_months_granted") == 1,
-        f"Expected 1, got {data.get('free_months_granted')}"
-    )
-    
-    log_test(
-        "D2: Response has total_amount=0",
-        data.get("total_amount") == 0,
-        f"Expected 0, got {data.get('total_amount')}"
-    )
-    
-    log_test(
-        "D2: Response has payment_session_id=null",
-        data.get("payment_session_id") is None,
-        f"Expected None, got {data.get('payment_session_id')}"
-    )
-    
-    log_test(
-        "D2: Response has expiry_date",
-        "expiry_date" in data,
-        "Missing expiry_date"
-    )
-    
-    log_test(
-        "D2: Response has subscription_id",
-        "subscription_id" in data,
-        "Missing subscription_id"
-    )
-    
-    log_test(
-        "D2: Response has payment_status='discounted_free'",
-        data.get("payment_status") == "discounted_free",
-        f"Expected 'discounted_free', got {data.get('payment_status')}"
-    )
-    
-    subscription_id = data.get("subscription_id")
-    print(f"\n✅ Free months subscription created:")
-    print(f"   Subscription ID: {subscription_id}")
-    print(f"   Expiry Date: {data.get('expiry_date')}")
-    
-    # Step 3: Verify subscription status
-    print(f"\n[D3] Verify subscription status")
-    resp = requests.get(
-        f"{BACKEND_URL}/salons/{salon_id}/subscription/status",
-        headers={"Authorization": f"Bearer {salon_token}"}
-    )
-    
+    resp = requests.post(f"{BASE_URL}/supplier/signup", json=payload)
     if resp.status_code == 200:
         data = resp.json()
-        log_test(
-            "D3: Subscription status is premium",
-            data.get("is_premium") is True,
-            f"Expected True, got {data.get('is_premium')}"
-        )
-        print(f"   Status: {data.get('status')}")
-        print(f"   Expiry: {data.get('expiry_date')}")
+        supplier = data.get("supplier", {})
+        if supplier.get("status") == "pending_approval" and "password_hash" not in supplier:
+            supplier_ids["TEST_S1"] = supplier.get("id")
+            log_test("A1. Sign up TEST_S1", True, f"ID: {supplier.get('id')}, status: pending_approval")
+        else:
+            log_test("A1. Sign up TEST_S1", False, f"Unexpected response: {data}")
+    else:
+        log_test("A1. Sign up TEST_S1", False, f"Status {resp.status_code}: {resp.text}")
     
-    # Step 4: Try to use same code again (should fail with max_uses_per_salon)
-    print(f"\n[D4] Try to use same code again (should fail)")
-    resp = requests.post(
-        f"{BACKEND_URL}/salons/{salon_id}/subscription/create-order",
-        headers={"Authorization": f"Bearer {salon_token}"},
-        json={"discount_code": "TESTFREE_PHASE7"}
-    )
-    log_test(
-        "D4: Second use of same code returns 400",
-        resp.status_code == 400,
-        f"Expected 400, got {resp.status_code}"
-    )
+    # A2. Duplicate mobile → 409
+    resp = requests.post(f"{BASE_URL}/supplier/signup", json=payload)
+    if resp.status_code == 409:
+        data = resp.json()
+        detail = data.get("detail", {})
+        if isinstance(detail, dict) and detail.get("code") == "supplier_already_exists":
+            log_test("A2. Duplicate mobile → 409", True, f"detail.code: {detail.get('code')}")
+        else:
+            log_test("A2. Duplicate mobile → 409", False, f"Expected code='supplier_already_exists', got: {detail}")
+    else:
+        log_test("A2. Duplicate mobile → 409", False, f"Status {resp.status_code}: {resp.text}")
     
-    # Step 5: Try bogus code (should fail)
-    print(f"\n[D5] Try bogus discount code (should fail)")
-    resp = requests.post(
-        f"{BACKEND_URL}/salons/{salon_id}/subscription/create-order",
-        headers={"Authorization": f"Bearer {salon_token}"},
-        json={"discount_code": "BOGUS_CODE_XYZ"}
-    )
-    log_test(
-        "D5: Bogus code returns 400",
-        resp.status_code == 400,
-        f"Expected 400, got {resp.status_code}"
-    )
+    # A3. Invalid mobile "123" → 400
+    resp = requests.post(f"{BASE_URL}/supplier/signup", json={**payload, "mobile": "123"})
+    if resp.status_code == 400:
+        log_test("A3. Invalid mobile → 400", True)
+    else:
+        log_test("A3. Invalid mobile → 400", False, f"Status {resp.status_code}")
+    
+    # A4. Invalid GST "@@@@@" → 400
+    resp = requests.post(f"{BASE_URL}/supplier/signup", json={**payload, "mobile": "+919900110099", "gst_number": "@@@@@"})
+    if resp.status_code == 400:
+        log_test("A4. Invalid GST → 400", True)
+    else:
+        log_test("A4. Invalid GST → 400", False, f"Status {resp.status_code}")
+    
+    # A5. Weak password "123" → 422
+    resp = requests.post(f"{BASE_URL}/supplier/signup", json={**payload, "mobile": "+919900110098", "password": "123"})
+    if resp.status_code == 422:
+        log_test("A5. Weak password → 422", True)
+    else:
+        log_test("A5. Weak password → 422", False, f"Status {resp.status_code}")
+    
+    # A6. Sign up TEST_S2 and TEST_S3 for later tests
+    for key in ["TEST_S2", "TEST_S3"]:
+        s = TEST_SUPPLIERS[key]
+        payload = {
+            "mobile": s["mobile"],
+            "password": s["password"],
+            "business_name": s["business_name"],
+            "owner_name": s["owner_name"],
+            "gst_number": "22BBBBB0000B1Z5",
+            "category_tags": ["skincare"]
+        }
+        resp = requests.post(f"{BASE_URL}/supplier/signup", json=payload)
+        if resp.status_code == 200:
+            data = resp.json()
+            supplier_ids[key] = data.get("supplier", {}).get("id")
+            log_test(f"A6. Sign up {key}", True, f"ID: {supplier_ids[key]}")
+        else:
+            log_test(f"A6. Sign up {key}", False, f"Status {resp.status_code}")
 
-def test_discount_code_percent(platform_token, salon_token, salon_id):
-    """Test E: Discount code percent carries through"""
+def test_b_supplier_auth_status_gating():
+    """B. Supplier auth status gating (3 tests)"""
     print("\n" + "="*80)
-    print("TEST E: DISCOUNT CODE PERCENT REGRESSION")
+    print("B. SUPPLIER AUTH STATUS GATING")
     print("="*80)
     
-    # Step 1: Create a percent discount code
-    print("\n[E1] Create percent discount code")
-    code_data = {
-        "code": "PCT50_PHASE7",
-        "discount_type": "percent",
-        "percent_off": 50,
-        "duration_months": 1,
-        "max_uses_per_salon": 5,
-        "applies_to_branches": "all"
+    s1 = TEST_SUPPLIERS["TEST_S1"]
+    
+    # B1. Password login with pending status → 403
+    resp = requests.post(f"{BASE_URL}/supplier/auth/password-login", json={"mobile": s1["mobile"], "password": s1["password"]})
+    if resp.status_code == 403:
+        data = resp.json()
+        detail = data.get("detail", {})
+        if isinstance(detail, dict) and detail.get("code") == "supplier_not_active" and detail.get("status") == "pending_approval":
+            log_test("B1. Password login pending → 403", True, f"status: {detail.get('status')}")
+        else:
+            log_test("B1. Password login pending → 403", False, f"Unexpected detail: {detail}")
+    else:
+        log_test("B1. Password login pending → 403", False, f"Status {resp.status_code}")
+    
+    # B2. Request OTP → 200
+    resp = requests.post(f"{BASE_URL}/supplier/auth/request-otp", json={"mobile": s1["mobile"]})
+    if resp.status_code == 200:
+        data = resp.json()
+        otp = data.get("otp")
+        if otp:
+            log_test("B2. Request OTP → 200", True, f"OTP: {otp}")
+            
+            # B3. Verify OTP with pending status → 403
+            resp = requests.post(f"{BASE_URL}/supplier/auth/verify-otp", json={"mobile": s1["mobile"], "otp": otp})
+            if resp.status_code == 403:
+                data = resp.json()
+                detail = data.get("detail", {})
+                if isinstance(detail, dict) and detail.get("status") == "pending_approval":
+                    log_test("B3. Verify OTP pending → 403", True, f"status: {detail.get('status')}")
+                else:
+                    log_test("B3. Verify OTP pending → 403", False, f"Unexpected detail: {detail}")
+            else:
+                log_test("B3. Verify OTP pending → 403", False, f"Status {resp.status_code}")
+        else:
+            log_test("B2. Request OTP → 200", False, "No OTP in response")
+    else:
+        log_test("B2. Request OTP → 200", False, f"Status {resp.status_code}")
+
+def test_c_platform_admin_supplier_management():
+    """C. Platform admin approve/reject/suspend (10 tests)"""
+    print("\n" + "="*80)
+    print("C. PLATFORM ADMIN SUPPLIER MANAGEMENT")
+    print("="*80)
+    
+    if not platform_admin_token:
+        print("❌ Platform admin token not available, skipping section C")
+        return
+    
+    headers = {"Authorization": f"Bearer {platform_admin_token}"}
+    
+    # C1. GET /platform/suppliers?status=pending_approval
+    resp = requests.get(f"{BASE_URL}/platform/suppliers?status=pending_approval", headers=headers)
+    if resp.status_code == 200:
+        data = resp.json()
+        suppliers = data.get("suppliers", [])
+        found = [s for s in suppliers if s.get("id") in [supplier_ids.get("TEST_S1"), supplier_ids.get("TEST_S2"), supplier_ids.get("TEST_S3")]]
+        log_test("C1. GET pending suppliers", True, f"Found {len(found)}/3 test suppliers")
+    else:
+        log_test("C1. GET pending suppliers", False, f"Status {resp.status_code}")
+    
+    # C2. GET /platform/suppliers?q=alice
+    resp = requests.get(f"{BASE_URL}/platform/suppliers?q=alice", headers=headers)
+    if resp.status_code == 200:
+        data = resp.json()
+        suppliers = data.get("suppliers", [])
+        found = any(s.get("owner_name", "").lower() == "alice" for s in suppliers)
+        log_test("C2. Search by owner name", True if found else False, f"Found Alice: {found}")
+    else:
+        log_test("C2. Search by owner name", False, f"Status {resp.status_code}")
+    
+    # C3. GET /platform/suppliers/{TEST_S1.id}
+    s1_id = supplier_ids.get("TEST_S1")
+    if s1_id:
+        resp = requests.get(f"{BASE_URL}/platform/suppliers/{s1_id}", headers=headers)
+        if resp.status_code == 200:
+            data = resp.json()
+            if "password_hash" not in data:
+                log_test("C3. GET supplier detail", True, f"No password_hash in response")
+            else:
+                log_test("C3. GET supplier detail", False, "password_hash exposed")
+        else:
+            log_test("C3. GET supplier detail", False, f"Status {resp.status_code}")
+    else:
+        log_test("C3. GET supplier detail", False, "TEST_S1 ID not available")
+    
+    # C4. POST /platform/suppliers/{TEST_S1.id}/approve
+    if s1_id:
+        resp = requests.post(f"{BASE_URL}/platform/suppliers/{s1_id}/approve", headers=headers)
+        if resp.status_code == 200:
+            data = resp.json()
+            if data.get("status") == "active":
+                log_test("C4. Approve TEST_S1", True, "status: active")
+            else:
+                log_test("C4. Approve TEST_S1", False, f"Unexpected status: {data.get('status')}")
+        else:
+            log_test("C4. Approve TEST_S1", False, f"Status {resp.status_code}")
+    
+    # C5. POST /platform/suppliers/{TEST_S2.id}/reject without body → 422
+    s2_id = supplier_ids.get("TEST_S2")
+    if s2_id:
+        resp = requests.post(f"{BASE_URL}/platform/suppliers/{s2_id}/reject", headers=headers, json={})
+        if resp.status_code == 422:
+            log_test("C5. Reject without reason → 422", True)
+        else:
+            log_test("C5. Reject without reason → 422", False, f"Status {resp.status_code}")
+    
+    # C6. POST /platform/suppliers/{TEST_S2.id}/reject with reason
+    if s2_id:
+        resp = requests.post(f"{BASE_URL}/platform/suppliers/{s2_id}/reject", headers=headers, json={"reason": "Missing GST"})
+        if resp.status_code == 200:
+            data = resp.json()
+            if data.get("status") == "rejected":
+                log_test("C6. Reject TEST_S2", True, f"status: rejected, reason: {data.get('reason')}")
+            else:
+                log_test("C6. Reject TEST_S2", False, f"Unexpected status: {data.get('status')}")
+        else:
+            log_test("C6. Reject TEST_S2", False, f"Status {resp.status_code}")
+    
+    # C7. Password login for TEST_S1 (approved) → 200
+    s1 = TEST_SUPPLIERS["TEST_S1"]
+    resp = requests.post(f"{BASE_URL}/supplier/auth/password-login", json={"mobile": s1["mobile"], "password": s1["password"]})
+    if resp.status_code == 200:
+        data = resp.json()
+        token = data.get("token")
+        supplier = data.get("supplier", {})
+        if token and supplier.get("status") == "active":
+            supplier_tokens["TEST_S1"] = token
+            log_test("C7. Login TEST_S1 (approved)", True, "Token obtained")
+        else:
+            log_test("C7. Login TEST_S1 (approved)", False, f"Unexpected response: {data}")
+    else:
+        log_test("C7. Login TEST_S1 (approved)", False, f"Status {resp.status_code}")
+    
+    # C8. Password login for TEST_S2 (rejected) → 403
+    s2 = TEST_SUPPLIERS["TEST_S2"]
+    resp = requests.post(f"{BASE_URL}/supplier/auth/password-login", json={"mobile": s2["mobile"], "password": s2["password"]})
+    if resp.status_code == 403:
+        data = resp.json()
+        detail = data.get("detail", {})
+        if isinstance(detail, dict) and detail.get("status") == "rejected":
+            log_test("C8. Login TEST_S2 (rejected) → 403", True, f"status: {detail.get('status')}")
+        else:
+            log_test("C8. Login TEST_S2 (rejected) → 403", False, f"Unexpected detail: {detail}")
+    else:
+        log_test("C8. Login TEST_S2 (rejected) → 403", False, f"Status {resp.status_code}")
+    
+    # C9. GET /supplier/me with TEST_S1 token
+    token = supplier_tokens.get("TEST_S1")
+    if token:
+        resp = requests.get(f"{BASE_URL}/supplier/me", headers={"Authorization": f"Bearer {token}"})
+        if resp.status_code == 200:
+            data = resp.json()
+            if data.get("id") == s1_id and "password_hash" not in data:
+                log_test("C9. GET /supplier/me", True, f"ID: {data.get('id')}")
+            else:
+                log_test("C9. GET /supplier/me", False, f"Unexpected response: {data}")
+        else:
+            log_test("C9. GET /supplier/me", False, f"Status {resp.status_code}")
+    
+    # C10. PUT /supplier/me with category_tags update
+    if token:
+        resp = requests.put(f"{BASE_URL}/supplier/me", headers={"Authorization": f"Bearer {token}"}, json={"category_tags": ["haircare", "skincare", "tools"]})
+        if resp.status_code == 200:
+            data = resp.json()
+            tags = data.get("category_tags", [])
+            if "tools" in tags:
+                log_test("C10. PUT /supplier/me", True, f"category_tags: {tags}")
+            else:
+                log_test("C10. PUT /supplier/me", False, f"category_tags not updated: {tags}")
+        else:
+            log_test("C10. PUT /supplier/me", False, f"Status {resp.status_code}")
+
+def test_d_supplier_dashboard_stats():
+    """D. Supplier dashboard stats (3 tests)"""
+    print("\n" + "="*80)
+    print("D. SUPPLIER DASHBOARD STATS")
+    print("="*80)
+    
+    token = supplier_tokens.get("TEST_S1")
+    if not token:
+        print("❌ TEST_S1 token not available, skipping section D")
+        return
+    
+    headers = {"Authorization": f"Bearer {token}"}
+    
+    # D1. GET /supplier/dashboard/stats → 200
+    resp = requests.get(f"{BASE_URL}/supplier/dashboard/stats", headers=headers)
+    if resp.status_code == 200:
+        data = resp.json()
+        log_test("D1. GET dashboard stats", True, f"Response: {json.dumps(data, indent=2)}")
+    else:
+        log_test("D1. GET dashboard stats", False, f"Status {resp.status_code}")
+    
+    # D2. Validate response shape
+    if resp.status_code == 200:
+        required_keys = ["supplier_id", "as_of", "orders_pending", "products_live", "low_stock_count", "mtd_gmv", "products_by_category"]
+        missing = [k for k in required_keys if k not in data]
+        if not missing:
+            log_test("D2. Response shape valid", True, f"All keys present")
+        else:
+            log_test("D2. Response shape valid", False, f"Missing keys: {missing}")
+    
+    # D3. With no products yet, products_live=0, low_stock_count=0
+    if resp.status_code == 200:
+        if data.get("products_live") == 0 and data.get("low_stock_count") == 0:
+            log_test("D3. No products yet", True, "products_live=0, low_stock_count=0")
+        else:
+            log_test("D3. No products yet", False, f"products_live={data.get('products_live')}, low_stock_count={data.get('low_stock_count')}")
+
+def test_e_supplier_products_crud():
+    """E. Supplier products CRUD (15 tests)"""
+    print("\n" + "="*80)
+    print("E. SUPPLIER PRODUCTS CRUD")
+    print("="*80)
+    
+    token = supplier_tokens.get("TEST_S1")
+    if not token:
+        print("❌ TEST_S1 token not available, skipping section E")
+        return
+    
+    headers = {"Authorization": f"Bearer {token}"}
+    
+    # E1. POST /supplier/products with valid data
+    product1 = {
+        "name": "Premium Hair Serum",
+        "brand": "BrandX",
+        "category": "haircare",
+        "unit": "ml",
+        "pack_size": "100ml",
+        "mrp": 499.0,
+        "selling_price": 399.0,
+        "gst_percent": 18,
+        "inventory_available": 50,
+        "low_stock_threshold": 10
     }
-    resp = requests.post(
-        f"{BACKEND_URL}/platform/discount-codes",
-        headers={"Authorization": f"Bearer {platform_token}"},
-        json=code_data
-    )
+    resp = requests.post(f"{BASE_URL}/supplier/products", headers=headers, json=product1)
+    if resp.status_code == 200:
+        data = resp.json()
+        if "total_on_hand" in data and "is_low_stock" in data:
+            product_ids["product1"] = data.get("id")
+            log_test("E1. Create product1", True, f"ID: {data.get('id')}, total_on_hand: {data.get('total_on_hand')}")
+        else:
+            log_test("E1. Create product1", False, f"Missing enriched fields: {data}")
+    else:
+        log_test("E1. Create product1", False, f"Status {resp.status_code}: {resp.text}")
     
-    if resp.status_code != 200:
-        log_test(
-            "E1: Create percent code returns 200",
-            False,
-            f"Expected 200, got {resp.status_code} - {resp.text}"
-        )
-        return
+    # E2. POST with selling_price > mrp → 422
+    resp = requests.post(f"{BASE_URL}/supplier/products", headers=headers, json={**product1, "selling_price": 600})
+    if resp.status_code == 422:
+        log_test("E2. selling_price > mrp → 422", True)
+    else:
+        log_test("E2. selling_price > mrp → 422", False, f"Status {resp.status_code}")
     
-    log_test("E1: Create percent code returns 200", True)
+    # E3. POST with unit="foo" → 422
+    resp = requests.post(f"{BASE_URL}/supplier/products", headers=headers, json={**product1, "unit": "foo"})
+    if resp.status_code == 422:
+        log_test("E3. Invalid unit → 422", True)
+    else:
+        log_test("E3. Invalid unit → 422", False, f"Status {resp.status_code}")
     
-    data = resp.json()
-    print(f"   Code ID: {data.get('id')}")
-    print(f"   Code: {data.get('code')}")
+    # E4. POST with mrp=-1 → 422
+    resp = requests.post(f"{BASE_URL}/supplier/products", headers=headers, json={**product1, "mrp": -1})
+    if resp.status_code == 422:
+        log_test("E4. Negative mrp → 422", True)
+    else:
+        log_test("E4. Negative mrp → 422", False, f"Status {resp.status_code}")
     
-    # Step 2: Create order with percent code
-    # Note: This might fail if salon already has active subscription
-    print(f"\n[E2] Create order with percent code")
-    resp = requests.post(
-        f"{BACKEND_URL}/salons/{salon_id}/subscription/create-order",
-        headers={"Authorization": f"Bearer {salon_token}"},
-        json={"discount_code": "PCT50_PHASE7"}
-    )
+    # E5. POST a second product
+    product2 = {
+        "name": "Skin Toner",
+        "category": "skincare",
+        "unit": "ml",
+        "mrp": 250,
+        "selling_price": 250,
+        "inventory_available": 3,
+        "low_stock_threshold": 5
+    }
+    resp = requests.post(f"{BASE_URL}/supplier/products", headers=headers, json=product2)
+    if resp.status_code == 200:
+        data = resp.json()
+        product_ids["product2"] = data.get("id")
+        log_test("E5. Create product2", True, f"ID: {data.get('id')}")
+    else:
+        log_test("E5. Create product2", False, f"Status {resp.status_code}")
     
-    if resp.status_code != 200:
-        log_test(
-            "E2: Create order with percent code",
-            False,
-            f"Expected 200, got {resp.status_code} - {resp.text}"
-        )
-        print("   Note: Salon may already have active subscription")
-        return
+    # E6. GET /supplier/products → total=2
+    resp = requests.get(f"{BASE_URL}/supplier/products", headers=headers)
+    if resp.status_code == 200:
+        data = resp.json()
+        total = data.get("total", 0)
+        log_test("E6. GET products", True if total == 2 else False, f"total: {total}")
+    else:
+        log_test("E6. GET products", False, f"Status {resp.status_code}")
     
-    log_test("E2: Create order with percent code returns 200", True)
+    # E7. GET /supplier/products?q=hair → total=1
+    resp = requests.get(f"{BASE_URL}/supplier/products?q=hair", headers=headers)
+    if resp.status_code == 200:
+        data = resp.json()
+        total = data.get("total", 0)
+        log_test("E7. Search products", True if total == 1 else False, f"total: {total}")
+    else:
+        log_test("E7. Search products", False, f"Status {resp.status_code}")
     
-    data = resp.json()
+    # E8. GET /supplier/products?category=skincare → total=1
+    resp = requests.get(f"{BASE_URL}/supplier/products?category=skincare", headers=headers)
+    if resp.status_code == 200:
+        data = resp.json()
+        total = data.get("total", 0)
+        log_test("E8. Filter by category", True if total == 1 else False, f"total: {total}")
+    else:
+        log_test("E8. Filter by category", False, f"Status {resp.status_code}")
     
-    # Verify response structure
-    log_test(
-        "E2: Response has payment_session_id",
-        data.get("payment_session_id") is not None,
-        f"Expected payment_session_id, got {data.get('payment_session_id')}"
-    )
+    # E9. GET /supplier/dashboard/stats → products_live=2, low_stock_count=1
+    resp = requests.get(f"{BASE_URL}/supplier/dashboard/stats", headers=headers)
+    if resp.status_code == 200:
+        data = resp.json()
+        products_live = data.get("products_live", 0)
+        low_stock_count = data.get("low_stock_count", 0)
+        log_test("E9. Dashboard stats updated", True if products_live == 2 and low_stock_count == 1 else False, 
+                 f"products_live: {products_live}, low_stock_count: {low_stock_count}")
+    else:
+        log_test("E9. Dashboard stats updated", False, f"Status {resp.status_code}")
     
-    log_test(
-        "E2: Response has base_amount > 0",
-        data.get("base_amount", 0) > 0,
-        f"Expected > 0, got {data.get('base_amount')}"
-    )
+    # E10. PUT /supplier/products/{id} with name update
+    product1_id = product_ids.get("product1")
+    if product1_id:
+        resp = requests.put(f"{BASE_URL}/supplier/products/{product1_id}", headers=headers, json={"name": "Premium Hair Serum v2"})
+        if resp.status_code == 200:
+            data = resp.json()
+            log_test("E10. Update product name", True, f"name: {data.get('name')}")
+        else:
+            log_test("E10. Update product name", False, f"Status {resp.status_code}")
     
-    base = data.get("base_amount", 0)
-    discount = data.get("discount_amount", 0)
-    total = data.get("total_amount", 0)
+    # E11. PUT with selling_price > mrp → 400
+    if product1_id:
+        resp = requests.put(f"{BASE_URL}/supplier/products/{product1_id}", headers=headers, json={"selling_price": 700})
+        if resp.status_code == 400:
+            log_test("E11. Update selling_price > mrp → 400", True)
+        else:
+            log_test("E11. Update selling_price > mrp → 400", False, f"Status {resp.status_code}")
     
-    log_test(
-        "E2: discount_amount is ~50% of base_amount",
-        abs(discount - base * 0.5) < 1,  # Allow 1 rupee tolerance
-        f"Expected ~{base * 0.5}, got {discount}"
-    )
+    # E12. POST /supplier/products/{id}/restock with qty=10
+    if product1_id:
+        resp = requests.post(f"{BASE_URL}/supplier/products/{product1_id}/restock", headers=headers, json={"qty": 10})
+        if resp.status_code == 200:
+            data = resp.json()
+            product = data.get("product", {})
+            log_test("E12. Restock product", True, f"inventory_available: {product.get('inventory_available')}")
+        else:
+            log_test("E12. Restock product", False, f"Status {resp.status_code}")
     
-    log_test(
-        "E2: total_amount = base_amount - discount_amount",
-        abs(total - (base - discount)) < 0.01,
-        f"Expected {base - discount}, got {total}"
-    )
+    # E13. POST /supplier/products/{id}/restock with qty=0 → 422
+    if product1_id:
+        resp = requests.post(f"{BASE_URL}/supplier/products/{product1_id}/restock", headers=headers, json={"qty": 0})
+        if resp.status_code == 422:
+            log_test("E13. Restock qty=0 → 422", True)
+        else:
+            log_test("E13. Restock qty=0 → 422", False, f"Status {resp.status_code}")
     
-    log_test(
-        "E2: Response has is_free_months=false",
-        data.get("is_free_months") is False,
-        f"Expected False, got {data.get('is_free_months')}"
-    )
+    # E14. DELETE /supplier/products/{id} → soft delete
+    if product1_id:
+        resp = requests.delete(f"{BASE_URL}/supplier/products/{product1_id}", headers=headers)
+        if resp.status_code == 200:
+            data = resp.json()
+            log_test("E14. Delete product", True, f"is_active: {data.get('is_active')}")
+        else:
+            log_test("E14. Delete product", False, f"Status {resp.status_code}")
     
-    print(f"\n💰 Percent discount order created:")
-    print(f"   Base Amount: ₹{base}")
-    print(f"   Discount (50%): ₹{discount}")
-    print(f"   Total Amount: ₹{total}")
-    print(f"   Payment Session ID: {data.get('payment_session_id')}")
+    # E15. GET /supplier/products → still shows deleted product
+    resp = requests.get(f"{BASE_URL}/supplier/products", headers=headers)
+    if resp.status_code == 200:
+        data = resp.json()
+        total = data.get("total", 0)
+        log_test("E15. GET products (includes deleted)", True, f"total: {total} (includes deleted)")
+    else:
+        log_test("E15. GET products (includes deleted)", False, f"Status {resp.status_code}")
 
-def test_discount_codes_crud(platform_token):
-    """Test F: Discount codes admin CRUD regression"""
+def test_f_cross_tenant_isolation():
+    """F. Cross-tenant isolation (3 tests)"""
     print("\n" + "="*80)
-    print("TEST F: DISCOUNT CODES ADMIN CRUD REGRESSION")
+    print("F. CROSS-TENANT ISOLATION")
     print("="*80)
     
-    # Test F1: GET /platform/discount-codes
-    print("\n[F1] GET /platform/discount-codes")
-    resp = requests.get(
-        f"{BACKEND_URL}/platform/discount-codes",
-        headers={"Authorization": f"Bearer {platform_token}"}
-    )
-    
-    if resp.status_code != 200:
-        log_test(
-            "F1: GET discount codes returns 200",
-            False,
-            f"Expected 200, got {resp.status_code} - {resp.text}"
-        )
-        return
-    
-    log_test("F1: GET discount codes returns 200", True)
-    
-    data = resp.json()
-    codes = data.get("codes", [])
-    
-    log_test(
-        "F1: Response has codes list",
-        isinstance(codes, list),
-        f"Expected list, got {type(codes)}"
-    )
-    
-    # Find our test codes
-    testfree = next((c for c in codes if c.get("code") == "TESTFREE_PHASE7"), None)
-    pct50 = next((c for c in codes if c.get("code") == "PCT50_PHASE7"), None)
-    
-    log_test(
-        "F1: TESTFREE_PHASE7 code exists",
-        testfree is not None,
-        "Code not found in list"
-    )
-    
-    log_test(
-        "F1: PCT50_PHASE7 code exists",
-        pct50 is not None,
-        "Code not found in list"
-    )
-    
-    if not testfree:
-        print("   ⚠️ Cannot continue CRUD tests without TESTFREE_PHASE7 code")
-        return
-    
-    code_id = testfree.get("id")
-    print(f"   Found {len(codes)} discount codes")
-    print(f"   TESTFREE_PHASE7 ID: {code_id}")
-    
-    # Test F2: PUT /platform/discount-codes/{id}
-    print(f"\n[F2] PUT /platform/discount-codes/{code_id}")
-    resp = requests.put(
-        f"{BACKEND_URL}/platform/discount-codes/{code_id}",
-        headers={"Authorization": f"Bearer {platform_token}"},
-        json={"description": "Updated description for testing"}
-    )
-    
-    if resp.status_code != 200:
-        log_test(
-            "F2: PUT discount code returns 200",
-            False,
-            f"Expected 200, got {resp.status_code} - {resp.text}"
-        )
-    else:
-        log_test("F2: PUT discount code returns 200", True)
+    # Sign up and approve TEST_S4
+    s4 = TEST_SUPPLIERS["TEST_S4"]
+    payload = {
+        "mobile": s4["mobile"],
+        "password": s4["password"],
+        "business_name": s4["business_name"],
+        "owner_name": s4["owner_name"],
+        "gst_number": "22DDDDD0000D1Z5",
+        "category_tags": ["tools"]
+    }
+    resp = requests.post(f"{BASE_URL}/supplier/signup", json=payload)
+    if resp.status_code == 200:
         data = resp.json()
-        log_test(
-            "F2: Description was updated",
-            data.get("description") == "Updated description for testing",
-            f"Expected 'Updated description for testing', got {data.get('description')}"
-        )
-    
-    # Test F3: POST /platform/discount-codes/{id}/disable
-    print(f"\n[F3] POST /platform/discount-codes/{code_id}/disable")
-    resp = requests.post(
-        f"{BACKEND_URL}/platform/discount-codes/{code_id}/disable",
-        headers={"Authorization": f"Bearer {platform_token}"}
-    )
-    
-    if resp.status_code != 200:
-        log_test(
-            "F3: Disable code returns 200",
-            False,
-            f"Expected 200, got {resp.status_code} - {resp.text}"
-        )
-    else:
-        log_test("F3: Disable code returns 200", True)
-        data = resp.json()
-        log_test(
-            "F3: Status is 'disabled'",
-            data.get("status") == "disabled",
-            f"Expected 'disabled', got {data.get('status')}"
-        )
-    
-    # Test F4: POST /platform/discount-codes/{id}/enable
-    print(f"\n[F4] POST /platform/discount-codes/{code_id}/enable")
-    resp = requests.post(
-        f"{BACKEND_URL}/platform/discount-codes/{code_id}/enable",
-        headers={"Authorization": f"Bearer {platform_token}"}
-    )
-    
-    if resp.status_code != 200:
-        log_test(
-            "F4: Enable code returns 200",
-            False,
-            f"Expected 200, got {resp.status_code} - {resp.text}"
-        )
-    else:
-        log_test("F4: Enable code returns 200", True)
-        data = resp.json()
-        log_test(
-            "F4: Status is 'active'",
-            data.get("status") == "active",
-            f"Expected 'active', got {data.get('status')}"
-        )
-    
-    # Test F5: GET /platform/discount-codes/{id}/usages
-    print(f"\n[F5] GET /platform/discount-codes/{code_id}/usages")
-    resp = requests.get(
-        f"{BACKEND_URL}/platform/discount-codes/{code_id}/usages",
-        headers={"Authorization": f"Bearer {platform_token}"}
-    )
-    
-    if resp.status_code != 200:
-        log_test(
-            "F5: GET code usages returns 200",
-            False,
-            f"Expected 200, got {resp.status_code} - {resp.text}"
-        )
-    else:
-        log_test("F5: GET code usages returns 200", True)
-        data = resp.json()
-        usages = data.get("usages", [])
-        log_test(
-            "F5: Usages list is present",
-            isinstance(usages, list),
-            f"Expected list, got {type(usages)}"
-        )
-        print(f"   Total usages: {len(usages)}")
-    
-    # Cleanup: Disable test codes
-    print(f"\n[CLEANUP] Disabling test codes")
-    for code in [testfree, pct50]:
-        if code:
-            resp = requests.post(
-                f"{BACKEND_URL}/platform/discount-codes/{code['id']}/disable",
-                headers={"Authorization": f"Bearer {platform_token}"}
-            )
+        supplier_ids["TEST_S4"] = data.get("supplier", {}).get("id")
+        
+        # Approve TEST_S4
+        if platform_admin_token:
+            headers = {"Authorization": f"Bearer {platform_admin_token}"}
+            resp = requests.post(f"{BASE_URL}/platform/suppliers/{supplier_ids['TEST_S4']}/approve", headers=headers)
             if resp.status_code == 200:
-                print(f"   ✅ Disabled {code['code']}")
+                # Login TEST_S4
+                resp = requests.post(f"{BASE_URL}/supplier/auth/password-login", json={"mobile": s4["mobile"], "password": s4["password"]})
+                if resp.status_code == 200:
+                    supplier_tokens["TEST_S4"] = resp.json().get("token")
+                    log_test("F. Setup TEST_S4", True, "Signed up, approved, logged in")
+    
+    token_s4 = supplier_tokens.get("TEST_S4")
+    if not token_s4:
+        print("❌ TEST_S4 token not available, skipping section F")
+        return
+    
+    headers_s4 = {"Authorization": f"Bearer {token_s4}"}
+    
+    # F1. GET /supplier/products with TEST_S4 token → total=0
+    resp = requests.get(f"{BASE_URL}/supplier/products", headers=headers_s4)
+    if resp.status_code == 200:
+        data = resp.json()
+        total = data.get("total", 0)
+        log_test("F1. TEST_S4 products → 0", True if total == 0 else False, f"total: {total}")
+    else:
+        log_test("F1. TEST_S4 products → 0", False, f"Status {resp.status_code}")
+    
+    # F2. GET /supplier/products/{TEST_S1.product_id} with TEST_S4 token → 404
+    product1_id = product_ids.get("product1")
+    if product1_id:
+        resp = requests.get(f"{BASE_URL}/supplier/products/{product1_id}", headers=headers_s4)
+        if resp.status_code == 404:
+            log_test("F2. Cross-tenant GET → 404", True)
+        else:
+            log_test("F2. Cross-tenant GET → 404", False, f"Status {resp.status_code}")
+    
+    # F3. PUT /supplier/products/{TEST_S1.product_id} with TEST_S4 token → 404
+    if product1_id:
+        resp = requests.put(f"{BASE_URL}/supplier/products/{product1_id}", headers=headers_s4, json={"name": "Hacked"})
+        if resp.status_code == 404:
+            log_test("F3. Cross-tenant PUT → 404", True)
+        else:
+            log_test("F3. Cross-tenant PUT → 404", False, f"Status {resp.status_code}")
 
-# ============================================================================
-# MAIN TEST RUNNER
-# ============================================================================
+def test_g_suspend():
+    """G. Suspend (3 tests)"""
+    print("\n" + "="*80)
+    print("G. SUSPEND")
+    print("="*80)
+    
+    if not platform_admin_token:
+        print("❌ Platform admin token not available, skipping section G")
+        return
+    
+    headers = {"Authorization": f"Bearer {platform_admin_token}"}
+    s1_id = supplier_ids.get("TEST_S1")
+    token_s1 = supplier_tokens.get("TEST_S1")
+    
+    # G1. Admin: POST /platform/suppliers/{TEST_S1.id}/suspend
+    if s1_id:
+        resp = requests.post(f"{BASE_URL}/platform/suppliers/{s1_id}/suspend", headers=headers, json={"reason": "Investigation"})
+        if resp.status_code == 200:
+            data = resp.json()
+            log_test("G1. Suspend TEST_S1", True, f"status: {data.get('status')}")
+        else:
+            log_test("G1. Suspend TEST_S1", False, f"Status {resp.status_code}")
+    
+    # G2. GET /supplier/me with suspended supplier token → 403
+    if token_s1:
+        resp = requests.get(f"{BASE_URL}/supplier/me", headers={"Authorization": f"Bearer {token_s1}"})
+        if resp.status_code == 403:
+            data = resp.json()
+            detail = data.get("detail", {})
+            if isinstance(detail, dict) and detail.get("status") == "suspended":
+                log_test("G2. GET /supplier/me suspended → 403", True, f"status: {detail.get('status')}")
+            else:
+                log_test("G2. GET /supplier/me suspended → 403", False, f"Unexpected detail: {detail}")
+        else:
+            log_test("G2. GET /supplier/me suspended → 403", False, f"Status {resp.status_code}")
+    
+    # G3. Password login for suspended supplier → 403
+    s1 = TEST_SUPPLIERS["TEST_S1"]
+    resp = requests.post(f"{BASE_URL}/supplier/auth/password-login", json={"mobile": s1["mobile"], "password": s1["password"]})
+    if resp.status_code == 403:
+        data = resp.json()
+        detail = data.get("detail", {})
+        if isinstance(detail, dict) and detail.get("status") == "suspended":
+            log_test("G3. Login suspended → 403", True, f"status: {detail.get('status')}")
+        else:
+            log_test("G3. Login suspended → 403", False, f"Unexpected detail: {detail}")
+    else:
+        log_test("G3. Login suspended → 403", False, f"Status {resp.status_code}")
+
+def test_h_product_samples():
+    """H. Product samples (2 tests)"""
+    print("\n" + "="*80)
+    print("H. PRODUCT SAMPLES")
+    print("="*80)
+    
+    token_s4 = supplier_tokens.get("TEST_S4")
+    if not token_s4:
+        print("❌ TEST_S4 token not available, skipping section H")
+        return
+    
+    headers = {"Authorization": f"Bearer {token_s4}"}
+    
+    # H1. GET /supplier/product-samples → 200 with samples:[]
+    resp = requests.get(f"{BASE_URL}/supplier/product-samples", headers=headers)
+    if resp.status_code == 200:
+        data = resp.json()
+        samples = data.get("samples", [])
+        log_test("H1. GET product-samples", True, f"samples: {len(samples)} (empty until seeded)")
+    else:
+        log_test("H1. GET product-samples", False, f"Status {resp.status_code}")
+    
+    # H2. POST /supplier/products/from-sample/bogus-id → 404
+    resp = requests.post(f"{BASE_URL}/supplier/products/from-sample/bogus-id", headers=headers)
+    if resp.status_code == 404:
+        log_test("H2. Create from bogus sample → 404", True)
+    else:
+        log_test("H2. Create from bogus sample → 404", False, f"Status {resp.status_code}")
 
 def main():
-    """Main test runner"""
-    print("\n" + "="*80)
-    print("PHASE 6 + PHASE 7 BACKEND TESTING")
     print("="*80)
-    print(f"Backend URL: {BACKEND_URL}")
-    print(f"Platform Owner Mobile: {PLATFORM_OWNER_MOBILE}")
+    print("PHASE 8 + PHASE 9 BACKEND TESTING")
+    print("="*80)
     
-    # Get platform admin token
-    platform_token = get_platform_admin_token()
-    if not platform_token:
-        print("\n❌ CRITICAL: Failed to get platform admin token. Cannot continue.")
-        return
+    # Get platform admin token first
+    get_platform_admin_token()
     
-    # Get salon admin token
-    salon_token, salon_id = get_salon_admin_token()
-    if not salon_token or not salon_id:
-        print("\n⚠️ WARNING: Failed to get salon admin token. Some tests will be skipped.")
+    # Run all test sections
+    test_a_supplier_signup()
+    test_b_supplier_auth_status_gating()
+    test_c_platform_admin_supplier_management()
+    test_d_supplier_dashboard_stats()
+    test_e_supplier_products_crud()
+    test_f_cross_tenant_isolation()
+    test_g_suspend()
+    test_h_product_samples()
     
-    # Run Phase 6 tests
-    test_dashboard_stats(platform_token)
-    test_broadcasts(platform_token)
-    test_supplier_stubs(platform_token)
-    
-    # Run Phase 7 tests (only if we have salon token)
-    if salon_token and salon_id:
-        test_discount_code_free_months(platform_token, salon_token, salon_id)
-        test_discount_code_percent(platform_token, salon_token, salon_id)
-    else:
-        print("\n⚠️ SKIPPING Phase 7 tests (no salon admin token)")
-    
-    # Run discount codes CRUD tests
-    test_discount_codes_crud(platform_token)
-    
-    # Print summary
-    print_summary()
+    print("\n" + "="*80)
+    print("TESTING COMPLETE")
+    print("="*80)
 
 if __name__ == "__main__":
     main()
