@@ -2,7 +2,7 @@
 [94m============================================================[0m
 [94mITERATION 5 — Phase 5 (Part A) Backend Regression Test[0m
 [94m============================================================[0m
-Base URL: https://premium-features-fix.preview.emergentagent.com/api
+Base URL: https://phase6-plus.preview.emergentagent.com/api
 Platform Owner: 7503070727
 Test Salon (Premium): c72d0479-1131-42ec-a952-89cd33b80de0
 Test Salon (Free): fff82245-2d17-47ed-8c0d-d404e26ad33f
@@ -73,7 +73,7 @@ Test Salon (Free): fff82245-2d17-47ed-8c0d-d404e26ad33f
   [92m✓ PASS:[0m JWT payload valid: role=salon_view_as, readonly=True, exp in 900s
 
 [94m[TEST 22][0m POST /platform/salons/fff82245-2d17-47ed-8c0d-d404e26ad33f/subscription/grant-pro
-  [92m✓ PASS:[0m Grant-pro successful: override_id=53c671c7-74c6-4b14-a164-e185a0709ae0, is_premium=true, max_branches=5
+  [92m✓ PASS:[0m Grant-pro successful: override_id=phase6-plus, is_premium=true, max_branches=5
 
 [94m[TEST 23][0m POST /platform/salons/fff82245-2d17-47ed-8c0d-d404e26ad33f/subscription/override-branches
   [92m✓ PASS:[0m Override-branches successful: max_branches_effective=10
@@ -186,7 +186,7 @@ Total: 40 tests
 
 [94m[TEST 0][0m CLEANUP: Removing test data
   [93mℹ INFO:[0m Cleanup requires direct DB access:
-  [93mℹ INFO:[0m   - Delete salon_subscriptions for salon_id=fff82245-2d17-47ed-8c0d-d404e26ad33f where payment_status='granted'
-  [93mℹ INFO:[0m   - Delete subscription_overrides_log for salon_id=fff82245-2d17-47ed-8c0d-d404e26ad33f
+  [93mℹ INFO:[0m   - Delete salon_subscriptions for salon_id=phase6-plus where payment_status='granted'
+  [93mℹ INFO:[0m   - Delete subscription_overrides_log for salon_id=phase6-plus
   [93mℹ INFO:[0m   - Delete platform_audit_log entries from this test run
   [93mℹ INFO:[0m   - Ensure salon fff82245-2d17-47ed-8c0d-d404e26ad33f has status='active'

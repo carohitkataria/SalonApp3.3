@@ -13,7 +13,7 @@ from datetime import datetime, timedelta
 from typing import Optional, Dict, Any
 
 # Configuration
-BASE_URL = "https://premium-features-fix.preview.emergentagent.com/api"
+BASE_URL = "https://phase6-plus.preview.emergentagent.com/api"
 PLATFORM_OWNER_MOBILE = "7503070727"
 TEST_SALON_PREMIUM = "c72d0479-1131-42ec-a952-89cd33b80de0"  # Has 3 branches, premium sub
 TEST_SALON_FREE = "fff82245-2d17-47ed-8c0d-d404e26ad33f"  # Glam Central37, free plan

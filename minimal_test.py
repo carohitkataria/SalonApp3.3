@@ -6,7 +6,7 @@ Minimal test for attendance endpoints to identify the issue
 import requests
 import json
 
-BASE_URL = "https://premium-features-fix.preview.emergentagent.com/api"
+BASE_URL = "https://phase6-plus.preview.emergentagent.com/api"
 SALON_ID = "91a8e87d-d687-49ea-b3e5-460cc55cf3de"
 
 def test_endpoint(endpoint, method="GET", data=None):
