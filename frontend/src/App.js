@@ -3,6 +3,7 @@ import { AuthProvider } from '@/contexts/AuthContext';
 import { BranchProvider } from '@/contexts/BranchContext';
 import { WebSocketProvider } from '@/contexts/WebSocketContext';
 import { ThemeProvider } from '@/contexts/ThemeContext';
+import { SupplierAuthProvider } from '@/contexts/SupplierAuthContext';
 import { Toaster } from '@/components/ui/sonner';
 
 // Layout
@@ -36,6 +37,13 @@ import PaymentCallbackPage from '@/pages/PaymentCallbackPage';
 import PlatformLoginPage from '@/pages/PlatformLoginPage';
 import PlatformDashboardPage from '@/pages/PlatformDashboardPage';
 
+// Supplier (Phase 8 & 9) — Marketplace seller portal
+import SupplierLoginPage from '@/pages/supplier/SupplierLoginPage';
+import SupplierSignupPage from '@/pages/supplier/SupplierSignupPage';
+import SupplierPendingPage from '@/pages/supplier/SupplierPendingPage';
+import SupplierDashboardPage from '@/pages/supplier/SupplierDashboardPage';
+import SupplierProductsPage from '@/pages/supplier/SupplierProductsPage';
+
 import '@/App.css';
 
 function App() {
@@ -44,6 +52,7 @@ function App() {
       <AuthProvider>
         <BranchProvider>
           <WebSocketProvider>
+            <SupplierAuthProvider>
             <div className="App">
               <Toaster position="top-center" richColors />
               <BrowserRouter>
@@ -85,7 +94,15 @@ function App() {
                   <Route path="/platform/login" element={<PlatformLoginPage />} />
                   <Route path="/platform" element={<PlatformDashboardPage />} />
                   <Route path="/platform/dashboard" element={<Navigate to="/platform" replace />} />
-                  
+
+                  {/* Supplier Marketplace (Phase 8 & 9) */}
+                  <Route path="/supplier" element={<Navigate to="/supplier/login" replace />} />
+                  <Route path="/supplier/login" element={<SupplierLoginPage />} />
+                  <Route path="/supplier/signup" element={<SupplierSignupPage />} />
+                  <Route path="/supplier/pending" element={<SupplierPendingPage />} />
+                  <Route path="/supplier/dashboard" element={<SupplierDashboardPage />} />
+                  <Route path="/supplier/products" element={<SupplierProductsPage />} />
+
                   {/* Redirect old routes */}
                   <Route path="/admin/login" element={<Navigate to="/salon/login" replace />} />
                   <Route path="/admin/dashboard" element={<Navigate to="/salon/dashboard" replace />} />
@@ -93,6 +110,7 @@ function App() {
                 </Routes>
               </BrowserRouter>
             </div>
+            </SupplierAuthProvider>
           </WebSocketProvider>
         </BranchProvider>
       </AuthProvider>

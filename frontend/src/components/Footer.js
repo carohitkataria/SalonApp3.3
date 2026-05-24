@@ -40,6 +40,7 @@ export default function Footer() {
   const company = [
     { label: 'About Us',         action: () => navigate('/about') },
     { label: 'Partner With Us',  action: () => navigate('/salon/login') },
+    { label: 'Become a Supplier',action: () => navigate('/supplier/login'), testid: 'footer-supplier-link' },
     { label: 'Find a Salon',     action: () => navigate('/salons') },
     { label: 'Help',             action: () => navigate('/help') },
   ];
@@ -90,7 +91,7 @@ export default function Footer() {
                 <button
                   onClick={item.action}
                   className="text-sm text-muted-foreground hover:text-brass transition-colors"
-                  data-testid={`footer-company-${item.label.toLowerCase().replace(/ /g,'-')}`}
+                  data-testid={item.testid || `footer-company-${item.label.toLowerCase().replace(/ /g,'-')}`}
                 >
                   {item.label}
                 </button>

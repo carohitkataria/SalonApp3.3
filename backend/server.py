@@ -12406,6 +12406,13 @@ async def startup_event():
         await platform_admin_mod.bootstrap_platform_owner()
     except Exception as e:
         logger.error(f"[STARTUP] platform owner bootstrap failed: {e}")
+    # Phase 9 — seed the 30 permanent supplier product samples (idempotent)
+    try:
+        from data.product_samples_seed import seed_supplier_product_samples
+        n = await seed_supplier_product_samples(db)
+        logger.info(f"[STARTUP] Seeded {n} supplier product samples")
+    except Exception as e:
+        logger.error(f"[STARTUP] product samples seed failed: {e}")
     scheduler.start()
     logger.info("Application started with multi-salon support")
 
