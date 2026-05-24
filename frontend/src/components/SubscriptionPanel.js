@@ -1,7 +1,10 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import axios from 'axios';
-import { Crown, Check, AlertTriangle, Loader2, CreditCard, ReceiptText } from 'lucide-react';
+import {
+  Crown, Check, AlertTriangle, Loader2, ReceiptText, Building2, Info, Tag, X,
+} from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 import { useSubscription } from '@/contexts/SubscriptionContext';
 import { toast } from 'sonner';
 
@@ -33,10 +36,18 @@ const fmtDate = (iso) => {
   }
 };
 
+const fmtMoney = (n) =>
+  `₹${Number(n || 0).toLocaleString('en-IN', { maximumFractionDigits: 0 })}`;
+
 export default function SubscriptionPanel({ salonId }) {
   const { status, plan, refresh, loading, openPaywall, isPremium } = useSubscription();
   const [transactions, setTransactions] = useState([]);
   const [txLoading, setTxLoading] = useState(false);
+
+  // Discount code preview state (Phase 3 wires the UI; Phase 4 will validate)
+  const [codeInput, setCodeInput] = useState('');
+  const [quote, setQuote] = useState(null);
+  const [quoteLoading, setQuoteLoading] = useState(false);
 
   const fetchTx = useCallback(async () => {
     if (!salonId) return;
@@ -54,11 +65,65 @@ export default function SubscriptionPanel({ salonId }) {
     }
   }, [salonId]);
 
+  const fetchQuote = useCallback(async (code = null) => {
+    if (!salonId) return;
+    setQuoteLoading(true);
+    try {
+      const params = code ? `?discount_code=${encodeURIComponent(code)}` : '';
+      const r = await axios.get(
+        `${API}/salons/${salonId}/subscription/quote${params}`
+      );
+      setQuote(r.data);
+      if (code && r.data?.discount_details && !r.data.discount_details.valid) {
+        toast.error(r.data.discount_details.reason || 'Discount code not valid');
+      } else if (code && r.data?.discount_amount > 0) {
+        toast.success(`Code ${code} applied — saved ${fmtMoney(r.data.discount_amount)}`);
+      }
+    } catch (e) {
+      const detail = e?.response?.data?.detail;
+      toast.error(typeof detail === 'string' ? detail : 'Could not fetch quote');
+    } finally {
+      setQuoteLoading(false);
+    }
+  }, [salonId]);
+
   useEffect(() => {
     fetchTx();
-  }, [fetchTx]);
+    fetchQuote();
+  }, [fetchTx, fetchQuote]);
 
   const expired = status?.status === 'expired';
+
+  // Phase 2 (Part C) — per-branch pricing breakdown
+  const pricePerBranch = Number(
+    status?.price_per_branch ?? quote?.price_per_branch ?? plan?.price_per_branch ?? plan?.price ?? 499
+  );
+  const billableBranchCount = Number(
+    status?.billable_branch_count ?? quote?.billable_branch_count ?? 1
+  );
+  const activeBranchCount = Number(
+    status?.active_branch_count ?? billableBranchCount
+  );
+  const baseAmount = Number(status?.base_amount ?? quote?.base_amount ?? pricePerBranch * billableBranchCount);
+  const totalAmount = Number(status?.total_amount ?? quote?.total_amount ?? baseAmount);
+  const discountCode = quote?.discount_code_applied || status?.discount_code_applied;
+  const discountAmount = Number(quote?.discount_amount ?? status?.discount_amount ?? 0);
+  const nextRenewalAmount = Number(status?.next_renewal_amount ?? pricePerBranch * activeBranchCount);
+  const branchesAddedMidCycle = Boolean(status?.branches_added_mid_cycle);
+
+  const handleApplyCode = () => {
+    const code = codeInput.trim();
+    if (!code) {
+      toast.error('Enter a discount code');
+      return;
+    }
+    fetchQuote(code);
+  };
+
+  const handleClearCode = () => {
+    setCodeInput('');
+    fetchQuote();
+  };
 
   return (
     <div className="space-y-6" data-testid="subscription-panel">
@@ -66,7 +131,7 @@ export default function SubscriptionPanel({ salonId }) {
         <Crown className="w-7 h-7 text-amber-400" />
         <div>
           <h2 className="text-2xl font-playfair font-bold text-foreground">Subscription</h2>
-          <p className="text-sm text-muted-foreground">Manage your SalonHub Pro plan</p>
+          <p className="text-sm text-muted-foreground">Per-branch SalonHub Pro pricing</p>
         </div>
       </div>
 
@@ -100,21 +165,41 @@ export default function SubscriptionPanel({ salonId }) {
             <h3 className="text-xl font-bold text-foreground">
               {isPremium || expired ? plan?.plan_name || 'SalonHub Pro' : 'Free Plan'}
             </h3>
+
+            {/* Per-branch breakdown line */}
+            <p className="text-sm text-muted-foreground mt-2 flex items-center gap-1.5 flex-wrap">
+              <Building2 className="w-3.5 h-3.5" />
+              {fmtMoney(pricePerBranch)}/month/branch &nbsp;×&nbsp;{' '}
+              <span className="text-foreground font-medium">
+                {billableBranchCount} branch{billableBranchCount === 1 ? '' : 'es'}
+              </span>{' '}
+              = <span className="text-foreground font-semibold">{fmtMoney(baseAmount)}/month</span>
+            </p>
+
+            {/* Active discount line */}
+            {discountCode && discountAmount > 0 && (
+              <p className="text-sm text-emerald-400 mt-1 flex items-center gap-1.5">
+                <Tag className="w-3.5 h-3.5" />
+                Code <span className="font-mono font-semibold">{discountCode}</span> applied — save {fmtMoney(discountAmount)}
+              </p>
+            )}
+
             {isPremium && status?.expiry_date && (
-              <p className="text-sm text-muted-foreground mt-1">
-                Renews on <span className="text-foreground font-medium">{fmtDate(status.expiry_date)}</span>
+              <p className="text-sm text-muted-foreground mt-2">
+                Next renewal on{' '}
+                <span className="text-foreground font-medium">{fmtDate(status.expiry_date)}</span>
                 {typeof status.days_remaining === 'number' && (
                   <> &nbsp;·&nbsp; {status.days_remaining} day{status.days_remaining === 1 ? '' : 's'} remaining</>
                 )}
               </p>
             )}
             {expired && (
-              <p className="text-sm text-rose-300 mt-1">
+              <p className="text-sm text-rose-300 mt-2">
                 Your premium features have stopped working. Existing data is safe and visible. Renew to unlock again.
               </p>
             )}
             {!isPremium && !expired && (
-              <p className="text-sm text-muted-foreground mt-1">
+              <p className="text-sm text-muted-foreground mt-2">
                 You're on the free plan. Upgrade to add multiple staff & branches.
               </p>
             )}
@@ -122,7 +207,7 @@ export default function SubscriptionPanel({ salonId }) {
 
           <div className="text-right">
             <div className="text-3xl font-bold text-foreground">
-              ₹{Number(plan?.price ?? 499).toLocaleString('en-IN')}
+              {fmtMoney(totalAmount)}
               <span className="text-sm font-normal text-muted-foreground ml-1">
                 /{plan?.billing_cycle === 'yearly' ? 'year' : 'month'}
               </span>
@@ -148,6 +233,64 @@ export default function SubscriptionPanel({ salonId }) {
         )}
       </div>
 
+      {/* Next renewal banner — only if premium & there is a clear next-renewal amount */}
+      {isPremium && (
+        <div className="rounded-xl border border-amber-500/30 bg-amber-500/5 px-4 py-3 flex items-start gap-3">
+          <Info className="w-4 h-4 text-amber-400 mt-0.5 shrink-0" />
+          <p className="text-sm text-muted-foreground">
+            Your next renewal on{' '}
+            <span className="text-foreground font-medium">{fmtDate(status?.expiry_date)}</span> will be{' '}
+            <span className="text-foreground font-semibold">{fmtMoney(nextRenewalAmount)}</span> for{' '}
+            <span className="text-foreground font-medium">
+              {activeBranchCount} branch{activeBranchCount === 1 ? '' : 'es'}
+            </span>
+            .
+          </p>
+        </div>
+      )}
+
+      {/* Mid-cycle banner — only when branches were added after the last paid period */}
+      {branchesAddedMidCycle && (
+        <div className="rounded-xl border border-sky-500/30 bg-sky-500/5 px-4 py-3 flex items-start gap-3">
+          <Building2 className="w-4 h-4 text-sky-400 mt-0.5 shrink-0" />
+          <p className="text-sm text-muted-foreground">
+            New branches added mid-cycle are billed from your next renewal.
+          </p>
+        </div>
+      )}
+
+      {/* Discount code input */}
+      <div className="rounded-2xl border border-border bg-card/40 p-6">
+        <h3 className="text-lg font-bold text-foreground flex items-center gap-2 mb-3">
+          <Tag className="w-5 h-5 text-amber-400" />
+          Discount code
+        </h3>
+        <p className="text-xs text-muted-foreground mb-3">
+          Have a promo code? Apply it here to see the discounted price before checkout.
+        </p>
+        <div className="flex flex-col sm:flex-row gap-2">
+          <Input
+            placeholder="Enter discount code"
+            value={codeInput}
+            onChange={(e) => setCodeInput(e.target.value.toUpperCase())}
+            className="sm:max-w-xs"
+            disabled={quoteLoading}
+          />
+          <Button
+            onClick={handleApplyCode}
+            disabled={quoteLoading || !codeInput.trim()}
+            className="bg-zinc-800 hover:bg-zinc-700 text-white"
+          >
+            {quoteLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Apply'}
+          </Button>
+          {discountCode && (
+            <Button variant="ghost" onClick={handleClearCode} disabled={quoteLoading}>
+              <X className="w-4 h-4 mr-1" /> Remove
+            </Button>
+          )}
+        </div>
+      </div>
+
       {/* Transaction history */}
       <div className="rounded-2xl border border-border bg-card/40 p-6">
         <div className="flex items-center justify-between mb-4">
@@ -155,7 +298,7 @@ export default function SubscriptionPanel({ salonId }) {
             <ReceiptText className="w-5 h-5 text-amber-400" />
             Payment History
           </h3>
-          <Button variant="ghost" size="sm" onClick={() => { fetchTx(); refresh(); }} disabled={loading || txLoading}>
+          <Button variant="ghost" size="sm" onClick={() => { fetchTx(); refresh(); fetchQuote(); }} disabled={loading || txLoading}>
             {(loading || txLoading) ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Refresh'}
           </Button>
         </div>
@@ -185,7 +328,7 @@ export default function SubscriptionPanel({ salonId }) {
                       {tx.gateway_order_id || tx.id?.slice(0, 12)}
                     </td>
                     <td className="py-3 text-right font-medium">
-                      ₹{Number(tx.amount).toLocaleString('en-IN')}
+                      {fmtMoney(tx.amount)}
                     </td>
                     <td className="py-3 text-center">
                       <span

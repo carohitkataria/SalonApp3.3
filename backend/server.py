@@ -41,6 +41,9 @@ from twilio_service import (
 # Import invoice service
 from invoice_service import generate_invoice_pdf, save_invoice_pdf
 
+# Import platform admin module (Phase 1 — Part A)
+import platform_admin as platform_admin_mod
+
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
 
@@ -659,15 +662,17 @@ class StaffBranchTransfer(BaseModel):
 class SubscriptionPlanCreate(BaseModel):
     plan_name: str
     price: float
+    price_per_branch: Optional[float] = None  # Phase 2 — Part C
     billing_cycle: str = "monthly"  # monthly | yearly
-    max_staff: Optional[int] = None  # None = unlimited
-    max_branches: Optional[int] = None  # None = unlimited
+    max_staff: Optional[int] = None
+    max_branches: Optional[int] = None
     features: List[str] = []
     status: str = "active"  # active | inactive
 
 class SubscriptionPlanUpdate(BaseModel):
     plan_name: Optional[str] = None
     price: Optional[float] = None
+    price_per_branch: Optional[float] = None  # Phase 2 — Part C
     billing_cycle: Optional[str] = None
     max_staff: Optional[int] = None
     max_branches: Optional[int] = None
@@ -678,6 +683,7 @@ class SubscriptionPlan(BaseModel):
     id: str
     plan_name: str
     price: float
+    price_per_branch: Optional[float] = None  # Phase 2 (Part C) — per-branch pricing
     billing_cycle: str
     max_staff: Optional[int] = None
     max_branches: Optional[int] = None
@@ -698,6 +704,14 @@ class SalonSubscription(BaseModel):
     cashfree_order_id: Optional[str] = None
     cashfree_payment_id: Optional[str] = None
     auto_renew: bool = False
+    # Phase 2 (Part C) — per-branch pricing snapshot fields
+    billable_branch_count: Optional[int] = None
+    price_per_branch_snapshot: Optional[float] = None
+    branch_ids_snapshot: Optional[List[str]] = None
+    base_amount: Optional[float] = None
+    discount_code_applied: Optional[str] = None
+    discount_amount: Optional[float] = None
+    total_amount: Optional[float] = None
     created_at: str
     updated_at: Optional[str] = None
 
@@ -952,6 +966,89 @@ async def migrate_branches():
             total_backfilled += (res.modified_count + res2.modified_count)
     if total_backfilled:
         logger.info(f"[BRANCH MIGRATION] Back-filled branch_id on {total_backfilled} legacy docs")
+
+
+async def migrate_subscription_pricing_v2():
+    """Phase 2 (Part C) — idempotent migration.
+
+    1. Backfill `price_per_branch` on every subscription_plans doc that doesn't
+       have it (copy from `price`).
+    2. Backfill `billable_branch_count`, `price_per_branch_snapshot`,
+       `branch_ids_snapshot`, `base_amount`, `total_amount`,
+       `discount_code_applied`, `discount_amount` on existing paid salon
+       subscriptions.
+
+    Guarded by a `system_flags.subscription_v2_migrated = True` doc so it only
+    runs once.
+    """
+    flag = await db.system_flags.find_one({"key": "subscription_v2_migrated"}, {"_id": 0})
+    if flag and flag.get("value") is True:
+        return
+
+    # 1) Plans
+    plans_updated = 0
+    async for plan in db.subscription_plans.find({}, {"_id": 0}):
+        if plan.get("price_per_branch") in (None, "", 0, 0.0):
+            await db.subscription_plans.update_one(
+                {"id": plan["id"]},
+                {"$set": {"price_per_branch": float(plan.get("price") or 0)}},
+            )
+            plans_updated += 1
+
+    # 2) Active / paid subscriptions
+    subs_updated = 0
+    async for sub in db.salon_subscriptions.find(
+        {"payment_status": "paid"}, {"_id": 0}
+    ):
+        if sub.get("billable_branch_count") is not None:
+            continue
+
+        salon_id = sub.get("salon_id")
+        plan_id = sub.get("plan_id")
+        plan = await db.subscription_plans.find_one({"id": plan_id}, {"_id": 0}) if plan_id else None
+        price_per_branch = float(
+            (plan or {}).get("price_per_branch")
+            or (plan or {}).get("price")
+            or sub.get("price")
+            or 0
+        )
+
+        # Try to use the salon's current active branches as the snapshot;
+        # fall back to 1 if none.
+        branch_ids = await get_active_branch_ids(salon_id) if salon_id else []
+        if not branch_ids:
+            billable = 1
+            branch_ids = []
+        else:
+            billable = len(branch_ids)
+
+        base_amount = round(price_per_branch * billable, 2)
+        await db.salon_subscriptions.update_one(
+            {"id": sub["id"]},
+            {
+                "$set": {
+                    "billable_branch_count": billable,
+                    "price_per_branch_snapshot": price_per_branch,
+                    "branch_ids_snapshot": branch_ids,
+                    "base_amount": base_amount,
+                    "discount_code_applied": None,
+                    "discount_amount": 0.0,
+                    "total_amount": base_amount,
+                    "updated_at": datetime.now(timezone.utc).isoformat(),
+                }
+            },
+        )
+        subs_updated += 1
+
+    await db.system_flags.update_one(
+        {"key": "subscription_v2_migrated"},
+        {"$set": {"value": True, "ran_at": datetime.now(timezone.utc).isoformat()}},
+        upsert=True,
+    )
+    logger.info(
+        f"[SUBSCRIPTION V2 MIGRATION] plans updated: {plans_updated}, "
+        f"subscriptions backfilled: {subs_updated}"
+    )
 
 
 # Optional authentication dependencies (don't raise if no auth)
@@ -2185,13 +2282,40 @@ import cashfree_service
 GRACE_PERIOD_DAYS = 0  # No grace period; subscription becomes premium immediately on payment
 
 async def get_active_plan() -> dict:
-    """Return the default active plan, or fall back to any active plan."""
+    """Return the default active plan, or fall back to any active plan.
+
+    Always normalises so that `price_per_branch` is populated — legacy plans
+    that only have `price` will have `price_per_branch = price`.
+    """
     plan = await db.subscription_plans.find_one(
         {"status": "active", "is_default": True}, {"_id": 0}
     )
     if not plan:
         plan = await db.subscription_plans.find_one({"status": "active"}, {"_id": 0})
+    if plan:
+        # Phase 2 (Part C): ensure price_per_branch is always available
+        if plan.get("price_per_branch") in (None, 0, 0.0):
+            plan["price_per_branch"] = float(plan.get("price") or 0)
     return plan
+
+
+async def count_billable_branches(salon_id: str) -> int:
+    """Phase 2 (Part C): how many branches the salon should be charged for.
+
+    Rule: every branch with status == 'active' counts. The main branch counts.
+    The minimum is 1 (so a brand-new salon with no branches yet is billed for 1).
+    """
+    n = await db.salon_branches.count_documents(
+        {"salon_id": salon_id, "status": "active"}
+    )
+    return max(int(n or 0), 1)
+
+
+async def get_active_branch_ids(salon_id: str) -> List[str]:
+    docs = await db.salon_branches.find(
+        {"salon_id": salon_id, "status": "active"}, {"_id": 0, "id": 1}
+    ).to_list(length=None)
+    return [d["id"] for d in docs if d.get("id")]
 
 async def get_current_subscription(salon_id: str) -> Optional[dict]:
     """
@@ -2208,7 +2332,20 @@ async def get_current_subscription(salon_id: str) -> Optional[dict]:
 async def get_subscription_status(salon_id: str) -> dict:
     """
     Compute subscription state for a salon.
-    Returns dict with: is_premium, status, expiry_date, days_remaining, subscription, plan
+
+    Phase 2 (Part C): also returns per-branch pricing fields so the frontend
+    can render "₹X/month/branch × N branches = ₹Y/month" and the
+    "Next renewal will be ₹Z" banner.
+
+    Returns dict with: is_premium, status, expiry_date, days_remaining,
+    subscription, plan, plus per-branch fields:
+      - price_per_branch
+      - billable_branch_count
+      - active_branch_count (always current, used for next_renewal_amount)
+      - next_renewal_amount
+      - base_amount / total_amount / discount_code_applied / discount_amount
+        (from the active subscription if any)
+      - branches_added_mid_cycle (bool — to show the deferred-billing banner)
     """
     sub = await get_current_subscription(salon_id)
     plan = await get_active_plan()
@@ -2234,6 +2371,27 @@ async def get_subscription_status(salon_id: str) -> dict:
         except Exception as e:
             logger.warning(f"[Subscription] Bad expiry_date for salon {salon_id}: {e}")
 
+    # Phase 2 (Part C) — per-branch pricing context
+    price_per_branch = float((plan or {}).get("price_per_branch") or (plan or {}).get("price") or 0)
+    active_branch_count = await count_billable_branches(salon_id)
+    next_renewal_amount = round(price_per_branch * active_branch_count, 2)
+
+    # Pull snapshot fields from the active sub (if any)
+    sub_billable = (sub or {}).get("billable_branch_count")
+    sub_base_amount = (sub or {}).get("base_amount")
+    sub_total_amount = (sub or {}).get("total_amount")
+    sub_discount_code = (sub or {}).get("discount_code_applied")
+    sub_discount_amount = (sub or {}).get("discount_amount")
+
+    # Mid-cycle branch addition detection: salon is currently premium AND has
+    # more active branches now than were paid for on the current subscription.
+    branches_added_mid_cycle = False
+    if is_premium and sub_billable is not None:
+        try:
+            branches_added_mid_cycle = active_branch_count > int(sub_billable)
+        except Exception:
+            branches_added_mid_cycle = False
+
     return {
         "is_premium": is_premium,
         "status": status,
@@ -2241,6 +2399,16 @@ async def get_subscription_status(salon_id: str) -> dict:
         "days_remaining": days_remaining,
         "subscription": sub,
         "plan": plan,
+        # Phase 2 (Part C) additions
+        "price_per_branch": price_per_branch,
+        "billable_branch_count": int(sub_billable) if sub_billable is not None else active_branch_count,
+        "active_branch_count": active_branch_count,
+        "next_renewal_amount": next_renewal_amount,
+        "base_amount": float(sub_base_amount) if sub_base_amount is not None else round(price_per_branch * active_branch_count, 2),
+        "total_amount": float(sub_total_amount) if sub_total_amount is not None else round(price_per_branch * active_branch_count, 2),
+        "discount_code_applied": sub_discount_code,
+        "discount_amount": float(sub_discount_amount) if sub_discount_amount is not None else 0.0,
+        "branches_added_mid_cycle": branches_added_mid_cycle,
     }
 
 async def enforce_premium_or_within_limit(salon_id: str, *, resource: str) -> None:
@@ -2424,6 +2592,7 @@ async def initialize_data():
             "id": str(uuid.uuid4()),
             "plan_name": "SalonHub Pro",
             "price": 499.0,
+            "price_per_branch": 499.0,  # Phase 2 (Part C)
             "billing_cycle": "monthly",
             "max_staff": None,
             "max_branches": None,
@@ -2439,7 +2608,7 @@ async def initialize_data():
             "created_at": datetime.now(timezone.utc).isoformat(),
         }
         await db.subscription_plans.insert_one(default_plan)
-        logger.info("Seeded default SalonHub Pro plan @ ₹499/month")
+        logger.info("Seeded default SalonHub Pro plan @ ₹499/month/branch")
 
     # Seed/refresh a 1-year premium subscription for the test salon (+917503070727)
     # so the admin doesn't see "Upgrade to SalonHub Pro" prompts when using premium features.
@@ -2474,6 +2643,17 @@ async def initialize_data():
 
                 now_dt = datetime.now(timezone.utc)
                 expiry_dt = now_dt + timedelta(days=365)
+                # Phase 2 (Part C): include per-branch pricing snapshot
+                price_per_branch = float(
+                    (plan or {}).get("price_per_branch")
+                    or (plan or {}).get("price")
+                    or 0
+                )
+                # Use real branches if they exist; otherwise default to 1.
+                snapshot_branch_ids = await get_active_branch_ids(test_salon_id)
+                billable = max(len(snapshot_branch_ids), 1)
+                base_amount = round(price_per_branch * billable, 2)
+
                 sub_doc = {
                     "id": str(uuid.uuid4()),
                     "salon_id": test_salon_id,
@@ -2488,6 +2668,14 @@ async def initialize_data():
                     "cashfree_payment_id": "TEST_SEED_PREMIUM_1Y",
                     "auto_renew": False,
                     "is_test_seed": True,
+                    # Phase 2 (Part C) snapshot fields
+                    "billable_branch_count": billable,
+                    "price_per_branch_snapshot": price_per_branch,
+                    "branch_ids_snapshot": snapshot_branch_ids,
+                    "base_amount": base_amount,
+                    "discount_code_applied": None,
+                    "discount_amount": 0.0,
+                    "total_amount": base_amount,
                     "created_at": now_dt.isoformat(),
                     "updated_at": now_dt.isoformat(),
                 }
@@ -11464,6 +11652,70 @@ async def api_subscription_status(salon_id: str):
         raise HTTPException(status_code=404, detail="Salon not found")
     return await get_subscription_status(salon_id)
 
+
+@api_router.get("/salons/{salon_id}/subscription/quote")
+async def api_subscription_quote(
+    salon_id: str,
+    plan_id: Optional[str] = None,
+    discount_code: Optional[str] = None,
+):
+    """Phase 2 (Part C) — pricing preview for a salon.
+
+    Returns the per-branch breakdown the UI shows on the subscription page
+    and inside the paywall modal. Discount handling is wired up here as a
+    pass-through stub now; the real validation lands in Phase 4 (Part D).
+    """
+    salon = await db.salons.find_one({"id": salon_id}, {"_id": 0, "id": 1})
+    if not salon:
+        raise HTTPException(status_code=404, detail="Salon not found")
+
+    if plan_id:
+        plan = await db.subscription_plans.find_one(
+            {"id": plan_id, "status": "active"}, {"_id": 0}
+        )
+    else:
+        plan = await get_active_plan()
+    if not plan:
+        raise HTTPException(status_code=404, detail="No active plan available")
+
+    price_per_branch = float(
+        plan.get("price_per_branch") or plan.get("price") or 0
+    )
+    billable_branch_count = await count_billable_branches(salon_id)
+    branch_ids_snapshot = await get_active_branch_ids(salon_id)
+    base_amount = round(price_per_branch * billable_branch_count, 2)
+
+    discount_amount = 0.0
+    discount_details = None
+    discount_code_applied: Optional[str] = None
+    if discount_code:
+        # Phase 4 (Part D) will implement full validation. For Phase 2 we treat
+        # any provided code as "unknown" so the UI can already wire up the
+        # input but no money is actually deducted yet.
+        discount_details = {
+            "code": discount_code,
+            "valid": False,
+            "reason": "Discount codes will be enabled in Phase 4.",
+        }
+
+    total_amount = round(max(base_amount - discount_amount, 0.0), 2)
+
+    return {
+        "salon_id": salon_id,
+        "plan_id": plan.get("id"),
+        "plan_name": plan.get("plan_name"),
+        "billing_cycle": plan.get("billing_cycle", "monthly"),
+        "billable_branch_count": billable_branch_count,
+        "branch_ids_snapshot": branch_ids_snapshot,
+        "price_per_branch": price_per_branch,
+        "base_amount": base_amount,
+        "discount_code_applied": discount_code_applied,
+        "discount_amount": discount_amount,
+        "total_amount": total_amount,
+        "discount_details": discount_details,
+    }
+
+
 @api_router.get("/salons/{salon_id}/subscription/transactions")
 async def api_subscription_transactions(
     salon_id: str, current_user=Depends(get_current_salon_user)
@@ -11512,6 +11764,23 @@ async def create_subscription_order(
     amount = float(plan.get("price", 0))
     if amount <= 0:
         raise HTTPException(status_code=400, detail="Invalid plan price")
+
+    # Phase 2 (Part C) — per-branch repricing
+    price_per_branch = float(plan.get("price_per_branch") or amount)
+    billable_branch_count = await count_billable_branches(salon_id)
+    branch_ids_snapshot = await get_active_branch_ids(salon_id)
+    base_amount = round(price_per_branch * billable_branch_count, 2)
+    # Discount code wiring will arrive with Phase 4 (Part D). For now the
+    # snapshot fields are recorded so the data model is forward-compatible.
+    discount_amount = 0.0
+    discount_code_applied = None
+    total_amount = round(max(base_amount - discount_amount, 0.0), 2)
+    amount = total_amount  # what actually gets charged
+
+    if amount <= 0:
+        # Could happen later when discount fully covers (free_months). For now,
+        # never zero — Phase 4 will add a separate path that skips Cashfree.
+        raise HTTPException(status_code=400, detail="Total amount must be greater than 0")
 
     # Build order
     order_id = f"SH-{salon_id[:8]}-{int(datetime.now(timezone.utc).timestamp())}"
@@ -11563,6 +11832,14 @@ async def create_subscription_order(
         "cashfree_payment_id": None,
         "auto_renew": False,
         "billing_cycle": plan.get("billing_cycle", "monthly"),
+        # Phase 2 (Part C) snapshot fields
+        "billable_branch_count": billable_branch_count,
+        "price_per_branch_snapshot": price_per_branch,
+        "branch_ids_snapshot": branch_ids_snapshot,
+        "base_amount": base_amount,
+        "discount_code_applied": discount_code_applied,
+        "discount_amount": discount_amount,
+        "total_amount": total_amount,
         "created_at": datetime.now(timezone.utc).isoformat(),
         "updated_at": None,
     }
@@ -11596,6 +11873,13 @@ async def create_subscription_order(
         "plan": plan,
         "subscription_id": sub_id,
         "cashfree_env": cashfree_service.CASHFREE_ENV,
+        # Phase 2 (Part C) breakdown so the frontend can confirm what's being charged
+        "billable_branch_count": billable_branch_count,
+        "price_per_branch": price_per_branch,
+        "base_amount": base_amount,
+        "discount_amount": discount_amount,
+        "discount_code_applied": discount_code_applied,
+        "total_amount": total_amount,
     }
 
 
@@ -11851,6 +12135,15 @@ async def admin_update_subscription_plan(
 # Include router - MUST be after ALL @api_router routes are defined
 fastapi_app.include_router(api_router)
 
+# Phase 1 (Part A) — mount platform admin router. Uses its own /api/platform prefix.
+platform_admin_mod.init_platform_admin_router(
+    db=db,
+    send_whatsapp_otp=send_whatsapp_otp,
+    secret_key=SECRET_KEY,
+    algorithm=ALGORITHM,
+)
+fastapi_app.include_router(platform_admin_mod.platform_router)
+
 # Health check endpoint for Kubernetes liveness/readiness probes
 @fastapi_app.get("/health")
 async def health_check():
@@ -11873,6 +12166,16 @@ scheduler.add_job(cancel_active_bookings_end_of_day, 'cron', hour=18, minute=30)
 async def startup_event():
     await initialize_data()
     await migrate_branches()
+    # Phase 2 (Part C) — per-branch pricing migration (idempotent)
+    try:
+        await migrate_subscription_pricing_v2()
+    except Exception as e:
+        logger.error(f"[STARTUP] subscription_v2 migration failed: {e}")
+    # Phase 1 (Part A) — bootstrap platform owner from PLATFORM_OWNER_MOBILE
+    try:
+        await platform_admin_mod.bootstrap_platform_owner()
+    except Exception as e:
+        logger.error(f"[STARTUP] platform owner bootstrap failed: {e}")
     scheduler.start()
     logger.info("Application started with multi-salon support")
 

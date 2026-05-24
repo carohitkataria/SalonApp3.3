@@ -32,6 +32,10 @@ import EnhancedSalonDashboard from '@/pages/EnhancedSalonDashboard';
 import StaffProfilePage from '@/pages/StaffProfilePage';
 import PaymentCallbackPage from '@/pages/PaymentCallbackPage';
 
+// Platform Admin (HIDDEN — bookmark /platform/login only, no links from landing)
+import PlatformLoginPage from '@/pages/PlatformLoginPage';
+import PlatformDashboardPage from '@/pages/PlatformDashboardPage';
+
 import '@/App.css';
 
 function App() {
@@ -76,6 +80,11 @@ function App() {
 
                   {/* Subscription / Payment */}
                   <Route path="/subscription/callback" element={<PaymentCallbackPage />} />
+
+                  {/* HIDDEN — Platform Admin (Part A). Not linked from anywhere. */}
+                  <Route path="/platform/login" element={<PlatformLoginPage />} />
+                  <Route path="/platform" element={<PlatformDashboardPage />} />
+                  <Route path="/platform/dashboard" element={<Navigate to="/platform" replace />} />
                   
                   {/* Redirect old routes */}
                   <Route path="/admin/login" element={<Navigate to="/salon/login" replace />} />

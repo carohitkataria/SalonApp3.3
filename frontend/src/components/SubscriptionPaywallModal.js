@@ -1,8 +1,8 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import axios from 'axios';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
-import { Check, Crown, Loader2, Sparkles } from 'lucide-react';
+import { Check, Crown, Loader2, Sparkles, Building2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { useSubscription } from '@/contexts/SubscriptionContext';
 
@@ -21,13 +21,44 @@ const getAuthHeaders = () => {
   return legacyToken ? { Authorization: `Bearer ${legacyToken}` } : {};
 };
 
+const fmtMoney = (n) =>
+  `₹${Number(n || 0).toLocaleString('en-IN', { maximumFractionDigits: 0 })}`;
+
 export default function SubscriptionPaywallModal() {
-  const { paywallOpen, paywallReason, closePaywall, plan, salonId, refresh } = useSubscription();
+  const { paywallOpen, paywallReason, closePaywall, plan, salonId, status } = useSubscription();
   const [processing, setProcessing] = useState(false);
+  const [quote, setQuote] = useState(null);
+  const [quoteLoading, setQuoteLoading] = useState(false);
+
+  // Fetch per-branch quote whenever the paywall opens
+  useEffect(() => {
+    let cancelled = false;
+    if (paywallOpen && salonId) {
+      setQuoteLoading(true);
+      axios
+        .get(`${API}/salons/${salonId}/subscription/quote`)
+        .then((r) => { if (!cancelled) setQuote(r.data); })
+        .catch(() => {})
+        .finally(() => { if (!cancelled) setQuoteLoading(false); });
+    } else {
+      setQuote(null);
+    }
+    return () => { cancelled = true; };
+  }, [paywallOpen, salonId]);
 
   if (!paywallOpen) return null;
 
-  const price = plan?.price ?? paywallReason?.plan_price ?? 499;
+  // Phase 2 (Part C) — show per-branch breakdown
+  const pricePerBranch = Number(
+    quote?.price_per_branch ?? status?.price_per_branch ?? plan?.price_per_branch ?? plan?.price ?? 499
+  );
+  const billableBranchCount = Number(
+    quote?.billable_branch_count ?? status?.active_branch_count ?? 1
+  );
+  const baseAmount = Number(quote?.base_amount ?? pricePerBranch * billableBranchCount);
+  const totalAmount = Number(quote?.total_amount ?? baseAmount);
+  const discountAmount = Number(quote?.discount_amount ?? 0);
+
   const planName = plan?.plan_name ?? paywallReason?.plan_name ?? 'SalonHub Pro';
   const billingCycle = plan?.billing_cycle ?? 'monthly';
   const features = plan?.features?.length
@@ -99,7 +130,7 @@ export default function SubscriptionPaywallModal() {
         <DialogHeader className="px-6 pt-6 pb-2">
           <div className="flex items-center gap-2 mb-2">
             <Crown className="w-6 h-6 text-amber-400" />
-            <span className="text-xs uppercase tracking-widest text-amber-400 font-semibold">SalonHub Pro</span>
+            <span className="text-xs uppercase tracking-widest text-amber-400 font-semibold">{planName}</span>
           </div>
           <DialogTitle className="text-2xl font-bold text-white leading-tight">
             Upgrade to SalonHub Pro
@@ -119,17 +150,45 @@ export default function SubscriptionPaywallModal() {
             ))}
           </ul>
 
-          <div className="bg-amber-500/10 border border-amber-500/30 rounded-xl px-4 py-3 mb-5 flex items-baseline justify-between">
-            <span className="text-zinc-300 text-sm">Price</span>
-            <div className="text-right">
-              <div className="text-3xl font-bold text-white">
-                ₹{Number(price).toLocaleString('en-IN')}
-                <span className="text-sm font-normal text-zinc-400 ml-1">
-                  /{billingCycle === 'yearly' ? 'year' : 'month'}
-                </span>
+          {/* Per-branch breakdown */}
+          <div className="bg-amber-500/10 border border-amber-500/30 rounded-xl px-4 py-3 mb-5">
+            <div className="flex items-center gap-2 text-xs text-zinc-400 mb-2">
+              <Building2 className="w-3.5 h-3.5" />
+              {quoteLoading ? (
+                'Calculating…'
+              ) : (
+                <>
+                  {fmtMoney(pricePerBranch)}/month/branch &nbsp;×&nbsp; {billableBranchCount} branch
+                  {billableBranchCount === 1 ? '' : 'es'}
+                </>
+              )}
+            </div>
+
+            {discountAmount > 0 && (
+              <div className="flex items-center justify-between text-xs text-zinc-400 mb-1">
+                <span>Subtotal</span>
+                <span className="line-through">{fmtMoney(baseAmount)}</span>
               </div>
-              <div className="text-[10px] uppercase tracking-wider text-amber-400 mt-1 flex items-center justify-end gap-1">
-                <Sparkles className="w-3 h-3" /> Cancel anytime
+            )}
+            {discountAmount > 0 && (
+              <div className="flex items-center justify-between text-xs text-emerald-400 mb-1">
+                <span>Discount</span>
+                <span>− {fmtMoney(discountAmount)}</span>
+              </div>
+            )}
+
+            <div className="flex items-baseline justify-between">
+              <span className="text-zinc-300 text-sm">Total</span>
+              <div className="text-right">
+                <div className="text-3xl font-bold text-white">
+                  {fmtMoney(totalAmount)}
+                  <span className="text-sm font-normal text-zinc-400 ml-1">
+                    /{billingCycle === 'yearly' ? 'year' : 'month'}
+                  </span>
+                </div>
+                <div className="text-[10px] uppercase tracking-wider text-amber-400 mt-1 flex items-center justify-end gap-1">
+                  <Sparkles className="w-3 h-3" /> Cancel anytime
+                </div>
               </div>
             </div>
           </div>
@@ -137,7 +196,7 @@ export default function SubscriptionPaywallModal() {
           <div className="flex flex-col gap-2">
             <Button
               onClick={handleSubscribe}
-              disabled={processing}
+              disabled={processing || quoteLoading}
               className="w-full bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 text-white font-semibold py-6 text-base"
             >
               {processing ? (

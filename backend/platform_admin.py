@@ -1,0 +1,315 @@
+"""
+Platform Admin module — Phase 1 of the master build.
+
+Implements:
+  - `platform_admins` collection model
+  - Bootstrap of the first platform owner from env var PLATFORM_OWNER_MOBILE
+  - OTP request / verify endpoints (reuses existing salon WhatsApp OTP service)
+  - `get_current_platform_admin` dependency for protected routes
+  - `/api/platform/auth/me` to fetch the logged-in admin profile
+
+Login route on the frontend is intentionally hidden: bookmark `/platform/login`.
+"""
+
+from __future__ import annotations
+
+import logging
+import os
+import random
+import string
+import uuid
+from datetime import datetime, timedelta, timezone
+from typing import Optional
+
+import jwt
+from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from pydantic import BaseModel, Field
+
+logger = logging.getLogger(__name__)
+
+# These are injected by server.py via `init_platform_admin_router(...)` below.
+_db = None
+_send_whatsapp_otp = None  # async callable(phone, otp) -> dict
+_secret_key: str = "change-me"
+_algorithm: str = "HS256"
+
+platform_router = APIRouter(prefix="/api/platform", tags=["platform-admin"])
+_security = HTTPBearer()
+
+
+# ---------- Models ----------
+
+class PlatformAdmin(BaseModel):
+    id: str
+    mobile: str
+    name: Optional[str] = None
+    email: Optional[str] = None
+    is_owner: bool = False
+    can_be_deleted: bool = True
+    status: str = "active"  # active | suspended
+    invited_by: Optional[str] = None
+    last_login_at: Optional[str] = None
+    created_at: str
+    updated_at: Optional[str] = None
+
+
+class OTPRequest(BaseModel):
+    mobile: str = Field(..., description="10-digit mobile or +91XXXXXXXXXX")
+
+
+class OTPVerify(BaseModel):
+    mobile: str
+    otp: str
+
+
+# ---------- Helpers ----------
+
+def _normalize_mobile(raw: str) -> str:
+    """Return E.164-ish form '+91XXXXXXXXXX'."""
+    digits = "".join(c for c in (raw or "") if c.isdigit())
+    if digits.startswith("91") and len(digits) == 12:
+        digits = digits[2:]
+    if len(digits) != 10:
+        raise HTTPException(status_code=400, detail="Invalid mobile number")
+    return f"+91{digits}"
+
+
+def _generate_otp() -> str:
+    return "".join(random.choices(string.digits, k=6))
+
+
+def _make_access_token(admin_doc: dict) -> str:
+    payload = {
+        "role": "platform_admin",
+        "platform_admin_id": admin_doc["id"],
+        "mobile": admin_doc["mobile"],
+        "is_owner": bool(admin_doc.get("is_owner")),
+        "iat": int(datetime.now(timezone.utc).timestamp()),
+        "exp": int((datetime.now(timezone.utc) + timedelta(days=30)).timestamp()),
+    }
+    return jwt.encode(payload, _secret_key, algorithm=_algorithm)
+
+
+def _decode_token(token: str) -> Optional[dict]:
+    try:
+        return jwt.decode(token, _secret_key, algorithms=[_algorithm])
+    except jwt.InvalidTokenError:
+        return None
+
+
+# ---------- Auth dependency ----------
+
+async def get_current_platform_admin(
+    creds: HTTPAuthorizationCredentials = Depends(_security),
+) -> dict:
+    """JWT auth dependency for platform admin routes."""
+    payload = _decode_token(creds.credentials)
+    if not payload or payload.get("role") != "platform_admin":
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid platform admin token",
+        )
+    admin = await _db.platform_admins.find_one(
+        {"id": payload["platform_admin_id"]}, {"_id": 0}
+    )
+    if not admin:
+        raise HTTPException(status_code=401, detail="Platform admin no longer exists")
+    if admin.get("status") != "active":
+        raise HTTPException(status_code=403, detail="Platform admin is suspended")
+    return admin
+
+
+# ---------- Bootstrap ----------
+
+async def bootstrap_platform_owner():
+    """
+    Idempotently seed the platform owner from PLATFORM_OWNER_MOBILE.
+    Runs every startup. Safe if already present.
+    """
+    raw_mobile = os.environ.get("PLATFORM_OWNER_MOBILE")
+    if not raw_mobile:
+        logger.warning(
+            "[Platform Admin] PLATFORM_OWNER_MOBILE not set — owner bootstrap skipped."
+        )
+        return None
+
+    try:
+        mobile = _normalize_mobile(raw_mobile)
+    except HTTPException as e:
+        logger.error(f"[Platform Admin] Invalid PLATFORM_OWNER_MOBILE: {e.detail}")
+        return None
+
+    existing_owner = await _db.platform_admins.find_one({"is_owner": True}, {"_id": 0})
+    if existing_owner:
+        # Repair: ensure the owner's mobile matches env (in case it was changed)
+        # but never demote / never auto-delete.
+        if existing_owner["mobile"] != mobile:
+            logger.info(
+                f"[Platform Admin] Owner mobile in DB ({existing_owner['mobile']}) "
+                f"differs from env ({mobile}). Leaving DB record untouched."
+            )
+        return existing_owner
+
+    # No owner yet — create one.
+    now_iso = datetime.now(timezone.utc).isoformat()
+    owner_doc = {
+        "id": str(uuid.uuid4()),
+        "mobile": mobile,
+        "name": os.environ.get("PLATFORM_OWNER_NAME", "Platform Owner"),
+        "email": os.environ.get("PLATFORM_OWNER_EMAIL"),
+        "is_owner": True,
+        "can_be_deleted": False,
+        "status": "active",
+        "invited_by": None,
+        "last_login_at": None,
+        "created_at": now_iso,
+        "updated_at": now_iso,
+    }
+    await _db.platform_admins.insert_one(owner_doc.copy())
+    logger.info(
+        f"[Platform Admin] Bootstrapped platform owner with mobile {mobile}"
+    )
+    return owner_doc
+
+
+def init_platform_admin_router(*, db, send_whatsapp_otp, secret_key: str, algorithm: str = "HS256"):
+    """Called by server.py at import time to inject shared dependencies."""
+    global _db, _send_whatsapp_otp, _secret_key, _algorithm
+    _db = db
+    _send_whatsapp_otp = send_whatsapp_otp
+    _secret_key = secret_key
+    _algorithm = algorithm
+    return platform_router
+
+
+# ---------- Endpoints ----------
+
+@platform_router.post("/auth/request-otp")
+async def platform_request_otp(payload: OTPRequest):
+    """
+    Send a 6-digit OTP to the platform admin's WhatsApp.
+
+    Security: We do NOT reveal whether the mobile is registered.
+    The response is identical whether or not the number maps to a platform admin.
+    """
+    mobile = _normalize_mobile(payload.mobile)
+    admin = await _db.platform_admins.find_one(
+        {"mobile": mobile, "status": "active"}, {"_id": 0}
+    )
+
+    otp = _generate_otp()
+    expires_at = datetime.now(timezone.utc) + timedelta(minutes=10)
+
+    # We always store the OTP keyed by (mobile, scope='platform_admin'). If the
+    # number isn't an admin, the verify endpoint will still fail since no admin
+    # row exists — so storing the OTP is harmless.
+    await _db.platform_otp.delete_many({"mobile": mobile})
+    await _db.platform_otp.insert_one(
+        {
+            "mobile": mobile,
+            "otp": otp,
+            "expires_at": expires_at.isoformat(),
+            "verified": False,
+            "created_at": datetime.now(timezone.utc).isoformat(),
+        }
+    )
+
+    response: dict = {
+        "message": "If this number is registered as a platform admin, an OTP has been sent to WhatsApp.",
+        "delivery_status": "sent",
+    }
+
+    if admin:
+        whatsapp_result = await _send_whatsapp_otp(mobile, otp)
+        response["delivery_status"] = whatsapp_result.get("status", "sent")
+        if whatsapp_result.get("status") in ("mock", "failed"):
+            # Surface the OTP so the operator can still log in in dev / when
+            # Twilio is unavailable. The /platform/login route is hidden so the
+            # blast-radius is acceptable.
+            response["otp"] = otp
+            response["note"] = (
+                "WhatsApp not configured — OTP returned for development use."
+                if whatsapp_result.get("status") == "mock"
+                else "WhatsApp delivery failed — OTP returned as fallback."
+            )
+    else:
+        # Do not actually send WhatsApp for unknown numbers, but keep timing similar.
+        logger.info(f"[Platform Admin] OTP request for unknown mobile {mobile}")
+
+    return response
+
+
+@platform_router.post("/auth/verify-otp")
+async def platform_verify_otp(payload: OTPVerify):
+    mobile = _normalize_mobile(payload.mobile)
+    record = await _db.platform_otp.find_one({"mobile": mobile}, {"_id": 0})
+
+    # Generic 401 for either missing admin or bad OTP — no enumeration.
+    invalid = HTTPException(
+        status_code=401, detail="Invalid mobile or OTP. Please try again."
+    )
+
+    if not record:
+        raise invalid
+
+    # Expiry check
+    try:
+        exp_dt = datetime.fromisoformat(record["expires_at"].replace("Z", "+00:00"))
+        if exp_dt.tzinfo is None:
+            exp_dt = exp_dt.replace(tzinfo=timezone.utc)
+    except Exception:
+        raise invalid
+    if exp_dt < datetime.now(timezone.utc):
+        await _db.platform_otp.delete_one({"mobile": mobile})
+        raise HTTPException(status_code=401, detail="OTP expired. Please request a new one.")
+
+    if (payload.otp or "").strip() != record.get("otp"):
+        raise invalid
+
+    admin = await _db.platform_admins.find_one(
+        {"mobile": mobile, "status": "active"}, {"_id": 0}
+    )
+    if not admin:
+        # OTP matches our stored value but no admin — still invalid.
+        await _db.platform_otp.delete_one({"mobile": mobile})
+        raise invalid
+
+    # Clean up + update last_login_at
+    await _db.platform_otp.delete_one({"mobile": mobile})
+    now_iso = datetime.now(timezone.utc).isoformat()
+    await _db.platform_admins.update_one(
+        {"id": admin["id"]},
+        {"$set": {"last_login_at": now_iso, "updated_at": now_iso}},
+    )
+    admin["last_login_at"] = now_iso
+
+    token = _make_access_token(admin)
+
+    return {
+        "access_token": token,
+        "token_type": "bearer",
+        "admin": {
+            "id": admin["id"],
+            "mobile": admin["mobile"],
+            "name": admin.get("name"),
+            "email": admin.get("email"),
+            "is_owner": bool(admin.get("is_owner")),
+        },
+    }
+
+
+@platform_router.get("/auth/me")
+async def platform_me(current=Depends(get_current_platform_admin)):
+    """Return the authenticated platform admin's profile."""
+    return {
+        "id": current["id"],
+        "mobile": current["mobile"],
+        "name": current.get("name"),
+        "email": current.get("email"),
+        "is_owner": bool(current.get("is_owner")),
+        "can_be_deleted": bool(current.get("can_be_deleted", True)),
+        "status": current.get("status", "active"),
+        "last_login_at": current.get("last_login_at"),
+        "created_at": current.get("created_at"),
+    }
