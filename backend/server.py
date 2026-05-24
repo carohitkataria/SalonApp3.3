@@ -11783,14 +11783,9 @@ async def create_subscription_order(
     """
     Create a Cashfree order for subscribing the salon to a plan.
     Returns the payment_session_id which the frontend uses with Cashfree JS SDK.
+    For free_months discount codes, skips Cashfree entirely (Phase 7).
     """
     _check_salon_admin_for_salon(current_user, salon_id)
-
-    if not cashfree_service.is_configured():
-        raise HTTPException(
-            status_code=503,
-            detail="Payment gateway is not configured. Please contact support.",
-        )
 
     salon = await db.salons.find_one({"id": salon_id}, {"_id": 0})
     if not salon:
@@ -11947,6 +11942,14 @@ async def create_subscription_order(
         # This is the non-free-months edge case (e.g., 100% percent code).
         # Treat the same way: skip Cashfree, mark discounted_free with same expiry as a paid month.
         raise HTTPException(status_code=400, detail="Total amount must be greater than 0")
+
+    # Phase 7 — Cashfree config check happens here so free_months path above works
+    # even when the payment gateway isn't configured (no payment needed).
+    if not cashfree_service.is_configured():
+        raise HTTPException(
+            status_code=503,
+            detail="Payment gateway is not configured. Please contact support.",
+        )
 
     # Build order
     order_id = f"SH-{salon_id[:8]}-{int(datetime.now(timezone.utc).timestamp())}"
