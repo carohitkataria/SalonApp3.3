@@ -21,6 +21,10 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { toast } from 'sonner';
+import AnalyticsTab from '@/components/platform/AnalyticsTab';
+import DiscountCodesTab from '@/components/platform/DiscountCodesTab';
+import BroadcastTab from '@/components/platform/BroadcastTab';
+import SuppliersTab from '@/components/platform/SuppliersTab';
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
 const API = `${BACKEND_URL}/api`;
@@ -526,10 +530,10 @@ export default function PlatformDashboardPage() {
         <div className="max-w-7xl mx-auto px-4 flex gap-1 overflow-x-auto">
           {[
             { id: 'salons', label: 'Salons', icon: Building2 },
-            { id: 'suppliers', label: 'Suppliers', icon: Package, disabled: true },
-            { id: 'discounts', label: 'Discount codes', icon: Tag, disabled: true },
-            { id: 'analytics', label: 'Analytics', icon: BarChart3, disabled: true },
-            { id: 'broadcast', label: 'Broadcast', icon: Megaphone, disabled: true },
+            { id: 'suppliers', label: 'Suppliers', icon: Package },
+            { id: 'discounts', label: 'Discount codes', icon: Tag },
+            { id: 'analytics', label: 'Analytics', icon: BarChart3 },
+            { id: 'broadcast', label: 'Broadcast', icon: Megaphone },
           ].map(t => (
             <button
               key={t.id}
@@ -653,6 +657,11 @@ export default function PlatformDashboardPage() {
             </div>
           </>
         )}
+
+        {tab === 'suppliers' && <SuppliersTab headers={headers} />}
+        {tab === 'discounts' && <DiscountCodesTab headers={headers} />}
+        {tab === 'analytics' && <AnalyticsTab headers={headers} />}
+        {tab === 'broadcast' && <BroadcastTab headers={headers} />}
       </div>
 
       <OverrideModals

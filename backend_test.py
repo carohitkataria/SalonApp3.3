@@ -1,1602 +1,915 @@
 #!/usr/bin/env python3
 """
-Comprehensive backend regression test for ITERATION 5 — Phase 5 (Part A).
-Platform Admin: salon management + subscription overrides.
-
-Tests all 40 scenarios from the review request.
+Phase 6 + Phase 7 Backend Testing Script
+Tests platform admin dashboard, broadcasts, and discount code flows
 """
 
 import requests
 import json
-import time
+import os
 from datetime import datetime, timedelta
-from typing import Optional, Dict, Any
 
-# Configuration
-BASE_URL = "https://phase6-plus.preview.emergentagent.com/api"
+# Read backend URL from frontend/.env
+BACKEND_URL = "https://phase6-plus.preview.emergentagent.com/api"
+
+# Platform admin mobile from backend/.env
 PLATFORM_OWNER_MOBILE = "7503070727"
-TEST_SALON_PREMIUM = "c72d0479-1131-42ec-a952-89cd33b80de0"  # Has 3 branches, premium sub
-TEST_SALON_FREE = "fff82245-2d17-47ed-8c0d-d404e26ad33f"  # Glam Central37, free plan
 
-# Global state
-platform_token: Optional[str] = None
-salon_token: Optional[str] = None
-override_ids: Dict[str, str] = {}  # Store override IDs for revoke tests
+# Test results tracking
+test_results = {
+    "passed": [],
+    "failed": [],
+    "total": 0
+}
 
-# ANSI colors for output
-GREEN = "\033[92m"
-RED = "\033[91m"
-YELLOW = "\033[93m"
-BLUE = "\033[94m"
-RESET = "\033[0m"
+def log_test(name, passed, details=""):
+    """Log test result"""
+    test_results["total"] += 1
+    if passed:
+        test_results["passed"].append(name)
+        print(f"✅ PASS: {name}")
+    else:
+        test_results["failed"].append({"name": name, "details": details})
+        print(f"❌ FAIL: {name}")
+        if details:
+            print(f"   Details: {details}")
 
-
-def log_test(test_num: int, description: str):
-    """Log test start."""
-    print(f"\n{BLUE}[TEST {test_num}]{RESET} {description}")
-
-
-def log_pass(message: str):
-    """Log test pass."""
-    print(f"  {GREEN}✓ PASS:{RESET} {message}")
-
-
-def log_fail(message: str):
-    """Log test failure."""
-    print(f"  {RED}✗ FAIL:{RESET} {message}")
-
-
-def log_info(message: str):
-    """Log informational message."""
-    print(f"  {YELLOW}ℹ INFO:{RESET} {message}")
-
-
-def get_platform_token() -> str:
-    """Get platform admin JWT token."""
-    global platform_token
+def print_summary():
+    """Print test summary"""
+    print("\n" + "="*80)
+    print("TEST SUMMARY")
+    print("="*80)
+    print(f"Total Tests: {test_results['total']}")
+    print(f"Passed: {len(test_results['passed'])}")
+    print(f"Failed: {len(test_results['failed'])}")
+    print(f"Pass Rate: {len(test_results['passed'])/test_results['total']*100:.1f}%")
     
-    if platform_token:
-        return platform_token
+    if test_results['failed']:
+        print("\n❌ FAILED TESTS:")
+        for fail in test_results['failed']:
+            print(f"  - {fail['name']}")
+            if fail['details']:
+                print(f"    {fail['details']}")
+    print("="*80)
+
+# ============================================================================
+# AUTH SETUP
+# ============================================================================
+
+def get_platform_admin_token():
+    """Get platform admin JWT via OTP flow"""
+    print("\n" + "="*80)
+    print("PLATFORM ADMIN AUTH SETUP")
+    print("="*80)
     
-    # Request OTP
+    # Step 1: Request OTP
+    print(f"\n1. Requesting OTP for platform admin: {PLATFORM_OWNER_MOBILE}")
     resp = requests.post(
-        f"{BASE_URL}/platform/auth/request-otp",
+        f"{BACKEND_URL}/platform/auth/request-otp",
         json={"mobile": PLATFORM_OWNER_MOBILE}
     )
     
     if resp.status_code != 200:
-        raise Exception(f"Failed to request OTP: {resp.status_code} {resp.text}")
+        print(f"❌ Failed to request OTP: {resp.status_code} - {resp.text}")
+        return None
     
     data = resp.json()
-    otp = data.get("otp")  # Dev mode returns OTP in response
+    print(f"✅ OTP requested successfully")
     
+    # Extract OTP from response (for testing)
+    otp = data.get("otp")
     if not otp:
-        raise Exception("OTP not returned in dev mode")
+        print("❌ No OTP in response")
+        return None
     
-    # Verify OTP
+    print(f"   OTP: {otp}")
+    
+    # Step 2: Verify OTP
+    print(f"\n2. Verifying OTP: {otp}")
     resp = requests.post(
-        f"{BASE_URL}/platform/auth/verify-otp",
+        f"{BACKEND_URL}/platform/auth/verify-otp",
         json={"mobile": PLATFORM_OWNER_MOBILE, "otp": otp}
     )
     
     if resp.status_code != 200:
-        raise Exception(f"Failed to verify OTP: {resp.status_code} {resp.text}")
+        print(f"❌ Failed to verify OTP: {resp.status_code} - {resp.text}")
+        return None
     
     data = resp.json()
-    platform_token = data.get("access_token")
+    token = data.get("access_token")
     
-    if not platform_token:
-        raise Exception("No access_token in verify response")
+    if not token:
+        print("❌ No access_token in response")
+        return None
     
-    return platform_token
+    print(f"✅ Platform admin authenticated successfully")
+    print(f"   Token length: {len(token)} chars")
+    
+    return token
 
-
-def get_salon_token() -> str:
-    """Get salon user JWT token for auth enforcement tests."""
-    global salon_token
+def get_salon_admin_token():
+    """Get salon admin JWT using existing salon credentials"""
+    print("\n" + "="*80)
+    print("SALON ADMIN AUTH SETUP")
+    print("="*80)
     
-    if salon_token:
-        return salon_token
+    # Use existing salon admin credentials
+    phone = "7503070727"
+    password = "salon123"
     
-    # Login as salon admin
+    print(f"\n1. Logging in as salon admin: {phone}")
     resp = requests.post(
-        f"{BASE_URL}/salon/users/login",
-        json={"identifier": "admin", "password": "salon123"}
+        f"{BACKEND_URL}/salon/users/login",
+        json={"identifier": phone, "password": password}
     )
     
     if resp.status_code != 200:
-        raise Exception(f"Failed to login as salon admin: {resp.status_code} {resp.text}")
+        print(f"❌ Failed to login: {resp.status_code} - {resp.text}")
+        return None, None
     
     data = resp.json()
-    salon_token = data.get("access_token")
+    token = data.get("access_token")
+    salon_id = data.get("salon_id")
     
-    if not salon_token:
-        raise Exception("No access_token in salon login response")
+    if not token or not salon_id:
+        print("❌ Missing access_token or salon_id in response")
+        return None, None
     
-    return salon_token
-
-
-# ============================================================
-# AUTH ENFORCEMENT TESTS (1-5)
-# ============================================================
-
-def test_01_no_auth():
-    """Test 1: GET /api/platform/salons WITHOUT auth header → expect 401 or 403."""
-    log_test(1, "GET /platform/salons without auth → expect 401/403")
+    print(f"✅ Salon admin authenticated successfully")
+    print(f"   Salon ID: {salon_id}")
+    print(f"   Token length: {len(token)} chars")
     
-    resp = requests.get(f"{BASE_URL}/platform/salons")
-    
-    if resp.status_code in [401, 403]:
-        log_pass(f"Correctly rejected with {resp.status_code}")
-        return True
-    else:
-        log_fail(f"Expected 401/403, got {resp.status_code}")
-        return False
+    return token, salon_id
 
+# ============================================================================
+# PHASE 6 TESTS
+# ============================================================================
 
-def test_02_salon_user_token():
-    """Test 2: GET /api/platform/salons WITH salon-user JWT → expect 401."""
-    log_test(2, "GET /platform/salons with salon_user token → expect 401")
+def test_dashboard_stats(platform_token):
+    """Test A: GET /api/platform/dashboard/stats"""
+    print("\n" + "="*80)
+    print("TEST A: PLATFORM DASHBOARD STATS")
+    print("="*80)
     
-    try:
-        token = get_salon_token()
-        resp = requests.get(
-            f"{BASE_URL}/platform/salons",
-            headers={"Authorization": f"Bearer {token}"}
+    # Test A1: Without auth (should fail with 401)
+    print("\n[A1] GET /platform/dashboard/stats without auth")
+    resp = requests.get(f"{BACKEND_URL}/platform/dashboard/stats")
+    log_test(
+        "A1: Dashboard stats without auth returns 401",
+        resp.status_code == 401,
+        f"Expected 401, got {resp.status_code}"
+    )
+    
+    # Test A2: With auth (should succeed with all required keys)
+    print("\n[A2] GET /platform/dashboard/stats with auth")
+    resp = requests.get(
+        f"{BACKEND_URL}/platform/dashboard/stats",
+        headers={"Authorization": f"Bearer {platform_token}"}
+    )
+    
+    if resp.status_code != 200:
+        log_test(
+            "A2: Dashboard stats with auth returns 200",
+            False,
+            f"Expected 200, got {resp.status_code} - {resp.text}"
         )
-        
-        if resp.status_code in [401, 403]:
-            log_pass(f"Correctly rejected salon_user token with {resp.status_code}")
-            return True
-        else:
-            log_fail(f"Expected 401/403, got {resp.status_code}")
-            return False
-    except Exception as e:
-        log_info(f"Could not get salon token: {e}")
-        log_pass("Skipping test (salon login unavailable)")
-        return True
-
-
-def test_03_tampered_token():
-    """Test 3: GET /api/platform/salons WITH tampered JWT → expect 401."""
-    log_test(3, "GET /platform/salons with tampered token → expect 401")
+        return
     
-    token = get_platform_token()
-    tampered = token[:-1] + ("X" if token[-1] != "X" else "Y")
-    
-    resp = requests.get(
-        f"{BASE_URL}/platform/salons",
-        headers={"Authorization": f"Bearer {tampered}"}
-    )
-    
-    if resp.status_code in [401, 403]:
-        log_pass(f"Correctly rejected tampered token with {resp.status_code}")
-        return True
-    else:
-        log_fail(f"Expected 401/403, got {resp.status_code}")
-        return False
-
-
-def test_04_suspend_no_auth():
-    """Test 4: POST /api/platform/salons/{id}/suspend WITHOUT auth → expect 401/403."""
-    log_test(4, "POST /platform/salons/{id}/suspend without auth → expect 401/403")
-    
-    resp = requests.post(
-        f"{BASE_URL}/platform/salons/{TEST_SALON_PREMIUM}/suspend",
-        json={"reason": "Test"}
-    )
-    
-    if resp.status_code in [401, 403]:
-        log_pass(f"Correctly rejected with {resp.status_code}")
-        return True
-    else:
-        log_fail(f"Expected 401/403, got {resp.status_code}")
-        return False
-
-
-def test_05_get_valid_token():
-    """Test 5: Get valid platform admin token for subsequent tests."""
-    log_test(5, "Get valid platform admin token")
-    
-    try:
-        token = get_platform_token()
-        log_pass(f"Got platform token: {token[:20]}...")
-        return True
-    except Exception as e:
-        log_fail(f"Failed to get token: {e}")
-        return False
-
-
-# ============================================================
-# SALON LIST + SEARCH TESTS (6-12)
-# ============================================================
-
-def test_06_salon_list():
-    """Test 6: GET /api/platform/salons?page=1&page_size=25 → 200, total≥2."""
-    log_test(6, "GET /platform/salons with pagination")
-    
-    token = get_platform_token()
-    resp = requests.get(
-        f"{BASE_URL}/platform/salons?page=1&page_size=25",
-        headers={"Authorization": f"Bearer {token}"}
-    )
-    
-    if resp.status_code != 200:
-        log_fail(f"Expected 200, got {resp.status_code}: {resp.text}")
-        return False
+    log_test("A2: Dashboard stats with auth returns 200", True)
     
     data = resp.json()
     
-    # Check structure
-    required_keys = ["rows", "page", "page_size", "total", "total_pages"]
-    for key in required_keys:
-        if key not in data:
-            log_fail(f"Missing key: {key}")
-            return False
-    
-    if data["total"] < 2:
-        log_fail(f"Expected total≥2, got {data['total']}")
-        return False
-    
-    # Check row structure
-    if len(data["rows"]) == 0:
-        log_fail("No rows returned")
-        return False
-    
-    row = data["rows"][0]
-    row_keys = ["id", "salon_name", "owner_name", "phone", "status", "branches_count",
-                "plan_name", "subscription_status", "is_premium", "expiry_date", "current_amount"]
-    
-    for key in row_keys:
-        if key not in row:
-            log_fail(f"Missing row key: {key}")
-            return False
-    
-    log_pass(f"Got {data['total']} salons, page {data['page']}/{data['total_pages']}")
-    return True
-
-
-def test_07_search_by_name():
-    """Test 7: GET /api/platform/salons?q=Looks → 200, returns matching salon."""
-    log_test(7, "GET /platform/salons?q=Looks")
-    
-    token = get_platform_token()
-    resp = requests.get(
-        f"{BASE_URL}/platform/salons?q=Looks",
-        headers={"Authorization": f"Bearer {token}"}
-    )
-    
-    if resp.status_code != 200:
-        log_fail(f"Expected 200, got {resp.status_code}: {resp.text}")
-        return False
-    
-    data = resp.json()
-    
-    if data["total"] == 0:
-        log_info("No salons matching 'Looks' found (may be expected)")
-        return True
-    
-    # Check if any salon name contains "Looks"
-    found = any("looks" in row.get("salon_name", "").lower() for row in data["rows"])
-    
-    if found:
-        log_pass(f"Found {data['total']} salon(s) matching 'Looks'")
-    else:
-        log_info(f"Got {data['total']} results but none contain 'Looks' in name")
-    
-    return True
-
-
-def test_08_search_by_phone():
-    """Test 8: GET /api/platform/salons?q=918560 → 200, returns Glam Central37."""
-    log_test(8, "GET /platform/salons?q=918560")
-    
-    token = get_platform_token()
-    resp = requests.get(
-        f"{BASE_URL}/platform/salons?q=918560",
-        headers={"Authorization": f"Bearer {token}"}
-    )
-    
-    if resp.status_code != 200:
-        log_fail(f"Expected 200, got {resp.status_code}: {resp.text}")
-        return False
-    
-    data = resp.json()
-    
-    if data["total"] == 0:
-        log_info("No salons matching '918560' found")
-        return True
-    
-    log_pass(f"Found {data['total']} salon(s) matching phone '918560'")
-    return True
-
-
-def test_09_search_nonexistent():
-    """Test 9: GET /api/platform/salons?q=nonexistent-xyz → 200, total=0."""
-    log_test(9, "GET /platform/salons?q=nonexistent-xyz")
-    
-    token = get_platform_token()
-    resp = requests.get(
-        f"{BASE_URL}/platform/salons?q=nonexistent-xyz",
-        headers={"Authorization": f"Bearer {token}"}
-    )
-    
-    if resp.status_code != 200:
-        log_fail(f"Expected 200, got {resp.status_code}: {resp.text}")
-        return False
-    
-    data = resp.json()
-    
-    if data["total"] != 0:
-        log_fail(f"Expected total=0, got {data['total']}")
-        return False
-    
-    log_pass("Correctly returned 0 results for nonexistent search")
-    return True
-
-
-def test_10_filter_active():
-    """Test 10: GET /api/platform/salons?status=active → 200, returns active salons."""
-    log_test(10, "GET /platform/salons?status=active")
-    
-    token = get_platform_token()
-    resp = requests.get(
-        f"{BASE_URL}/platform/salons?status=active",
-        headers={"Authorization": f"Bearer {token}"}
-    )
-    
-    if resp.status_code != 200:
-        log_fail(f"Expected 200, got {resp.status_code}: {resp.text}")
-        return False
-    
-    data = resp.json()
-    
-    # Should return at least 2 salons (both test salons are active initially)
-    if data["total"] < 2:
-        log_fail(f"Expected total≥2, got {data['total']}")
-        return False
-    
-    log_pass(f"Got {data['total']} active salons")
-    return True
-
-
-def test_11_filter_suspended():
-    """Test 11: GET /api/platform/salons?status=suspended → 200, total=0 initially."""
-    log_test(11, "GET /platform/salons?status=suspended")
-    
-    token = get_platform_token()
-    resp = requests.get(
-        f"{BASE_URL}/platform/salons?status=suspended",
-        headers={"Authorization": f"Bearer {token}"}
-    )
-    
-    if resp.status_code != 200:
-        log_fail(f"Expected 200, got {resp.status_code}: {resp.text}")
-        return False
-    
-    data = resp.json()
-    
-    log_pass(f"Got {data['total']} suspended salons (expected 0 initially)")
-    return True
-
-
-def test_12_pagination():
-    """Test 12: Test pagination with page_size=1."""
-    log_test(12, "GET /platform/salons pagination (page_size=1)")
-    
-    token = get_platform_token()
-    
-    # Page 1
-    resp1 = requests.get(
-        f"{BASE_URL}/platform/salons?page=1&page_size=1",
-        headers={"Authorization": f"Bearer {token}"}
-    )
-    
-    if resp1.status_code != 200:
-        log_fail(f"Page 1 failed: {resp1.status_code}")
-        return False
-    
-    data1 = resp1.json()
-    
-    if len(data1["rows"]) != 1:
-        log_fail(f"Expected 1 row on page 1, got {len(data1['rows'])}")
-        return False
-    
-    if data1["total"] < 2:
-        log_fail(f"Expected total≥2, got {data1['total']}")
-        return False
-    
-    if data1["total_pages"] < 2:
-        log_fail(f"Expected total_pages≥2, got {data1['total_pages']}")
-        return False
-    
-    # Page 2
-    resp2 = requests.get(
-        f"{BASE_URL}/platform/salons?page=2&page_size=1",
-        headers={"Authorization": f"Bearer {token}"}
-    )
-    
-    if resp2.status_code != 200:
-        log_fail(f"Page 2 failed: {resp2.status_code}")
-        return False
-    
-    data2 = resp2.json()
-    
-    if len(data2["rows"]) != 1:
-        log_fail(f"Expected 1 row on page 2, got {len(data2['rows'])}")
-        return False
-    
-    # Ensure different salons
-    if data1["rows"][0]["id"] == data2["rows"][0]["id"]:
-        log_fail("Page 1 and page 2 returned same salon")
-        return False
-    
-    log_pass(f"Pagination working: total={data1['total']}, pages={data1['total_pages']}")
-    return True
-
-
-# ============================================================
-# SALON DETAIL TESTS (13-14)
-# ============================================================
-
-def test_13_salon_detail():
-    """Test 13: GET /api/platform/salons/{id} → 200 with all required fields."""
-    log_test(13, f"GET /platform/salons/{TEST_SALON_PREMIUM}")
-    
-    token = get_platform_token()
-    resp = requests.get(
-        f"{BASE_URL}/platform/salons/{TEST_SALON_PREMIUM}",
-        headers={"Authorization": f"Bearer {token}"}
-    )
-    
-    if resp.status_code != 200:
-        log_fail(f"Expected 200, got {resp.status_code}: {resp.text}")
-        return False
-    
-    data = resp.json()
-    
-    # Check top-level keys
-    required_keys = ["salon", "subscription_state", "subscription_history", 
-                     "payment_history", "branches", "staff_count", 
-                     "this_month_revenue", "active_overrides", "override_history"]
-    
-    for key in required_keys:
-        if key not in data:
-            log_fail(f"Missing key: {key}")
-            return False
-    
-    # Check subscription_state
-    sub_state = data["subscription_state"]
-    if not sub_state.get("is_premium"):
-        log_fail("Expected is_premium=true for test salon")
-        return False
-    
-    if sub_state.get("active_branch_count") != 3:
-        log_fail(f"Expected 3 branches, got {sub_state.get('active_branch_count')}")
-        return False
-    
-    # Check branches
-    if len(data["branches"]) != 3:
-        log_fail(f"Expected 3 branches in list, got {len(data['branches'])}")
-        return False
-    
-    # Check staff_count is integer
-    if not isinstance(data["staff_count"], int):
-        log_fail(f"staff_count should be int, got {type(data['staff_count'])}")
-        return False
-    
-    # Check active_overrides is list
-    if not isinstance(data["active_overrides"], list):
-        log_fail(f"active_overrides should be list, got {type(data['active_overrides'])}")
-        return False
-    
-    log_pass(f"Salon detail complete: {sub_state.get('plan', {}).get('plan_name')}, "
-             f"{sub_state.get('active_branch_count')} branches, "
-             f"{data['staff_count']} staff, "
-             f"{len(data['active_overrides'])} active overrides")
-    return True
-
-
-def test_14_salon_detail_invalid():
-    """Test 14: GET /api/platform/salons/invalid-uuid → 404."""
-    log_test(14, "GET /platform/salons/invalid-uuid → 404")
-    
-    token = get_platform_token()
-    resp = requests.get(
-        f"{BASE_URL}/platform/salons/invalid-uuid-12345",
-        headers={"Authorization": f"Bearer {token}"}
-    )
-    
-    if resp.status_code == 404:
-        log_pass("Correctly returned 404 for invalid salon ID")
-        return True
-    else:
-        log_fail(f"Expected 404, got {resp.status_code}")
-        return False
-
-
-# ============================================================
-# SUSPEND / REACTIVATE TESTS (15-19)
-# ============================================================
-
-def test_15_suspend_salon():
-    """Test 15: POST /api/platform/salons/{id}/suspend → 200."""
-    log_test(15, f"POST /platform/salons/{TEST_SALON_FREE}/suspend")
-    
-    token = get_platform_token()
-    resp = requests.post(
-        f"{BASE_URL}/platform/salons/{TEST_SALON_FREE}/suspend",
-        headers={"Authorization": f"Bearer {token}"},
-        json={"reason": "Auto test suspension"}
-    )
-    
-    if resp.status_code != 200:
-        log_fail(f"Expected 200, got {resp.status_code}: {resp.text}")
-        return False
-    
-    data = resp.json()
-    
-    if not data.get("ok"):
-        log_fail("Response ok=false")
-        return False
-    
-    if data.get("status") != "suspended":
-        log_fail(f"Expected status='suspended', got {data.get('status')}")
-        return False
-    
-    log_pass(f"Salon suspended: {data.get('reason')}")
-    return True
-
-
-def test_16_verify_suspension():
-    """Test 16: Verify salon detail shows status='suspended'."""
-    log_test(16, "Verify salon status='suspended' in detail")
-    
-    token = get_platform_token()
-    resp = requests.get(
-        f"{BASE_URL}/platform/salons/{TEST_SALON_FREE}",
-        headers={"Authorization": f"Bearer {token}"}
-    )
-    
-    if resp.status_code != 200:
-        log_fail(f"Expected 200, got {resp.status_code}: {resp.text}")
-        return False
-    
-    data = resp.json()
-    salon = data.get("salon", {})
-    
-    if salon.get("status") != "suspended":
-        log_fail(f"Expected status='suspended', got {salon.get('status')}")
-        return False
-    
-    if not salon.get("suspension_reason"):
-        log_fail("suspension_reason not set")
-        return False
-    
-    log_pass(f"Suspension verified: {salon.get('suspension_reason')}")
-    return True
-
-
-def test_17_suspend_again():
-    """Test 17: POST /api/platform/salons/{id}/suspend AGAIN → 400."""
-    log_test(17, "POST /platform/salons/{id}/suspend again → 400")
-    
-    token = get_platform_token()
-    resp = requests.post(
-        f"{BASE_URL}/platform/salons/{TEST_SALON_FREE}/suspend",
-        headers={"Authorization": f"Bearer {token}"},
-        json={"reason": "Second suspension attempt"}
-    )
-    
-    if resp.status_code == 400:
-        log_pass("Correctly rejected duplicate suspension with 400")
-        return True
-    else:
-        log_fail(f"Expected 400, got {resp.status_code}")
-        return False
-
-
-def test_18_reactivate_salon():
-    """Test 18: POST /api/platform/salons/{id}/reactivate → 200."""
-    log_test(18, f"POST /platform/salons/{TEST_SALON_FREE}/reactivate")
-    
-    token = get_platform_token()
-    resp = requests.post(
-        f"{BASE_URL}/platform/salons/{TEST_SALON_FREE}/reactivate",
-        headers={"Authorization": f"Bearer {token}"}
-    )
-    
-    if resp.status_code != 200:
-        log_fail(f"Expected 200, got {resp.status_code}: {resp.text}")
-        return False
-    
-    data = resp.json()
-    
-    if not data.get("ok"):
-        log_fail("Response ok=false")
-        return False
-    
-    if data.get("status") != "active":
-        log_fail(f"Expected status='active', got {data.get('status')}")
-        return False
-    
-    log_pass("Salon reactivated")
-    return True
-
-
-def test_19_reactivate_again():
-    """Test 19: POST /api/platform/salons/{id}/reactivate AGAIN → 400."""
-    log_test(19, "POST /platform/salons/{id}/reactivate again → 400")
-    
-    token = get_platform_token()
-    resp = requests.post(
-        f"{BASE_URL}/platform/salons/{TEST_SALON_FREE}/reactivate",
-        headers={"Authorization": f"Bearer {token}"}
-    )
-    
-    if resp.status_code == 400:
-        log_pass("Correctly rejected duplicate reactivation with 400")
-        return True
-    else:
-        log_fail(f"Expected 400, got {resp.status_code}")
-        return False
-
-
-# ============================================================
-# VIEW-AS TOKEN TESTS (20-21)
-# ============================================================
-
-def test_20_view_as_token():
-    """Test 20: POST /api/platform/salons/{id}/view-as → 200 with JWT."""
-    log_test(20, f"POST /platform/salons/{TEST_SALON_PREMIUM}/view-as")
-    
-    token = get_platform_token()
-    resp = requests.post(
-        f"{BASE_URL}/platform/salons/{TEST_SALON_PREMIUM}/view-as",
-        headers={"Authorization": f"Bearer {token}"}
-    )
-    
-    if resp.status_code != 200:
-        log_fail(f"Expected 200, got {resp.status_code}: {resp.text}")
-        return False
-    
-    data = resp.json()
-    
-    required_keys = ["token", "salon_id", "salon_name", "expires_in_seconds", "readonly"]
-    for key in required_keys:
-        if key not in data:
-            log_fail(f"Missing key: {key}")
-            return False
-    
-    if data.get("expires_in_seconds") != 900:
-        log_fail(f"Expected expires_in_seconds=900, got {data.get('expires_in_seconds')}")
-        return False
-    
-    if data.get("readonly") != True:
-        log_fail(f"Expected readonly=true, got {data.get('readonly')}")
-        return False
-    
-    log_pass(f"View-as token generated: {len(data['token'])} chars, expires in 900s")
-    return True
-
-
-def test_21_decode_view_as_token():
-    """Test 21: Decode view-as JWT and verify payload."""
-    log_test(21, "Decode view-as JWT payload")
-    
-    token = get_platform_token()
-    resp = requests.post(
-        f"{BASE_URL}/platform/salons/{TEST_SALON_PREMIUM}/view-as",
-        headers={"Authorization": f"Bearer {token}"}
-    )
-    
-    if resp.status_code != 200:
-        log_fail(f"Failed to get view-as token: {resp.status_code}")
-        return False
-    
-    data = resp.json()
-    view_as_token = data["token"]
-    
-    # Decode without verification (just inspect payload)
-    import base64
-    try:
-        # JWT format: header.payload.signature
-        parts = view_as_token.split(".")
-        if len(parts) != 3:
-            log_fail(f"Invalid JWT format: {len(parts)} parts")
-            return False
-        
-        # Decode payload (add padding if needed)
-        payload_b64 = parts[1]
-        padding = 4 - len(payload_b64) % 4
-        if padding != 4:
-            payload_b64 += "=" * padding
-        
-        payload_json = base64.urlsafe_b64decode(payload_b64)
-        payload = json.loads(payload_json)
-        
-        # Verify payload fields
-        if payload.get("role") != "salon_view_as":
-            log_fail(f"Expected role='salon_view_as', got {payload.get('role')}")
-            return False
-        
-        if payload.get("salon_id") != TEST_SALON_PREMIUM:
-            log_fail(f"Expected salon_id={TEST_SALON_PREMIUM}, got {payload.get('salon_id')}")
-            return False
-        
-        if payload.get("readonly") != True:
-            log_fail(f"Expected readonly=true, got {payload.get('readonly')}")
-            return False
-        
-        if "platform_admin_id" not in payload:
-            log_fail("Missing platform_admin_id in payload")
-            return False
-        
-        if "exp" not in payload:
-            log_fail("Missing exp in payload")
-            return False
-        
-        # Check expiry is ~900s from now
-        exp_time = payload["exp"]
-        now = int(datetime.now().timestamp())
-        exp_delta = exp_time - now
-        
-        if not (850 <= exp_delta <= 950):
-            log_fail(f"Expected exp ~900s from now, got {exp_delta}s")
-            return False
-        
-        log_pass(f"JWT payload valid: role={payload['role']}, readonly={payload['readonly']}, exp in {exp_delta}s")
-        return True
-        
-    except Exception as e:
-        log_fail(f"Failed to decode JWT: {e}")
-        return False
-
-
-# ============================================================
-# SUBSCRIPTION OVERRIDE TESTS (22-30)
-# ============================================================
-
-def test_22_grant_pro():
-    """Test 22: POST /api/platform/salons/{id}/subscription/grant-pro."""
-    log_test(22, f"POST /platform/salons/{TEST_SALON_FREE}/subscription/grant-pro")
-    
-    token = get_platform_token()
-    resp = requests.post(
-        f"{BASE_URL}/platform/salons/{TEST_SALON_FREE}/subscription/grant-pro",
-        headers={"Authorization": f"Bearer {token}"},
-        json={
-            "duration_months": 3,
-            "max_branches": 5,
-            "reason": "Beta partner"
-        }
-    )
-    
-    if resp.status_code != 200:
-        log_fail(f"Expected 200, got {resp.status_code}: {resp.text}")
-        return False
-    
-    data = resp.json()
-    
-    if not data.get("ok"):
-        log_fail("Response ok=false")
-        return False
-    
-    override = data.get("override", {})
-    
-    if override.get("override_type") != "grant_pro":
-        log_fail(f"Expected override_type='grant_pro', got {override.get('override_type')}")
-        return False
-    
-    if not override.get("id"):
-        log_fail("Missing override.id")
-        return False
-    
-    # Store override ID for later revoke test
-    override_ids["grant_pro"] = override["id"]
-    
-    # Verify subscription status
-    resp2 = requests.get(
-        f"{BASE_URL}/salons/{TEST_SALON_FREE}/subscription/status"
-    )
-    
-    if resp2.status_code != 200:
-        log_fail(f"Failed to get subscription status: {resp2.status_code}")
-        return False
-    
-    status = resp2.json()
-    
-    if not status.get("is_premium"):
-        log_fail("Expected is_premium=true after grant-pro")
-        return False
-    
-    if status.get("grant_type") != "grant_pro":
-        log_fail(f"Expected grant_type='grant_pro', got {status.get('grant_type')}")
-        return False
-    
-    if not status.get("is_platform_granted"):
-        log_fail("Expected is_platform_granted=true")
-        return False
-    
-    if status.get("max_branches_effective") != 5:
-        log_fail(f"Expected max_branches_effective=5, got {status.get('max_branches_effective')}")
-        return False
-    
-    log_pass(f"Grant-pro successful: override_id={override['id']}, is_premium=true, max_branches=5")
-    return True
-
-
-def test_23_override_branches():
-    """Test 23: POST /api/platform/salons/{id}/subscription/override-branches."""
-    log_test(23, f"POST /platform/salons/{TEST_SALON_FREE}/subscription/override-branches")
-    
-    token = get_platform_token()
-    resp = requests.post(
-        f"{BASE_URL}/platform/salons/{TEST_SALON_FREE}/subscription/override-branches",
-        headers={"Authorization": f"Bearer {token}"},
-        json={
-            "max_branches": 10,
-            "reason": "Seasonal expansion"
-        }
-    )
-    
-    if resp.status_code != 200:
-        log_fail(f"Expected 200, got {resp.status_code}: {resp.text}")
-        return False
-    
-    data = resp.json()
-    
-    if not data.get("ok"):
-        log_fail("Response ok=false")
-        return False
-    
-    override = data.get("override", {})
-    
-    if override.get("override_type") != "override_branches":
-        log_fail(f"Expected override_type='override_branches', got {override.get('override_type')}")
-        return False
-    
-    # Store override ID
-    override_ids["override_branches"] = override["id"]
-    
-    # Verify subscription status
-    resp2 = requests.get(
-        f"{BASE_URL}/salons/{TEST_SALON_FREE}/subscription/status"
-    )
-    
-    if resp2.status_code != 200:
-        log_fail(f"Failed to get subscription status: {resp2.status_code}")
-        return False
-    
-    status = resp2.json()
-    
-    if status.get("max_branches_override") != 10:
-        log_fail(f"Expected max_branches_override=10, got {status.get('max_branches_override')}")
-        return False
-    
-    if status.get("max_branches_effective") != 10:
-        log_fail(f"Expected max_branches_effective=10, got {status.get('max_branches_effective')}")
-        return False
-    
-    log_pass(f"Override-branches successful: max_branches_effective=10")
-    return True
-
-
-def test_24_override_branches_no_sub():
-    """Test 24: Override branches without active sub → 400."""
-    log_test(24, "Override branches without active sub → 400")
-    
-    # First revoke the grant-pro to remove active sub
-    token = get_platform_token()
-    grant_pro_id = override_ids.get("grant_pro")
-    
-    if not grant_pro_id:
-        log_fail("No grant_pro override ID stored")
-        return False
-    
-    resp = requests.post(
-        f"{BASE_URL}/platform/salons/{TEST_SALON_FREE}/subscription/revoke-override/{grant_pro_id}",
-        headers={"Authorization": f"Bearer {token}"}
-    )
-    
-    if resp.status_code != 200:
-        log_fail(f"Failed to revoke grant-pro: {resp.status_code}")
-        return False
-    
-    log_info("Revoked grant-pro override")
-    
-    # Verify no active sub
-    resp2 = requests.get(
-        f"{BASE_URL}/salons/{TEST_SALON_FREE}/subscription/status"
-    )
-    
-    if resp2.status_code == 200:
-        status = resp2.json()
-        if status.get("is_premium"):
-            log_fail("Expected is_premium=false after revoke")
-            return False
-    
-    # Now try to override branches
-    resp3 = requests.post(
-        f"{BASE_URL}/platform/salons/{TEST_SALON_FREE}/subscription/override-branches",
-        headers={"Authorization": f"Bearer {token}"},
-        json={
-            "max_branches": 7,
-            "reason": "test"
-        }
-    )
-    
-    if resp3.status_code == 400:
-        log_pass("Correctly rejected override-branches without active sub (400)")
-        return True
-    else:
-        log_fail(f"Expected 400, got {resp3.status_code}")
-        return False
-
-
-def test_25_extend_trial_no_sub():
-    """Test 25: Extend trial without active sub → creates new sub."""
-    log_test(25, f"POST /platform/salons/{TEST_SALON_FREE}/subscription/extend-trial (no sub)")
-    
-    token = get_platform_token()
-    resp = requests.post(
-        f"{BASE_URL}/platform/salons/{TEST_SALON_FREE}/subscription/extend-trial",
-        headers={"Authorization": f"Bearer {token}"},
-        json={
-            "days": 14,
-            "reason": "Onboarding extension"
-        }
-    )
-    
-    if resp.status_code != 200:
-        log_fail(f"Expected 200, got {resp.status_code}: {resp.text}")
-        return False
-    
-    data = resp.json()
-    
-    if not data.get("ok"):
-        log_fail("Response ok=false")
-        return False
-    
-    override = data.get("override", {})
-    
-    if override.get("override_type") != "extend_trial":
-        log_fail(f"Expected override_type='extend_trial', got {override.get('override_type')}")
-        return False
-    
-    # Store override ID
-    override_ids["extend_trial"] = override["id"]
-    
-    # Verify subscription status
-    resp2 = requests.get(
-        f"{BASE_URL}/salons/{TEST_SALON_FREE}/subscription/status"
-    )
-    
-    if resp2.status_code != 200:
-        log_fail(f"Failed to get subscription status: {resp2.status_code}")
-        return False
-    
-    status = resp2.json()
-    
-    if not status.get("is_premium"):
-        log_fail("Expected is_premium=true after extend-trial")
-        return False
-    
-    if not status.get("trial_ends_at"):
-        log_fail("Expected trial_ends_at to be set")
-        return False
-    
-    # Check expiry is ~14 days from now
-    try:
-        expiry = datetime.fromisoformat(status["expiry_date"].replace("Z", "+00:00"))
-        now = datetime.now(timezone.utc)
-        delta = (expiry - now).days
-        
-        if not (12 <= delta <= 16):
-            log_fail(f"Expected expiry ~14 days from now, got {delta} days")
-            return False
-    except Exception as e:
-        log_fail(f"Failed to parse expiry_date: {e}")
-        return False
-    
-    log_pass(f"Extend-trial successful: is_premium=true, expiry ~14 days")
-    return True
-
-
-def test_26_extend_trial_again():
-    """Test 26: Extend trial again → pushes expiry further."""
-    log_test(26, "POST /platform/salons/{id}/subscription/extend-trial again")
-    
-    # Get current expiry
-    resp1 = requests.get(
-        f"{BASE_URL}/salons/{TEST_SALON_FREE}/subscription/status"
-    )
-    
-    if resp1.status_code != 200:
-        log_fail(f"Failed to get subscription status: {resp1.status_code}")
-        return False
-    
-    status1 = resp1.json()
-    expiry1 = status1.get("expiry_date")
-    
-    if not expiry1:
-        log_fail("No expiry_date in status")
-        return False
-    
-    # Extend by 7 more days
-    token = get_platform_token()
-    resp2 = requests.post(
-        f"{BASE_URL}/platform/salons/{TEST_SALON_FREE}/subscription/extend-trial",
-        headers={"Authorization": f"Bearer {token}"},
-        json={
-            "days": 7,
-            "reason": "more"
-        }
-    )
-    
-    if resp2.status_code != 200:
-        log_fail(f"Expected 200, got {resp2.status_code}: {resp2.text}")
-        return False
-    
-    # Get new expiry
-    resp3 = requests.get(
-        f"{BASE_URL}/salons/{TEST_SALON_FREE}/subscription/status"
-    )
-    
-    if resp3.status_code != 200:
-        log_fail(f"Failed to get subscription status: {resp3.status_code}")
-        return False
-    
-    status2 = resp3.json()
-    expiry2 = status2.get("expiry_date")
-    
-    if not expiry2:
-        log_fail("No expiry_date in status after extend")
-        return False
-    
-    # Check expiry is ~21 days from now (14 + 7)
-    try:
-        expiry_dt = datetime.fromisoformat(expiry2.replace("Z", "+00:00"))
-        now = datetime.now(timezone.utc)
-        delta = (expiry_dt - now).days
-        
-        if not (19 <= delta <= 23):
-            log_fail(f"Expected expiry ~21 days from now, got {delta} days")
-            return False
-    except Exception as e:
-        log_fail(f"Failed to parse expiry_date: {e}")
-        return False
-    
-    log_pass(f"Extend-trial again successful: expiry pushed to ~21 days")
-    return True
-
-
-def test_27_comp_access():
-    """Test 27: POST /api/platform/salons/{id}/subscription/comp."""
-    log_test(27, f"POST /platform/salons/{TEST_SALON_FREE}/subscription/comp")
-    
-    token = get_platform_token()
-    resp = requests.post(
-        f"{BASE_URL}/platform/salons/{TEST_SALON_FREE}/subscription/comp",
-        headers={"Authorization": f"Bearer {token}"},
-        json={
-            "reason": "Partner salon"
-        }
-    )
-    
-    if resp.status_code != 200:
-        log_fail(f"Expected 200, got {resp.status_code}: {resp.text}")
-        return False
-    
-    data = resp.json()
-    
-    if not data.get("ok"):
-        log_fail("Response ok=false")
-        return False
-    
-    override = data.get("override", {})
-    
-    if override.get("override_type") != "comp":
-        log_fail(f"Expected override_type='comp', got {override.get('override_type')}")
-        return False
-    
-    # Store override ID
-    override_ids["comp"] = override["id"]
-    
-    # Verify subscription status
-    resp2 = requests.get(
-        f"{BASE_URL}/salons/{TEST_SALON_FREE}/subscription/status"
-    )
-    
-    if resp2.status_code != 200:
-        log_fail(f"Failed to get subscription status: {resp2.status_code}")
-        return False
-    
-    status = resp2.json()
-    
-    if status.get("grant_type") != "comp":
-        log_fail(f"Expected grant_type='comp', got {status.get('grant_type')}")
-        return False
-    
-    if not status.get("is_platform_granted"):
-        log_fail("Expected is_platform_granted=true")
-        return False
-    
-    # Check days_remaining is very large (>300000)
-    days_remaining = status.get("days_remaining")
-    if days_remaining is None or days_remaining < 300000:
-        log_fail(f"Expected days_remaining>300000, got {days_remaining}")
-        return False
-    
-    log_pass(f"Comp access successful: grant_type=comp, days_remaining={days_remaining}")
-    return True
-
-
-def test_28_revoke_comp():
-    """Test 28: Revoke comp override."""
-    log_test(28, "POST /platform/salons/{id}/subscription/revoke-override/{comp_id}")
-    
-    token = get_platform_token()
-    comp_id = override_ids.get("comp")
-    
-    if not comp_id:
-        log_fail("No comp override ID stored")
-        return False
-    
-    resp = requests.post(
-        f"{BASE_URL}/platform/salons/{TEST_SALON_FREE}/subscription/revoke-override/{comp_id}",
-        headers={"Authorization": f"Bearer {token}"}
-    )
-    
-    if resp.status_code != 200:
-        log_fail(f"Expected 200, got {resp.status_code}: {resp.text}")
-        return False
-    
-    data = resp.json()
-    
-    if not data.get("ok"):
-        log_fail("Response ok=false")
-        return False
-    
-    log_pass("Comp override revoked successfully")
-    return True
-
-
-def test_29_revoke_nonexistent():
-    """Test 29: Revoke non-existent override → 404."""
-    log_test(29, "Revoke non-existent override → 404")
-    
-    token = get_platform_token()
-    fake_id = "00000000-0000-0000-0000-000000000000"
-    
-    resp = requests.post(
-        f"{BASE_URL}/platform/salons/{TEST_SALON_FREE}/subscription/revoke-override/{fake_id}",
-        headers={"Authorization": f"Bearer {token}"}
-    )
-    
-    if resp.status_code == 404:
-        log_pass("Correctly returned 404 for non-existent override")
-        return True
-    else:
-        log_fail(f"Expected 404, got {resp.status_code}")
-        return False
-
-
-def test_30_revoke_already_revoked():
-    """Test 30: Revoke already-revoked override → 400."""
-    log_test(30, "Revoke already-revoked override → 400")
-    
-    token = get_platform_token()
-    comp_id = override_ids.get("comp")
-    
-    if not comp_id:
-        log_fail("No comp override ID stored")
-        return False
-    
-    resp = requests.post(
-        f"{BASE_URL}/platform/salons/{TEST_SALON_FREE}/subscription/revoke-override/{comp_id}",
-        headers={"Authorization": f"Bearer {token}"}
-    )
-    
-    if resp.status_code == 400:
-        log_pass("Correctly returned 400 for already-revoked override")
-        return True
-    else:
-        log_fail(f"Expected 400, got {resp.status_code}")
-        return False
-
-
-# ============================================================
-# VALIDATION TESTS (31-35)
-# ============================================================
-
-def test_31_suspend_empty_reason():
-    """Test 31: Suspend with empty reason → 422."""
-    log_test(31, "Suspend with empty reason → 422")
-    
-    token = get_platform_token()
-    resp = requests.post(
-        f"{BASE_URL}/platform/salons/{TEST_SALON_PREMIUM}/suspend",
-        headers={"Authorization": f"Bearer {token}"},
-        json={"reason": ""}
-    )
-    
-    if resp.status_code == 422:
-        log_pass("Correctly rejected empty reason with 422")
-        return True
-    else:
-        log_fail(f"Expected 422, got {resp.status_code}")
-        return False
-
-
-def test_32_grant_pro_zero_months():
-    """Test 32: Grant-pro with duration_months=0 → 422."""
-    log_test(32, "Grant-pro with duration_months=0 → 422")
-    
-    token = get_platform_token()
-    resp = requests.post(
-        f"{BASE_URL}/platform/salons/{TEST_SALON_PREMIUM}/subscription/grant-pro",
-        headers={"Authorization": f"Bearer {token}"},
-        json={
-            "duration_months": 0,
-            "max_branches": 5,
-            "reason": "test"
-        }
-    )
-    
-    if resp.status_code == 422:
-        log_pass("Correctly rejected duration_months=0 with 422")
-        return True
-    else:
-        log_fail(f"Expected 422, got {resp.status_code}")
-        return False
-
-
-def test_33_grant_pro_too_many_months():
-    """Test 33: Grant-pro with duration_months=200 → 422."""
-    log_test(33, "Grant-pro with duration_months=200 → 422")
-    
-    token = get_platform_token()
-    resp = requests.post(
-        f"{BASE_URL}/platform/salons/{TEST_SALON_PREMIUM}/subscription/grant-pro",
-        headers={"Authorization": f"Bearer {token}"},
-        json={
-            "duration_months": 200,
-            "max_branches": 5,
-            "reason": "test"
-        }
-    )
-    
-    if resp.status_code == 422:
-        log_pass("Correctly rejected duration_months=200 with 422")
-        return True
-    else:
-        log_fail(f"Expected 422, got {resp.status_code}")
-        return False
-
-
-def test_34_override_branches_zero():
-    """Test 34: Override-branches with max_branches=0 → 422."""
-    log_test(34, "Override-branches with max_branches=0 → 422")
-    
-    token = get_platform_token()
-    resp = requests.post(
-        f"{BASE_URL}/platform/salons/{TEST_SALON_PREMIUM}/subscription/override-branches",
-        headers={"Authorization": f"Bearer {token}"},
-        json={
-            "max_branches": 0,
-            "reason": "test"
-        }
-    )
-    
-    if resp.status_code == 422:
-        log_pass("Correctly rejected max_branches=0 with 422")
-        return True
-    else:
-        log_fail(f"Expected 422, got {resp.status_code}")
-        return False
-
-
-def test_35_comp_blank_reason():
-    """Test 35: Comp with blank reason → 422."""
-    log_test(35, "Comp with blank reason (whitespace) → 422")
-    
-    token = get_platform_token()
-    resp = requests.post(
-        f"{BASE_URL}/platform/salons/{TEST_SALON_PREMIUM}/subscription/comp",
-        headers={"Authorization": f"Bearer {token}"},
-        json={
-            "reason": "   "
-        }
-    )
-    
-    if resp.status_code == 422:
-        log_pass("Correctly rejected blank reason with 422")
-        return True
-    else:
-        log_fail(f"Expected 422, got {resp.status_code}")
-        return False
-
-
-# ============================================================
-# AUDIT LOG TEST (36)
-# ============================================================
-
-def test_36_audit_log():
-    """Test 36: Verify platform_audit_log has entries."""
-    log_test(36, "Verify platform_audit_log has entries")
-    
-    # This requires direct DB access which we don't have via API
-    # We'll skip this test and note it in the report
-    log_info("Audit log verification requires direct DB access - skipping")
-    log_pass("Audit log entries assumed present (verified via curl in smoke test)")
-    return True
-
-
-# ============================================================
-# PHASE 1+2 REGRESSION TESTS (37-40)
-# ============================================================
-
-def test_37_subscription_status_regression():
-    """Test 37: GET /api/salons/{id}/subscription/status still works."""
-    log_test(37, f"GET /salons/{TEST_SALON_PREMIUM}/subscription/status (Phase 1+2 regression)")
-    
-    resp = requests.get(
-        f"{BASE_URL}/salons/{TEST_SALON_PREMIUM}/subscription/status"
-    )
-    
-    if resp.status_code != 200:
-        log_fail(f"Expected 200, got {resp.status_code}: {resp.text}")
-        return False
-    
-    data = resp.json()
-    
-    # Check Phase 2 fields
-    phase2_fields = ["is_premium", "price_per_branch", "billable_branch_count", 
-                     "base_amount", "total_amount", "branches_added_mid_cycle"]
-    
-    for field in phase2_fields:
-        if field not in data:
-            log_fail(f"Missing Phase 2 field: {field}")
-            return False
-    
-    # Check Phase 5 fields
-    phase5_fields = ["grant_type", "max_branches_override", "max_branches_effective",
-                     "trial_ends_at", "is_platform_granted"]
-    
-    for field in phase5_fields:
-        if field not in data:
-            log_fail(f"Missing Phase 5 field: {field}")
-            return False
-    
-    if not data.get("is_premium"):
-        log_fail("Expected is_premium=true for test salon")
-        return False
-    
-    if data.get("billable_branch_count") != 3:
-        log_fail(f"Expected billable_branch_count=3, got {data.get('billable_branch_count')}")
-        return False
-    
-    log_pass(f"Subscription status regression OK: is_premium={data['is_premium']}, "
-             f"billable_branch_count={data['billable_branch_count']}, "
-             f"is_platform_granted={data.get('is_platform_granted')}")
-    return True
-
-
-def test_38_subscription_quote_regression():
-    """Test 38: GET /api/salons/{id}/subscription/quote still works."""
-    log_test(38, f"GET /salons/{TEST_SALON_PREMIUM}/subscription/quote (Phase 2 regression)")
-    
-    resp = requests.get(
-        f"{BASE_URL}/salons/{TEST_SALON_PREMIUM}/subscription/quote"
-    )
-    
-    if resp.status_code != 200:
-        log_fail(f"Expected 200, got {resp.status_code}: {resp.text}")
-        return False
-    
-    data = resp.json()
-    
-    # Check required fields
-    required_fields = ["base_amount", "total_amount", "per_branch_breakdown"]
-    
-    for field in required_fields:
-        if field not in data:
-            log_fail(f"Missing field: {field}")
-            return False
-    
-    log_pass(f"Subscription quote regression OK: total_amount={data.get('total_amount')}")
-    return True
-
-
-def test_39_discount_code_stub():
-    """Test 39: POST /api/salons/{id}/subscription/quote?discount_code=ANY → stub."""
-    log_test(39, "POST /salons/{id}/subscription/quote?discount_code=ANY (Phase 4 stub)")
-    
-    resp = requests.post(
-        f"{BASE_URL}/salons/{TEST_SALON_PREMIUM}/subscription/quote?discount_code=TESTCODE"
-    )
-    
-    if resp.status_code != 200:
-        log_fail(f"Expected 200, got {resp.status_code}: {resp.text}")
-        return False
-    
-    data = resp.json()
-    
-    # Check discount_details exists and valid=false
-    if "discount_details" not in data:
-        log_fail("Missing discount_details")
-        return False
-    
-    if data["discount_details"].get("valid") != False:
-        log_fail(f"Expected discount_details.valid=false, got {data['discount_details'].get('valid')}")
-        return False
-    
-    log_pass("Discount code stub regression OK: discount_details.valid=false")
-    return True
-
-
-def test_40_platform_auth_me():
-    """Test 40: /api/platform/auth/me still works."""
-    log_test(40, "GET /platform/auth/me (Phase 1 regression)")
-    
-    token = get_platform_token()
-    resp = requests.get(
-        f"{BASE_URL}/platform/auth/me",
-        headers={"Authorization": f"Bearer {token}"}
-    )
-    
-    if resp.status_code != 200:
-        log_fail(f"Expected 200, got {resp.status_code}: {resp.text}")
-        return False
-    
-    data = resp.json()
-    
-    required_fields = ["id", "mobile", "is_owner", "status"]
-    
-    for field in required_fields:
-        if field not in data:
-            log_fail(f"Missing field: {field}")
-            return False
-    
-    log_pass(f"Platform auth/me regression OK: mobile={data.get('mobile')}, is_owner={data.get('is_owner')}")
-    return True
-
-
-# ============================================================
-# CLEANUP (not a test, just cleanup)
-# ============================================================
-
-def cleanup():
-    """Cleanup test data."""
-    log_test(0, "CLEANUP: Removing test data")
-    
-    # Note: This would require direct DB access
-    # For now, we'll just log that cleanup is needed
-    log_info("Cleanup requires direct DB access:")
-    log_info(f"  - Delete salon_subscriptions for salon_id={TEST_SALON_FREE} where payment_status='granted'")
-    log_info(f"  - Delete subscription_overrides_log for salon_id={TEST_SALON_FREE}")
-    log_info(f"  - Delete platform_audit_log entries from this test run")
-    log_info(f"  - Ensure salon {TEST_SALON_FREE} has status='active'")
-    
-    return True
-
-
-# ============================================================
-# MAIN TEST RUNNER
-# ============================================================
-
-def main():
-    """Run all tests."""
-    print(f"\n{BLUE}{'='*60}{RESET}")
-    print(f"{BLUE}ITERATION 5 — Phase 5 (Part A) Backend Regression Test{RESET}")
-    print(f"{BLUE}{'='*60}{RESET}")
-    print(f"Base URL: {BASE_URL}")
-    print(f"Platform Owner: {PLATFORM_OWNER_MOBILE}")
-    print(f"Test Salon (Premium): {TEST_SALON_PREMIUM}")
-    print(f"Test Salon (Free): {TEST_SALON_FREE}")
-    print(f"{BLUE}{'='*60}{RESET}\n")
-    
-    tests = [
-        # Auth enforcement (1-5)
-        ("AUTH-1", test_01_no_auth),
-        ("AUTH-2", test_02_salon_user_token),
-        ("AUTH-3", test_03_tampered_token),
-        ("AUTH-4", test_04_suspend_no_auth),
-        ("AUTH-5", test_05_get_valid_token),
-        
-        # Salon list + search (6-12)
-        ("LIST-6", test_06_salon_list),
-        ("LIST-7", test_07_search_by_name),
-        ("LIST-8", test_08_search_by_phone),
-        ("LIST-9", test_09_search_nonexistent),
-        ("LIST-10", test_10_filter_active),
-        ("LIST-11", test_11_filter_suspended),
-        ("LIST-12", test_12_pagination),
-        
-        # Salon detail (13-14)
-        ("DETAIL-13", test_13_salon_detail),
-        ("DETAIL-14", test_14_salon_detail_invalid),
-        
-        # Suspend/reactivate (15-19)
-        ("SUSPEND-15", test_15_suspend_salon),
-        ("SUSPEND-16", test_16_verify_suspension),
-        ("SUSPEND-17", test_17_suspend_again),
-        ("SUSPEND-18", test_18_reactivate_salon),
-        ("SUSPEND-19", test_19_reactivate_again),
-        
-        # View-as (20-21)
-        ("VIEWAS-20", test_20_view_as_token),
-        ("VIEWAS-21", test_21_decode_view_as_token),
-        
-        # Subscription overrides (22-30)
-        ("OVERRIDE-22", test_22_grant_pro),
-        ("OVERRIDE-23", test_23_override_branches),
-        ("OVERRIDE-24", test_24_override_branches_no_sub),
-        ("OVERRIDE-25", test_25_extend_trial_no_sub),
-        ("OVERRIDE-26", test_26_extend_trial_again),
-        ("OVERRIDE-27", test_27_comp_access),
-        ("OVERRIDE-28", test_28_revoke_comp),
-        ("OVERRIDE-29", test_29_revoke_nonexistent),
-        ("OVERRIDE-30", test_30_revoke_already_revoked),
-        
-        # Validation (31-35)
-        ("VALID-31", test_31_suspend_empty_reason),
-        ("VALID-32", test_32_grant_pro_zero_months),
-        ("VALID-33", test_33_grant_pro_too_many_months),
-        ("VALID-34", test_34_override_branches_zero),
-        ("VALID-35", test_35_comp_blank_reason),
-        
-        # Audit log (36)
-        ("AUDIT-36", test_36_audit_log),
-        
-        # Phase 1+2 regression (37-40)
-        ("REGRESS-37", test_37_subscription_status_regression),
-        ("REGRESS-38", test_38_subscription_quote_regression),
-        ("REGRESS-39", test_39_discount_code_stub),
-        ("REGRESS-40", test_40_platform_auth_me),
+    # Verify all required keys
+    required_keys = [
+        "as_of", "salons", "subscriptions", "revenue", 
+        "overrides", "discount_codes", "suppliers"
     ]
     
-    results = []
-    passed = 0
-    failed = 0
+    for key in required_keys:
+        log_test(
+            f"A2: Response has '{key}' key",
+            key in data,
+            f"Missing key: {key}"
+        )
     
-    for test_id, test_func in tests:
-        try:
-            result = test_func()
-            results.append((test_id, result))
-            if result:
-                passed += 1
-            else:
-                failed += 1
-        except Exception as e:
-            log_fail(f"Exception: {e}")
-            results.append((test_id, False))
-            failed += 1
+    # Verify nested structure
+    if "salons" in data:
+        salon_keys = ["total", "active", "suspended"]
+        for key in salon_keys:
+            log_test(
+                f"A2: salons.{key} is numeric",
+                key in data["salons"] and isinstance(data["salons"][key], (int, float)),
+                f"salons.{key} = {data['salons'].get(key)}"
+            )
     
-    # Summary
-    print(f"\n{BLUE}{'='*60}{RESET}")
-    print(f"{BLUE}TEST SUMMARY{RESET}")
-    print(f"{BLUE}{'='*60}{RESET}")
-    print(f"Total: {len(tests)} tests")
-    print(f"{GREEN}Passed: {passed}{RESET}")
-    print(f"{RED}Failed: {failed}{RESET}")
-    print(f"{BLUE}{'='*60}{RESET}\n")
+    if "subscriptions" in data:
+        sub_keys = ["active", "expired", "granted"]
+        for key in sub_keys:
+            log_test(
+                f"A2: subscriptions.{key} is numeric",
+                key in data["subscriptions"] and isinstance(data["subscriptions"][key], (int, float)),
+                f"subscriptions.{key} = {data['subscriptions'].get(key)}"
+            )
     
-    # Detailed results
-    print(f"{BLUE}DETAILED RESULTS:{RESET}")
-    for test_id, result in results:
-        status = f"{GREEN}✓ PASS{RESET}" if result else f"{RED}✗ FAIL{RESET}"
-        print(f"  {test_id}: {status}")
+    if "revenue" in data:
+        rev_keys = ["mtd_amount", "mtd_transaction_count"]
+        for key in rev_keys:
+            log_test(
+                f"A2: revenue.{key} is numeric",
+                key in data["revenue"] and isinstance(data["revenue"][key], (int, float)),
+                f"revenue.{key} = {data['revenue'].get(key)}"
+            )
     
-    print(f"\n{BLUE}{'='*60}{RESET}\n")
+    if "discount_codes" in data:
+        dc_keys = ["total", "active", "disabled", "expired", "mtd_uses", "mtd_savings"]
+        for key in dc_keys:
+            log_test(
+                f"A2: discount_codes.{key} is numeric",
+                key in data["discount_codes"] and isinstance(data["discount_codes"][key], (int, float)),
+                f"discount_codes.{key} = {data['discount_codes'].get(key)}"
+            )
     
-    # Cleanup note
-    cleanup()
-    
-    return failed == 0
+    print(f"\n📊 Dashboard Stats Sample:")
+    print(json.dumps(data, indent=2)[:500] + "...")
 
+def test_broadcasts(platform_token):
+    """Test B: POST /api/platform/broadcast + GET /api/platform/broadcasts"""
+    print("\n" + "="*80)
+    print("TEST B: BROADCAST ENDPOINTS")
+    print("="*80)
+    
+    # Test B1: POST without auth (should fail with 401)
+    print("\n[B1] POST /platform/broadcast without auth")
+    resp = requests.post(
+        f"{BACKEND_URL}/platform/broadcast",
+        json={"title": "Test", "message": "Hello", "audience": "all_salons"}
+    )
+    log_test(
+        "B1: Broadcast without auth returns 401",
+        resp.status_code == 401,
+        f"Expected 401, got {resp.status_code}"
+    )
+    
+    # Test B2: POST with invalid audience (should fail with 422)
+    print("\n[B2] POST /platform/broadcast with invalid audience")
+    resp = requests.post(
+        f"{BACKEND_URL}/platform/broadcast",
+        headers={"Authorization": f"Bearer {platform_token}"},
+        json={"title": "Test", "message": "Hello", "audience": "invalid_audience"}
+    )
+    log_test(
+        "B2: Broadcast with invalid audience returns 422",
+        resp.status_code == 422,
+        f"Expected 422, got {resp.status_code}"
+    )
+    
+    # Test B3: POST with too short title (should fail with 422)
+    print("\n[B3] POST /platform/broadcast with too short title")
+    resp = requests.post(
+        f"{BACKEND_URL}/platform/broadcast",
+        headers={"Authorization": f"Bearer {platform_token}"},
+        json={"title": "T", "message": "X", "audience": "all_salons"}
+    )
+    log_test(
+        "B3: Broadcast with title < 2 chars returns 422",
+        resp.status_code == 422,
+        f"Expected 422, got {resp.status_code}"
+    )
+    
+    # Test B4: POST with valid data (should succeed)
+    print("\n[B4] POST /platform/broadcast with valid data")
+    broadcast_data = {
+        "title": "Test Broadcast Phase 6",
+        "message": "This is a test broadcast message for Phase 6 testing",
+        "audience": "all_salons",
+        "channels": ["in_app"]
+    }
+    resp = requests.post(
+        f"{BACKEND_URL}/platform/broadcast",
+        headers={"Authorization": f"Bearer {platform_token}"},
+        json=broadcast_data
+    )
+    
+    if resp.status_code != 200:
+        log_test(
+            "B4: Broadcast with valid data returns 200",
+            False,
+            f"Expected 200, got {resp.status_code} - {resp.text}"
+        )
+        return
+    
+    log_test("B4: Broadcast with valid data returns 200", True)
+    
+    data = resp.json()
+    broadcast_id = data.get("id")
+    
+    # Verify response structure
+    required_keys = ["id", "target_count", "delivered_count", "failed_count", "audience", "created_at"]
+    for key in required_keys:
+        log_test(
+            f"B4: Response has '{key}' key",
+            key in data,
+            f"Missing key: {key}"
+        )
+    
+    print(f"\n📢 Broadcast Created:")
+    print(f"   ID: {broadcast_id}")
+    print(f"   Target Count: {data.get('target_count')}")
+    print(f"   Delivered Count: {data.get('delivered_count')}")
+    
+    # Test B5: GET broadcast history
+    print("\n[B5] GET /platform/broadcasts")
+    resp = requests.get(
+        f"{BACKEND_URL}/platform/broadcasts",
+        headers={"Authorization": f"Bearer {platform_token}"}
+    )
+    
+    if resp.status_code != 200:
+        log_test(
+            "B5: GET broadcasts returns 200",
+            False,
+            f"Expected 200, got {resp.status_code} - {resp.text}"
+        )
+        return
+    
+    log_test("B5: GET broadcasts returns 200", True)
+    
+    data = resp.json()
+    broadcasts = data.get("broadcasts", [])
+    
+    log_test(
+        "B5: Broadcasts list is not empty",
+        len(broadcasts) > 0,
+        f"Expected at least 1 broadcast, got {len(broadcasts)}"
+    )
+    
+    if broadcasts:
+        first = broadcasts[0]
+        log_test(
+            "B5: First broadcast is the one just sent",
+            first.get("id") == broadcast_id,
+            f"Expected {broadcast_id}, got {first.get('id')}"
+        )
+    
+    # Test B6-B8: Try different audiences
+    audiences = ["premium_salons", "free_salons", "suspended_salons"]
+    for i, audience in enumerate(audiences, start=6):
+        print(f"\n[B{i}] POST /platform/broadcast with audience={audience}")
+        resp = requests.post(
+            f"{BACKEND_URL}/platform/broadcast",
+            headers={"Authorization": f"Bearer {platform_token}"},
+            json={
+                "title": f"Test {audience}",
+                "message": f"Testing {audience} audience",
+                "audience": audience,
+                "channels": ["in_app"]
+            }
+        )
+        log_test(
+            f"B{i}: Broadcast to {audience} returns 200",
+            resp.status_code == 200,
+            f"Expected 200, got {resp.status_code}"
+        )
+        
+        if resp.status_code == 200:
+            data = resp.json()
+            print(f"   Target Count: {data.get('target_count')}")
+            print(f"   Delivered Count: {data.get('delivered_count')}")
+
+def test_supplier_stubs(platform_token):
+    """Test C: Supplier stub endpoints"""
+    print("\n" + "="*80)
+    print("TEST C: SUPPLIER STUBS")
+    print("="*80)
+    
+    # Test C1: GET /platform/suppliers
+    print("\n[C1] GET /platform/suppliers")
+    resp = requests.get(
+        f"{BACKEND_URL}/platform/suppliers",
+        headers={"Authorization": f"Bearer {platform_token}"}
+    )
+    
+    if resp.status_code != 200:
+        log_test(
+            "C1: GET suppliers returns 200",
+            False,
+            f"Expected 200, got {resp.status_code} - {resp.text}"
+        )
+        return
+    
+    log_test("C1: GET suppliers returns 200", True)
+    
+    data = resp.json()
+    log_test(
+        "C1: Response has 'suppliers' key",
+        "suppliers" in data,
+        f"Missing 'suppliers' key"
+    )
+    log_test(
+        "C1: Response has 'total' key",
+        "total" in data,
+        f"Missing 'total' key"
+    )
+    
+    print(f"   Suppliers: {data.get('total', 0)}")
+    
+    # Test C2: GET with status filter
+    print("\n[C2] GET /platform/suppliers?status=pending")
+    resp = requests.get(
+        f"{BACKEND_URL}/platform/suppliers?status=pending",
+        headers={"Authorization": f"Bearer {platform_token}"}
+    )
+    log_test(
+        "C2: GET suppliers with status filter returns 200",
+        resp.status_code == 200,
+        f"Expected 200, got {resp.status_code}"
+    )
+    
+    # Test C3: POST approve non-existent supplier (should return 404)
+    print("\n[C3] POST /platform/suppliers/nonexistent-id/approve")
+    resp = requests.post(
+        f"{BACKEND_URL}/platform/suppliers/nonexistent-id/approve",
+        headers={"Authorization": f"Bearer {platform_token}"}
+    )
+    log_test(
+        "C3: Approve non-existent supplier returns 404",
+        resp.status_code == 404,
+        f"Expected 404, got {resp.status_code}"
+    )
+    
+    if resp.status_code == 404:
+        log_test(
+            "C3: Error detail mentions Phase 8",
+            "Phase 8" in resp.text,
+            f"Expected 'Phase 8' in error message"
+        )
+    
+    # Test C4: POST reject non-existent supplier (should return 404)
+    print("\n[C4] POST /platform/suppliers/nonexistent-id/reject")
+    resp = requests.post(
+        f"{BACKEND_URL}/platform/suppliers/nonexistent-id/reject",
+        headers={"Authorization": f"Bearer {platform_token}"}
+    )
+    log_test(
+        "C4: Reject non-existent supplier returns 404",
+        resp.status_code == 404,
+        f"Expected 404, got {resp.status_code}"
+    )
+
+# ============================================================================
+# PHASE 7 TESTS
+# ============================================================================
+
+def test_discount_code_free_months(platform_token, salon_token, salon_id):
+    """Test D: Discount code free_months end-to-end"""
+    print("\n" + "="*80)
+    print("TEST D: DISCOUNT CODE FREE_MONTHS END-TO-END")
+    print("="*80)
+    
+    # Step 1: Create a free_months discount code
+    print("\n[D1] Create free_months discount code")
+    code_data = {
+        "code": "TESTFREE_PHASE7",
+        "discount_type": "free_months",
+        "free_months": 1,
+        "duration_months": 1,
+        "max_uses_per_salon": 1,
+        "max_total_uses": None,
+        "applies_to_branches": "all"
+    }
+    resp = requests.post(
+        f"{BACKEND_URL}/platform/discount-codes",
+        headers={"Authorization": f"Bearer {platform_token}"},
+        json=code_data
+    )
+    
+    if resp.status_code != 200:
+        log_test(
+            "D1: Create free_months code returns 200",
+            False,
+            f"Expected 200, got {resp.status_code} - {resp.text}"
+        )
+        return
+    
+    log_test("D1: Create free_months code returns 200", True)
+    
+    data = resp.json()
+    code_id = data.get("id")
+    print(f"   Code ID: {code_id}")
+    print(f"   Code: {data.get('code')}")
+    
+    # Step 2: Find a salon without active subscription
+    # For testing, we'll use the current salon and try to create order
+    print(f"\n[D2] Create order with free_months code for salon {salon_id}")
+    resp = requests.post(
+        f"{BACKEND_URL}/salons/{salon_id}/subscription/create-order",
+        headers={"Authorization": f"Bearer {salon_token}"},
+        json={"discount_code": "TESTFREE_PHASE7"}
+    )
+    
+    if resp.status_code != 200:
+        log_test(
+            "D2: Create order with free_months code",
+            False,
+            f"Expected 200, got {resp.status_code} - {resp.text}"
+        )
+        # This might fail if salon already has active subscription
+        # That's okay for testing purposes
+        print("   Note: Salon may already have active subscription")
+        return
+    
+    log_test("D2: Create order with free_months code returns 200", True)
+    
+    data = resp.json()
+    
+    # Verify response structure
+    log_test(
+        "D2: Response has is_free_months=true",
+        data.get("is_free_months") is True,
+        f"Expected True, got {data.get('is_free_months')}"
+    )
+    
+    log_test(
+        "D2: Response has free_months_granted=1",
+        data.get("free_months_granted") == 1,
+        f"Expected 1, got {data.get('free_months_granted')}"
+    )
+    
+    log_test(
+        "D2: Response has total_amount=0",
+        data.get("total_amount") == 0,
+        f"Expected 0, got {data.get('total_amount')}"
+    )
+    
+    log_test(
+        "D2: Response has payment_session_id=null",
+        data.get("payment_session_id") is None,
+        f"Expected None, got {data.get('payment_session_id')}"
+    )
+    
+    log_test(
+        "D2: Response has expiry_date",
+        "expiry_date" in data,
+        "Missing expiry_date"
+    )
+    
+    log_test(
+        "D2: Response has subscription_id",
+        "subscription_id" in data,
+        "Missing subscription_id"
+    )
+    
+    log_test(
+        "D2: Response has payment_status='discounted_free'",
+        data.get("payment_status") == "discounted_free",
+        f"Expected 'discounted_free', got {data.get('payment_status')}"
+    )
+    
+    subscription_id = data.get("subscription_id")
+    print(f"\n✅ Free months subscription created:")
+    print(f"   Subscription ID: {subscription_id}")
+    print(f"   Expiry Date: {data.get('expiry_date')}")
+    
+    # Step 3: Verify subscription status
+    print(f"\n[D3] Verify subscription status")
+    resp = requests.get(
+        f"{BACKEND_URL}/salons/{salon_id}/subscription/status",
+        headers={"Authorization": f"Bearer {salon_token}"}
+    )
+    
+    if resp.status_code == 200:
+        data = resp.json()
+        log_test(
+            "D3: Subscription status is premium",
+            data.get("is_premium") is True,
+            f"Expected True, got {data.get('is_premium')}"
+        )
+        print(f"   Status: {data.get('status')}")
+        print(f"   Expiry: {data.get('expiry_date')}")
+    
+    # Step 4: Try to use same code again (should fail with max_uses_per_salon)
+    print(f"\n[D4] Try to use same code again (should fail)")
+    resp = requests.post(
+        f"{BACKEND_URL}/salons/{salon_id}/subscription/create-order",
+        headers={"Authorization": f"Bearer {salon_token}"},
+        json={"discount_code": "TESTFREE_PHASE7"}
+    )
+    log_test(
+        "D4: Second use of same code returns 400",
+        resp.status_code == 400,
+        f"Expected 400, got {resp.status_code}"
+    )
+    
+    # Step 5: Try bogus code (should fail)
+    print(f"\n[D5] Try bogus discount code (should fail)")
+    resp = requests.post(
+        f"{BACKEND_URL}/salons/{salon_id}/subscription/create-order",
+        headers={"Authorization": f"Bearer {salon_token}"},
+        json={"discount_code": "BOGUS_CODE_XYZ"}
+    )
+    log_test(
+        "D5: Bogus code returns 400",
+        resp.status_code == 400,
+        f"Expected 400, got {resp.status_code}"
+    )
+
+def test_discount_code_percent(platform_token, salon_token, salon_id):
+    """Test E: Discount code percent carries through"""
+    print("\n" + "="*80)
+    print("TEST E: DISCOUNT CODE PERCENT REGRESSION")
+    print("="*80)
+    
+    # Step 1: Create a percent discount code
+    print("\n[E1] Create percent discount code")
+    code_data = {
+        "code": "PCT50_PHASE7",
+        "discount_type": "percent",
+        "percent_off": 50,
+        "duration_months": 1,
+        "max_uses_per_salon": 5,
+        "applies_to_branches": "all"
+    }
+    resp = requests.post(
+        f"{BACKEND_URL}/platform/discount-codes",
+        headers={"Authorization": f"Bearer {platform_token}"},
+        json=code_data
+    )
+    
+    if resp.status_code != 200:
+        log_test(
+            "E1: Create percent code returns 200",
+            False,
+            f"Expected 200, got {resp.status_code} - {resp.text}"
+        )
+        return
+    
+    log_test("E1: Create percent code returns 200", True)
+    
+    data = resp.json()
+    print(f"   Code ID: {data.get('id')}")
+    print(f"   Code: {data.get('code')}")
+    
+    # Step 2: Create order with percent code
+    # Note: This might fail if salon already has active subscription
+    print(f"\n[E2] Create order with percent code")
+    resp = requests.post(
+        f"{BACKEND_URL}/salons/{salon_id}/subscription/create-order",
+        headers={"Authorization": f"Bearer {salon_token}"},
+        json={"discount_code": "PCT50_PHASE7"}
+    )
+    
+    if resp.status_code != 200:
+        log_test(
+            "E2: Create order with percent code",
+            False,
+            f"Expected 200, got {resp.status_code} - {resp.text}"
+        )
+        print("   Note: Salon may already have active subscription")
+        return
+    
+    log_test("E2: Create order with percent code returns 200", True)
+    
+    data = resp.json()
+    
+    # Verify response structure
+    log_test(
+        "E2: Response has payment_session_id",
+        data.get("payment_session_id") is not None,
+        f"Expected payment_session_id, got {data.get('payment_session_id')}"
+    )
+    
+    log_test(
+        "E2: Response has base_amount > 0",
+        data.get("base_amount", 0) > 0,
+        f"Expected > 0, got {data.get('base_amount')}"
+    )
+    
+    base = data.get("base_amount", 0)
+    discount = data.get("discount_amount", 0)
+    total = data.get("total_amount", 0)
+    
+    log_test(
+        "E2: discount_amount is ~50% of base_amount",
+        abs(discount - base * 0.5) < 1,  # Allow 1 rupee tolerance
+        f"Expected ~{base * 0.5}, got {discount}"
+    )
+    
+    log_test(
+        "E2: total_amount = base_amount - discount_amount",
+        abs(total - (base - discount)) < 0.01,
+        f"Expected {base - discount}, got {total}"
+    )
+    
+    log_test(
+        "E2: Response has is_free_months=false",
+        data.get("is_free_months") is False,
+        f"Expected False, got {data.get('is_free_months')}"
+    )
+    
+    print(f"\n💰 Percent discount order created:")
+    print(f"   Base Amount: ₹{base}")
+    print(f"   Discount (50%): ₹{discount}")
+    print(f"   Total Amount: ₹{total}")
+    print(f"   Payment Session ID: {data.get('payment_session_id')}")
+
+def test_discount_codes_crud(platform_token):
+    """Test F: Discount codes admin CRUD regression"""
+    print("\n" + "="*80)
+    print("TEST F: DISCOUNT CODES ADMIN CRUD REGRESSION")
+    print("="*80)
+    
+    # Test F1: GET /platform/discount-codes
+    print("\n[F1] GET /platform/discount-codes")
+    resp = requests.get(
+        f"{BACKEND_URL}/platform/discount-codes",
+        headers={"Authorization": f"Bearer {platform_token}"}
+    )
+    
+    if resp.status_code != 200:
+        log_test(
+            "F1: GET discount codes returns 200",
+            False,
+            f"Expected 200, got {resp.status_code} - {resp.text}"
+        )
+        return
+    
+    log_test("F1: GET discount codes returns 200", True)
+    
+    data = resp.json()
+    codes = data.get("codes", [])
+    
+    log_test(
+        "F1: Response has codes list",
+        isinstance(codes, list),
+        f"Expected list, got {type(codes)}"
+    )
+    
+    # Find our test codes
+    testfree = next((c for c in codes if c.get("code") == "TESTFREE_PHASE7"), None)
+    pct50 = next((c for c in codes if c.get("code") == "PCT50_PHASE7"), None)
+    
+    log_test(
+        "F1: TESTFREE_PHASE7 code exists",
+        testfree is not None,
+        "Code not found in list"
+    )
+    
+    log_test(
+        "F1: PCT50_PHASE7 code exists",
+        pct50 is not None,
+        "Code not found in list"
+    )
+    
+    if not testfree:
+        print("   ⚠️ Cannot continue CRUD tests without TESTFREE_PHASE7 code")
+        return
+    
+    code_id = testfree.get("id")
+    print(f"   Found {len(codes)} discount codes")
+    print(f"   TESTFREE_PHASE7 ID: {code_id}")
+    
+    # Test F2: PUT /platform/discount-codes/{id}
+    print(f"\n[F2] PUT /platform/discount-codes/{code_id}")
+    resp = requests.put(
+        f"{BACKEND_URL}/platform/discount-codes/{code_id}",
+        headers={"Authorization": f"Bearer {platform_token}"},
+        json={"description": "Updated description for testing"}
+    )
+    
+    if resp.status_code != 200:
+        log_test(
+            "F2: PUT discount code returns 200",
+            False,
+            f"Expected 200, got {resp.status_code} - {resp.text}"
+        )
+    else:
+        log_test("F2: PUT discount code returns 200", True)
+        data = resp.json()
+        log_test(
+            "F2: Description was updated",
+            data.get("description") == "Updated description for testing",
+            f"Expected 'Updated description for testing', got {data.get('description')}"
+        )
+    
+    # Test F3: POST /platform/discount-codes/{id}/disable
+    print(f"\n[F3] POST /platform/discount-codes/{code_id}/disable")
+    resp = requests.post(
+        f"{BACKEND_URL}/platform/discount-codes/{code_id}/disable",
+        headers={"Authorization": f"Bearer {platform_token}"}
+    )
+    
+    if resp.status_code != 200:
+        log_test(
+            "F3: Disable code returns 200",
+            False,
+            f"Expected 200, got {resp.status_code} - {resp.text}"
+        )
+    else:
+        log_test("F3: Disable code returns 200", True)
+        data = resp.json()
+        log_test(
+            "F3: Status is 'disabled'",
+            data.get("status") == "disabled",
+            f"Expected 'disabled', got {data.get('status')}"
+        )
+    
+    # Test F4: POST /platform/discount-codes/{id}/enable
+    print(f"\n[F4] POST /platform/discount-codes/{code_id}/enable")
+    resp = requests.post(
+        f"{BACKEND_URL}/platform/discount-codes/{code_id}/enable",
+        headers={"Authorization": f"Bearer {platform_token}"}
+    )
+    
+    if resp.status_code != 200:
+        log_test(
+            "F4: Enable code returns 200",
+            False,
+            f"Expected 200, got {resp.status_code} - {resp.text}"
+        )
+    else:
+        log_test("F4: Enable code returns 200", True)
+        data = resp.json()
+        log_test(
+            "F4: Status is 'active'",
+            data.get("status") == "active",
+            f"Expected 'active', got {data.get('status')}"
+        )
+    
+    # Test F5: GET /platform/discount-codes/{id}/usages
+    print(f"\n[F5] GET /platform/discount-codes/{code_id}/usages")
+    resp = requests.get(
+        f"{BACKEND_URL}/platform/discount-codes/{code_id}/usages",
+        headers={"Authorization": f"Bearer {platform_token}"}
+    )
+    
+    if resp.status_code != 200:
+        log_test(
+            "F5: GET code usages returns 200",
+            False,
+            f"Expected 200, got {resp.status_code} - {resp.text}"
+        )
+    else:
+        log_test("F5: GET code usages returns 200", True)
+        data = resp.json()
+        usages = data.get("usages", [])
+        log_test(
+            "F5: Usages list is present",
+            isinstance(usages, list),
+            f"Expected list, got {type(usages)}"
+        )
+        print(f"   Total usages: {len(usages)}")
+    
+    # Cleanup: Disable test codes
+    print(f"\n[CLEANUP] Disabling test codes")
+    for code in [testfree, pct50]:
+        if code:
+            resp = requests.post(
+                f"{BACKEND_URL}/platform/discount-codes/{code['id']}/disable",
+                headers={"Authorization": f"Bearer {platform_token}"}
+            )
+            if resp.status_code == 200:
+                print(f"   ✅ Disabled {code['code']}")
+
+# ============================================================================
+# MAIN TEST RUNNER
+# ============================================================================
+
+def main():
+    """Main test runner"""
+    print("\n" + "="*80)
+    print("PHASE 6 + PHASE 7 BACKEND TESTING")
+    print("="*80)
+    print(f"Backend URL: {BACKEND_URL}")
+    print(f"Platform Owner Mobile: {PLATFORM_OWNER_MOBILE}")
+    
+    # Get platform admin token
+    platform_token = get_platform_admin_token()
+    if not platform_token:
+        print("\n❌ CRITICAL: Failed to get platform admin token. Cannot continue.")
+        return
+    
+    # Get salon admin token
+    salon_token, salon_id = get_salon_admin_token()
+    if not salon_token or not salon_id:
+        print("\n⚠️ WARNING: Failed to get salon admin token. Some tests will be skipped.")
+    
+    # Run Phase 6 tests
+    test_dashboard_stats(platform_token)
+    test_broadcasts(platform_token)
+    test_supplier_stubs(platform_token)
+    
+    # Run Phase 7 tests (only if we have salon token)
+    if salon_token and salon_id:
+        test_discount_code_free_months(platform_token, salon_token, salon_id)
+        test_discount_code_percent(platform_token, salon_token, salon_id)
+    else:
+        print("\n⚠️ SKIPPING Phase 7 tests (no salon admin token)")
+    
+    # Run discount codes CRUD tests
+    test_discount_codes_crud(platform_token)
+    
+    # Print summary
+    print_summary()
 
 if __name__ == "__main__":
-    success = main()
-    exit(0 if success else 1)
+    main()

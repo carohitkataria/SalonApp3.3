@@ -739,6 +739,7 @@ class PaymentTransaction(BaseModel):
 
 class CreateOrderRequest(BaseModel):
     plan_id: Optional[str] = None  # if None, use default active plan
+    discount_code: Optional[str] = None  # Phase 7 — applies discount to base_amount
 
 
 
@@ -11816,16 +11817,135 @@ async def create_subscription_order(
     billable_branch_count = await count_billable_branches(salon_id)
     branch_ids_snapshot = await get_active_branch_ids(salon_id)
     base_amount = round(price_per_branch * billable_branch_count, 2)
-    # Discount code wiring will arrive with Phase 4 (Part D). For now the
-    # snapshot fields are recorded so the data model is forward-compatible.
+
+    # Phase 7 (Part D) — apply discount code if provided
     discount_amount = 0.0
-    discount_code_applied = None
+    discount_code_applied: Optional[str] = None
+    discount_code_doc: Optional[dict] = None
+    is_free_months = False
+    free_months_granted = 0
+    discount_details: Optional[dict] = None
+
+    if payload.discount_code:
+        try:
+            validation = await discount_codes_mod.validate_discount_code(
+                code=payload.discount_code,
+                salon_id=salon_id,
+                billable_branch_count=billable_branch_count,
+            )
+        except Exception as e:
+            logger.error(f"[Subscription] discount validation error: {e}")
+            validation = {"valid": False, "code_doc": None, "reason": "Could not validate code"}
+
+        if not validation["valid"]:
+            raise HTTPException(
+                status_code=400,
+                detail=validation.get("reason") or "Invalid discount code",
+            )
+
+        discount_code_doc = validation["code_doc"]
+        comp = discount_codes_mod.compute_discount(
+            code_doc=discount_code_doc,
+            base_amount=base_amount,
+            price_per_branch=price_per_branch,
+            billable_branch_count=billable_branch_count,
+        )
+        discount_amount = float(comp["discount_amount"])
+        is_free_months = bool(comp["is_free_months"])
+        free_months_granted = int(comp["free_months"])
+        discount_details = comp["discount_details"]
+        discount_code_applied = discount_code_doc["code"]
+
     total_amount = round(max(base_amount - discount_amount, 0.0), 2)
+
+    # Phase 7 — Free months short-circuit. Skip Cashfree entirely.
+    if is_free_months and free_months_granted > 0:
+        now = datetime.now(timezone.utc)
+        start_date_iso = now.isoformat()
+        expiry_date_iso = (now + timedelta(days=30 * free_months_granted)).isoformat()
+        sub_id = str(uuid.uuid4())
+        sub_doc = {
+            "id": sub_id,
+            "salon_id": salon_id,
+            "plan_id": plan["id"],
+            "plan_name": plan.get("plan_name"),
+            "price": 0.0,
+            "subscription_status": "active",
+            "start_date": start_date_iso,
+            "expiry_date": expiry_date_iso,
+            "payment_status": "discounted_free",
+            "cashfree_order_id": None,
+            "cashfree_payment_id": None,
+            "auto_renew": False,
+            "billing_cycle": plan.get("billing_cycle", "monthly"),
+            "billable_branch_count": billable_branch_count,
+            "price_per_branch_snapshot": price_per_branch,
+            "branch_ids_snapshot": branch_ids_snapshot,
+            "base_amount": base_amount,
+            "discount_code_applied": discount_code_applied,
+            "discount_amount": discount_amount,
+            "total_amount": 0.0,
+            "free_months_granted": free_months_granted,
+            "created_at": start_date_iso,
+            "updated_at": start_date_iso,
+        }
+        await db.salon_subscriptions.insert_one(sub_doc.copy())
+
+        # Record usage atomically
+        try:
+            await discount_codes_mod.record_discount_usage(
+                code_doc=discount_code_doc,
+                salon_id=salon_id,
+                subscription_id=sub_id,
+                base_amount=base_amount,
+                discount_amount=discount_amount,
+                final_amount=0.0,
+                branch_count_at_use=billable_branch_count,
+            )
+        except Exception as e:
+            logger.error(f"[Subscription] record_discount_usage failed: {e}")
+
+        # Best-effort notification to the salon admin
+        try:
+            await create_in_app_notification(
+                user_type="salon",
+                user_id=salon_id,
+                title="🎉 Subscription Activated (Free)",
+                message=f"Your {free_months_granted}-month free subscription is now active using code {discount_code_applied}.",
+                notification_type="subscription_activated",
+                setting_key="subscription_activated",
+                salon_id=salon_id,
+                related_id=sub_id,
+            )
+        except Exception:
+            pass
+
+        return {
+            "order_id": None,
+            "payment_session_id": None,
+            "amount": 0.0,
+            "currency": "INR",
+            "plan": plan,
+            "subscription_id": sub_id,
+            "cashfree_env": cashfree_service.CASHFREE_ENV,
+            "billable_branch_count": billable_branch_count,
+            "price_per_branch": price_per_branch,
+            "base_amount": base_amount,
+            "discount_amount": discount_amount,
+            "discount_code_applied": discount_code_applied,
+            "total_amount": 0.0,
+            "is_free_months": True,
+            "free_months_granted": free_months_granted,
+            "discount_details": discount_details,
+            "payment_status": "discounted_free",
+            "expiry_date": expiry_date_iso,
+        }
+
     amount = total_amount  # what actually gets charged
 
     if amount <= 0:
-        # Could happen later when discount fully covers (free_months). For now,
-        # never zero — Phase 4 will add a separate path that skips Cashfree.
+        # This is the non-free-months edge case (e.g., 100% percent code).
+        # Treat the same way: skip Cashfree, mark discounted_free with same expiry as a paid month.
         raise HTTPException(status_code=400, detail="Total amount must be greater than 0")
 
     # Build order
@@ -11971,6 +12091,30 @@ async def _activate_subscription_from_payment(
         )
 
     await db.salon_subscriptions.update_one({"id": sub_id}, {"$set": update_doc})
+
+    # Phase 7 — record discount usage on payment success (idempotent guard)
+    try:
+        sub_doc_now = await db.salon_subscriptions.find_one({"id": sub_id}, {"_id": 0})
+        code_applied = (sub_doc_now or {}).get("discount_code_applied")
+        if code_applied:
+            already = await db.discount_code_usages.find_one(
+                {"subscription_id": sub_id}, {"_id": 0, "id": 1}
+            )
+            if not already:
+                code_doc = await db.discount_codes.find_one({"code": code_applied}, {"_id": 0})
+                if code_doc:
+                    await discount_codes_mod.record_discount_usage(
+                        code_doc=code_doc,
+                        salon_id=salon_id,
+                        subscription_id=sub_id,
+                        base_amount=float(sub_doc_now.get("base_amount") or 0),
+                        discount_amount=float(sub_doc_now.get("discount_amount") or 0),
+                        final_amount=float(sub_doc_now.get("total_amount") or 0),
+                        branch_count_at_use=int(sub_doc_now.get("billable_branch_count") or 1),
+                    )
+    except Exception as e:
+        logger.error(f"[Subscription] record_discount_usage on activation failed: {e}")
+
     return update_doc
 
 
@@ -12199,6 +12343,7 @@ platform_admin_mgmt_mod.init_platform_management_router(
     get_active_plan=get_active_plan,
     secret_key=SECRET_KEY,
     algorithm=ALGORITHM,
+    create_in_app_notification=create_in_app_notification,
 )
 fastapi_app.include_router(platform_admin_mgmt_mod.management_router)
 

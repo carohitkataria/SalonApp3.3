@@ -40,12 +40,15 @@ const fmtMoney = (n) =>
   `₹${Number(n || 0).toLocaleString('en-IN', { maximumFractionDigits: 0 })}`;
 
 export default function SubscriptionPanel({ salonId }) {
-  const { status, plan, refresh, loading, openPaywall, isPremium } = useSubscription();
+  const {
+    status, plan, refresh, loading, openPaywall, isPremium,
+    setAppliedDiscount, clearAppliedDiscount, appliedDiscountCode,
+  } = useSubscription();
   const [transactions, setTransactions] = useState([]);
   const [txLoading, setTxLoading] = useState(false);
 
-  // Discount code preview state (Phase 3 wires the UI; Phase 4 will validate)
-  const [codeInput, setCodeInput] = useState('');
+  // Discount code preview state (Phase 3 wires the UI; Phase 4 validates; Phase 7 carries to checkout)
+  const [codeInput, setCodeInput] = useState(appliedDiscountCode || '');
   const [quote, setQuote] = useState(null);
   const [quoteLoading, setQuoteLoading] = useState(false);
 
@@ -76,16 +79,22 @@ export default function SubscriptionPanel({ salonId }) {
       setQuote(r.data);
       if (code && r.data?.discount_details && !r.data.discount_details.valid) {
         toast.error(r.data.discount_details.reason || 'Discount code not valid');
+        clearAppliedDiscount();
       } else if (code && r.data?.discount_amount > 0) {
         toast.success(`Code ${code} applied — saved ${fmtMoney(r.data.discount_amount)}`);
+        setAppliedDiscount(code, r.data);
+      } else if (!code) {
+        // Initial quote without a code — clear any stale applied code
+        clearAppliedDiscount();
       }
     } catch (e) {
       const detail = e?.response?.data?.detail;
       toast.error(typeof detail === 'string' ? detail : 'Could not fetch quote');
+      clearAppliedDiscount();
     } finally {
       setQuoteLoading(false);
     }
-  }, [salonId]);
+  }, [salonId, setAppliedDiscount, clearAppliedDiscount]);
 
   useEffect(() => {
     fetchTx();

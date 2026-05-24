@@ -25,18 +25,25 @@ const fmtMoney = (n) =>
   `₹${Number(n || 0).toLocaleString('en-IN', { maximumFractionDigits: 0 })}`;
 
 export default function SubscriptionPaywallModal() {
-  const { paywallOpen, paywallReason, closePaywall, plan, salonId, status } = useSubscription();
+  const {
+    paywallOpen, paywallReason, closePaywall, plan, salonId, status,
+    appliedDiscountCode, appliedDiscountQuote,
+    clearAppliedDiscount, refresh,
+  } = useSubscription();
   const [processing, setProcessing] = useState(false);
   const [quote, setQuote] = useState(null);
   const [quoteLoading, setQuoteLoading] = useState(false);
 
-  // Fetch per-branch quote whenever the paywall opens
+  // Fetch per-branch quote whenever the paywall opens — include applied discount if any
   useEffect(() => {
     let cancelled = false;
     if (paywallOpen && salonId) {
       setQuoteLoading(true);
+      // If a quote was already computed on the subscription page, prefer that for instant render
+      if (appliedDiscountQuote) setQuote(appliedDiscountQuote);
+      const params = appliedDiscountCode ? `?discount_code=${encodeURIComponent(appliedDiscountCode)}` : '';
       axios
-        .get(`${API}/salons/${salonId}/subscription/quote`)
+        .get(`${API}/salons/${salonId}/subscription/quote${params}`)
         .then((r) => { if (!cancelled) setQuote(r.data); })
         .catch(() => {})
         .finally(() => { if (!cancelled) setQuoteLoading(false); });
@@ -44,7 +51,7 @@ export default function SubscriptionPaywallModal() {
       setQuote(null);
     }
     return () => { cancelled = true; };
-  }, [paywallOpen, salonId]);
+  }, [paywallOpen, salonId, appliedDiscountCode, appliedDiscountQuote]);
 
   if (!paywallOpen) return null;
 
@@ -78,11 +85,31 @@ export default function SubscriptionPaywallModal() {
     }
     setProcessing(true);
     try {
+      const body = { plan_id: plan?.id };
+      if (appliedDiscountCode) body.discount_code = appliedDiscountCode;
+
       const orderRes = await axios.post(
         `${API}/salons/${salonId}/subscription/create-order`,
-        { plan_id: plan?.id },
+        body,
         { headers: { ...getAuthHeaders(), 'Content-Type': 'application/json' } }
       );
+
+      // Phase 7 — Free-months short-circuit (no Cashfree).
+      if (orderRes.data?.is_free_months || orderRes.data?.payment_status === 'discounted_free') {
+        const months = orderRes.data.free_months_granted || 0;
+        const expiry = orderRes.data.expiry_date;
+        toast.success(
+          `🎉 ${months} month${months === 1 ? '' : 's'} free subscription activated!${
+            expiry ? ` Expires ${new Date(expiry).toLocaleDateString('en-IN')}.` : ''
+          }`,
+          { duration: 6000 },
+        );
+        clearAppliedDiscount();
+        await refresh();
+        setProcessing(false);
+        closePaywall();
+        return;
+      }
 
       const { payment_session_id, order_id, cashfree_env } = orderRes.data;
       if (!payment_session_id) {
@@ -172,8 +199,13 @@ export default function SubscriptionPaywallModal() {
             )}
             {discountAmount > 0 && (
               <div className="flex items-center justify-between text-xs text-emerald-400 mb-1">
-                <span>Discount</span>
+                <span>Discount{appliedDiscountCode ? ` (${appliedDiscountCode})` : ''}</span>
                 <span>− {fmtMoney(discountAmount)}</span>
+              </div>
+            )}
+            {(quote?.is_free_months || (appliedDiscountCode && totalAmount === 0)) && (
+              <div className="mt-2 rounded-lg border border-emerald-500/30 bg-emerald-500/10 text-emerald-300 text-xs p-2 text-center font-semibold">
+                🎉 Free subscription — no payment required
               </div>
             )}
 
@@ -201,10 +233,10 @@ export default function SubscriptionPaywallModal() {
             >
               {processing ? (
                 <span className="flex items-center gap-2">
-                  <Loader2 className="w-4 h-4 animate-spin" /> Redirecting to payment…
+                  <Loader2 className="w-4 h-4 animate-spin" /> {totalAmount === 0 ? 'Activating…' : 'Redirecting to payment…'}
                 </span>
               ) : (
-                'Subscribe Now'
+                totalAmount === 0 ? 'Activate Free Subscription' : 'Subscribe Now'
               )}
             </Button>
             <Button

@@ -44,6 +44,7 @@ _get_active_branch_ids = None
 _get_active_plan = None
 _secret_key: str = "change-me"
 _algorithm: str = "HS256"
+_create_in_app_notification = None
 
 management_router = APIRouter(
     prefix="/api/platform", tags=["platform-admin-management"]
@@ -81,6 +82,32 @@ class CompRequest(BaseModel):
     def reason_not_blank(cls, v: str) -> str:
         if not v or not v.strip():
             raise ValueError("reason must not be blank")
+        return v.strip()
+
+
+# Phase 6 — Broadcast
+BROADCAST_AUDIENCES = {"all_salons", "premium_salons", "free_salons", "suspended_salons"}
+
+
+class BroadcastRequest(BaseModel):
+    title: str = Field(..., min_length=2, max_length=140)
+    message: str = Field(..., min_length=2, max_length=2000)
+    audience: str = Field(default="all_salons")
+    # channels reserved for future (in_app only this iteration)
+    channels: Optional[List[str]] = Field(default_factory=lambda: ["in_app"])
+
+    @field_validator("audience")
+    @classmethod
+    def audience_valid(cls, v: str) -> str:
+        if v not in BROADCAST_AUDIENCES:
+            raise ValueError(f"audience must be one of {sorted(BROADCAST_AUDIENCES)}")
+        return v
+
+    @field_validator("title", "message")
+    @classmethod
+    def not_blank(cls, v: str) -> str:
+        if not v or not v.strip():
+            raise ValueError("must not be blank")
         return v.strip()
 
 
@@ -726,6 +753,271 @@ async def revoke_override(
     return {"ok": True, "override_id": override_id}
 
 
+# ---------- Phase 6: Dashboard Stats ----------
+
+@management_router.get("/dashboard/stats")
+async def dashboard_stats(admin=Depends(require_platform_admin)):
+    """High-level KPIs for the platform admin dashboard.
+
+    Includes:
+      - Salon counts (total, active, suspended)
+      - Subscription counts (active premium, expired, granted)
+      - Month-to-date revenue (from paid payment_transactions in current month)
+      - Active overrides count
+      - Discount code counts (active / disabled / expired)
+      - Suppliers pending approval (stub: 0 until Phase 8)
+    """
+    now = datetime.now(timezone.utc)
+    month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0).isoformat()
+
+    # Salon counts
+    total_salons = await _db.salons.count_documents({})
+    suspended_salons = await _db.salons.count_documents({"status": "suspended"})
+    active_salons = total_salons - suspended_salons
+
+    # Subscription counts
+    active_subs = await _db.salon_subscriptions.count_documents({
+        "payment_status": {"$in": ["paid", "granted", "discounted_free"]},
+        "subscription_status": {"$in": ["active", "granted"]},
+        "expiry_date": {"$gt": now.isoformat()},
+    })
+    expired_subs = await _db.salon_subscriptions.count_documents({
+        "expiry_date": {"$lte": now.isoformat()},
+        "payment_status": {"$in": ["paid", "granted", "discounted_free"]},
+    })
+    granted_subs = await _db.salon_subscriptions.count_documents({
+        "payment_status": "granted",
+        "subscription_status": "granted",
+        "expiry_date": {"$gt": now.isoformat()},
+    })
+
+    # MTD revenue (only real money — not discounted_free / granted)
+    pipeline = [
+        {"$match": {
+            "payment_status": "success",
+            "created_at": {"$gte": month_start},
+        }},
+        {"$group": {"_id": None, "total": {"$sum": "$amount"}, "count": {"$sum": 1}}},
+    ]
+    rev_cursor = _db.payment_transactions.aggregate(pipeline)
+    rev_list = await rev_cursor.to_list(length=1)
+    mtd_revenue = float(rev_list[0]["total"]) if rev_list else 0.0
+    mtd_tx_count = int(rev_list[0]["count"]) if rev_list else 0
+
+    # Active overrides
+    active_overrides = await _db.subscription_overrides_log.count_documents({"active": True})
+
+    # Discount codes
+    total_codes = await _db.discount_codes.count_documents({})
+    active_codes = await _db.discount_codes.count_documents({"status": "active"})
+    disabled_codes = await _db.discount_codes.count_documents({"status": "disabled"})
+    expired_codes = await _db.discount_codes.count_documents({"status": "expired"})
+
+    # Usage stats for codes (this month)
+    usage_pipeline = [
+        {"$match": {"applied_at": {"$gte": month_start}}},
+        {"$group": {"_id": None, "uses": {"$sum": 1}, "savings": {"$sum": "$discount_amount"}}},
+    ]
+    usage_cursor = _db.discount_code_usages.aggregate(usage_pipeline)
+    usage_list = await usage_cursor.to_list(length=1)
+    mtd_code_uses = int(usage_list[0]["uses"]) if usage_list else 0
+    mtd_code_savings = float(usage_list[0]["savings"]) if usage_list else 0.0
+
+    # Suppliers (stub for Phase 8)
+    suppliers_pending = await _db.suppliers.count_documents({"approval_status": "pending"}) if "suppliers" in await _db.list_collection_names() else 0
+
+    return {
+        "as_of": now.isoformat(),
+        "salons": {
+            "total": total_salons,
+            "active": active_salons,
+            "suspended": suspended_salons,
+        },
+        "subscriptions": {
+            "active": active_subs,
+            "expired": expired_subs,
+            "granted": granted_subs,
+        },
+        "revenue": {
+            "mtd_amount": mtd_revenue,
+            "mtd_transaction_count": mtd_tx_count,
+        },
+        "overrides": {
+            "active": active_overrides,
+        },
+        "discount_codes": {
+            "total": total_codes,
+            "active": active_codes,
+            "disabled": disabled_codes,
+            "expired": expired_codes,
+            "mtd_uses": mtd_code_uses,
+            "mtd_savings": mtd_code_savings,
+        },
+        "suppliers": {
+            "pending_approval": suppliers_pending,
+        },
+    }
+
+
+# ---------- Phase 6: Broadcast ----------
+
+async def _resolve_broadcast_audience(audience: str) -> List[dict]:
+    """Return list of salon dicts matching the audience filter."""
+    now_iso = datetime.now(timezone.utc).isoformat()
+    if audience == "suspended_salons":
+        cursor = _db.salons.find({"status": "suspended"}, {"_id": 0, "id": 1, "salon_name": 1, "phone": 1})
+        return await cursor.to_list(length=10000)
+
+    # Active salons (status active or unset)
+    base_q = {"$or": [{"status": "active"}, {"status": {"$exists": False}}, {"status": None}]}
+
+    if audience == "all_salons":
+        cursor = _db.salons.find(base_q, {"_id": 0, "id": 1, "salon_name": 1, "phone": 1})
+        return await cursor.to_list(length=10000)
+
+    # For premium/free filter, look up active subscriptions
+    cursor = _db.salons.find(base_q, {"_id": 0, "id": 1, "salon_name": 1, "phone": 1})
+    all_salons = await cursor.to_list(length=10000)
+
+    # Get salons with active subs
+    active_sub_salon_ids = set()
+    sub_cursor = _db.salon_subscriptions.find(
+        {
+            "payment_status": {"$in": ["paid", "granted", "discounted_free"]},
+            "subscription_status": {"$in": ["active", "granted"]},
+            "expiry_date": {"$gt": now_iso},
+        },
+        {"_id": 0, "salon_id": 1},
+    )
+    async for s in sub_cursor:
+        active_sub_salon_ids.add(s["salon_id"])
+
+    if audience == "premium_salons":
+        return [s for s in all_salons if s["id"] in active_sub_salon_ids]
+    elif audience == "free_salons":
+        return [s for s in all_salons if s["id"] not in active_sub_salon_ids]
+
+    return all_salons
+
+
+@management_router.post("/broadcast")
+async def send_broadcast(
+    body: BroadcastRequest,
+    admin=Depends(require_platform_admin),
+):
+    """Send an in-app broadcast notification to a target audience of salon admins.
+
+    Stores a record in `platform_broadcasts` and fan-outs in-app notifications
+    via `notifications` collection so salon admins see it in their bell.
+    """
+    if not _create_in_app_notification:
+        raise HTTPException(
+            status_code=503,
+            detail="Broadcast not yet wired — notification helper missing",
+        )
+
+    salons = await _resolve_broadcast_audience(body.audience)
+    broadcast_id = str(uuid.uuid4())
+    now_iso = _now_iso()
+
+    delivered = 0
+    failed = 0
+    for s in salons:
+        try:
+            res = await _create_in_app_notification(
+                user_type="salon",
+                user_id=s["id"],
+                title=body.title,
+                message=body.message,
+                notification_type="platform_broadcast",
+                setting_key="platform_broadcast",
+                salon_id=s["id"],
+                related_id=broadcast_id,
+            )
+            if res:
+                delivered += 1
+            else:
+                # Suppressed by user preference still counts as attempted
+                delivered += 1
+        except Exception as e:
+            logger.error(f"Broadcast in-app failure for salon {s['id']}: {e}")
+            failed += 1
+
+    # Persist broadcast record
+    broadcast_doc = {
+        "id": broadcast_id,
+        "title": body.title,
+        "message": body.message,
+        "audience": body.audience,
+        "channels": body.channels or ["in_app"],
+        "target_count": len(salons),
+        "delivered_count": delivered,
+        "failed_count": failed,
+        "sent_by_admin_id": admin["id"],
+        "sent_by_admin_mobile": admin.get("mobile"),
+        "created_at": now_iso,
+    }
+    await _db.platform_broadcasts.insert_one(broadcast_doc.copy())
+    await _write_audit(
+        admin=admin, action="send_broadcast", target="broadcast", target_id=broadcast_id,
+        payload={"audience": body.audience, "target_count": len(salons), "delivered": delivered},
+    )
+
+    return broadcast_doc
+
+
+@management_router.get("/broadcasts")
+async def list_broadcasts(admin=Depends(require_platform_admin)):
+    """Returns history of broadcasts (latest first)."""
+    docs = await _db.platform_broadcasts.find({}, {"_id": 0}).sort("created_at", -1).to_list(length=200)
+    return {"broadcasts": docs, "total": len(docs)}
+
+
+# ---------- Phase 6: Supplier Approval Stubs (Phase 8 will flesh these out) ----------
+
+@management_router.get("/suppliers")
+async def list_suppliers(
+    status: Optional[str] = Query(None, description="pending | approved | rejected"),
+    admin=Depends(require_platform_admin),
+):
+    """Return suppliers list. Empty until Phase 8 (signup) lands."""
+    if "suppliers" not in await _db.list_collection_names():
+        return {"suppliers": [], "total": 0, "note": "Supplier signup flow lands in Phase 8"}
+    q: dict = {}
+    if status:
+        q["approval_status"] = status
+    docs = await _db.suppliers.find(q, {"_id": 0}).sort("created_at", -1).to_list(length=500)
+    return {"suppliers": docs, "total": len(docs)}
+
+
+@management_router.post("/suppliers/{supplier_id}/approve")
+async def approve_supplier(supplier_id: str, admin=Depends(require_platform_admin)):
+    """Stub. Will implement signup + WhatsApp notify in Phase 8."""
+    supplier = await _db.suppliers.find_one({"id": supplier_id}, {"_id": 0}) if "suppliers" in await _db.list_collection_names() else None
+    if not supplier:
+        raise HTTPException(status_code=404, detail="Supplier not found (signup flow lands in Phase 8)")
+    await _db.suppliers.update_one(
+        {"id": supplier_id},
+        {"$set": {"approval_status": "approved", "approved_at": _now_iso(), "approved_by": admin.get("id")}},
+    )
+    await _write_audit(admin=admin, action="approve_supplier", target="supplier", target_id=supplier_id, payload={})
+    return {"ok": True, "supplier_id": supplier_id, "status": "approved"}
+
+
+@management_router.post("/suppliers/{supplier_id}/reject")
+async def reject_supplier(supplier_id: str, admin=Depends(require_platform_admin)):
+    """Stub. Will implement WhatsApp notify in Phase 8."""
+    supplier = await _db.suppliers.find_one({"id": supplier_id}, {"_id": 0}) if "suppliers" in await _db.list_collection_names() else None
+    if not supplier:
+        raise HTTPException(status_code=404, detail="Supplier not found (signup flow lands in Phase 8)")
+    await _db.suppliers.update_one(
+        {"id": supplier_id},
+        {"$set": {"approval_status": "rejected", "rejected_at": _now_iso(), "rejected_by": admin.get("id")}},
+    )
+    await _write_audit(admin=admin, action="reject_supplier", target="supplier", target_id=supplier_id, payload={})
+    return {"ok": True, "supplier_id": supplier_id, "status": "rejected"}
+
+
 # ---------- Wiring ----------
 
 def init_platform_management_router(
@@ -733,11 +1025,12 @@ def init_platform_management_router(
     get_subscription_status, count_billable_branches,
     get_active_branch_ids, get_active_plan,
     secret_key: str, algorithm: str = "HS256",
+    create_in_app_notification=None,
 ):
     """Called by server.py at import time to inject shared dependencies."""
     global _db, _get_subscription_status
     global _count_billable_branches, _get_active_branch_ids, _get_active_plan
-    global _secret_key, _algorithm
+    global _secret_key, _algorithm, _create_in_app_notification
     _db = db
     _get_subscription_status = get_subscription_status
     _count_billable_branches = count_billable_branches
@@ -745,4 +1038,5 @@ def init_platform_management_router(
     _get_active_plan = get_active_plan
     _secret_key = secret_key
     _algorithm = algorithm
+    _create_in_app_notification = create_in_app_notification
     return management_router

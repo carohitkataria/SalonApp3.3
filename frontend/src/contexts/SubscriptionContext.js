@@ -10,9 +10,13 @@ const SubscriptionContext = createContext({
   loading: false,
   paywallOpen: false,
   paywallReason: null,
+  appliedDiscountCode: null,
+  appliedDiscountQuote: null,
   refresh: () => {},
   openPaywall: () => {},
   closePaywall: () => {},
+  setAppliedDiscount: () => {},
+  clearAppliedDiscount: () => {},
 });
 
 export const useSubscription = () => useContext(SubscriptionContext);
@@ -23,6 +27,8 @@ export const SubscriptionProvider = ({ salonId, children }) => {
   const [loading, setLoading] = useState(false);
   const [paywallOpen, setPaywallOpen] = useState(false);
   const [paywallReason, setPaywallReason] = useState(null);
+  const [appliedDiscountCode, setAppliedDiscountCode] = useState(null);
+  const [appliedDiscountQuote, setAppliedDiscountQuote] = useState(null);
 
   const refresh = useCallback(async () => {
     if (!salonId) return;
@@ -56,6 +62,17 @@ export const SubscriptionProvider = ({ salonId, children }) => {
     setPaywallReason(null);
   }, []);
 
+  // Phase 7 — applied discount code persistence (in-memory, cleared on success/manual remove)
+  const setAppliedDiscount = useCallback((code, quote) => {
+    setAppliedDiscountCode(code || null);
+    setAppliedDiscountQuote(quote || null);
+  }, []);
+
+  const clearAppliedDiscount = useCallback(() => {
+    setAppliedDiscountCode(null);
+    setAppliedDiscountQuote(null);
+  }, []);
+
   return (
     <SubscriptionContext.Provider
       value={{
@@ -64,9 +81,13 @@ export const SubscriptionProvider = ({ salonId, children }) => {
         loading,
         paywallOpen,
         paywallReason,
+        appliedDiscountCode,
+        appliedDiscountQuote,
         refresh,
         openPaywall,
         closePaywall,
+        setAppliedDiscount,
+        clearAppliedDiscount,
         isPremium: status?.is_premium || false,
         salonId,
       }}
