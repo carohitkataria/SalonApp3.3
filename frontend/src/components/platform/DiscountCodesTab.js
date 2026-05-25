@@ -28,9 +28,9 @@ const fmtMoney = (n) => `₹${Number(n || 0).toLocaleString('en-IN', { maximumFr
 
 const STATUS_STYLES = {
   active: 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30',
-  disabled: 'bg-zinc-500/15 text-zinc-300 border-zinc-500/30',
+  disabled: 'bg-zinc-500/15 text-foreground/80 border-zinc-500/30',
   expired: 'bg-rose-500/15 text-rose-300 border-rose-500/30',
-  exhausted: 'bg-amber-500/15 text-amber-300 border-amber-500/30',
+  exhausted: 'bg-primary/15 text-primary border-primary/30',
 };
 
 const TYPE_LABEL = {
@@ -160,35 +160,35 @@ function CodeFormModal({ open, onClose, initial, onSaved, headers }) {
 
   return (
     <Dialog open={open} onOpenChange={onClose}>
-      <DialogContent className="bg-zinc-950 border-zinc-800 text-white max-w-2xl max-h-[90vh] overflow-y-auto">
+      <DialogContent className="bg-background border-border text-foreground max-w-2xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle className="text-amber-400 flex items-center gap-2">
+          <DialogTitle className="text-primary flex items-center gap-2">
             <Tag className="w-4 h-4" /> {isEdit ? 'Edit' : 'Create'} discount code
           </DialogTitle>
         </DialogHeader>
         <div className="space-y-4 mt-2">
           {!isEdit && (
             <div>
-              <label className="text-[10px] uppercase tracking-widest font-bold text-zinc-400">Code</label>
+              <label className="text-[10px] uppercase tracking-widest font-bold text-muted-foreground">Code</label>
               <Input
                 value={form.code}
                 onChange={(e) => set('code', e.target.value.toUpperCase())}
                 placeholder="LAUNCH50"
-                className="mt-1 bg-zinc-900 border-zinc-800 text-white font-mono uppercase"
+                className="mt-1 bg-card border-border text-foreground font-mono uppercase"
                 maxLength={40}
               />
-              <div className="text-[10px] text-zinc-500 mt-1">3–40 chars, letters/digits/underscore/hyphen.</div>
+              <div className="text-[10px] text-muted-foreground/80 mt-1">3–40 chars, letters/digits/underscore/hyphen.</div>
             </div>
           )}
 
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="text-[10px] uppercase tracking-widest font-bold text-zinc-400">Type</label>
+              <label className="text-[10px] uppercase tracking-widest font-bold text-muted-foreground">Type</label>
               <select
                 value={form.discount_type}
                 onChange={(e) => set('discount_type', e.target.value)}
                 disabled={isEdit}
-                className="mt-1 w-full bg-zinc-900 border border-zinc-800 text-white rounded-md px-3 h-10 disabled:opacity-50"
+                className="mt-1 w-full bg-card border border-border text-foreground rounded-md px-3 h-10 disabled:opacity-50"
               >
                 <option value="free_months">Free months (skip Cashfree)</option>
                 <option value="percent">Percent off</option>
@@ -198,47 +198,47 @@ function CodeFormModal({ open, onClose, initial, onSaved, headers }) {
 
             {form.discount_type === 'free_months' && (
               <div>
-                <label className="text-[10px] uppercase tracking-widest font-bold text-zinc-400">Free months</label>
-                <Input type="number" min="1" value={form.free_months} onChange={(e) => set('free_months', e.target.value)} className="mt-1 bg-zinc-900 border-zinc-800 text-white" />
+                <label className="text-[10px] uppercase tracking-widest font-bold text-muted-foreground">Free months</label>
+                <Input type="number" min="1" value={form.free_months} onChange={(e) => set('free_months', e.target.value)} className="mt-1 bg-card border-border text-foreground" />
               </div>
             )}
             {form.discount_type === 'percent' && (
               <div>
-                <label className="text-[10px] uppercase tracking-widest font-bold text-zinc-400">Percent off (1–100)</label>
-                <Input type="number" min="1" max="100" value={form.percent_off} onChange={(e) => set('percent_off', e.target.value)} className="mt-1 bg-zinc-900 border-zinc-800 text-white" />
+                <label className="text-[10px] uppercase tracking-widest font-bold text-muted-foreground">Percent off (1–100)</label>
+                <Input type="number" min="1" max="100" value={form.percent_off} onChange={(e) => set('percent_off', e.target.value)} className="mt-1 bg-card border-border text-foreground" />
               </div>
             )}
             {form.discount_type === 'flat_per_month' && (
               <div>
-                <label className="text-[10px] uppercase tracking-widest font-bold text-zinc-400">Flat ₹ off per month</label>
-                <Input type="number" min="1" value={form.flat_off_per_month} onChange={(e) => set('flat_off_per_month', e.target.value)} className="mt-1 bg-zinc-900 border-zinc-800 text-white" />
+                <label className="text-[10px] uppercase tracking-widest font-bold text-muted-foreground">Flat ₹ off per month</label>
+                <Input type="number" min="1" value={form.flat_off_per_month} onChange={(e) => set('flat_off_per_month', e.target.value)} className="mt-1 bg-card border-border text-foreground" />
               </div>
             )}
           </div>
 
           <div className="grid grid-cols-3 gap-3">
             <div>
-              <label className="text-[10px] uppercase tracking-widest font-bold text-zinc-400">Duration (months)</label>
-              <Input type="number" min="1" value={form.duration_months} onChange={(e) => set('duration_months', e.target.value)} className="mt-1 bg-zinc-900 border-zinc-800 text-white" />
-              <div className="text-[10px] text-zinc-500 mt-1">For percent/flat — used for display only.</div>
+              <label className="text-[10px] uppercase tracking-widest font-bold text-muted-foreground">Duration (months)</label>
+              <Input type="number" min="1" value={form.duration_months} onChange={(e) => set('duration_months', e.target.value)} className="mt-1 bg-card border-border text-foreground" />
+              <div className="text-[10px] text-muted-foreground/80 mt-1">For percent/flat — used for display only.</div>
             </div>
             <div>
-              <label className="text-[10px] uppercase tracking-widest font-bold text-zinc-400">Max uses (global)</label>
-              <Input type="number" min="1" value={form.max_total_uses} onChange={(e) => set('max_total_uses', e.target.value)} placeholder="Unlimited" className="mt-1 bg-zinc-900 border-zinc-800 text-white" />
+              <label className="text-[10px] uppercase tracking-widest font-bold text-muted-foreground">Max uses (global)</label>
+              <Input type="number" min="1" value={form.max_total_uses} onChange={(e) => set('max_total_uses', e.target.value)} placeholder="Unlimited" className="mt-1 bg-card border-border text-foreground" />
             </div>
             <div>
-              <label className="text-[10px] uppercase tracking-widest font-bold text-zinc-400">Max uses / salon</label>
-              <Input type="number" min="1" value={form.max_uses_per_salon} onChange={(e) => set('max_uses_per_salon', e.target.value)} className="mt-1 bg-zinc-900 border-zinc-800 text-white" />
+              <label className="text-[10px] uppercase tracking-widest font-bold text-muted-foreground">Max uses / salon</label>
+              <Input type="number" min="1" value={form.max_uses_per_salon} onChange={(e) => set('max_uses_per_salon', e.target.value)} className="mt-1 bg-card border-border text-foreground" />
             </div>
           </div>
 
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="text-[10px] uppercase tracking-widest font-bold text-zinc-400">Applies to branches</label>
+              <label className="text-[10px] uppercase tracking-widest font-bold text-muted-foreground">Applies to branches</label>
               <select
                 value={form.applies_to_branches}
                 onChange={(e) => set('applies_to_branches', e.target.value)}
-                className="mt-1 w-full bg-zinc-900 border border-zinc-800 text-white rounded-md px-3 h-10"
+                className="mt-1 w-full bg-card border border-border text-foreground rounded-md px-3 h-10"
               >
                 <option value="all">All billable branches</option>
                 <option value="first_n">First N branches only</option>
@@ -246,31 +246,31 @@ function CodeFormModal({ open, onClose, initial, onSaved, headers }) {
             </div>
             {form.applies_to_branches === 'first_n' && (
               <div>
-                <label className="text-[10px] uppercase tracking-widest font-bold text-zinc-400">First N branches</label>
-                <Input type="number" min="1" value={form.applies_to_first_n_branches} onChange={(e) => set('applies_to_first_n_branches', e.target.value)} className="mt-1 bg-zinc-900 border-zinc-800 text-white" />
+                <label className="text-[10px] uppercase tracking-widest font-bold text-muted-foreground">First N branches</label>
+                <Input type="number" min="1" value={form.applies_to_first_n_branches} onChange={(e) => set('applies_to_first_n_branches', e.target.value)} className="mt-1 bg-card border-border text-foreground" />
               </div>
             )}
           </div>
 
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="text-[10px] uppercase tracking-widest font-bold text-zinc-400">Valid from</label>
-              <Input type="date" value={form.valid_from} onChange={(e) => set('valid_from', e.target.value)} className="mt-1 bg-zinc-900 border-zinc-800 text-white" />
+              <label className="text-[10px] uppercase tracking-widest font-bold text-muted-foreground">Valid from</label>
+              <Input type="date" value={form.valid_from} onChange={(e) => set('valid_from', e.target.value)} className="mt-1 bg-card border-border text-foreground" />
             </div>
             <div>
-              <label className="text-[10px] uppercase tracking-widest font-bold text-zinc-400">Valid until</label>
-              <Input type="date" value={form.valid_until} onChange={(e) => set('valid_until', e.target.value)} className="mt-1 bg-zinc-900 border-zinc-800 text-white" />
+              <label className="text-[10px] uppercase tracking-widest font-bold text-muted-foreground">Valid until</label>
+              <Input type="date" value={form.valid_until} onChange={(e) => set('valid_until', e.target.value)} className="mt-1 bg-card border-border text-foreground" />
             </div>
           </div>
 
-          <label className="flex items-center gap-2 text-sm text-zinc-300 cursor-pointer">
+          <label className="flex items-center gap-2 text-sm text-foreground/80 cursor-pointer">
             <input type="checkbox" checked={form.is_new_salons_only} onChange={(e) => set('is_new_salons_only', e.target.checked)} className="rounded" />
             New salons only (salon must have never subscribed before)
           </label>
 
           <div>
-            <label className="text-[10px] uppercase tracking-widest font-bold text-zinc-400">Description (internal)</label>
-            <Input value={form.description} onChange={(e) => set('description', e.target.value)} placeholder="Launch promo for Q3" className="mt-1 bg-zinc-900 border-zinc-800 text-white" />
+            <label className="text-[10px] uppercase tracking-widest font-bold text-muted-foreground">Description (internal)</label>
+            <Input value={form.description} onChange={(e) => set('description', e.target.value)} placeholder="Launch promo for Q3" className="mt-1 bg-card border-border text-foreground" />
           </div>
 
           {err && (
@@ -282,7 +282,7 @@ function CodeFormModal({ open, onClose, initial, onSaved, headers }) {
 
           <div className="flex justify-end gap-2 pt-2">
             <Button variant="outline" onClick={onClose} disabled={submitting}>Cancel</Button>
-            <Button onClick={submit} disabled={submitting} className="bg-amber-500 hover:bg-amber-600 text-black font-bold">
+            <Button onClick={submit} disabled={submitting} className="bg-primary hover:bg-primary/90 text-primary-foreground font-bold">
               {submitting && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
               {isEdit ? 'Save changes' : 'Create code'}
             </Button>
@@ -308,36 +308,36 @@ function UsagesDrawer({ code, onClose, headers }) {
 
   return (
     <Dialog open={!!code} onOpenChange={() => onClose()}>
-      <DialogContent className="bg-zinc-950 border-zinc-800 text-white max-w-3xl max-h-[85vh] overflow-y-auto">
+      <DialogContent className="bg-background border-border text-foreground max-w-3xl max-h-[85vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle className="text-amber-400 flex items-center gap-2">
+          <DialogTitle className="text-primary flex items-center gap-2">
             <Eye className="w-4 h-4" /> Usages — <span className="font-mono">{code?.code}</span>
           </DialogTitle>
         </DialogHeader>
         <div className="mt-2">
           <div className="grid grid-cols-3 gap-3 mb-4">
-            <div className="rounded-lg border border-zinc-800 bg-zinc-900/60 p-3">
-              <div className="text-[10px] uppercase tracking-widest text-zinc-500 font-bold">Total uses</div>
-              <div className="text-xl font-bold text-white">{code?.current_uses || 0}{code?.max_total_uses ? `/${code.max_total_uses}` : ''}</div>
+            <div className="rounded-lg border border-border bg-card/60 p-3">
+              <div className="text-[10px] uppercase tracking-widest text-muted-foreground/80 font-bold">Total uses</div>
+              <div className="text-xl font-bold text-foreground">{code?.current_uses || 0}{code?.max_total_uses ? `/${code.max_total_uses}` : ''}</div>
             </div>
-            <div className="rounded-lg border border-zinc-800 bg-zinc-900/60 p-3">
-              <div className="text-[10px] uppercase tracking-widest text-zinc-500 font-bold">Salons benefited</div>
-              <div className="text-xl font-bold text-white">{new Set(usages.map(u => u.salon_id)).size}</div>
+            <div className="rounded-lg border border-border bg-card/60 p-3">
+              <div className="text-[10px] uppercase tracking-widest text-muted-foreground/80 font-bold">Salons benefited</div>
+              <div className="text-xl font-bold text-foreground">{new Set(usages.map(u => u.salon_id)).size}</div>
             </div>
-            <div className="rounded-lg border border-zinc-800 bg-zinc-900/60 p-3">
-              <div className="text-[10px] uppercase tracking-widest text-zinc-500 font-bold">Total saved</div>
-              <div className="text-xl font-bold text-white">{fmtMoney(usages.reduce((s, u) => s + (u.discount_amount || 0), 0))}</div>
+            <div className="rounded-lg border border-border bg-card/60 p-3">
+              <div className="text-[10px] uppercase tracking-widest text-muted-foreground/80 font-bold">Total saved</div>
+              <div className="text-xl font-bold text-foreground">{fmtMoney(usages.reduce((s, u) => s + (u.discount_amount || 0), 0))}</div>
             </div>
           </div>
           {loading ? (
-            <div className="py-10 flex justify-center"><Loader2 className="w-5 h-5 animate-spin text-amber-400" /></div>
+            <div className="py-10 flex justify-center"><Loader2 className="w-5 h-5 animate-spin text-primary" /></div>
           ) : usages.length === 0 ? (
-            <div className="py-10 text-center text-zinc-500 text-xs">No usages yet.</div>
+            <div className="py-10 text-center text-muted-foreground/80 text-xs">No usages yet.</div>
           ) : (
-            <div className="overflow-x-auto rounded-lg border border-zinc-800">
+            <div className="overflow-x-auto rounded-lg border border-border">
               <table className="w-full text-sm">
-                <thead className="bg-zinc-950/60">
-                  <tr className="text-[10px] uppercase tracking-widest text-zinc-500 border-b border-zinc-800">
+                <thead className="bg-background/60">
+                  <tr className="text-[10px] uppercase tracking-widest text-muted-foreground/80 border-b border-border">
                     <th className="text-left px-3 py-2 font-bold">Salon</th>
                     <th className="text-left px-3 py-2 font-bold">Subscription</th>
                     <th className="text-right px-3 py-2 font-bold">Base</th>
@@ -348,13 +348,13 @@ function UsagesDrawer({ code, onClose, headers }) {
                 </thead>
                 <tbody>
                   {usages.map(u => (
-                    <tr key={u.id} className="border-b border-zinc-800/40 last:border-0">
-                      <td className="px-3 py-2 text-zinc-300 font-mono text-xs">{u.salon_name || u.salon_id?.substring(0, 8)}</td>
-                      <td className="px-3 py-2 text-zinc-500 font-mono text-xs">{u.subscription_id?.substring(0, 8)}</td>
-                      <td className="px-3 py-2 text-right text-zinc-300">{fmtMoney(u.base_amount)}</td>
+                    <tr key={u.id} className="border-b border-border/40 last:border-0">
+                      <td className="px-3 py-2 text-foreground/80 font-mono text-xs">{u.salon_name || u.salon_id?.substring(0, 8)}</td>
+                      <td className="px-3 py-2 text-muted-foreground/80 font-mono text-xs">{u.subscription_id?.substring(0, 8)}</td>
+                      <td className="px-3 py-2 text-right text-foreground/80">{fmtMoney(u.base_amount)}</td>
                       <td className="px-3 py-2 text-right text-emerald-300">−{fmtMoney(u.discount_amount)}</td>
-                      <td className="px-3 py-2 text-right font-bold text-white">{fmtMoney(u.final_amount)}</td>
-                      <td className="px-3 py-2 text-zinc-400 text-xs">{fmtTs(u.applied_at)}</td>
+                      <td className="px-3 py-2 text-right font-bold text-foreground">{fmtMoney(u.final_amount)}</td>
+                      <td className="px-3 py-2 text-muted-foreground text-xs">{fmtTs(u.applied_at)}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -434,10 +434,10 @@ export default function DiscountCodesTab({ headers }) {
     <div className="space-y-4">
       <div className="flex items-center justify-between flex-wrap gap-2">
         <div>
-          <h2 className="text-lg font-bold text-white flex items-center gap-2"><Tag className="w-5 h-5 text-amber-400" /> Discount codes</h2>
-          <p className="text-xs text-zinc-500">Create promo codes salons can apply at checkout.</p>
+          <h2 className="text-lg font-bold text-foreground flex items-center gap-2"><Tag className="w-5 h-5 text-primary" /> Discount codes</h2>
+          <p className="text-xs text-muted-foreground/80">Create promo codes salons can apply at checkout.</p>
         </div>
-        <Button onClick={() => { setEditing(null); setShowForm(true); }} className="bg-amber-500 hover:bg-amber-600 text-black font-bold">
+        <Button onClick={() => { setEditing(null); setShowForm(true); }} className="bg-primary hover:bg-primary/90 text-primary-foreground font-bold">
           <Plus className="w-4 h-4 mr-1" /> Create code
         </Button>
       </div>
@@ -447,12 +447,12 @@ export default function DiscountCodesTab({ headers }) {
           placeholder="Search code or description..."
           value={q}
           onChange={(e) => setQ(e.target.value)}
-          className="flex-1 min-w-[200px] bg-zinc-950 border-zinc-800 text-white"
+          className="flex-1 min-w-[200px] bg-background border-border text-foreground"
         />
         <select
           value={statusFilter}
           onChange={(e) => setStatusFilter(e.target.value)}
-          className="bg-zinc-950 border border-zinc-800 text-white text-sm rounded-md px-3 h-10"
+          className="bg-background border border-border text-foreground text-sm rounded-md px-3 h-10"
         >
           <option value="">All statuses</option>
           <option value="active">Active</option>
@@ -465,19 +465,19 @@ export default function DiscountCodesTab({ headers }) {
         </Button>
       </div>
 
-      <div className="bg-zinc-900/60 border border-zinc-800 rounded-2xl overflow-hidden">
+      <div className="bg-card/60 border border-border rounded-2xl overflow-hidden">
         {loading ? (
-          <div className="py-20 flex justify-center"><Loader2 className="w-6 h-6 animate-spin text-amber-400" /></div>
+          <div className="py-20 flex justify-center"><Loader2 className="w-6 h-6 animate-spin text-primary" /></div>
         ) : filtered.length === 0 ? (
-          <div className="py-16 text-center text-zinc-500 text-sm">
-            <Tag className="w-12 h-12 text-zinc-700 mx-auto mb-3" />
+          <div className="py-16 text-center text-muted-foreground/80 text-sm">
+            <Tag className="w-12 h-12 text-muted-foreground/40 mx-auto mb-3" />
             No codes match.
           </div>
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
-              <thead className="bg-zinc-950/60">
-                <tr className="text-[10px] uppercase tracking-widest text-zinc-500 border-b border-zinc-800">
+              <thead className="bg-background/60">
+                <tr className="text-[10px] uppercase tracking-widest text-muted-foreground/80 border-b border-border">
                   <th className="text-left px-4 py-3 font-bold">Code</th>
                   <th className="text-left px-4 py-3 font-bold">Type</th>
                   <th className="text-left px-4 py-3 font-bold">Value</th>
@@ -494,17 +494,17 @@ export default function DiscountCodesTab({ headers }) {
                     : `${fmtMoney(c.flat_off_per_month)} / mo`;
                   const usesDisplay = c.max_total_uses ? `${c.current_uses || 0}/${c.max_total_uses}` : `${c.current_uses || 0}/∞`;
                   return (
-                    <tr key={c.id} className="border-b border-zinc-800/40 last:border-0 hover:bg-zinc-950/40">
+                    <tr key={c.id} className="border-b border-border/40 last:border-0 hover:bg-background/40">
                       <td className="px-4 py-3">
-                        <button onClick={() => copyCode(c.code)} className="flex items-center gap-1 font-mono font-bold text-white hover:text-amber-300">
+                        <button onClick={() => copyCode(c.code)} className="flex items-center gap-1 font-mono font-bold text-foreground hover:text-primary">
                           {c.code} <Copy className="w-3 h-3 opacity-50" />
                         </button>
-                        {c.description && <div className="text-[11px] text-zinc-500 mt-0.5">{c.description}</div>}
+                        {c.description && <div className="text-[11px] text-muted-foreground/80 mt-0.5">{c.description}</div>}
                       </td>
-                      <td className="px-4 py-3 text-zinc-300 text-xs">{TYPE_LABEL[c.discount_type] || c.discount_type}</td>
-                      <td className="px-4 py-3 text-amber-300 font-semibold text-xs">{valueDisplay}</td>
-                      <td className="px-4 py-3 text-center text-zinc-300 text-xs">{usesDisplay}</td>
-                      <td className="px-4 py-3 text-zinc-400 text-xs">
+                      <td className="px-4 py-3 text-foreground/80 text-xs">{TYPE_LABEL[c.discount_type] || c.discount_type}</td>
+                      <td className="px-4 py-3 text-primary font-semibold text-xs">{valueDisplay}</td>
+                      <td className="px-4 py-3 text-center text-foreground/80 text-xs">{usesDisplay}</td>
+                      <td className="px-4 py-3 text-muted-foreground text-xs">
                         <div className="flex items-center gap-1">
                           <Calendar className="w-3 h-3" />
                           {c.valid_from ? fmtDate(c.valid_from) : 'Now'} → {c.valid_until ? fmtDate(c.valid_until) : '∞'}
@@ -518,7 +518,7 @@ export default function DiscountCodesTab({ headers }) {
                       <td className="px-4 py-3 text-right">
                         <div className="flex justify-end gap-1">
                           <button onClick={() => setUsagesFor(c)} className="p-1.5 rounded hover:bg-sky-500/15 text-sky-400" title="View usages"><TrendingUp className="w-3.5 h-3.5" /></button>
-                          <button onClick={() => { setEditing(c); setShowForm(true); }} className="p-1.5 rounded hover:bg-amber-500/15 text-amber-400" title="Edit"><Edit3 className="w-3.5 h-3.5" /></button>
+                          <button onClick={() => { setEditing(c); setShowForm(true); }} className="p-1.5 rounded hover:bg-primary/15 text-primary" title="Edit"><Edit3 className="w-3.5 h-3.5" /></button>
                           <button onClick={() => toggleDisable(c)} disabled={actionBusy === c.id} className={`p-1.5 rounded disabled:opacity-50 ${c.status === 'disabled' ? 'hover:bg-emerald-500/15 text-emerald-400' : 'hover:bg-rose-500/15 text-rose-400'}`} title={c.status === 'disabled' ? 'Enable' : 'Disable'}>
                             <Power className="w-3.5 h-3.5" />
                           </button>

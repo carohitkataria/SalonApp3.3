@@ -18,20 +18,20 @@ const fmtMoney = (n) => `₹${Number(n || 0).toLocaleString('en-IN', { maximumFr
 
 const Kpi = ({ icon: Icon, label, value, sub, tone = 'amber' }) => {
   const tones = {
-    amber: 'text-amber-300 bg-amber-500/10 border-amber-500/30',
+    amber: 'text-primary bg-primary/10 border-primary/30',
     emerald: 'text-emerald-300 bg-emerald-500/10 border-emerald-500/30',
     rose: 'text-rose-300 bg-rose-500/10 border-rose-500/30',
     violet: 'text-violet-300 bg-violet-500/10 border-violet-500/30',
     sky: 'text-sky-300 bg-sky-500/10 border-sky-500/30',
-    zinc: 'text-zinc-300 bg-zinc-500/10 border-zinc-500/30',
+    zinc: 'text-foreground/80 bg-zinc-500/10 border-zinc-500/30',
   };
   return (
     <div className={`rounded-2xl border p-4 ${tones[tone] || tones.amber}`}>
       <div className="flex items-start justify-between">
         <div>
           <div className="text-[10px] uppercase tracking-widest font-bold opacity-80">{label}</div>
-          <div className="text-2xl font-bold text-white mt-1">{value}</div>
-          {sub && <div className="text-[11px] text-zinc-400 mt-1">{sub}</div>}
+          <div className="text-2xl font-bold text-foreground mt-1">{value}</div>
+          {sub && <div className="text-[11px] text-muted-foreground mt-1">{sub}</div>}
         </div>
         <Icon className="w-5 h-5 opacity-70" />
       </div>
@@ -60,7 +60,7 @@ export default function AnalyticsTab({ headers }) {
   if (loading && !stats) {
     return (
       <div className="py-20 flex justify-center">
-        <Loader2 className="w-6 h-6 animate-spin text-amber-400" />
+        <Loader2 className="w-6 h-6 animate-spin text-primary" />
       </div>
     );
   }
@@ -71,8 +71,8 @@ export default function AnalyticsTab({ headers }) {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h2 className="text-lg font-bold text-white">Platform Analytics</h2>
-          <p className="text-xs text-zinc-500">Snapshot as of {new Date(s.as_of).toLocaleString('en-IN')}</p>
+          <h2 className="text-lg font-bold text-foreground">Platform Analytics</h2>
+          <p className="text-xs text-muted-foreground/80">Snapshot as of {new Date(s.as_of).toLocaleString('en-IN')}</p>
         </div>
         <Button variant="outline" size="sm" onClick={fetchStats}>
           <RefreshCw className={`w-3.5 h-3.5 mr-1 ${loading ? 'animate-spin' : ''}`} /> Refresh
@@ -91,8 +91,8 @@ export default function AnalyticsTab({ headers }) {
         <Kpi icon={Megaphone} label="Suppliers Pending" value={s.suppliers.pending_approval} sub="Awaiting approval (Phase 8)" tone="zinc" />
       </div>
 
-      <div className="rounded-xl border border-zinc-800 bg-zinc-900/40 p-4 text-xs text-zinc-400">
-        <Sparkles className="inline w-3.5 h-3.5 text-amber-400 mr-1 -mt-0.5" />
+      <div className="rounded-xl border border-border bg-card/40 p-4 text-xs text-muted-foreground">
+        <Sparkles className="inline w-3.5 h-3.5 text-primary mr-1 -mt-0.5" />
         Numbers refresh on demand. Revenue is calculated only from successful Cashfree payments in the current calendar month — granted &amp; discounted-free subscriptions are excluded.
       </div>
     </div>

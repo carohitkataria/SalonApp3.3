@@ -786,6 +786,21 @@ async def get_current_salon_user(credentials: HTTPAuthorizationCredentials = Dep
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid authentication credentials"
         )
+
+    # Phase-5 enforcement — block suspended salons on EVERY salon-side request.
+    # (Previously the suspend check was only at login time, so already-logged-in
+    #  admins kept access to mutations like adding branches/barbers.)
+    salon_id = payload.get("salon_id") or payload.get("sub")
+    if salon_id:
+        salon_doc = await db.salons.find_one({"id": salon_id}, {"_id": 0, "status": 1})
+        if salon_doc and salon_doc.get("status") == "suspended":
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail={
+                    "code": "salon_suspended",
+                    "message": "This salon has been suspended by the platform administrator. Please contact support.",
+                },
+            )
     return payload
 
 async def get_current_salon_admin(credentials: HTTPAuthorizationCredentials = Depends(security)):

@@ -19,7 +19,7 @@ const fmtMoney = (n) => `₹${Number(n || 0).toLocaleString('en-IN', { maximumFr
 
 const Kpi = ({ icon: Icon, label, value, sub, tone = 'amber', to, testid }) => {
   const tones = {
-    amber: 'text-amber-300 bg-amber-500/10 border-amber-500/30 hover:border-amber-500/60',
+    amber: 'text-primary bg-primary/10 border-primary/30 hover:border-primary/60',
     emerald: 'text-emerald-300 bg-emerald-500/10 border-emerald-500/30 hover:border-emerald-500/60',
     rose: 'text-rose-300 bg-rose-500/10 border-rose-500/30 hover:border-rose-500/60',
     sky: 'text-sky-300 bg-sky-500/10 border-sky-500/30 hover:border-sky-500/60',
@@ -29,8 +29,8 @@ const Kpi = ({ icon: Icon, label, value, sub, tone = 'amber', to, testid }) => {
       <div className="flex items-start justify-between">
         <div>
           <div className="text-[10px] uppercase tracking-widest font-bold opacity-80">{label}</div>
-          <div className="text-3xl font-bold text-white mt-1">{value}</div>
-          {sub && <div className="text-[11px] text-zinc-400 mt-1">{sub}</div>}
+          <div className="text-3xl font-bold text-foreground mt-1">{value}</div>
+          {sub && <div className="text-[11px] text-muted-foreground mt-1">{sub}</div>}
         </div>
         <Icon className="w-6 h-6 opacity-70" />
       </div>
@@ -63,14 +63,14 @@ export default function SupplierDashboardPage() {
   return (
     <SupplierLayout>
       <div className="mb-6">
-        <h1 className="text-2xl font-bold text-white">
-          Welcome back, <span className="text-amber-400">{supplier?.owner_name?.split(' ')[0] || 'Supplier'}</span> 👋
+        <h1 className="text-2xl font-bold text-foreground">
+          Welcome back, <span className="text-primary">{supplier?.owner_name?.split(' ')[0] || 'Supplier'}</span> 👋
         </h1>
-        <p className="text-sm text-zinc-500 mt-1">Here's your business at a glance.</p>
+        <p className="text-sm text-muted-foreground/80 mt-1">Here's your business at a glance.</p>
       </div>
 
       {loading && !stats ? (
-        <div className="py-20 flex justify-center"><Loader2 className="w-6 h-6 animate-spin text-amber-400" /></div>
+        <div className="py-20 flex justify-center"><Loader2 className="w-6 h-6 animate-spin text-primary" /></div>
       ) : !stats ? (
         <div className="rounded-xl border border-rose-500/30 bg-rose-500/10 text-rose-300 text-sm p-4">Could not load dashboard.</div>
       ) : (
@@ -114,10 +114,10 @@ export default function SupplierDashboardPage() {
 
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
             {/* Category breakdown */}
-            <div className="lg:col-span-2 rounded-2xl border border-zinc-800 bg-zinc-900/40 p-5">
+            <div className="lg:col-span-2 rounded-2xl border border-border bg-card/40 p-5">
               <div className="flex items-center justify-between mb-4">
-                <h3 className="text-sm font-bold text-white flex items-center gap-2"><TrendingUp className="w-4 h-4 text-amber-400" /> Products by category</h3>
-                <Link to="/supplier/products" className="text-xs text-amber-400 hover:text-amber-300 font-bold uppercase tracking-widest flex items-center gap-1">
+                <h3 className="text-sm font-bold text-foreground flex items-center gap-2"><TrendingUp className="w-4 h-4 text-primary" /> Products by category</h3>
+                <Link to="/supplier/products" className="text-xs text-primary hover:text-primary font-bold uppercase tracking-widest flex items-center gap-1">
                   Manage <ArrowRight className="w-3 h-3" />
                 </Link>
               </div>
@@ -129,11 +129,11 @@ export default function SupplierDashboardPage() {
                     return (
                       <div key={c.category}>
                         <div className="flex items-center justify-between text-xs mb-1">
-                          <span className="text-zinc-300 font-medium capitalize">{c.category}</span>
-                          <span className="text-zinc-500 font-mono">{c.count}</span>
+                          <span className="text-foreground/80 font-medium capitalize">{c.category}</span>
+                          <span className="text-muted-foreground/80 font-mono">{c.count}</span>
                         </div>
-                        <div className="h-2 rounded-full bg-zinc-800 overflow-hidden">
-                          <div className="h-full bg-gradient-to-r from-amber-500 to-amber-400 rounded-full" style={{ width: `${pct}%` }} />
+                        <div className="h-2 rounded-full bg-muted overflow-hidden">
+                          <div className="h-full bg-gradient-to-r from-primary to-primary/80 rounded-full" style={{ width: `${pct}%` }} />
                         </div>
                       </div>
                     );
@@ -141,9 +141,9 @@ export default function SupplierDashboardPage() {
                 </div>
               ) : (
                 <div className="py-10 text-center">
-                  <Boxes className="w-10 h-10 text-zinc-700 mx-auto mb-2" />
-                  <p className="text-sm text-zinc-400">No products yet.</p>
-                  <Link to="/supplier/products" className="inline-flex items-center gap-1 mt-3 text-amber-400 text-xs font-bold uppercase tracking-widest hover:text-amber-300">
+                  <Boxes className="w-10 h-10 text-muted-foreground/40 mx-auto mb-2" />
+                  <p className="text-sm text-muted-foreground">No products yet.</p>
+                  <Link to="/supplier/products" className="inline-flex items-center gap-1 mt-3 text-primary text-xs font-bold uppercase tracking-widest hover:text-primary">
                     <Sparkles className="w-3 h-3" /> Add your first product <ArrowRight className="w-3 h-3" />
                   </Link>
                 </div>
@@ -151,25 +151,25 @@ export default function SupplierDashboardPage() {
             </div>
 
             {/* Quick actions */}
-            <div className="rounded-2xl border border-zinc-800 bg-zinc-900/40 p-5">
-              <h3 className="text-sm font-bold text-white mb-4">Quick actions</h3>
+            <div className="rounded-2xl border border-border bg-card/40 p-5">
+              <h3 className="text-sm font-bold text-foreground mb-4">Quick actions</h3>
               <div className="space-y-2">
-                <Link to="/supplier/products?action=add" className="flex items-center justify-between p-3 rounded-lg border border-zinc-800 bg-zinc-950/40 hover:border-amber-500/50 transition-colors">
+                <Link to="/supplier/products?action=add" className="flex items-center justify-between p-3 rounded-lg border border-border bg-background/40 hover:border-primary/50 transition-colors">
                   <div className="flex items-center gap-2">
-                    <Sparkles className="w-4 h-4 text-amber-400" />
+                    <Sparkles className="w-4 h-4 text-primary" />
                     <span className="text-sm font-semibold">Add a product</span>
                   </div>
-                  <ArrowRight className="w-4 h-4 text-zinc-500" />
+                  <ArrowRight className="w-4 h-4 text-muted-foreground/80" />
                 </Link>
-                <Link to="/supplier/products?action=samples" className="flex items-center justify-between p-3 rounded-lg border border-zinc-800 bg-zinc-950/40 hover:border-amber-500/50 transition-colors">
+                <Link to="/supplier/products?action=samples" className="flex items-center justify-between p-3 rounded-lg border border-border bg-background/40 hover:border-primary/50 transition-colors">
                   <div className="flex items-center gap-2">
-                    <Boxes className="w-4 h-4 text-amber-400" />
+                    <Boxes className="w-4 h-4 text-primary" />
                     <span className="text-sm font-semibold">Browse samples</span>
                   </div>
-                  <ArrowRight className="w-4 h-4 text-zinc-500" />
+                  <ArrowRight className="w-4 h-4 text-muted-foreground/80" />
                 </Link>
               </div>
-              <div className="mt-6 pt-4 border-t border-zinc-800 text-xs text-zinc-500">
+              <div className="mt-6 pt-4 border-t border-border text-xs text-muted-foreground/80">
                 Updated {new Date(stats.as_of).toLocaleString('en-IN')}
               </div>
             </div>

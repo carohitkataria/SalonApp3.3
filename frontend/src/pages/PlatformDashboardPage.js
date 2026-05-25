@@ -58,7 +58,7 @@ const StatusPill = ({ status, is_premium, is_platform_granted, grant_type }) => 
   if (is_premium) {
     return <span className="inline-flex items-center gap-1 text-[10px] uppercase tracking-widest font-bold px-2 py-0.5 rounded bg-emerald-500/15 text-emerald-300 border border-emerald-500/30">Active</span>;
   }
-  return <span className="inline-flex items-center gap-1 text-[10px] uppercase tracking-widest font-bold px-2 py-0.5 rounded bg-zinc-500/15 text-zinc-300 border border-zinc-500/30">Free</span>;
+  return <span className="inline-flex items-center gap-1 text-[10px] uppercase tracking-widest font-bold px-2 py-0.5 rounded bg-zinc-500/15 text-foreground/80 border border-zinc-500/30">Free</span>;
 };
 
 export default function PlatformDashboardPage() {
@@ -307,8 +307,8 @@ export default function PlatformDashboardPage() {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-zinc-950 flex items-center justify-center">
-        <Loader2 className="w-6 h-6 animate-spin text-amber-400" />
+      <div className="min-h-screen bg-background flex items-center justify-center">
+        <Loader2 className="w-6 h-6 animate-spin text-primary" />
       </div>
     );
   }
@@ -319,23 +319,23 @@ export default function PlatformDashboardPage() {
     const s = detail.salon || {};
     const ss = detail.subscription_state || {};
     return (
-      <div className="min-h-screen bg-gradient-to-br from-zinc-950 via-black to-zinc-900">
+      <div className="min-h-screen bg-background">
         <div className="max-w-6xl mx-auto px-4 py-8">
           <button
             onClick={() => setDetail(null)}
-            className="flex items-center gap-1.5 text-sm text-zinc-400 hover:text-white mb-4"
+            className="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground mb-4"
           >
             <ArrowLeft className="w-4 h-4" /> Back to salons
           </button>
 
           {detailLoading ? (
-            <div className="flex justify-center py-20"><Loader2 className="w-6 h-6 animate-spin text-amber-400" /></div>
+            <div className="flex justify-center py-20"><Loader2 className="w-6 h-6 animate-spin text-primary" /></div>
           ) : (
             <>
               <div className="flex flex-wrap items-start justify-between gap-4 mb-6">
                 <div>
-                  <h1 className="text-2xl font-bold text-white">{s.salon_name}</h1>
-                  <p className="text-sm text-zinc-500 mt-1">{s.owner_name} · {s.phone} · {s.city || '—'}</p>
+                  <h1 className="text-2xl font-bold text-foreground">{s.salon_name}</h1>
+                  <p className="text-sm text-muted-foreground/80 mt-1">{s.owner_name} · {s.phone} · {s.city || '—'}</p>
                   <div className="mt-2 flex items-center gap-2">
                     <StatusPill status={s.status || 'active'} is_premium={ss.is_premium} is_platform_granted={ss.is_platform_granted} grant_type={ss.grant_type} />
                     {s.suspension_reason && (
@@ -356,19 +356,19 @@ export default function PlatformDashboardPage() {
 
               {/* Summary cards */}
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
-                <SummaryCard icon={<Crown className="text-amber-400" />} label="Plan" value={ss.plan?.plan_name || '—'} sub={ss.is_premium ? `Renews ${fmtDate(ss.expiry_date)}` : 'Free'} />
+                <SummaryCard icon={<Crown className="text-primary" />} label="Plan" value={ss.plan?.plan_name || '—'} sub={ss.is_premium ? `Renews ${fmtDate(ss.expiry_date)}` : 'Free'} />
                 <SummaryCard icon={<Building2 className="text-sky-400" />} label="Active branches" value={ss.active_branch_count ?? detail.branches?.length ?? 0} sub={`Cap ${ss.max_branches_effective ?? '∞'}`} />
                 <SummaryCard icon={<Users className="text-emerald-400" />} label="Staff" value={detail.staff_count ?? 0} sub="Active" />
                 <SummaryCard icon={<IndianRupee className="text-violet-400" />} label="This month rev." value={fmtMoney(detail.this_month_revenue || 0)} sub="From bills" />
               </div>
 
               {/* Override action buttons */}
-              <div className="bg-zinc-900/60 border border-zinc-800 rounded-2xl p-5 mb-6">
-                <h2 className="text-base font-bold text-white mb-3 flex items-center gap-2">
-                  <Settings2 className="w-4 h-4 text-amber-400" /> Subscription overrides
+              <div className="bg-card/60 border border-border rounded-2xl p-5 mb-6">
+                <h2 className="text-base font-bold text-foreground mb-3 flex items-center gap-2">
+                  <Settings2 className="w-4 h-4 text-primary" /> Subscription overrides
                 </h2>
                 <div className="flex flex-wrap gap-2">
-                  <Button size="sm" onClick={() => setModal({ type: 'grant_pro', salonId: s.id })} className="bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 text-white">
+                  <Button size="sm" onClick={() => setModal({ type: 'grant_pro', salonId: s.id })} className="bg-gradient-to-r from-primary to-primary/80 hover:from-primary/90 hover:to-primary/70 text-foreground">
                     <Crown className="w-3 h-3 mr-1" /> Grant Pro (time-bound)
                   </Button>
                   <Button size="sm" variant="outline" onClick={() => setModal({ type: 'comp', salonId: s.id })}>
@@ -385,19 +385,19 @@ export default function PlatformDashboardPage() {
 
               {/* Active overrides */}
               {detail.active_overrides?.length > 0 && (
-                <div className="bg-zinc-900/60 border border-amber-500/30 rounded-2xl p-5 mb-6">
-                  <h2 className="text-base font-bold text-amber-200 mb-3 flex items-center gap-2">
+                <div className="bg-card/60 border border-primary/30 rounded-2xl p-5 mb-6">
+                  <h2 className="text-base font-bold text-primary/90 mb-3 flex items-center gap-2">
                     <Check className="w-4 h-4" /> Active overrides ({detail.active_overrides.length})
                   </h2>
                   <div className="space-y-2">
                     {detail.active_overrides.map(o => (
-                      <div key={o.id} className="flex items-center justify-between bg-zinc-950/50 border border-zinc-800 rounded-lg p-3 text-sm">
+                      <div key={o.id} className="flex items-center justify-between bg-background/50 border border-border rounded-lg p-3 text-sm">
                         <div className="flex-1">
-                          <div className="font-medium text-white capitalize">{o.override_type.replace(/_/g, ' ')}</div>
-                          <div className="text-xs text-zinc-500 mt-0.5">
+                          <div className="font-medium text-foreground capitalize">{o.override_type.replace(/_/g, ' ')}</div>
+                          <div className="text-xs text-muted-foreground/80 mt-0.5">
                             {Object.entries(o.override_details || {}).map(([k, v]) => v != null && `${k}: ${v}`).filter(Boolean).join(' · ')}
                           </div>
-                          <div className="text-xs text-zinc-500 mt-0.5">
+                          <div className="text-xs text-muted-foreground/80 mt-0.5">
                             {fmtTs(o.created_at)} · by {o.granted_by_admin_mobile} · "{o.reason}"
                           </div>
                         </div>
@@ -411,17 +411,17 @@ export default function PlatformDashboardPage() {
               )}
 
               {/* Subscription history */}
-              <div className="bg-zinc-900/60 border border-zinc-800 rounded-2xl p-5 mb-6">
-                <h2 className="text-base font-bold text-white mb-3 flex items-center gap-2">
-                  <History className="w-4 h-4 text-amber-400" /> Subscription history
+              <div className="bg-card/60 border border-border rounded-2xl p-5 mb-6">
+                <h2 className="text-base font-bold text-foreground mb-3 flex items-center gap-2">
+                  <History className="w-4 h-4 text-primary" /> Subscription history
                 </h2>
                 {detail.subscription_history?.length === 0 ? (
-                  <p className="text-sm text-zinc-500">No subscriptions yet.</p>
+                  <p className="text-sm text-muted-foreground/80">No subscriptions yet.</p>
                 ) : (
                   <div className="overflow-x-auto">
                     <table className="w-full text-xs">
                       <thead>
-                        <tr className="text-zinc-500 uppercase tracking-wider border-b border-zinc-800">
+                        <tr className="text-muted-foreground/80 uppercase tracking-wider border-b border-border">
                           <th className="text-left py-2">Plan</th>
                           <th className="text-left py-2">Status</th>
                           <th className="text-left py-2">Payment</th>
@@ -432,7 +432,7 @@ export default function PlatformDashboardPage() {
                       </thead>
                       <tbody>
                         {detail.subscription_history.map(sub => (
-                          <tr key={sub.id} className="border-b border-zinc-800/50 last:border-0 text-zinc-300">
+                          <tr key={sub.id} className="border-b border-border/50 last:border-0 text-foreground/80">
                             <td className="py-2">{sub.plan_name || '—'}</td>
                             <td className="py-2">{sub.subscription_status}</td>
                             <td className="py-2">{sub.payment_status}</td>
@@ -449,23 +449,23 @@ export default function PlatformDashboardPage() {
 
               {/* Override history (all, including revoked) */}
               {detail.override_history?.length > 0 && (
-                <div className="bg-zinc-900/60 border border-zinc-800 rounded-2xl p-5 mb-6">
-                  <h2 className="text-base font-bold text-white mb-3 flex items-center gap-2">
-                    <History className="w-4 h-4 text-zinc-400" /> Override history
+                <div className="bg-card/60 border border-border rounded-2xl p-5 mb-6">
+                  <h2 className="text-base font-bold text-foreground mb-3 flex items-center gap-2">
+                    <History className="w-4 h-4 text-muted-foreground" /> Override history
                   </h2>
                   <div className="space-y-2 text-xs">
                     {detail.override_history.map(o => (
-                      <div key={o.id} className={`p-3 rounded-lg border ${o.active ? 'border-amber-500/30 bg-amber-500/5' : 'border-zinc-800 bg-zinc-950/30 opacity-60'}`}>
+                      <div key={o.id} className={`p-3 rounded-lg border ${o.active ? 'border-primary/30 bg-primary/5' : 'border-border bg-background/30 opacity-60'}`}>
                         <div className="flex items-center justify-between">
-                          <span className="text-white font-medium capitalize">{o.override_type.replace(/_/g, ' ')}</span>
+                          <span className="text-foreground font-medium capitalize">{o.override_type.replace(/_/g, ' ')}</span>
                           {o.active ? (
                             <span className="text-emerald-400 text-[10px] uppercase tracking-wider font-bold">Active</span>
                           ) : (
-                            <span className="text-zinc-500 text-[10px] uppercase tracking-wider">Revoked {fmtDate(o.revoked_at)}</span>
+                            <span className="text-muted-foreground/80 text-[10px] uppercase tracking-wider">Revoked {fmtDate(o.revoked_at)}</span>
                           )}
                         </div>
-                        <div className="text-zinc-500 mt-1">{fmtTs(o.created_at)} · {o.granted_by_admin_mobile}</div>
-                        <div className="text-zinc-400 mt-1 italic">"{o.reason}"</div>
+                        <div className="text-muted-foreground/80 mt-1">{fmtTs(o.created_at)} · {o.granted_by_admin_mobile}</div>
+                        <div className="text-muted-foreground mt-1 italic">"{o.reason}"</div>
                       </div>
                     ))}
                   </div>
@@ -502,25 +502,25 @@ export default function PlatformDashboardPage() {
 
   // List view
   return (
-    <div className="min-h-screen bg-gradient-to-br from-zinc-950 via-black to-zinc-900">
+    <div className="min-h-screen bg-background">
       {/* Top nav */}
-      <div className="border-b border-zinc-800 bg-zinc-950/60 backdrop-blur sticky top-0 z-10">
+      <div className="border-b border-border bg-background/60 backdrop-blur sticky top-0 z-10">
         <div className="max-w-7xl mx-auto px-4 py-3 flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <div className="w-9 h-9 rounded-xl bg-amber-500/10 border border-amber-500/30 flex items-center justify-center">
-              <Shield className="w-5 h-5 text-amber-400" />
+            <div className="w-9 h-9 rounded-xl bg-primary/10 border border-primary/30 flex items-center justify-center">
+              <Shield className="w-5 h-5 text-primary" />
             </div>
             <div>
-              <h1 className="text-base font-bold text-white">Platform Admin</h1>
-              <p className="text-[10px] uppercase tracking-widest text-zinc-500">SalonHub control plane</p>
+              <h1 className="text-base font-bold text-foreground">Platform Admin</h1>
+              <p className="text-[10px] uppercase tracking-widest text-muted-foreground/80">SalonHub control plane</p>
             </div>
           </div>
           <div className="flex items-center gap-3">
             <div className="text-right text-xs hidden sm:block">
-              <div className="text-white">{me.name || 'Owner'}</div>
-              <div className="text-zinc-500 font-mono">{me.mobile}</div>
+              <div className="text-foreground">{me.name || 'Owner'}</div>
+              <div className="text-muted-foreground/80 font-mono">{me.mobile}</div>
             </div>
-            <Button variant="ghost" size="sm" onClick={logout} className="text-zinc-400 hover:text-white">
+            <Button variant="ghost" size="sm" onClick={logout} className="text-muted-foreground hover:text-foreground">
               <LogOut className="w-4 h-4 mr-1" /> Sign out
             </Button>
           </div>
@@ -541,14 +541,14 @@ export default function PlatformDashboardPage() {
               disabled={t.disabled}
               className={`px-4 py-2 text-xs uppercase tracking-widest font-bold flex items-center gap-1.5 border-b-2 transition-colors whitespace-nowrap
                 ${tab === t.id
-                  ? 'border-amber-400 text-amber-400'
+                  ? 'border-amber-400 text-primary'
                   : t.disabled
-                    ? 'border-transparent text-zinc-600 cursor-not-allowed'
-                    : 'border-transparent text-zinc-400 hover:text-white'}`}
+                    ? 'border-transparent text-muted-foreground/60 cursor-not-allowed'
+                    : 'border-transparent text-muted-foreground hover:text-foreground'}`}
               title={t.disabled ? 'Coming in Phase 6 / Part B' : undefined}
             >
               <t.icon className="w-3.5 h-3.5" /> {t.label}
-              {t.disabled && <span className="ml-1 text-[9px] text-zinc-600">soon</span>}
+              {t.disabled && <span className="ml-1 text-[9px] text-muted-foreground/60">soon</span>}
             </button>
           ))}
         </div>
@@ -560,18 +560,18 @@ export default function PlatformDashboardPage() {
             {/* Search + filter */}
             <div className="flex flex-wrap items-center gap-2 mb-4">
               <div className="relative flex-1 min-w-[200px]">
-                <Search className="w-4 h-4 text-zinc-500 absolute left-3 top-1/2 -translate-y-1/2" />
+                <Search className="w-4 h-4 text-muted-foreground/80 absolute left-3 top-1/2 -translate-y-1/2" />
                 <Input
                   placeholder="Search by name, owner, mobile, email..."
                   value={q}
                   onChange={(e) => { setQ(e.target.value); setPage(1); }}
-                  className="pl-9 bg-zinc-950 border-zinc-800 text-white"
+                  className="pl-9 bg-background border-border text-foreground"
                 />
               </div>
               <select
                 value={statusFilter}
                 onChange={(e) => { setStatusFilter(e.target.value); setPage(1); }}
-                className="bg-zinc-950 border border-zinc-800 text-white text-sm rounded-md px-3 h-10"
+                className="bg-background border border-border text-foreground text-sm rounded-md px-3 h-10"
               >
                 <option value="">All statuses</option>
                 <option value="active">Active</option>
@@ -582,16 +582,16 @@ export default function PlatformDashboardPage() {
               </Button>
             </div>
 
-            <div className="bg-zinc-900/60 border border-zinc-800 rounded-2xl overflow-hidden">
+            <div className="bg-card/60 border border-border rounded-2xl overflow-hidden">
               {tableLoading ? (
-                <div className="py-20 flex justify-center"><Loader2 className="w-6 h-6 animate-spin text-amber-400" /></div>
+                <div className="py-20 flex justify-center"><Loader2 className="w-6 h-6 animate-spin text-primary" /></div>
               ) : salons.length === 0 ? (
-                <div className="py-20 text-center text-zinc-500 text-sm">No salons found.</div>
+                <div className="py-20 text-center text-muted-foreground/80 text-sm">No salons found.</div>
               ) : (
                 <div className="overflow-x-auto">
                   <table className="w-full text-sm">
-                    <thead className="bg-zinc-950/60">
-                      <tr className="text-[10px] uppercase tracking-widest text-zinc-500 border-b border-zinc-800">
+                    <thead className="bg-background/60">
+                      <tr className="text-[10px] uppercase tracking-widest text-muted-foreground/80 border-b border-border">
                         <th className="text-left px-4 py-3 font-bold">Salon</th>
                         <th className="text-left px-4 py-3 font-bold">Owner</th>
                         <th className="text-left px-4 py-3 font-bold">Mobile</th>
@@ -606,18 +606,18 @@ export default function PlatformDashboardPage() {
                       {salons.map(s => (
                         <tr
                           key={s.id}
-                          className="border-b border-zinc-800/40 last:border-0 hover:bg-zinc-950/40 cursor-pointer"
+                          className="border-b border-border/40 last:border-0 hover:bg-background/40 cursor-pointer"
                           onClick={() => openDetail(s.id)}
                         >
                           <td className="px-4 py-3">
-                            <div className="font-medium text-white">{s.salon_name}</div>
-                            {s.city && <div className="text-xs text-zinc-500">{s.city}</div>}
+                            <div className="font-medium text-foreground">{s.salon_name}</div>
+                            {s.city && <div className="text-xs text-muted-foreground/80">{s.city}</div>}
                           </td>
-                          <td className="px-4 py-3 text-zinc-300">{s.owner_name || '—'}</td>
-                          <td className="px-4 py-3 font-mono text-xs text-zinc-400">{s.phone}</td>
-                          <td className="px-4 py-3 text-center text-zinc-300">{s.branches_count ?? 0}</td>
-                          <td className="px-4 py-3 text-zinc-300 text-xs">{s.plan_name || '—'}</td>
-                          <td className="px-4 py-3 text-zinc-400 text-xs">{fmtDate(s.expiry_date)}</td>
+                          <td className="px-4 py-3 text-foreground/80">{s.owner_name || '—'}</td>
+                          <td className="px-4 py-3 font-mono text-xs text-muted-foreground">{s.phone}</td>
+                          <td className="px-4 py-3 text-center text-foreground/80">{s.branches_count ?? 0}</td>
+                          <td className="px-4 py-3 text-foreground/80 text-xs">{s.plan_name || '—'}</td>
+                          <td className="px-4 py-3 text-muted-foreground text-xs">{fmtDate(s.expiry_date)}</td>
                           <td className="px-4 py-3">
                             <StatusPill {...s} />
                           </td>
@@ -629,7 +629,7 @@ export default function PlatformDashboardPage() {
                                 <button onClick={() => { setModal({ type: 'suspend', salonId: s.id }); setSuspendReason(''); }} className="p-1.5 rounded hover:bg-rose-500/15 text-rose-400" title="Suspend"><Pause className="w-3.5 h-3.5" /></button>
                               )}
                               <button onClick={() => handleViewAs(s.id)} className="p-1.5 rounded hover:bg-sky-500/15 text-sky-400" title="View as"><Eye className="w-3.5 h-3.5" /></button>
-                              <button onClick={() => openDetail(s.id)} className="p-1.5 rounded hover:bg-amber-500/15 text-amber-400" title="Open detail"><Settings2 className="w-3.5 h-3.5" /></button>
+                              <button onClick={() => openDetail(s.id)} className="p-1.5 rounded hover:bg-primary/15 text-primary" title="Open detail"><Settings2 className="w-3.5 h-3.5" /></button>
                             </div>
                           </td>
                         </tr>
@@ -642,7 +642,7 @@ export default function PlatformDashboardPage() {
 
             {/* Pagination */}
             {totalSalons > pageSize && (
-              <div className="flex items-center justify-between mt-3 text-xs text-zinc-500">
+              <div className="flex items-center justify-between mt-3 text-xs text-muted-foreground/80">
                 <div>Showing page {page} of {Math.ceil(totalSalons / pageSize)} · {totalSalons} salons</div>
                 <div className="flex gap-2">
                   <Button size="sm" variant="outline" disabled={page <= 1} onClick={() => setPage(p => Math.max(1, p - 1))}>Prev</Button>
@@ -651,8 +651,8 @@ export default function PlatformDashboardPage() {
               </div>
             )}
 
-            <div className="mt-6 rounded-xl border border-amber-500/20 bg-amber-500/5 p-4 text-xs text-zinc-400">
-              <AlertTriangle className="inline w-3.5 h-3.5 text-amber-400 mr-1 -mt-0.5" />
+            <div className="mt-6 rounded-xl border border-primary/20 bg-primary/5 p-4 text-xs text-muted-foreground">
+              <AlertTriangle className="inline w-3.5 h-3.5 text-primary mr-1 -mt-0.5" />
               Phase 5 complete: salon management, subscription overrides, view-as token, audit log. Suppliers, discount codes, analytics, and broadcast panels arrive in Phase 6 / Part B / Part D.
             </div>
           </>
@@ -690,13 +690,13 @@ export default function PlatformDashboardPage() {
 
 function SummaryCard({ icon, label, value, sub }) {
   return (
-    <div className="bg-zinc-900/60 border border-zinc-800 rounded-xl p-3">
+    <div className="bg-card/60 border border-border rounded-xl p-3">
       <div className="flex items-center gap-2 mb-1">
         <div className="w-5 h-5">{icon}</div>
-        <div className="text-[10px] uppercase tracking-widest text-zinc-500 font-bold">{label}</div>
+        <div className="text-[10px] uppercase tracking-widest text-muted-foreground/80 font-bold">{label}</div>
       </div>
-      <div className="text-lg font-bold text-white">{value}</div>
-      <div className="text-[10px] text-zinc-500">{sub}</div>
+      <div className="text-lg font-bold text-foreground">{value}</div>
+      <div className="text-[10px] text-muted-foreground/80">{sub}</div>
     </div>
   );
 }
@@ -714,7 +714,7 @@ function OverrideModals({
 
   return (
     <Dialog open={!!modal} onOpenChange={(o) => !o && !submitting && setModal(null)}>
-      <DialogContent className="max-w-md bg-zinc-950 border-zinc-800 text-white">
+      <DialogContent className="max-w-md bg-background border-border text-foreground">
         <DialogHeader>
           <DialogTitle>
             {type === 'suspend' && 'Suspend salon'}
@@ -727,10 +727,10 @@ function OverrideModals({
 
         {type === 'suspend' && (
           <div className="space-y-3">
-            <p className="text-sm text-zinc-400">The salon admin will be blocked from logging in until reactivated. Customer-facing pages may remain visible.</p>
+            <p className="text-sm text-muted-foreground">The salon admin will be blocked from logging in until reactivated. Customer-facing pages may remain visible.</p>
             <div>
-              <label className="text-xs uppercase tracking-widest text-zinc-500 font-bold">Reason</label>
-              <Input value={suspendReason} onChange={(e) => setSuspendReason(e.target.value)} placeholder="e.g. payment dispute" className="mt-1 bg-zinc-900 border-zinc-800" autoFocus />
+              <label className="text-xs uppercase tracking-widest text-muted-foreground/80 font-bold">Reason</label>
+              <Input value={suspendReason} onChange={(e) => setSuspendReason(e.target.value)} placeholder="e.g. payment dispute" className="mt-1 bg-card border-border" autoFocus />
             </div>
             <div className="flex justify-end gap-2 pt-2">
               <Button variant="ghost" onClick={() => setModal(null)}>Cancel</Button>
@@ -741,24 +741,24 @@ function OverrideModals({
 
         {type === 'grant_pro' && (
           <div className="space-y-3">
-            <p className="text-sm text-zinc-400">Creates a granted subscription. The salon pays nothing for the duration.</p>
+            <p className="text-sm text-muted-foreground">Creates a granted subscription. The salon pays nothing for the duration.</p>
             <div className="grid grid-cols-2 gap-3">
               <div>
-                <label className="text-xs uppercase tracking-widest text-zinc-500 font-bold">Duration (months)</label>
-                <Input type="number" min={1} value={grantForm.duration_months} onChange={(e) => setGrantForm({ ...grantForm, duration_months: e.target.value })} className="mt-1 bg-zinc-900 border-zinc-800" />
+                <label className="text-xs uppercase tracking-widest text-muted-foreground/80 font-bold">Duration (months)</label>
+                <Input type="number" min={1} value={grantForm.duration_months} onChange={(e) => setGrantForm({ ...grantForm, duration_months: e.target.value })} className="mt-1 bg-card border-border" />
               </div>
               <div>
-                <label className="text-xs uppercase tracking-widest text-zinc-500 font-bold">Max branches</label>
-                <Input type="number" min={1} value={grantForm.max_branches} onChange={(e) => setGrantForm({ ...grantForm, max_branches: e.target.value })} placeholder="∞" className="mt-1 bg-zinc-900 border-zinc-800" />
+                <label className="text-xs uppercase tracking-widest text-muted-foreground/80 font-bold">Max branches</label>
+                <Input type="number" min={1} value={grantForm.max_branches} onChange={(e) => setGrantForm({ ...grantForm, max_branches: e.target.value })} placeholder="∞" className="mt-1 bg-card border-border" />
               </div>
             </div>
             <div>
-              <label className="text-xs uppercase tracking-widest text-zinc-500 font-bold">Reason</label>
-              <Input value={grantForm.reason} onChange={(e) => setGrantForm({ ...grantForm, reason: e.target.value })} placeholder="e.g. beta partner" className="mt-1 bg-zinc-900 border-zinc-800" />
+              <label className="text-xs uppercase tracking-widest text-muted-foreground/80 font-bold">Reason</label>
+              <Input value={grantForm.reason} onChange={(e) => setGrantForm({ ...grantForm, reason: e.target.value })} placeholder="e.g. beta partner" className="mt-1 bg-card border-border" />
             </div>
             <div className="flex justify-end gap-2 pt-2">
               <Button variant="ghost" onClick={() => setModal(null)}>Cancel</Button>
-              <Button onClick={submitGrantPro} disabled={submitting} className="bg-gradient-to-r from-amber-500 to-orange-500 text-white">
+              <Button onClick={submitGrantPro} disabled={submitting} className="bg-gradient-to-r from-primary to-primary/80 text-foreground">
                 {submitting ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Grant access'}
               </Button>
             </div>
@@ -767,18 +767,18 @@ function OverrideModals({
 
         {type === 'override_branches' && (
           <div className="space-y-3">
-            <p className="text-sm text-zinc-400">Raises (or lowers) the max-branches cap on the active subscription.</p>
+            <p className="text-sm text-muted-foreground">Raises (or lowers) the max-branches cap on the active subscription.</p>
             <div>
-              <label className="text-xs uppercase tracking-widest text-zinc-500 font-bold">New max branches</label>
-              <Input type="number" min={1} value={overrideForm.max_branches} onChange={(e) => setOverrideForm({ ...overrideForm, max_branches: e.target.value })} className="mt-1 bg-zinc-900 border-zinc-800" autoFocus />
+              <label className="text-xs uppercase tracking-widest text-muted-foreground/80 font-bold">New max branches</label>
+              <Input type="number" min={1} value={overrideForm.max_branches} onChange={(e) => setOverrideForm({ ...overrideForm, max_branches: e.target.value })} className="mt-1 bg-card border-border" autoFocus />
             </div>
             <div>
-              <label className="text-xs uppercase tracking-widest text-zinc-500 font-bold">Reason</label>
-              <Input value={overrideForm.reason} onChange={(e) => setOverrideForm({ ...overrideForm, reason: e.target.value })} placeholder="e.g. seasonal expansion" className="mt-1 bg-zinc-900 border-zinc-800" />
+              <label className="text-xs uppercase tracking-widest text-muted-foreground/80 font-bold">Reason</label>
+              <Input value={overrideForm.reason} onChange={(e) => setOverrideForm({ ...overrideForm, reason: e.target.value })} placeholder="e.g. seasonal expansion" className="mt-1 bg-card border-border" />
             </div>
             <div className="flex justify-end gap-2 pt-2">
               <Button variant="ghost" onClick={() => setModal(null)}>Cancel</Button>
-              <Button onClick={submitOverrideBranches} disabled={submitting} className="bg-gradient-to-r from-amber-500 to-orange-500 text-white">
+              <Button onClick={submitOverrideBranches} disabled={submitting} className="bg-gradient-to-r from-primary to-primary/80 text-foreground">
                 {submitting ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Apply override'}
               </Button>
             </div>
@@ -787,18 +787,18 @@ function OverrideModals({
 
         {type === 'extend_trial' && (
           <div className="space-y-3">
-            <p className="text-sm text-zinc-400">Pushes the salon's subscription expiry / trial-end by N days.</p>
+            <p className="text-sm text-muted-foreground">Pushes the salon's subscription expiry / trial-end by N days.</p>
             <div>
-              <label className="text-xs uppercase tracking-widest text-zinc-500 font-bold">Days</label>
-              <Input type="number" min={1} value={trialForm.days} onChange={(e) => setTrialForm({ ...trialForm, days: e.target.value })} className="mt-1 bg-zinc-900 border-zinc-800" autoFocus />
+              <label className="text-xs uppercase tracking-widest text-muted-foreground/80 font-bold">Days</label>
+              <Input type="number" min={1} value={trialForm.days} onChange={(e) => setTrialForm({ ...trialForm, days: e.target.value })} className="mt-1 bg-card border-border" autoFocus />
             </div>
             <div>
-              <label className="text-xs uppercase tracking-widest text-zinc-500 font-bold">Reason</label>
-              <Input value={trialForm.reason} onChange={(e) => setTrialForm({ ...trialForm, reason: e.target.value })} placeholder="e.g. onboarding extension" className="mt-1 bg-zinc-900 border-zinc-800" />
+              <label className="text-xs uppercase tracking-widest text-muted-foreground/80 font-bold">Reason</label>
+              <Input value={trialForm.reason} onChange={(e) => setTrialForm({ ...trialForm, reason: e.target.value })} placeholder="e.g. onboarding extension" className="mt-1 bg-card border-border" />
             </div>
             <div className="flex justify-end gap-2 pt-2">
               <Button variant="ghost" onClick={() => setModal(null)}>Cancel</Button>
-              <Button onClick={submitExtendTrial} disabled={submitting} className="bg-gradient-to-r from-amber-500 to-orange-500 text-white">
+              <Button onClick={submitExtendTrial} disabled={submitting} className="bg-gradient-to-r from-primary to-primary/80 text-foreground">
                 {submitting ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Extend'}
               </Button>
             </div>
@@ -807,18 +807,18 @@ function OverrideModals({
 
         {type === 'comp' && (
           <div className="space-y-3">
-            <p className="text-sm text-zinc-400">Ongoing complimentary access — no expiry. Revoke this override to remove access later.</p>
+            <p className="text-sm text-muted-foreground">Ongoing complimentary access — no expiry. Revoke this override to remove access later.</p>
             <div>
-              <label className="text-xs uppercase tracking-widest text-zinc-500 font-bold">Max branches (optional)</label>
-              <Input type="number" min={1} value={compForm.max_branches} onChange={(e) => setCompForm({ ...compForm, max_branches: e.target.value })} placeholder="∞" className="mt-1 bg-zinc-900 border-zinc-800" />
+              <label className="text-xs uppercase tracking-widest text-muted-foreground/80 font-bold">Max branches (optional)</label>
+              <Input type="number" min={1} value={compForm.max_branches} onChange={(e) => setCompForm({ ...compForm, max_branches: e.target.value })} placeholder="∞" className="mt-1 bg-card border-border" />
             </div>
             <div>
-              <label className="text-xs uppercase tracking-widest text-zinc-500 font-bold">Reason</label>
-              <Input value={compForm.reason} onChange={(e) => setCompForm({ ...compForm, reason: e.target.value })} placeholder="e.g. partner salon" className="mt-1 bg-zinc-900 border-zinc-800" autoFocus />
+              <label className="text-xs uppercase tracking-widest text-muted-foreground/80 font-bold">Reason</label>
+              <Input value={compForm.reason} onChange={(e) => setCompForm({ ...compForm, reason: e.target.value })} placeholder="e.g. partner salon" className="mt-1 bg-card border-border" autoFocus />
             </div>
             <div className="flex justify-end gap-2 pt-2">
               <Button variant="ghost" onClick={() => setModal(null)}>Cancel</Button>
-              <Button onClick={submitComp} disabled={submitting} className="bg-gradient-to-r from-amber-500 to-orange-500 text-white">
+              <Button onClick={submitComp} disabled={submitting} className="bg-gradient-to-r from-primary to-primary/80 text-foreground">
                 {submitting ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Grant comp'}
               </Button>
             </div>

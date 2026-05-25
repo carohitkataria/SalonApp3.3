@@ -149,14 +149,14 @@ export default function SupplierSignupPage() {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-zinc-950 via-zinc-900 to-zinc-950 px-4 py-10">
+    <div className="min-h-screen bg-background px-4 py-10">
       <div className="max-w-2xl mx-auto">
         <div className="text-center mb-6">
-          <div className="w-14 h-14 rounded-2xl bg-amber-500/15 border border-amber-500/40 flex items-center justify-center mx-auto mb-3">
-            <Package className="w-7 h-7 text-amber-400" />
+          <div className="w-14 h-14 rounded-2xl bg-primary/15 border border-primary/40 flex items-center justify-center mx-auto mb-3">
+            <Package className="w-7 h-7 text-primary" />
           </div>
-          <h1 className="text-2xl font-bold text-white">Supplier Signup</h1>
-          <p className="text-sm text-zinc-500 mt-1">Join SalonHub Marketplace as a verified supplier</p>
+          <h1 className="text-2xl font-bold text-foreground">Supplier Signup</h1>
+          <p className="text-sm text-muted-foreground/80 mt-1">Join SalonHub Marketplace as a verified supplier</p>
         </div>
 
         {/* Stepper */}
@@ -166,40 +166,40 @@ export default function SupplierSignupPage() {
               <div className="flex flex-col items-center">
                 <div className={`w-9 h-9 rounded-full flex items-center justify-center text-xs font-bold border transition-colors ${
                   step > s.n ? 'bg-emerald-500/20 border-emerald-500/50 text-emerald-300' :
-                  step === s.n ? 'bg-amber-500 border-amber-500 text-black' :
-                  'bg-zinc-900 border-zinc-700 text-zinc-500'
+                  step === s.n ? 'bg-primary border-primary text-primary-foreground' :
+                  'bg-card border-border text-muted-foreground/80'
                 }`}>
                   {step > s.n ? <Check className="w-4 h-4" /> : s.n}
                 </div>
-                <div className={`text-[10px] uppercase tracking-widest font-bold mt-1.5 ${step === s.n ? 'text-amber-300' : 'text-zinc-500'}`}>{s.label.split(' ')[0]}</div>
+                <div className={`text-[10px] uppercase tracking-widest font-bold mt-1.5 ${step === s.n ? 'text-primary' : 'text-muted-foreground/80'}`}>{s.label.split(' ')[0]}</div>
               </div>
               {idx < STEPS.length - 1 && (
-                <div className={`flex-1 h-px mx-1 ${step > s.n ? 'bg-emerald-500/30' : 'bg-zinc-800'}`} />
+                <div className={`flex-1 h-px mx-1 ${step > s.n ? 'bg-emerald-500/30' : 'bg-muted'}`} />
               )}
             </React.Fragment>
           ))}
         </div>
 
-        <div className="bg-zinc-900/60 border border-zinc-800 rounded-2xl p-6">
+        <div className="bg-card/60 border border-border rounded-2xl p-6">
           {step === 1 && (
             <div className="space-y-4">
-              <h2 className="text-sm font-bold text-white flex items-center gap-2"><Building2 className="w-4 h-4 text-amber-400" /> Business details</h2>
+              <h2 className="text-sm font-bold text-foreground flex items-center gap-2"><Building2 className="w-4 h-4 text-primary" /> Business details</h2>
               <div>
-                <label className="text-[10px] uppercase tracking-widest font-bold text-zinc-400">Business name *</label>
-                <Input value={form.business_name} onChange={(e) => set('business_name', e.target.value)} placeholder="ABC Beauty Supplies" data-testid="signup-business-name-input" className="mt-1 bg-zinc-950 border-zinc-800 text-white" />
+                <label className="text-[10px] uppercase tracking-widest font-bold text-muted-foreground">Business name *</label>
+                <Input value={form.business_name} onChange={(e) => set('business_name', e.target.value)} placeholder="ABC Beauty Supplies" data-testid="signup-business-name-input" className="mt-1 bg-background border-border text-foreground" />
               </div>
               <div>
-                <label className="text-[10px] uppercase tracking-widest font-bold text-zinc-400">Owner / Contact person *</label>
-                <Input value={form.owner_name} onChange={(e) => set('owner_name', e.target.value)} placeholder="Full name" data-testid="signup-owner-name-input" className="mt-1 bg-zinc-950 border-zinc-800 text-white" />
+                <label className="text-[10px] uppercase tracking-widest font-bold text-muted-foreground">Owner / Contact person *</label>
+                <Input value={form.owner_name} onChange={(e) => set('owner_name', e.target.value)} placeholder="Full name" data-testid="signup-owner-name-input" className="mt-1 bg-background border-border text-foreground" />
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="text-[10px] uppercase tracking-widest font-bold text-zinc-400">GST number</label>
-                  <Input value={form.gst_number} onChange={(e) => set('gst_number', e.target.value.toUpperCase())} placeholder="22AAAAA0000A1Z5" className="mt-1 bg-zinc-950 border-zinc-800 text-white font-mono" />
+                  <label className="text-[10px] uppercase tracking-widest font-bold text-muted-foreground">GST number</label>
+                  <Input value={form.gst_number} onChange={(e) => set('gst_number', e.target.value.toUpperCase())} placeholder="22AAAAA0000A1Z5" className="mt-1 bg-background border-border text-foreground font-mono" />
                 </div>
                 <div>
-                  <label className="text-[10px] uppercase tracking-widest font-bold text-zinc-400">PAN number</label>
-                  <Input value={form.pan_number} onChange={(e) => set('pan_number', e.target.value.toUpperCase())} placeholder="ABCDE1234F" className="mt-1 bg-zinc-950 border-zinc-800 text-white font-mono" />
+                  <label className="text-[10px] uppercase tracking-widest font-bold text-muted-foreground">PAN number</label>
+                  <Input value={form.pan_number} onChange={(e) => set('pan_number', e.target.value.toUpperCase())} placeholder="ABCDE1234F" className="mt-1 bg-background border-border text-foreground font-mono" />
                 </div>
               </div>
             </div>
@@ -207,41 +207,41 @@ export default function SupplierSignupPage() {
 
           {step === 2 && (
             <div className="space-y-4">
-              <h2 className="text-sm font-bold text-white flex items-center gap-2"><Phone className="w-4 h-4 text-amber-400" /> Contact &amp; login</h2>
+              <h2 className="text-sm font-bold text-foreground flex items-center gap-2"><Phone className="w-4 h-4 text-primary" /> Contact &amp; login</h2>
               <div>
-                <label className="text-[10px] uppercase tracking-widest font-bold text-zinc-400">Mobile *</label>
-                <Input value={form.mobile} onChange={(e) => set('mobile', e.target.value)} placeholder="10-digit mobile" data-testid="signup-mobile-input" className="mt-1 bg-zinc-950 border-zinc-800 text-white" />
+                <label className="text-[10px] uppercase tracking-widest font-bold text-muted-foreground">Mobile *</label>
+                <Input value={form.mobile} onChange={(e) => set('mobile', e.target.value)} placeholder="10-digit mobile" data-testid="signup-mobile-input" className="mt-1 bg-background border-border text-foreground" />
               </div>
               <div>
-                <label className="text-[10px] uppercase tracking-widest font-bold text-zinc-400">Email</label>
-                <Input type="email" value={form.email} onChange={(e) => set('email', e.target.value)} placeholder="owner@business.com" data-testid="signup-email-input" className="mt-1 bg-zinc-950 border-zinc-800 text-white" />
+                <label className="text-[10px] uppercase tracking-widest font-bold text-muted-foreground">Email</label>
+                <Input type="email" value={form.email} onChange={(e) => set('email', e.target.value)} placeholder="owner@business.com" data-testid="signup-email-input" className="mt-1 bg-background border-border text-foreground" />
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="text-[10px] uppercase tracking-widest font-bold text-zinc-400">Password *</label>
-                  <Input type="password" value={form.password} onChange={(e) => set('password', e.target.value)} placeholder="≥6 chars" data-testid="signup-password-input" className="mt-1 bg-zinc-950 border-zinc-800 text-white" />
+                  <label className="text-[10px] uppercase tracking-widest font-bold text-muted-foreground">Password *</label>
+                  <Input type="password" value={form.password} onChange={(e) => set('password', e.target.value)} placeholder="≥6 chars" data-testid="signup-password-input" className="mt-1 bg-background border-border text-foreground" />
                 </div>
                 <div>
-                  <label className="text-[10px] uppercase tracking-widest font-bold text-zinc-400">Confirm password *</label>
-                  <Input type="password" value={form.confirm_password} onChange={(e) => set('confirm_password', e.target.value)} data-testid="signup-confirm-password-input" className="mt-1 bg-zinc-950 border-zinc-800 text-white" />
+                  <label className="text-[10px] uppercase tracking-widest font-bold text-muted-foreground">Confirm password *</label>
+                  <Input type="password" value={form.confirm_password} onChange={(e) => set('confirm_password', e.target.value)} data-testid="signup-confirm-password-input" className="mt-1 bg-background border-border text-foreground" />
                 </div>
               </div>
               <div>
-                <label className="text-[10px] uppercase tracking-widest font-bold text-zinc-400">Address</label>
-                <Input value={form.address} onChange={(e) => set('address', e.target.value)} placeholder="Street, locality" className="mt-1 bg-zinc-950 border-zinc-800 text-white" />
+                <label className="text-[10px] uppercase tracking-widest font-bold text-muted-foreground">Address</label>
+                <Input value={form.address} onChange={(e) => set('address', e.target.value)} placeholder="Street, locality" className="mt-1 bg-background border-border text-foreground" />
               </div>
               <div className="grid grid-cols-3 gap-3">
                 <div>
-                  <label className="text-[10px] uppercase tracking-widest font-bold text-zinc-400">City</label>
-                  <Input value={form.city} onChange={(e) => set('city', e.target.value)} className="mt-1 bg-zinc-950 border-zinc-800 text-white" />
+                  <label className="text-[10px] uppercase tracking-widest font-bold text-muted-foreground">City</label>
+                  <Input value={form.city} onChange={(e) => set('city', e.target.value)} className="mt-1 bg-background border-border text-foreground" />
                 </div>
                 <div>
-                  <label className="text-[10px] uppercase tracking-widest font-bold text-zinc-400">State</label>
-                  <Input value={form.state} onChange={(e) => set('state', e.target.value)} className="mt-1 bg-zinc-950 border-zinc-800 text-white" />
+                  <label className="text-[10px] uppercase tracking-widest font-bold text-muted-foreground">State</label>
+                  <Input value={form.state} onChange={(e) => set('state', e.target.value)} className="mt-1 bg-background border-border text-foreground" />
                 </div>
                 <div>
-                  <label className="text-[10px] uppercase tracking-widest font-bold text-zinc-400">Pincode</label>
-                  <Input value={form.pincode} onChange={(e) => set('pincode', e.target.value)} className="mt-1 bg-zinc-950 border-zinc-800 text-white" />
+                  <label className="text-[10px] uppercase tracking-widest font-bold text-muted-foreground">Pincode</label>
+                  <Input value={form.pincode} onChange={(e) => set('pincode', e.target.value)} className="mt-1 bg-background border-border text-foreground" />
                 </div>
               </div>
             </div>
@@ -249,20 +249,20 @@ export default function SupplierSignupPage() {
 
           {step === 3 && (
             <div className="space-y-4">
-              <h2 className="text-sm font-bold text-white flex items-center gap-2"><Landmark className="w-4 h-4 text-amber-400" /> Bank details (optional)</h2>
-              <p className="text-xs text-zinc-500">Required only before your first payout. You can also fill these in later from settings.</p>
+              <h2 className="text-sm font-bold text-foreground flex items-center gap-2"><Landmark className="w-4 h-4 text-primary" /> Bank details (optional)</h2>
+              <p className="text-xs text-muted-foreground/80">Required only before your first payout. You can also fill these in later from settings.</p>
               <div>
-                <label className="text-[10px] uppercase tracking-widest font-bold text-zinc-400">Account number</label>
-                <Input value={form.bank_account_no} onChange={(e) => set('bank_account_no', e.target.value)} className="mt-1 bg-zinc-950 border-zinc-800 text-white" />
+                <label className="text-[10px] uppercase tracking-widest font-bold text-muted-foreground">Account number</label>
+                <Input value={form.bank_account_no} onChange={(e) => set('bank_account_no', e.target.value)} className="mt-1 bg-background border-border text-foreground" />
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="text-[10px] uppercase tracking-widest font-bold text-zinc-400">IFSC code</label>
-                  <Input value={form.bank_ifsc} onChange={(e) => set('bank_ifsc', e.target.value.toUpperCase())} placeholder="HDFC0000123" className="mt-1 bg-zinc-950 border-zinc-800 text-white font-mono" />
+                  <label className="text-[10px] uppercase tracking-widest font-bold text-muted-foreground">IFSC code</label>
+                  <Input value={form.bank_ifsc} onChange={(e) => set('bank_ifsc', e.target.value.toUpperCase())} placeholder="HDFC0000123" className="mt-1 bg-background border-border text-foreground font-mono" />
                 </div>
                 <div>
-                  <label className="text-[10px] uppercase tracking-widest font-bold text-zinc-400">Account holder name</label>
-                  <Input value={form.bank_holder} onChange={(e) => set('bank_holder', e.target.value)} className="mt-1 bg-zinc-950 border-zinc-800 text-white" />
+                  <label className="text-[10px] uppercase tracking-widest font-bold text-muted-foreground">Account holder name</label>
+                  <Input value={form.bank_holder} onChange={(e) => set('bank_holder', e.target.value)} className="mt-1 bg-background border-border text-foreground" />
                 </div>
               </div>
             </div>
@@ -270,8 +270,8 @@ export default function SupplierSignupPage() {
 
           {step === 4 && (
             <div className="space-y-4">
-              <h2 className="text-sm font-bold text-white flex items-center gap-2"><Tags className="w-4 h-4 text-amber-400" /> Product categories *</h2>
-              <p className="text-xs text-zinc-500">Select categories you'll list products in. You can change these later.</p>
+              <h2 className="text-sm font-bold text-foreground flex items-center gap-2"><Tags className="w-4 h-4 text-primary" /> Product categories *</h2>
+              <p className="text-xs text-muted-foreground/80">Select categories you'll list products in. You can change these later.</p>
               <div className="flex flex-wrap gap-2">
                 {SUGGESTED_CATEGORIES.map((cat) => (
                   <button
@@ -281,8 +281,8 @@ export default function SupplierSignupPage() {
                     data-testid={`signup-category-${cat.replace(/ /g, '-')}`}
                     className={`px-3 py-1.5 rounded-full text-xs font-semibold border transition-colors ${
                       form.category_tags.includes(cat)
-                        ? 'bg-amber-500 border-amber-500 text-black'
-                        : 'bg-zinc-950 border-zinc-700 text-zinc-300 hover:border-amber-500/50'
+                        ? 'bg-primary border-primary text-primary-foreground'
+                        : 'bg-background border-border text-foreground/80 hover:border-primary/50'
                     }`}
                   >
                     {form.category_tags.includes(cat) && <Check className="inline w-3 h-3 mr-1" />}
@@ -290,13 +290,13 @@ export default function SupplierSignupPage() {
                   </button>
                 ))}
                 {form.category_tags.filter((c) => !SUGGESTED_CATEGORIES.includes(c)).map((cat) => (
-                  <button key={cat} type="button" onClick={() => toggleCategory(cat)} className="px-3 py-1.5 rounded-full text-xs font-semibold border bg-amber-500 border-amber-500 text-black">
+                  <button key={cat} type="button" onClick={() => toggleCategory(cat)} className="px-3 py-1.5 rounded-full text-xs font-semibold border bg-primary border-primary text-primary-foreground">
                     <Check className="inline w-3 h-3 mr-1" /> {cat} <span className="ml-1 opacity-60">×</span>
                   </button>
                 ))}
               </div>
               <div className="flex gap-2 pt-2">
-                <Input value={categoryInput} onChange={(e) => setCategoryInput(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addCustomCategory(); } }} placeholder="Add custom category" className="bg-zinc-950 border-zinc-800 text-white" />
+                <Input value={categoryInput} onChange={(e) => setCategoryInput(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addCustomCategory(); } }} placeholder="Add custom category" className="bg-background border-border text-foreground" />
                 <Button type="button" onClick={addCustomCategory} variant="outline">Add</Button>
               </div>
             </div>
@@ -304,8 +304,8 @@ export default function SupplierSignupPage() {
 
           {step === 5 && (
             <div className="space-y-4">
-              <h2 className="text-sm font-bold text-white flex items-center gap-2"><FileText className="w-4 h-4 text-amber-400" /> Review &amp; submit</h2>
-              <div className="rounded-xl border border-zinc-800 bg-zinc-950/40 divide-y divide-zinc-800">
+              <h2 className="text-sm font-bold text-foreground flex items-center gap-2"><FileText className="w-4 h-4 text-primary" /> Review &amp; submit</h2>
+              <div className="rounded-xl border border-border bg-background/40 divide-y divide-border">
                 <ReviewRow label="Business" value={form.business_name} />
                 <ReviewRow label="Owner" value={form.owner_name} />
                 {form.gst_number && <ReviewRow label="GST" value={form.gst_number} mono />}
@@ -316,22 +316,22 @@ export default function SupplierSignupPage() {
                 {form.bank_account_no && <ReviewRow label="Bank" value={`****${form.bank_account_no.slice(-4)} · ${form.bank_ifsc}`} mono />}
                 <ReviewRow label="Categories" value={form.category_tags.join(', ')} />
               </div>
-              <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-3 text-xs text-amber-200">
+              <div className="rounded-xl border border-primary/30 bg-primary/10 p-3 text-xs text-primary/90">
                 Once submitted, your account will be in review. You'll get a WhatsApp notification once approved.
               </div>
             </div>
           )}
 
-          <div className="flex items-center justify-between mt-6 pt-4 border-t border-zinc-800">
+          <div className="flex items-center justify-between mt-6 pt-4 border-t border-border">
             <Button variant="outline" onClick={prevStep} disabled={step === 1} data-testid="signup-back-btn">
               <ArrowLeft className="w-4 h-4 mr-1" /> Back
             </Button>
             {step < STEPS.length ? (
-              <Button onClick={nextStep} data-testid="signup-continue-btn" className="bg-amber-500 hover:bg-amber-600 text-black font-bold">
+              <Button onClick={nextStep} data-testid="signup-continue-btn" className="bg-primary hover:bg-primary/90 text-primary-foreground font-bold">
                 Continue <ArrowRight className="w-4 h-4 ml-1" />
               </Button>
             ) : (
-              <Button onClick={handleSubmit} disabled={submitting} data-testid="signup-submit-btn" className="bg-amber-500 hover:bg-amber-600 text-black font-bold">
+              <Button onClick={handleSubmit} disabled={submitting} data-testid="signup-submit-btn" className="bg-primary hover:bg-primary/90 text-primary-foreground font-bold">
                 {submitting && <Loader2 className="w-4 h-4 mr-2 animate-spin" />} Submit application
               </Button>
             )}
@@ -339,8 +339,8 @@ export default function SupplierSignupPage() {
         </div>
 
         <div className="text-center mt-6 text-sm">
-          <span className="text-zinc-500">Already a supplier? </span>
-          <Link to="/supplier/login" className="text-amber-400 hover:text-amber-300 font-semibold">Login</Link>
+          <span className="text-muted-foreground/80">Already a supplier? </span>
+          <Link to="/supplier/login" className="text-primary hover:text-primary font-semibold">Login</Link>
         </div>
       </div>
     </div>
@@ -350,8 +350,8 @@ export default function SupplierSignupPage() {
 function ReviewRow({ label, value, mono }) {
   return (
     <div className="flex items-start justify-between px-4 py-2.5 text-sm gap-3">
-      <span className="text-[10px] uppercase tracking-widest font-bold text-zinc-500">{label}</span>
-      <span className={`text-white text-right break-words ${mono ? 'font-mono text-xs' : ''}`}>{value || '—'}</span>
+      <span className="text-[10px] uppercase tracking-widest font-bold text-muted-foreground/80">{label}</span>
+      <span className={`text-foreground text-right break-words ${mono ? 'font-mono text-xs' : ''}`}>{value || '—'}</span>
     </div>
   );
 }
