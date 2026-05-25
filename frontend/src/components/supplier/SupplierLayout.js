@@ -9,24 +9,29 @@ import { useSupplierAuth } from '@/contexts/SupplierAuthContext';
 
 export default function SupplierLayout({ children }) {
   const navigate = useNavigate();
-  const { supplier, logout, blockedStatus } = useSupplierAuth();
+  const { supplier, token, loading, logout, blockedStatus } = useSupplierAuth();
 
-  // Route guard
+  // Route guard — only redirect once we're CERTAIN the user has no session.
+  // While refresh() is in flight (token present but supplier still null), wait.
   React.useEffect(() => {
-    if (!supplier) {
+    if (loading) return;
+    if (!token) {
       navigate('/supplier/login', { replace: true });
-    } else if (blockedStatus) {
+      return;
+    }
+    if (blockedStatus) {
       navigate('/supplier/pending', { replace: true });
     }
-  }, [supplier, blockedStatus, navigate]);
+  }, [token, loading, blockedStatus, navigate]);
 
+  // Don't paint until we have a supplier profile (avoids flicker / race with guard)
   if (!supplier) return null;
 
   const handleLogout = () => {
-    // Navigate FIRST so the layout unmounts before its route-guard effect
-    // fires on the cleared supplier state (otherwise we'd bounce to /supplier/login).
-    navigate('/');
+    // Hard navigation guarantees the layout fully unmounts before the
+    // route-guard useEffect can race on the cleared token.
     logout();
+    window.location.replace('/');
   };
 
   return (

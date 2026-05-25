@@ -1,0 +1,55 @@
+{
+  "summary": "Phase 8/9 Supplier Marketplace frontend RETEST 3. Route-guard race FIXED — both page.goto and NavLink click reach /supplier/products without bouncing. 9/10 happy-path steps PASS. Logout correctly lands on '/' (landing page). One new functional bug surfaced at the DELETE step: backend soft-deletes by setting is_active=false, but the supplier catalog GET (/api/supplier/products) does not filter by is_active, so the card REMAINS visible after delete + reload, even though DELETE returns 200.",
+  "backend_issues": {
+    "critical": [
+      {
+        "endpoint": "DELETE /api/supplier/products/{id} + GET /api/supplier/products",
+        "issue": "Delete is a soft-delete (sets is_active=false), but the list endpoint does NOT filter inactive products by default. Result: after a successful DELETE (200), the product card stays in the supplier's own catalog view forever — even after a hard reload. UI shows 'Product removed' toast but MY CATALOG (2) count stays 2. Reproduced cleanly: DELETE 200 fired, GET 200 returned the same product list with the deleted item still in it. Backend file: /app/backend/supplier_products.py line 205-225 (list_products has no is_active default filter) and line 272-280 (delete only flips is_active=false). Fix options: (a) in list_products default to `is_active=True` for supplier-facing GET unless query param explicitly asks for inactive; OR (b) introduce a separate `deleted_at` field for hard-hidden state and exclude in GET; OR (c) hard-delete in the DELETE handler.",
+        "priority": "HIGH"
+      }
+    ],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [
+      {
+        "flow": "Delete product from supplier catalog",
+        "issue": "Card never disappears from MY CATALOG view despite successful DELETE. This is the UI consequence of the backend soft-delete + no-filter GET described above. SupplierProductsPage refetches after delete (confirmed via network log) but the refetched list still contains the 'deleted' product.",
+        "affected_selectors": ["delete-product-{id}", "confirm-delete-btn", "product-card-{id}"]
+      },
+      {
+        "flow": "Supplier logout",
+        "issue": "Cosmetic only — nav log shows brief transition to /supplier/login before window.location.replace('/') wins. Final URL is '/' as required (landing page visible). The handleLogout fix works because window.location.replace forces a full page nav that overrides the route-guard's last useEffect run. Consider gating SupplierLayout's redirect on `!loading && token && !supplier ? wait : (!token ? redirect)` AND also early-return when a `loggingOut` sentinel is set, to make this 100% race-free. Not blocking.",
+        "affected_selectors": ["supplier-header-logout-btn"]
+      }
+    ],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/test_reports/iteration_15.json",
+    "/app/test_reports/iteration_14.json"
+  ],
+  "action_items": [
+    "FIX: DELETE /api/supplier/products/{id} → either hard-delete OR keep soft-delete but make the supplier-facing GET /api/supplier/products exclude is_active=false by default (or filter `deleted_at IS NULL`). Currently the deleted card remains forever and the user has no way to remove a product through the UI.",
+    "Optional cleanup: SupplierLayout.handleLogout — the brief /supplier/login flicker before window.location.replace('/') is benign but indicates the route-guard useEffect still fires once after logout(). Add a `loggingOut` flag in SupplierAuthContext or early-return in the layout effect when token was just cleared. Currently not user-visible because the hard nav wins.",
+    "After the delete fix, re-run only step 9 (delete) and confirm the card disappears + persists deleted across reload."
+  ],
+  "critical_code_review_comments": [
+    "supplier_products.py list_products: defaults is_active filter to None — supplier-facing GET should never expose soft-deleted rows. Current behaviour confuses 'inactive draft (intentional)' vs 'soft-deleted (hidden)'. Recommend introducing a separate `is_deleted` field and filtering it out in all supplier-facing reads.",
+    "SupplierProductsPage shows the same DRAFT badge for is_active=false products regardless of whether they were intentionally drafted or just soft-deleted. After fix, deleted products should not appear at all; intentional drafts should keep the DRAFT badge.",
+    "SupplierLayout route-guard fix is correct in spirit (gates on `loading` and `token`) but `if (!supplier) return null;` (line 28) means the layout never paints during initial refresh — fine because /supplier/login redirect is correct, but on the brief logout race it causes a flash of blank screen before window.location.replace fires. Acceptable.",
+    "SupplierProductsPage.js is 605 lines — should still be split (ProductCatalog / ProductSamples / ProductEditorModal / RestockModal / DeleteConfirmModal). Carry-over from previous iteration."
+  ],
+  "updated_files": [],
+  "success_rate": {
+    "backend": "not in scope (frontend-only retest); 1 backend issue surfaced during integration test",
+    "frontend": "90% — 9/10 happy-path steps verified (login, dashboard, /supplier/products via goto, via NavLink, tab-catalog, tab-samples, 31 samples, add-from-sample, manual add, edit price=₹400, restock 10→30, logout→/). Only delete step fails due to backend soft-delete leak."
+  },
+  "test_credentials": "Reused approved supplier from iteration 14: mobile=+919900220762 password=Supplier@123. Still active and approved. Password login works.",
+  "seed_data_creation": "Used existing supplier. During this test, one product was added from sample-haircare-001 (Sulfate-Free Shampoo, id 26d41a84-b2c4-4e81-9e5f-b43748b99332) and one manual product 'Manual Test Product' (id f10628e0-f838-42d3-b313-42cc7f258ef5) was created, edited (selling_price 450→400), restocked (10→30), and 'soft-deleted' (still present in DB and in list). Both remain on the supplier's catalog. Cleanup not performed because soft-deleted products don't actually disappear (the bug). After backend fix, recommend an admin cleanup of these two product ids.",
+  "retest_needed": true,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "ROUTE-GUARD RACE IS FIXED — both page.goto and NavLink reach /supplier/products without bouncing. tab-catalog, tab-samples, all editor-*, restock-*, edit-product-*, add-product-btn, add-sample-* selectors all verified working. 31 product samples seeded (≥30 required). Logout lands on '/'. The ONLY remaining failure in the happy path is the delete-product flow which is a backend issue (soft-delete + no filter on supplier list GET). After backend fix, the rest of the flow should pass end-to-end. Test products left in DB: f10628e0-f838-42d3-b313-42cc7f258ef5 (Manual Test Product) and 26d41a84-b2c4-4e81-9e5f-b43748b99332 (Sulfate-Free Shampoo, added from sample).",
+  "rca of the issue": "Delete bug RCA: /app/backend/supplier_products.py:271 `delete_product` sets `is_active=False` (soft delete). /app/backend/supplier_products.py:205 `list_products` accepts is_active as Optional[bool]=Query(None) and only filters if explicitly passed. The SupplierProductsPage frontend calls GET /api/supplier/products without is_active query, so the soft-deleted product is returned in the list and re-rendered as a card. From the user's perspective, clicking the trash icon and confirming does nothing visible (despite the 'Product removed' toast). Mitigation: either change the supplier-facing list to default `is_active=True` for non-deleted, OR introduce an `is_deleted` boolean and filter on that instead of overloading is_active (which legitimately can be false for draft-mode products). Recommended path: introduce `is_deleted=False` default + filter it in list_products + set `is_deleted=True` in delete_product. Logout race RCA: Layout's useEffect on `loading,token,blockedStatus` re-runs when logout() flips token→null; the effect dispatches navigate('/supplier/login') with replace:true. Within the same tick, window.location.replace('/') fires from handleLogout and wins because it's a full document navigation. Net effect is correct (user lands on /), but Playwright framenavigated captures the intermediate /supplier/login push. To make 100% race-free, gate the effect's redirect on a `loggingOut` flag set by logout() so the effect early-returns during logout."
+}
