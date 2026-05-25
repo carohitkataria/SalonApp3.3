@@ -4,7 +4,7 @@ import copy
 import pytest
 import requests
 
-BASE_URL = os.environ.get("REACT_APP_BACKEND_URL", "https://phase6-plus.preview.emergentagent.com").rstrip("/")
+BASE_URL = os.environ.get("REACT_APP_BACKEND_URL", "https://mvp-error-debug.preview.emergentagent.com").rstrip("/")
 SALON_ID = "a356c4e6-274f-40e7-9a37-66d3a4613d17"
 
 

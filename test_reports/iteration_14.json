@@ -37,7 +37,7 @@
     "backend": "not tested (frontend-only request)",
     "frontend": "36% — 4/11 happy-path steps verified (signup, pending login, approved login, dashboard KPIs); 7/11 blocked by /supplier/products bounce"
   },
-  "test_credentials": "Approved supplier created during test: mobile=+919900220762 password=Supplier@123 (supplier_id=2fb3bcac-abdc-42ad-b206-51f83b7cffc5). Platform owner OTP flow works as documented — request-otp returns dev OTP in body['otp'], verify-otp returns token in body['access_token'].",
+  "test_credentials": "Approved supplier created during test: mobile=+919900220762 password=Supplier@123 (supplier_id=mvp-error-debug). Platform owner OTP flow works as documented — request-otp returns dev OTP in body['otp'], verify-otp returns token in body['access_token'].",
   "seed_data_creation": "One fresh supplier (+919900220762, Test Supplier Co) created via UI signup and approved via POST /api/platform/suppliers/{id}/approve. Will remain in DB.",
   "retest_needed": true,
   "main_agent_can_self_test": false,
