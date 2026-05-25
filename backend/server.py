@@ -12389,6 +12389,11 @@ fastapi_app.include_router(supplier_auth_mod.supplier_auth_router)
 supplier_products_mod.init_supplier_products_router(db=db)
 fastapi_app.include_router(supplier_products_mod.supplier_products_router)
 
+# Phase 10 — Salon-facing Marketplace router (browse supplier catalogs + inquiries)
+import marketplace as marketplace_mod  # noqa: E402
+marketplace_mod.init_marketplace_router(db=db, get_current_salon_user=get_current_salon_user)
+fastapi_app.include_router(marketplace_mod.marketplace_router)
+
 # Health check endpoint for Kubernetes liveness/readiness probes
 @fastapi_app.get("/health")
 async def health_check():

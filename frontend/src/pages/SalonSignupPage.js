@@ -102,7 +102,11 @@ export default function SalonSignupPage() {
       toast.info('You can now login with your password');
       navigate('/salon/login', { state: { phone: formData.phone } });
     } catch (error) {
-      toast.error(error.response?.data?.detail || 'Registration failed');
+      const raw = error.response?.data?.detail;
+      const detailStr = typeof raw === 'string'
+        ? raw
+        : (raw && typeof raw === 'object' ? (raw.message || raw.detail || JSON.stringify(raw)) : '');
+      toast.error(detailStr || 'Registration failed');
     } finally {
       setLoading(false);
     }

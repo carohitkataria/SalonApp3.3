@@ -44,6 +44,9 @@ import SupplierPendingPage from '@/pages/supplier/SupplierPendingPage';
 import SupplierDashboardPage from '@/pages/supplier/SupplierDashboardPage';
 import SupplierProductsPage from '@/pages/supplier/SupplierProductsPage';
 
+// Salon-side Marketplace (Phase 10)
+import MarketplacePage from '@/pages/salon/MarketplacePage';
+
 import '@/App.css';
 
 function App() {
@@ -86,6 +89,7 @@ function App() {
                   <Route path="/salon/signup" element={<SalonSignupPage />} />
                   <Route path="/salon/dashboard" element={<EnhancedSalonDashboard />} />
                   <Route path="/salon/staff/:staffId" element={<StaffProfilePage />} />
+                  <Route path="/salon/marketplace" element={<MarketplacePage />} />
 
                   {/* Subscription / Payment */}
                   <Route path="/subscription/callback" element={<PaymentCallbackPage />} />

@@ -153,10 +153,15 @@ export default function OTPLoginPage() {
         }
       }
       
-      if (error.response?.status === 400 && error.response?.data?.detail?.includes('Password not set')) {
+      if (error.response?.status === 400 && detailStr.includes('Password not set')) {
         toast.error('Password not set for this salon. Please use OTP login.');
+      } else if (error.response?.status === 403 && raw && typeof raw === 'object' && raw.code === 'SALON_SUSPENDED') {
+        toast.error(raw.message || 'This salon has been suspended.', {
+          description: raw.reason ? `Reason: ${raw.reason}` : undefined,
+          duration: 8000,
+        });
       } else {
-        toast.error(error.response?.data?.detail || 'Login failed');
+        toast.error(detailStr || 'Login failed');
       }
     } finally {
       setLoading(false);
@@ -253,7 +258,11 @@ export default function OTPLoginPage() {
       toast.success('Login successful!');
       navigate('/salon/dashboard');
     } catch (error) {
-      toast.error(error.response?.data?.detail || 'Invalid OTP');
+      const raw = error.response?.data?.detail;
+      const detailStr = typeof raw === 'string'
+        ? raw
+        : (raw && typeof raw === 'object' ? (raw.message || raw.detail || JSON.stringify(raw)) : '');
+      toast.error(detailStr || 'Invalid OTP');
     } finally {
       setLoading(false);
     }

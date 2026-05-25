@@ -38,7 +38,7 @@ import {
   Clock, User, Phone, Bell, MapPin, Settings, CheckCircle, Calendar,
   Users, ArrowLeft, FileText, Download, Plus, X, TrendingUp, Menu,
   Shield, DollarSign, Database, Pin, PinOff, Edit, CreditCard, Banknote, Smartphone,
-  LayoutDashboard, Activity, Zap, Wallet, Search, Building2
+  LayoutDashboard, Activity, Zap, Wallet, Search, Building2, ShoppingBag
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
@@ -986,6 +986,7 @@ export default function EnhancedSalonDashboard() {
     { id: 'financials', label: 'Financials', icon: DollarSign, show: checkIsAdmin() || checkIsBranchManager() || checkHasPermission('can_access_financials') },
     { id: 'customer-master', label: 'Customer Master', icon: Database, show: true },
     { id: 'analytics', label: 'Analytics', icon: TrendingUp, show: checkIsAdmin() || checkIsBranchManager() || checkHasPermission('can_access_analytics') },
+    { id: 'marketplace', label: 'Marketplace', icon: ShoppingBag, show: checkIsAdmin(), route: '/salon/marketplace' },
     { id: 'gallery', label: 'Gallery', icon: FileText, show: true },
     { id: 'salon', label: 'Salon Settings', icon: Settings, show: checkIsAdmin() || checkHasPermission('can_edit_salon') }
   ].filter(item => item.show);
@@ -1144,6 +1145,13 @@ export default function EnhancedSalonDashboard() {
                       <button
                         key={item.id}
                         onClick={() => {
+                          if (item.route) {
+                            // External-route menu items (e.g. Marketplace) — navigate
+                            // to a separate page rather than switching tabs.
+                            if (!menuPinned) setMenuOpen(false);
+                            navigate(item.route);
+                            return;
+                          }
                           setActiveTab(item.id);
                           if (!menuPinned) setMenuOpen(false);
                         }}
