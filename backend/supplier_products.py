@@ -144,11 +144,16 @@ async def supplier_dashboard_stats(supplier: dict = Depends(require_supplier)):
     products_live = await _db.supplier_products.count_documents({
         "supplier_id": supplier_id,
         "is_active": True,
+        "is_deleted": {"$ne": True},
     })
 
     # Low-stock count
     pipeline = [
-        {"$match": {"supplier_id": supplier_id, "is_active": True}},
+        {"$match": {
+            "supplier_id": supplier_id,
+            "is_active": True,
+            "is_deleted": {"$ne": True},
+        }},
         {"$match": {
             "$expr": {
                 "$and": [
@@ -182,7 +187,11 @@ async def supplier_dashboard_stats(supplier: dict = Depends(require_supplier)):
 
     # Categories breakdown for chart
     cat_pipe = [
-        {"$match": {"supplier_id": supplier_id, "is_active": True}},
+        {"$match": {
+            "supplier_id": supplier_id,
+            "is_active": True,
+            "is_deleted": {"$ne": True},
+        }},
         {"$group": {"_id": "$category", "count": {"$sum": 1}}},
         {"$sort": {"count": -1}},
     ]
@@ -208,7 +217,11 @@ async def list_products(
     q: Optional[str] = Query(None, description="Search in name/brand"),
     supplier: dict = Depends(require_supplier),
 ):
-    query: dict = {"supplier_id": supplier["id"]}
+    query: dict = {
+        "supplier_id": supplier["id"],
+        # Always hide soft-deleted products from the supplier's own catalog.
+        "is_deleted": {"$ne": True},
+    }
     if is_active is not None:
         query["is_active"] = is_active
     if category:
@@ -225,7 +238,10 @@ async def list_products(
 
 @supplier_products_router.get("/products/{product_id}")
 async def get_product(product_id: str, supplier: dict = Depends(require_supplier)):
-    doc = await _db.supplier_products.find_one({"id": product_id, "supplier_id": supplier["id"]}, {"_id": 0})
+    doc = await _db.supplier_products.find_one(
+        {"id": product_id, "supplier_id": supplier["id"], "is_deleted": {"$ne": True}},
+        {"_id": 0},
+    )
     if not doc:
         raise HTTPException(status_code=404, detail="Product not found")
     return _enrich(doc)
@@ -248,7 +264,10 @@ async def create_product(payload: ProductCreate, supplier: dict = Depends(requir
 
 @supplier_products_router.put("/products/{product_id}")
 async def update_product(product_id: str, payload: ProductUpdate, supplier: dict = Depends(require_supplier)):
-    existing = await _db.supplier_products.find_one({"id": product_id, "supplier_id": supplier["id"]}, {"_id": 0})
+    existing = await _db.supplier_products.find_one(
+        {"id": product_id, "supplier_id": supplier["id"], "is_deleted": {"$ne": True}},
+        {"_id": 0},
+    )
     if not existing:
         raise HTTPException(status_code=404, detail="Product not found")
 
@@ -269,20 +288,37 @@ async def update_product(product_id: str, payload: ProductUpdate, supplier: dict
 
 @supplier_products_router.delete("/products/{product_id}")
 async def delete_product(product_id: str, supplier: dict = Depends(require_supplier)):
-    """Soft delete — sets is_active=false. Won't appear on marketplace but data preserved."""
-    existing = await _db.supplier_products.find_one({"id": product_id, "supplier_id": supplier["id"]}, {"_id": 0, "id": 1})
+    """Soft delete — sets is_deleted=True. Hides from catalog & marketplace; data preserved.
+
+    Distinct from is_active=False (which is an intentional 'draft' state the supplier
+    controls). Once deleted, the product no longer appears in /products list and cannot
+    be edited or restocked.
+    """
+    existing = await _db.supplier_products.find_one(
+        {"id": product_id, "supplier_id": supplier["id"], "is_deleted": {"$ne": True}},
+        {"_id": 0, "id": 1},
+    )
     if not existing:
         raise HTTPException(status_code=404, detail="Product not found")
+    now = _now_iso()
     await _db.supplier_products.update_one(
         {"id": product_id},
-        {"$set": {"is_active": False, "updated_at": _now_iso()}},
+        {"$set": {
+            "is_deleted": True,
+            "is_active": False,
+            "deleted_at": now,
+            "updated_at": now,
+        }},
     )
-    return {"ok": True, "product_id": product_id, "is_active": False}
+    return {"ok": True, "product_id": product_id, "is_deleted": True}
 
 
 @supplier_products_router.post("/products/{product_id}/restock")
 async def restock_product(product_id: str, payload: RestockRequest, supplier: dict = Depends(require_supplier)):
-    existing = await _db.supplier_products.find_one({"id": product_id, "supplier_id": supplier["id"]}, {"_id": 0})
+    existing = await _db.supplier_products.find_one(
+        {"id": product_id, "supplier_id": supplier["id"], "is_deleted": {"$ne": True}},
+        {"_id": 0},
+    )
     if not existing:
         raise HTTPException(status_code=404, detail="Product not found")
     new_avail = int(existing.get("inventory_available") or 0) + payload.qty

@@ -171,3 +171,38 @@ A multi-tenant salon management SaaS (React + FastAPI + MongoDB). Most recent fe
 - Reward Plan Phase 2 testing seeded one completed token (`_seed_test=true`, ₹1,20,000) for barber Imran. Cleanup: `db.tokens.delete_many({_seed_test: true})` if needed.
 - After Phase 1, every salon has at least one `salon_branches` doc (auto-created on startup). Idempotent: rerunning the migration is safe.
 - Frontend admin Branches page is reachable via Hamburger menu → Branches (no direct URL).
+
+---
+
+## Phase 8 & 9 — Supplier Marketplace (May 2026) ✅
+
+### Backend (✅ 45/45 tests passed in earlier iteration)
+- `supplier_auth.py`: signup, OTP & password login, JWT (separate from salon admin), `/api/supplier/me` profile gate (returns 403 with `code=supplier_not_active` for pending/rejected/suspended).
+- `supplier_products.py`: dashboard stats (KPIs), full product CRUD, restock, **soft-delete via `is_deleted` flag (NOT `is_active`)** — deleted items hidden from all supplier-facing reads. Product samples list & "create from sample" endpoints.
+- `platform_admin_management.py`: supplier approval/rejection wiring with WhatsApp notification on approve.
+- **Permanent 30+ product seed** at `/app/backend/data/product_samples_seed.py` — 31 samples across haircare (7), tools (7), consumables (5), skincare (5), beard (3), equipment (4). Seeded on every startup, idempotent upsert by `id`. **Images are stable Unsplash CDN URLs** — independent of database state.
+
+### Frontend (✅ 9/10 + delete-bug fix verified end-to-end)
+- `SupplierAuthContext` (separate JWT in localStorage `salonhub_supplier_token`).
+- `/supplier/login` (Password + OTP tabs), `/supplier/signup` (5-step), `/supplier/pending` (status-gated message), `/supplier/dashboard` (4 KPI cards + category chart), `/supplier/products` (catalog + samples tabs, CRUD modals, restock, delete).
+- "Become a Supplier" link added to landing-page Footer (Company column).
+- All critical elements have `data-testid` attributes for stable e2e.
+
+### Key API Endpoints (Phase 8/9)
+- `POST /api/supplier/signup`
+- `POST /api/supplier/auth/request-otp`, `POST /api/supplier/auth/verify-otp`, `POST /api/supplier/auth/password-login`
+- `GET  /api/supplier/me`
+- `GET  /api/supplier/dashboard/stats`
+- `GET/POST/PUT/DELETE /api/supplier/products[/:id]`
+- `POST /api/supplier/products/:id/restock`
+- `GET  /api/supplier/product-samples`
+- `POST /api/supplier/products/from-sample/:sample_id`
+- `POST /api/platform/suppliers/:id/approve`
+- `POST /api/platform/suppliers/:id/reject`
+
+### Known follow-ups (P2 — Phase 10+)
+- Marketplace browse for salons (B2B catalog discovery).
+- Cart, Checkout, Orders, Inventory sync between supplier `supplier_products` and salon inventory.
+- Modularize `server.py` (now 12.4k lines) — split into `routes/`, `models/`, `services/`.
+- Split `SupplierProductsPage.js` (605 lines) into ProductCatalog / ProductSamples / EditorModal / RestockModal / DeleteModal sub-components.
+- Optional: add `loggingOut` sentinel to SupplierAuthContext to eliminate the brief `/supplier/login` flash before `window.location.replace('/')` on logout (cosmetic, not user-visible).
