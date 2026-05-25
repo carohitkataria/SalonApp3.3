@@ -987,6 +987,7 @@ export default function EnhancedSalonDashboard() {
     { id: 'customer-master', label: 'Customer Master', icon: Database, show: true },
     { id: 'analytics', label: 'Analytics', icon: TrendingUp, show: checkIsAdmin() || checkIsBranchManager() || checkHasPermission('can_access_analytics') },
     { id: 'marketplace', label: 'Marketplace', icon: ShoppingBag, show: checkIsAdmin(), route: '/salon/marketplace' },
+    { id: 'store-orders', label: 'My Store Orders', icon: ShoppingBag, show: checkIsAdmin() || checkIsBranchManager(), route: '/salon/orders' },
     { id: 'gallery', label: 'Gallery', icon: FileText, show: true },
     { id: 'salon', label: 'Salon Settings', icon: Settings, show: checkIsAdmin() || checkHasPermission('can_edit_salon') }
   ].filter(item => item.show);

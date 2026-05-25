@@ -119,6 +119,15 @@ export default function OTPLoginPage() {
       navigate('/salon/dashboard');
     } catch (error) {
       console.error('[LOGIN] Error during login:', error.response?.data || error.message);
+      // Normalise the error shape so we never render an object as a React child.
+      // FastAPI can return detail as a string OR as a structured object like
+      // { code, message, reason } (e.g. SALON_SUSPENDED). Both must be handled.
+      const raw = error?.response?.data?.detail;
+      const detailStr = typeof raw === 'string'
+        ? raw
+        : (raw && typeof raw === 'object'
+            ? (raw.message || raw.detail || raw.error || JSON.stringify(raw))
+            : (error?.message || ''));
       // Fallback to legacy salon login if multi-user login fails
       if (error.response?.status === 404) {
         try {

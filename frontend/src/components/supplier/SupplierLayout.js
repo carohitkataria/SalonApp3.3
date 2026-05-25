@@ -4,7 +4,7 @@
  */
 import React from 'react';
 import { Link, NavLink, useNavigate } from 'react-router-dom';
-import { Package, LayoutDashboard, Boxes, LogOut, User } from 'lucide-react';
+import { Package, LayoutDashboard, Boxes, LogOut, User, Truck } from 'lucide-react';
 import { useSupplierAuth } from '@/contexts/SupplierAuthContext';
 
 export default function SupplierLayout({ children }) {
@@ -51,6 +51,7 @@ export default function SupplierLayout({ children }) {
           <nav className="hidden sm:flex items-center gap-1">
             <NavItem to="/supplier/dashboard" icon={LayoutDashboard} label="Dashboard" testid="supplier-nav-dashboard" />
             <NavItem to="/supplier/products" icon={Boxes} label="Products" testid="supplier-nav-products" />
+            <NavItem to="/supplier/orders" icon={Truck} label="Orders" testid="supplier-nav-orders" />
           </nav>
 
           <div className="flex items-center gap-2">
@@ -72,6 +73,7 @@ export default function SupplierLayout({ children }) {
         <nav className="sm:hidden flex items-center justify-around border-t border-border">
           <NavItem to="/supplier/dashboard" icon={LayoutDashboard} label="Dashboard" mobile testid="supplier-nav-dashboard-mobile" />
           <NavItem to="/supplier/products" icon={Boxes} label="Products" mobile testid="supplier-nav-products-mobile" />
+          <NavItem to="/supplier/orders" icon={Truck} label="Orders" mobile testid="supplier-nav-orders-mobile" />
         </nav>
       </header>
 

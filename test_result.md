@@ -2973,6 +2973,182 @@ notes_for_testing_agent_phase_8_9:
             - Invalid sample ID returns 404
             - Ready for seed data to be loaded by main agent
 
+
+  - task: "Phase 0 — Salon login React render error fix"
+    implemented: true
+    working: true
+    file: "/app/frontend/src/pages/OTPLoginPage.js, /app/frontend/src/pages/AdminLoginPage.js, /app/frontend/src/contexts/AuthContext.js, /app/frontend/src/utils/apiError.js"
+    needs_retesting: false
+    priority: "high"
+    status_history:
+        - working: true
+          agent: "main"
+          comment: |
+            ROOT CAUSE: FastAPI was returning structured detail bodies
+            (e.g. `{code: "SALON_SUSPENDED", message, reason}` for suspended
+            salons) and several auth handlers were passing that object straight
+            into `toast.error(...)` / JSX, which crashed React with
+            "Objects are not valid as a React child".
+
+            Additionally `OTPLoginPage.js` referenced `detailStr` and `raw`
+            inside the password-login catch block without declaring them,
+            so EVERY failed login path threw `ReferenceError` before any
+            user-facing error message could be shown.
+
+            FIX:
+            - Added a shared util `src/utils/apiError.js` exposing
+              `extractErrorMessage(error, fallback)` + `extractErrorDetail(error)`
+              that coerce any FastAPI/axios error body into a renderable string.
+            - Updated `OTPLoginPage.js` to declare `raw`/`detailStr` at the
+              top of the catch block and to branch on object-form details
+              correctly.
+            - Updated `AdminLoginPage.js` to stringify `result.error` before
+              passing to `toast.error`.
+            - Updated `AuthContext.js` (`loginUser`, `loginAdmin`,
+              `loginSalonUser`) to always return a string `error` value.
+
+            VERIFIED: salon admin login (7503070727 / salon123) now succeeds
+            and navigates to /salon/dashboard with a "Login successful" toast,
+            no console errors.
+
+backend:
+  - task: "Phase 10/11/12 — Salon Store: browse, cart, checkout, order lifecycle"
+    implemented: true
+    working: "NA"
+    file: "/app/backend/salon_store.py, /app/backend/server.py"
+    needs_retesting: true
+    priority: "high"
+    status_history:
+        - working: "NA"
+          agent: "main"
+          comment: |
+            New module `salon_store.py` wired into server.py. Endpoints:
+
+            Salon-side (auth: salon user JWT):
+              GET    /api/salon/store/products              browse + filter
+              GET    /api/salon/store/products/{id}
+              GET    /api/salon/store/categories
+              GET    /api/salon/store/brands
+              POST   /api/salon/store/notify-me             {product_id}
+              POST   /api/salon/store/checkout              reserves stock + creates orders
+              GET    /api/salon/store/orders                list
+              GET    /api/salon/store/orders/{id}           detail
+              POST   /api/salon/store/orders/{id}/cancel    releases reservation
+
+            Public:
+              POST   /api/salon/store/cashfree/webhook      Cashfree → mark paid/cancelled
+
+            Supplier-side (auth: supplier JWT):
+              GET    /api/supplier/orders
+              GET    /api/supplier/orders/{id}
+              POST   /api/supplier/orders/{id}/confirm
+              POST   /api/supplier/orders/{id}/ship         {tracking_number?, carrier?, note?}
+              POST   /api/supplier/orders/{id}/deliver      {note?}
+
+            Reservation model (Phase 11):
+              * Atomic `find_one_and_update` per line with filter
+                `inventory_available >= qty` and `$inc` decrement.
+              * Rollback on any line failure (compensating $inc on prior lines).
+              * Cashfree mode: reservation_expires_at = now + 15min.
+              * COD mode: confirmed immediately, no timer.
+
+            Background sweeper (asyncio task started by server.py startup):
+              * Every 60s, finds pending_payment orders with expired
+                reservation_expires_at, releases reservations, marks cancelled.
+
+            Cashfree integration: reuses `cashfree_service.py` (PROD keys
+            present in backend .env). Webhook signature verification is
+            enforced; mismatched webhooks return {ok:false}.
+
+            MANUAL SMOKE TEST OK:
+              * COD checkout for "Premium Hair Serum 100ml" qty=2 — order
+                created, inventory_available 80→78, inventory_reserved 0→2.
+              * Insufficient stock for a 0-stock SKU → 409 with structured
+                detail {code: "INSUFFICIENT_STOCK", available_qty: 0, ...}.
+              * GET /api/salon/store/orders returns the COD order.
+
+            NOTES FOR TESTING AGENT:
+              * Use the salon admin credentials in test_credentials.md
+                (7503070727 / salon123).
+              * 2 test suppliers (with 7 products total) are pre-seeded by
+                /app/backend/seed_store_fixtures.py; re-run if a clean slate
+                is needed.
+              * Cashfree checkout path expects PROD keys (already configured).
+                Testing without hitting the actual gateway is fine — verify
+                that the response carries `payment_session_id` and
+                `cashfree_order_id`, and stop short of completing payment.
+
+frontend:
+  - task: "Phase 10 — Salon Store browse + cart drawer"
+    implemented: true
+    working: "NA"
+    file: "/app/frontend/src/pages/salon/MarketplacePage.js, /app/frontend/src/components/store/CartDrawer.js, /app/frontend/src/contexts/CartContext.js"
+    needs_retesting: false
+    priority: "high"
+    status_history:
+        - working: "NA"
+          agent: "main"
+          comment: |
+            Replaced the inquiry-based MarketplacePage with a full storefront:
+            search, category/brand filters, sort, pagination, product detail
+            modal, "Add to cart" / "Notify me" actions. Cart is persisted in
+            localStorage per-salon via CartContext. Slide-in CartDrawer
+            groups items by supplier and links to /salon/checkout.
+            Smoke-tested manually: page renders all 7 seeded products with
+            categories + brand filters populated.
+
+  - task: "Phase 11 — Checkout page (Cashfree + COD)"
+    implemented: true
+    working: "NA"
+    file: "/app/frontend/src/pages/salon/CheckoutPage.js"
+    needs_retesting: false
+    priority: "high"
+    status_history:
+        - working: "NA"
+          agent: "main"
+          comment: |
+            New /salon/checkout page. Pre-fills shipping address from the
+            salon's profile. Payment-mode radio (Cashfree | COD).
+            On Cashfree: loads Cashfree v3 JS SDK, calls cashfree.checkout()
+            with paymentSessionId returned by /api/salon/store/checkout.
+            On COD: redirects to /salon/orders. Uses production mode (driven
+            by REACT_APP_CASHFREE_MODE=production in frontend/.env).
+
+  - task: "Phase 11 — Salon orders list + detail"
+    implemented: true
+    working: "NA"
+    file: "/app/frontend/src/pages/salon/SalonOrdersPage.js, /app/frontend/src/pages/salon/SalonOrderDetailPage.js"
+    needs_retesting: false
+    priority: "high"
+    status_history:
+        - working: "NA"
+          agent: "main"
+          comment: |
+            /salon/orders shows order list with status tabs and reservation
+            countdown badges. /salon/orders/:id shows items, timeline,
+            shipping, payment, and a Cancel button (available while
+            order_status in {pending_payment, confirmed}). Menu entry
+            "My Store Orders" added to EnhancedSalonDashboard hamburger.
+
+  - task: "Phase 12 — Supplier orders inbox + detail with lifecycle actions"
+    implemented: true
+    working: "NA"
+    file: "/app/frontend/src/pages/supplier/SupplierOrdersPage.js, /app/frontend/src/pages/supplier/SupplierOrderDetailPage.js, /app/frontend/src/components/supplier/SupplierLayout.js"
+    needs_retesting: false
+    priority: "high"
+    status_history:
+        - working: "NA"
+          agent: "main"
+          comment: |
+            /supplier/orders inbox with status tabs (New / Shipped /
+            Delivered / Cancelled). /supplier/orders/:id shows full detail,
+            timeline, buyer + shipping info, payment info, and lifecycle
+            buttons:
+              * "Mark as shipped" with tracking_number/carrier/note modal
+              * "Mark as delivered" with optional note
+              * "Acknowledge order"
+            Nav item "Orders" added to SupplierLayout (desktop + mobile).
+
 agent_communication:
     - agent: "testing"
       message: |

@@ -12394,6 +12394,17 @@ import marketplace as marketplace_mod  # noqa: E402
 marketplace_mod.init_marketplace_router(db=db, get_current_salon_user=get_current_salon_user)
 fastapi_app.include_router(marketplace_mod.marketplace_router)
 
+# Phase 10/11/12 — Salon Store (browse + cart + checkout + order lifecycle)
+import salon_store as salon_store_mod  # noqa: E402
+from supplier_auth import require_supplier as _require_supplier_dep  # noqa: E402
+salon_store_mod.init_salon_store_router(
+    db=db,
+    get_current_salon_user=get_current_salon_user,
+    create_in_app_notification=create_in_app_notification,
+    require_supplier=_require_supplier_dep,
+)
+fastapi_app.include_router(salon_store_mod.salon_store_router)
+
 # Health check endpoint for Kubernetes liveness/readiness probes
 @fastapi_app.get("/health")
 async def health_check():
@@ -12434,6 +12445,11 @@ async def startup_event():
     except Exception as e:
         logger.error(f"[STARTUP] product samples seed failed: {e}")
     scheduler.start()
+    # Phase 10/11 — start the salon-store reservation sweeper
+    try:
+        salon_store_mod.start_sweeper()
+    except Exception as e:
+        logger.error(f"[STARTUP] salon_store sweeper failed: {e}")
     logger.info("Application started with multi-salon support")
 
 @fastapi_app.on_event("shutdown")

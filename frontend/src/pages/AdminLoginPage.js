@@ -26,7 +26,15 @@ export default function AdminLoginPage() {
       toast.success('Salon login successful');
       navigate('/admin/dashboard');
     } else {
-      toast.error(result.error);
+      // Defensive: result.error can be a string or an object (FastAPI sometimes
+      // returns structured detail like {code, message, reason}). Always coerce
+      // to a string so sonner never gets an object as a React child.
+      const errMsg = typeof result.error === 'string'
+        ? result.error
+        : (result.error && typeof result.error === 'object'
+            ? (result.error.message || result.error.detail || result.error.error || 'Invalid credentials')
+            : 'Invalid credentials');
+      toast.error(errMsg);
     }
   };
 

@@ -6,6 +6,19 @@ const AuthContext = createContext();
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
 const API = `${BACKEND_URL}/api`;
 
+// Helper: turn any FastAPI error body into a safe string. FastAPI may return
+// detail as a string OR a structured object (e.g. { code, message, reason }).
+// Returning an object to a consumer that drops it into JSX/toast.error()
+// crashes React with "Objects are not valid as a React child".
+const extractErrorMessage = (error, fallback) => {
+  const raw = error?.response?.data?.detail ?? error?.response?.data;
+  if (typeof raw === 'string') return raw;
+  if (raw && typeof raw === 'object') {
+    return raw.message || raw.detail || raw.error || fallback;
+  }
+  return error?.message || fallback;
+};
+
 export const AuthProvider = ({ children }) => {
   const [user, setUser] = useState(null);
   const [admin, setAdmin] = useState(null);
@@ -61,7 +74,7 @@ export const AuthProvider = ({ children }) => {
       localStorage.setItem('salon_user', JSON.stringify(userData));
       return { success: true, user: userData };
     } catch (error) {
-      return { success: false, error: error.response?.data?.detail || 'Login failed' };
+      return { success: false, error: extractErrorMessage(error, 'Login failed') };
     }
   };
 
@@ -77,7 +90,7 @@ export const AuthProvider = ({ children }) => {
       localStorage.setItem('salon_admin_token', token);
       return { success: true };
     } catch (error) {
-      return { success: false, error: error.response?.data?.detail || 'Invalid credentials' };
+      return { success: false, error: extractErrorMessage(error, 'Invalid credentials') };
     }
   };
 
@@ -101,7 +114,7 @@ export const AuthProvider = ({ children }) => {
       localStorage.setItem('salon_user_auth', JSON.stringify(authData));
       return { success: true, data: authData };
     } catch (error) {
-      return { success: false, error: error.response?.data?.detail || 'Login failed' };
+      return { success: false, error: extractErrorMessage(error, 'Login failed') };
     }
   };
 

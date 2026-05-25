@@ -4,6 +4,7 @@ import { BranchProvider } from '@/contexts/BranchContext';
 import { WebSocketProvider } from '@/contexts/WebSocketContext';
 import { ThemeProvider } from '@/contexts/ThemeContext';
 import { SupplierAuthProvider } from '@/contexts/SupplierAuthContext';
+import { CartProvider } from '@/contexts/CartContext';
 import { Toaster } from '@/components/ui/sonner';
 
 // Layout
@@ -43,9 +44,14 @@ import SupplierSignupPage from '@/pages/supplier/SupplierSignupPage';
 import SupplierPendingPage from '@/pages/supplier/SupplierPendingPage';
 import SupplierDashboardPage from '@/pages/supplier/SupplierDashboardPage';
 import SupplierProductsPage from '@/pages/supplier/SupplierProductsPage';
+import SupplierOrdersPage from '@/pages/supplier/SupplierOrdersPage';
+import SupplierOrderDetailPage from '@/pages/supplier/SupplierOrderDetailPage';
 
-// Salon-side Marketplace (Phase 10)
+// Salon-side Marketplace (Phase 10–12)
 import MarketplacePage from '@/pages/salon/MarketplacePage';
+import CheckoutPage from '@/pages/salon/CheckoutPage';
+import SalonOrdersPage from '@/pages/salon/SalonOrdersPage';
+import SalonOrderDetailPage from '@/pages/salon/SalonOrderDetailPage';
 
 import '@/App.css';
 
@@ -56,6 +62,7 @@ function App() {
         <BranchProvider>
           <WebSocketProvider>
             <SupplierAuthProvider>
+            <CartProvider>
             <div className="App">
               <Toaster position="top-center" richColors />
               <BrowserRouter>
@@ -90,6 +97,9 @@ function App() {
                   <Route path="/salon/dashboard" element={<EnhancedSalonDashboard />} />
                   <Route path="/salon/staff/:staffId" element={<StaffProfilePage />} />
                   <Route path="/salon/marketplace" element={<MarketplacePage />} />
+                  <Route path="/salon/checkout" element={<CheckoutPage />} />
+                  <Route path="/salon/orders" element={<SalonOrdersPage />} />
+                  <Route path="/salon/orders/:orderId" element={<SalonOrderDetailPage />} />
 
                   {/* Subscription / Payment */}
                   <Route path="/subscription/callback" element={<PaymentCallbackPage />} />
@@ -106,6 +116,8 @@ function App() {
                   <Route path="/supplier/pending" element={<SupplierPendingPage />} />
                   <Route path="/supplier/dashboard" element={<SupplierDashboardPage />} />
                   <Route path="/supplier/products" element={<SupplierProductsPage />} />
+                  <Route path="/supplier/orders" element={<SupplierOrdersPage />} />
+                  <Route path="/supplier/orders/:orderId" element={<SupplierOrderDetailPage />} />
 
                   {/* Redirect old routes */}
                   <Route path="/admin/login" element={<Navigate to="/salon/login" replace />} />
@@ -114,6 +126,7 @@ function App() {
                 </Routes>
               </BrowserRouter>
             </div>
+            </CartProvider>
             </SupplierAuthProvider>
           </WebSocketProvider>
         </BranchProvider>

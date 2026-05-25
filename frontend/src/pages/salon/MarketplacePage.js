@@ -1,18 +1,25 @@
 /**
- * Phase 10 — Salon-side Marketplace page.
- * Salon admins browse the supplier catalog, filter by category/brand,
- * search, sort, and place an inquiry on items of interest.
+ * Phase 10 — Salon Store (browse + cart).
+ *
+ * Replaces the inquiry-only flow with a full Amazon-style storefront. Buyers
+ * browse, filter, search and add products to a client-side cart (see
+ * `CartContext`). Out-of-stock cards expose a "Notify me" CTA wired to
+ * `POST /api/salon/store/notify-me`. Checkout itself is a separate page
+ * (see CheckoutPage) that calls the reservation endpoint.
  */
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
-import { useParams, useNavigate, Link } from 'react-router-dom';
+import { useNavigate, Link } from 'react-router-dom';
 import axios from 'axios';
 import {
-  Loader2, Search, ShoppingBag, Tag, IndianRupee, Star, MapPin,
-  ArrowLeft, MessageSquare, Boxes, ChevronLeft, ChevronRight, X, Send,
+  Loader2, Search, ShoppingBag, IndianRupee, Star, MapPin,
+  ArrowLeft, Boxes, ChevronLeft, ChevronRight, X, BellRing, Plus, Minus,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { toast } from 'sonner';
+import { useCart } from '@/contexts/CartContext';
+import { extractErrorMessage } from '@/utils/apiError';
+import CartDrawer from '@/components/store/CartDrawer';
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
 const API = `${BACKEND_URL}/api`;
@@ -27,8 +34,8 @@ const SORT_OPTIONS = [
 ];
 
 export default function MarketplacePage() {
-  const { salonId } = useParams();
   const navigate = useNavigate();
+  const { addItem, openDrawer, summary, items } = useCart();
 
   const [products, setProducts] = useState([]);
   const [total, setTotal] = useState(0);
@@ -46,12 +53,15 @@ export default function MarketplacePage() {
   const [sort, setSort] = useState('popular');
 
   const [activeProduct, setActiveProduct] = useState(null);
-  const [inquiryQty, setInquiryQty] = useState(1);
-  const [inquiryMsg, setInquiryMsg] = useState('');
-  const [inquirySending, setInquirySending] = useState(false);
+  const [detailQty, setDetailQty] = useState(1);
+  const [notifySent, setNotifySent] = useState({});
 
   const authHeaders = useMemo(() => {
-    const token = localStorage.getItem('salon_admin_token') || localStorage.getItem('access_token');
+    const raw = localStorage.getItem('salon_user_auth');
+    let token = localStorage.getItem('salon_admin_token') || localStorage.getItem('access_token');
+    if (!token && raw) {
+      try { token = JSON.parse(raw).token; } catch { /* noop */ }
+    }
     return token ? { Authorization: `Bearer ${token}` } : {};
   }, []);
 
@@ -62,7 +72,7 @@ export default function MarketplacePage() {
       if (search) params.q = search;
       if (category) params.category = category;
       if (brand) params.brand = brand;
-      const r = await axios.get(`${API}/marketplace/products`, { headers: authHeaders, params });
+      const r = await axios.get(`${API}/salon/store/products`, { headers: authHeaders, params });
       setProducts(r.data.products || []);
       setTotal(r.data.total || 0);
       setTotalPages(r.data.total_pages || 1);
@@ -72,15 +82,15 @@ export default function MarketplacePage() {
         navigate('/salon/login');
         return;
       }
-      toast.error('Failed to load marketplace');
+      toast.error(extractErrorMessage(e, 'Failed to load store'));
     } finally { setLoading(false); }
   }, [authHeaders, page, search, category, brand, sort, navigate]);
 
   const fetchFilters = useCallback(async () => {
     try {
       const [c, b] = await Promise.all([
-        axios.get(`${API}/marketplace/categories`, { headers: authHeaders }),
-        axios.get(`${API}/marketplace/brands`,     { headers: authHeaders }),
+        axios.get(`${API}/salon/store/categories`, { headers: authHeaders }),
+        axios.get(`${API}/salon/store/brands`,     { headers: authHeaders }),
       ]);
       setCategories(c.data.categories || []);
       setBrands(b.data.brands || []);
@@ -90,326 +100,388 @@ export default function MarketplacePage() {
   useEffect(() => { fetchFilters(); }, [fetchFilters]);
   useEffect(() => { fetchProducts(); }, [fetchProducts]);
 
-  // Submit search
-  const onSearch = (e) => {
-    e?.preventDefault();
-    setSearch(searchDraft.trim());
-    setPage(1);
-  };
-
+  const onSearch = (e) => { e?.preventDefault(); setSearch(searchDraft.trim()); setPage(1); };
   const onCategoryChange = (c) => { setCategory(c); setPage(1); };
   const onBrandChange = (b) => { setBrand(b); setPage(1); };
   const onSortChange = (s) => { setSort(s); setPage(1); };
+  const clearFilters = () => { setCategory(''); setBrand(''); setSearch(''); setSearchDraft(''); setSort('popular'); setPage(1); };
 
-  const clearFilters = () => {
-    setCategory(''); setBrand(''); setSearch(''); setSearchDraft(''); setSort('popular'); setPage(1);
+  const openDetail = (p) => {
+    setActiveProduct(p);
+    setDetailQty(Math.max(1, Number(p?.min_order_qty || 1)));
+  };
+  const closeDetail = () => setActiveProduct(null);
+
+  const handleAddToCart = (product, qty = 1) => {
+    if (!product) return;
+    const available = Number(product.inventory_available || 0);
+    if (available <= 0) {
+      toast.error('Out of stock');
+      return;
+    }
+    if (qty > available) {
+      toast.error(`Only ${available} in stock`);
+      return;
+    }
+    addItem(product, qty);
+    toast.success(`Added ${qty} × ${product.name} to cart`);
   };
 
-  // Inquiry flow
-  const openInquiry = (p) => { setActiveProduct(p); setInquiryQty(p.min_order_qty || 1); setInquiryMsg(''); };
-  const closeInquiry = () => { setActiveProduct(null); };
-
-  const submitInquiry = async () => {
-    if (!activeProduct) return;
-    if (inquiryQty < 1) { toast.error('Quantity must be at least 1'); return; }
-    setInquirySending(true);
+  const handleNotifyMe = async (productId) => {
     try {
-      await axios.post(`${API}/marketplace/inquiries`, {
-        product_id: activeProduct.id,
-        qty: Number(inquiryQty),
-        message: inquiryMsg.trim() || null,
-      }, { headers: authHeaders });
-      toast.success(`Inquiry sent to ${activeProduct.supplier?.business_name || 'supplier'}`);
-      closeInquiry();
+      await axios.post(`${API}/salon/store/notify-me`, { product_id: productId }, { headers: authHeaders });
+      setNotifySent(prev => ({ ...prev, [productId]: true }));
+      toast.success("We'll notify you when this is back in stock");
     } catch (e) {
-      const raw = e?.response?.data?.detail;
-      const msg = typeof raw === 'string' ? raw : (raw?.message || 'Failed to send inquiry');
-      toast.error(msg);
-    } finally { setInquirySending(false); }
+      toast.error(extractErrorMessage(e, 'Could not subscribe'));
+    }
   };
-
-  const hasFilters = search || category || brand || sort !== 'popular';
 
   return (
     <div className="min-h-screen bg-background text-foreground">
+      <CartDrawer />
+
       {/* Header */}
-      <div className="sticky top-0 z-30 bg-background/85 backdrop-blur border-b border-border">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 h-14 flex items-center justify-between gap-3">
-          <button
-            onClick={() => navigate(salonId ? `/salon/dashboard` : '/salon/dashboard')}
-            data-testid="marketplace-back-btn"
-            className="flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground"
-          >
-            <ArrowLeft className="w-4 h-4" />
-            <span className="hidden sm:inline">Back to dashboard</span>
-          </button>
-          <div className="flex items-center gap-2">
-            <ShoppingBag className="w-5 h-5 text-primary" />
-            <h1 className="text-base font-bold">Marketplace</h1>
-            <span className="text-xs text-muted-foreground hidden sm:inline">· {total} products</span>
+      <header className="sticky top-0 z-30 bg-background/80 backdrop-blur border-b border-border">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 h-14 flex items-center gap-3">
+          <Button variant="ghost" size="sm" onClick={() => navigate(-1)} data-testid="store-back-btn">
+            <ArrowLeft className="w-4 h-4 mr-1" /> Back
+          </Button>
+          <div className="flex-1">
+            <div className="text-sm font-bold leading-tight">Salon Store</div>
+            <div className="text-[10px] uppercase tracking-widest text-muted-foreground/80">Supplies & products</div>
           </div>
-          <div className="w-24" />
+          <Button
+            variant="default"
+            size="sm"
+            data-testid="store-cart-btn"
+            onClick={openDrawer}
+            className="relative"
+          >
+            <ShoppingBag className="w-4 h-4 mr-1" /> Cart
+            {summary.itemCount > 0 && (
+              <span data-testid="store-cart-count" className="ml-2 inline-flex items-center justify-center min-w-5 h-5 px-1 rounded-full bg-white text-primary text-[10px] font-bold">
+                {summary.itemCount}
+              </span>
+            )}
+          </Button>
         </div>
+
+        {/* Search bar */}
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 pb-3">
+          <form onSubmit={onSearch} className="flex items-center gap-2">
+            <div className="flex-1 relative">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+              <Input
+                data-testid="store-search-input"
+                placeholder="Search products, brands…"
+                value={searchDraft}
+                onChange={(e) => setSearchDraft(e.target.value)}
+                className="pl-9"
+              />
+            </div>
+            <Button type="submit" data-testid="store-search-btn">Search</Button>
+          </form>
+        </div>
+      </header>
+
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 py-6 grid grid-cols-12 gap-6">
+        {/* Sidebar filters */}
+        <aside className="col-span-12 lg:col-span-3 space-y-5">
+          <FilterBlock label="Categories">
+            <FilterPill active={!category} label="All" onClick={() => onCategoryChange('')} />
+            {categories.map(c => (
+              <FilterPill
+                key={c.name}
+                active={category === c.name}
+                label={`${c.name} (${c.count})`}
+                onClick={() => onCategoryChange(c.name)}
+                testid={`store-filter-cat-${c.name}`}
+              />
+            ))}
+          </FilterBlock>
+
+          <FilterBlock label="Brands">
+            <FilterPill active={!brand} label="All" onClick={() => onBrandChange('')} />
+            {brands.slice(0, 24).map(b => (
+              <FilterPill
+                key={b.name}
+                active={brand === b.name}
+                label={`${b.name} (${b.count})`}
+                onClick={() => onBrandChange(b.name)}
+                testid={`store-filter-brand-${b.name}`}
+              />
+            ))}
+          </FilterBlock>
+
+          <Button variant="outline" size="sm" className="w-full" onClick={clearFilters} data-testid="store-clear-filters-btn">
+            <X className="w-3.5 h-3.5 mr-1" /> Reset filters
+          </Button>
+        </aside>
+
+        {/* Main results */}
+        <main className="col-span-12 lg:col-span-9">
+          <div className="flex items-center justify-between mb-4">
+            <div className="text-xs text-muted-foreground">
+              {loading ? 'Loading…' : `${total.toLocaleString()} products`}
+            </div>
+            <div className="flex items-center gap-2">
+              <label className="text-xs text-muted-foreground">Sort:</label>
+              <select
+                data-testid="store-sort-select"
+                value={sort}
+                onChange={(e) => onSortChange(e.target.value)}
+                className="text-xs bg-background border border-border rounded px-2 py-1.5"
+              >
+                {SORT_OPTIONS.map(o => (
+                  <option key={o.value} value={o.value}>{o.label}</option>
+                ))}
+              </select>
+            </div>
+          </div>
+
+          {loading ? (
+            <div className="flex items-center justify-center py-20 text-muted-foreground">
+              <Loader2 className="w-6 h-6 animate-spin mr-2" /> Loading products…
+            </div>
+          ) : products.length === 0 ? (
+            <div className="text-center py-16 border border-dashed border-border rounded-xl">
+              <Boxes className="w-10 h-10 mx-auto mb-3 text-muted-foreground" />
+              <div className="font-semibold mb-1">No products match your filters</div>
+              <div className="text-xs text-muted-foreground mb-4">Try clearing them or searching differently.</div>
+              <Button variant="outline" size="sm" onClick={clearFilters}>Reset filters</Button>
+            </div>
+          ) : (
+            <>
+              <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-4 gap-4">
+                {products.map(p => (
+                  <ProductCard
+                    key={p.id}
+                    p={p}
+                    onOpen={() => openDetail(p)}
+                    onAdd={() => handleAddToCart(p, 1)}
+                    onNotify={() => handleNotifyMe(p.id)}
+                    notified={!!notifySent[p.id]}
+                  />
+                ))}
+              </div>
+
+              {/* Pagination */}
+              {totalPages > 1 && (
+                <div className="flex items-center justify-center gap-2 mt-8" data-testid="store-pagination">
+                  <Button
+                    variant="outline" size="sm"
+                    disabled={page <= 1}
+                    onClick={() => setPage(p => Math.max(1, p - 1))}
+                    data-testid="store-page-prev"
+                  >
+                    <ChevronLeft className="w-4 h-4" />
+                  </Button>
+                  <div className="text-xs text-muted-foreground">Page {page} / {totalPages}</div>
+                  <Button
+                    variant="outline" size="sm"
+                    disabled={page >= totalPages}
+                    onClick={() => setPage(p => Math.min(totalPages, p + 1))}
+                    data-testid="store-page-next"
+                  >
+                    <ChevronRight className="w-4 h-4" />
+                  </Button>
+                </div>
+              )}
+            </>
+          )}
+        </main>
       </div>
 
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 py-6">
-        {/* Filter bar */}
-        <div className="grid grid-cols-1 lg:grid-cols-[1fr_auto_auto_auto] gap-2 mb-5">
-          <form onSubmit={onSearch} className="relative">
-            <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
-            <Input
-              data-testid="marketplace-search-input"
-              placeholder="Search products, brands, descriptions"
-              value={searchDraft}
-              onChange={(e) => setSearchDraft(e.target.value)}
-              className="pl-9 bg-card border-border"
-            />
-          </form>
-          <select
-            data-testid="marketplace-category-filter"
-            value={category}
-            onChange={(e) => onCategoryChange(e.target.value)}
-            className="bg-card border border-border rounded-md px-3 py-2 text-sm"
-          >
-            <option value="">All categories</option>
-            {categories.map(c => <option key={c.name} value={c.name}>{c.name} ({c.count})</option>)}
-          </select>
-          <select
-            data-testid="marketplace-brand-filter"
-            value={brand}
-            onChange={(e) => onBrandChange(e.target.value)}
-            className="bg-card border border-border rounded-md px-3 py-2 text-sm"
-          >
-            <option value="">All brands</option>
-            {brands.map(b => <option key={b.name} value={b.name}>{b.name} ({b.count})</option>)}
-          </select>
-          <select
-            data-testid="marketplace-sort"
-            value={sort}
-            onChange={(e) => onSortChange(e.target.value)}
-            className="bg-card border border-border rounded-md px-3 py-2 text-sm"
-          >
-            {SORT_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
-          </select>
-        </div>
-
-        {hasFilters && (
-          <div className="flex items-center gap-2 mb-4 text-xs">
-            <span className="text-muted-foreground">Filters active:</span>
-            {category && <Pill label={category} onClear={() => onCategoryChange('')} />}
-            {brand && <Pill label={brand} onClear={() => onBrandChange('')} />}
-            {search && <Pill label={`"${search}"`} onClear={() => { setSearch(''); setSearchDraft(''); }} />}
-            <button onClick={clearFilters} className="text-primary hover:opacity-80 font-bold uppercase tracking-widest text-[10px]">Clear all</button>
-          </div>
-        )}
-
-        {/* Grid */}
-        {loading ? (
-          <div className="py-20 flex justify-center"><Loader2 className="w-6 h-6 animate-spin text-primary" /></div>
-        ) : products.length === 0 ? (
-          <div className="rounded-2xl border border-border bg-card/40 p-10 text-center">
-            <Boxes className="w-12 h-12 text-muted-foreground/40 mx-auto mb-3" />
-            <h3 className="text-lg font-bold">No products match those filters</h3>
-            <p className="text-sm text-muted-foreground mt-1">Try a different category or clear filters.</p>
-            {hasFilters && <Button onClick={clearFilters} className="mt-4" variant="outline">Clear filters</Button>}
-          </div>
-        ) : (
-          <>
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-              {products.map((p) => (
-                <ProductCard key={p.id} product={p} onInquire={() => openInquiry(p)} />
-              ))}
-            </div>
-
-            {/* Pagination */}
-            {totalPages > 1 && (
-              <div className="flex items-center justify-center gap-2 mt-8">
-                <Button
-                  variant="outline" size="sm" disabled={page === 1}
-                  onClick={() => setPage(p => Math.max(1, p - 1))}
-                  data-testid="marketplace-prev-page"
-                ><ChevronLeft className="w-4 h-4" /> Prev</Button>
-                <span className="text-sm text-muted-foreground" data-testid="marketplace-page-info">
-                  Page {page} of {totalPages}
-                </span>
-                <Button
-                  variant="outline" size="sm" disabled={page === totalPages}
-                  onClick={() => setPage(p => Math.min(totalPages, p + 1))}
-                  data-testid="marketplace-next-page"
-                >Next <ChevronRight className="w-4 h-4" /></Button>
-              </div>
-            )}
-          </>
-        )}
-      </main>
-
-      {/* Inquiry drawer / modal */}
+      {/* Detail modal */}
       {activeProduct && (
-        <InquiryModal
+        <ProductDetailModal
           product={activeProduct}
-          qty={inquiryQty} setQty={setInquiryQty}
-          msg={inquiryMsg} setMsg={setInquiryMsg}
-          sending={inquirySending}
-          onClose={closeInquiry}
-          onSubmit={submitInquiry}
+          qty={detailQty}
+          setQty={setDetailQty}
+          onClose={closeDetail}
+          onAdd={() => { handleAddToCart(activeProduct, detailQty); closeDetail(); }}
+          onNotify={() => handleNotifyMe(activeProduct.id)}
+          notified={!!notifySent[activeProduct.id]}
         />
       )}
     </div>
   );
 }
 
-function Pill({ label, onClear }) {
+
+function FilterBlock({ label, children }) {
   return (
-    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-primary/10 text-primary text-[11px] font-semibold">
-      {label}
-      <button onClick={onClear} className="hover:opacity-70" aria-label={`Remove ${label}`}>
-        <X className="w-3 h-3" />
-      </button>
-    </span>
+    <div>
+      <div className="text-[10px] uppercase tracking-widest font-bold text-muted-foreground/80 mb-2">{label}</div>
+      <div className="flex flex-wrap gap-1.5">{children}</div>
+    </div>
   );
 }
 
-function ProductCard({ product, onInquire }) {
-  const img = product.images?.[0];
-  const disc = product.mrp && product.mrp > product.selling_price
-    ? Math.round(((product.mrp - product.selling_price) / product.mrp) * 100)
-    : 0;
+function FilterPill({ active, label, onClick, testid }) {
   return (
-    <div
-      data-testid={`marketplace-product-card-${product.id}`}
-      className="rounded-2xl border border-border bg-card/40 overflow-hidden hover:border-primary/40 transition-colors flex flex-col"
+    <button
+      type="button"
+      onClick={onClick}
+      data-testid={testid}
+      className={`text-xs px-2.5 py-1 rounded-full border transition-colors ${
+        active
+          ? 'bg-primary text-primary-foreground border-primary'
+          : 'bg-background text-foreground border-border hover:border-primary/50'
+      }`}
     >
-      <div className="aspect-square bg-background relative">
+      {label}
+    </button>
+  );
+}
+
+
+function ProductCard({ p, onOpen, onAdd, onNotify, notified }) {
+  const img = (p.images || [])[0];
+  const oos = !(Number(p.inventory_available || 0) > 0);
+  const supplier = p.supplier || {};
+  return (
+    <div className="group border border-border rounded-xl overflow-hidden bg-card hover:shadow-lg transition" data-testid={`store-product-card-${p.id}`}>
+      <button type="button" onClick={onOpen} className="block w-full aspect-square bg-muted overflow-hidden">
         {img ? (
-          <img src={img} alt={product.name} className="w-full h-full object-cover" loading="lazy"
-               onError={(e) => { e.target.style.display = 'none'; }} />
+          <img src={img} alt={p.name} className="w-full h-full object-cover group-hover:scale-[1.03] transition-transform" loading="lazy" />
         ) : (
-          <div className="w-full h-full flex items-center justify-center"><Boxes className="w-12 h-12 text-muted-foreground/30" /></div>
+          <div className="w-full h-full flex items-center justify-center text-muted-foreground"><Boxes className="w-8 h-8" /></div>
         )}
-        {disc > 0 && (
-          <div className="absolute top-2 left-2 px-2 py-0.5 rounded-full bg-emerald-500 text-white text-[10px] font-bold uppercase tracking-widest">
-            -{disc}%
-          </div>
-        )}
-      </div>
-      <div className="p-3 flex-1 flex flex-col">
-        <div className="text-[10px] uppercase tracking-widest font-bold text-primary flex items-center gap-1">
-          <Tag className="w-3 h-3" /> {product.category}{product.sub_category ? ` · ${product.sub_category}` : ''}
-        </div>
-        <h3 className="text-sm font-bold mt-1 line-clamp-2">{product.name}</h3>
-        {product.brand && <div className="text-xs text-muted-foreground">{product.brand}{product.pack_size ? ` · ${product.pack_size}` : ''}</div>}
-
-        {product.supplier && (
-          <div className="text-[11px] text-muted-foreground/90 mt-2 flex items-center gap-1">
-            <span className="font-medium text-foreground/80">{product.supplier.business_name}</span>
-            {product.supplier.rating_count > 0 && (
-              <span className="flex items-center gap-0.5 text-amber-500">
-                <Star className="w-3 h-3 fill-current" /> {product.supplier.rating_avg.toFixed(1)}
-              </span>
-            )}
-            {product.supplier.city && (
-              <span className="ml-auto flex items-center gap-0.5"><MapPin className="w-3 h-3" /> {product.supplier.city}</span>
-            )}
-          </div>
-        )}
-
-        <div className="flex items-center justify-between mt-3">
-          <div className="text-base font-bold text-primary flex items-center">
-            <IndianRupee className="w-3.5 h-3.5" />{Number(product.selling_price).toLocaleString('en-IN')}
-          </div>
-          {product.mrp > product.selling_price && (
-            <div className="text-xs text-muted-foreground line-through">{fmtMoney(product.mrp)}</div>
+      </button>
+      <div className="p-3 space-y-1.5">
+        <div className="text-xs text-muted-foreground line-clamp-1">{p.brand || '\u00A0'}</div>
+        <button type="button" onClick={onOpen} className="text-sm font-semibold leading-tight line-clamp-2 text-left hover:text-primary">
+          {p.name}
+        </button>
+        <div className="flex items-center gap-1 text-xs text-muted-foreground">
+          <MapPin className="w-3 h-3" />
+          <span className="line-clamp-1">{supplier.business_name || 'Supplier'}</span>
+          {supplier.rating_avg > 0 && (
+            <span className="flex items-center gap-0.5 ml-auto">
+              <Star className="w-3 h-3 fill-yellow-400 text-yellow-400" /> {supplier.rating_avg.toFixed(1)}
+            </span>
           )}
         </div>
-        <div className="text-[11px] text-muted-foreground mt-1">
-          {product.inventory_available > 50 ? 'In stock' : `Only ${product.inventory_available} left`}
-          {product.min_order_qty > 1 && <span> · MOQ {product.min_order_qty}</span>}
+        <div className="flex items-baseline gap-1.5">
+          <div className="text-base font-extrabold flex items-center"><IndianRupee className="w-3.5 h-3.5" />{Number(p.selling_price).toLocaleString('en-IN')}</div>
+          {Number(p.mrp) > Number(p.selling_price) && (
+            <div className="text-xs line-through text-muted-foreground">{fmtMoney(p.mrp)}</div>
+          )}
         </div>
 
-        <Button
-          data-testid={`marketplace-inquire-${product.id}`}
-          onClick={onInquire}
-          className="mt-3 w-full bg-primary hover:bg-primary/90 text-primary-foreground font-bold text-xs"
-        >
-          <MessageSquare className="w-3.5 h-3.5 mr-1" /> Inquire
-        </Button>
+        {oos ? (
+          notified ? (
+            <Button variant="outline" size="sm" className="w-full" disabled data-testid={`store-notify-done-${p.id}`}>
+              <BellRing className="w-3.5 h-3.5 mr-1" /> We'll notify you
+            </Button>
+          ) : (
+            <Button variant="outline" size="sm" className="w-full" onClick={onNotify} data-testid={`store-notify-btn-${p.id}`}>
+              <BellRing className="w-3.5 h-3.5 mr-1" /> Notify me
+            </Button>
+          )
+        ) : (
+          <Button size="sm" className="w-full" onClick={onAdd} data-testid={`store-add-to-cart-${p.id}`}>
+            <ShoppingBag className="w-3.5 h-3.5 mr-1" /> Add to cart
+          </Button>
+        )}
       </div>
     </div>
   );
 }
 
-function InquiryModal({ product, qty, setQty, msg, setMsg, sending, onClose, onSubmit }) {
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center px-4 py-6 bg-black/70 backdrop-blur-sm" onClick={onClose}>
-      <div onClick={(e) => e.stopPropagation()} className="w-full max-w-lg rounded-2xl border border-border bg-card p-5 shadow-2xl max-h-[90vh] overflow-y-auto">
-        <div className="flex items-start justify-between mb-3">
-          <div>
-            <h3 className="text-base font-bold">Send inquiry</h3>
-            <p className="text-xs text-muted-foreground">The supplier will respond on WhatsApp with a quote.</p>
-          </div>
-          <button onClick={onClose} data-testid="inquiry-close-btn" className="p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted">
-            <X className="w-4 h-4" />
-          </button>
-        </div>
 
-        <div className="rounded-xl border border-border bg-background p-3 flex gap-3 mb-4">
-          <div className="w-16 h-16 rounded-lg bg-card overflow-hidden flex-shrink-0">
-            {product.images?.[0] ? (
-              <img src={product.images[0]} alt={product.name} className="w-full h-full object-cover" />
-            ) : (
-              <div className="w-full h-full flex items-center justify-center"><Boxes className="w-6 h-6 text-muted-foreground/40" /></div>
+function ProductDetailModal({ product, qty, setQty, onClose, onAdd, onNotify, notified }) {
+  const img = (product.images || [])[0];
+  const oos = !(Number(product.inventory_available || 0) > 0);
+  const supplier = product.supplier || {};
+  return (
+    <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4" onClick={onClose}>
+      <div className="bg-card border border-border rounded-2xl w-full max-w-3xl max-h-[92vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+        <div className="grid grid-cols-1 md:grid-cols-2">
+          <div className="aspect-square bg-muted">
+            {img ? <img src={img} alt={product.name} className="w-full h-full object-cover" /> : (
+              <div className="w-full h-full flex items-center justify-center text-muted-foreground"><Boxes className="w-12 h-12" /></div>
             )}
           </div>
-          <div className="flex-1 min-w-0">
-            <div className="text-[10px] uppercase tracking-widest font-bold text-primary">{product.category}</div>
-            <div className="text-sm font-bold line-clamp-1">{product.name}</div>
-            <div className="text-xs text-muted-foreground">{product.brand} · {product.pack_size}</div>
-            <div className="text-sm font-bold text-primary mt-1">{fmtMoney(product.selling_price)} <span className="text-[10px] text-muted-foreground font-normal">per {product.unit}</span></div>
-          </div>
-        </div>
-
-        <div className="space-y-3">
-          <div>
-            <label className="text-[10px] uppercase tracking-widest font-bold text-muted-foreground">Quantity</label>
-            <Input
-              type="number"
-              min={product.min_order_qty || 1}
-              value={qty}
-              onChange={(e) => setQty(e.target.value)}
-              data-testid="inquiry-qty-input"
-              className="mt-1 bg-background border-border"
-            />
-            <div className="text-[10px] text-muted-foreground mt-1">
-              MOQ: {product.min_order_qty || 1} {product.unit} · Available: {product.inventory_available}
+          <div className="p-5 space-y-3">
+            <div className="flex items-start justify-between gap-2">
+              <div>
+                <div className="text-xs text-muted-foreground">{product.brand}</div>
+                <div className="text-lg font-extrabold leading-tight">{product.name}</div>
+              </div>
+              <Button variant="ghost" size="sm" onClick={onClose} data-testid="store-detail-close-btn"><X className="w-4 h-4" /></Button>
             </div>
-          </div>
-          <div>
-            <label className="text-[10px] uppercase tracking-widest font-bold text-muted-foreground">Message (optional)</label>
-            <textarea
-              rows={3}
-              value={msg}
-              onChange={(e) => setMsg(e.target.value)}
-              data-testid="inquiry-message-input"
-              placeholder="Specify shade, delivery timeline, bulk-pricing ask, etc."
-              className="w-full mt-1 bg-background border border-border rounded-md px-3 py-2 text-sm"
-            />
-          </div>
-          <div className="rounded-lg border border-primary/30 bg-primary/5 p-3 text-xs text-foreground/80">
-            Estimated value: <span className="font-bold text-primary">{fmtMoney((Number(qty) || 0) * (product.selling_price || 0))}</span>
-          </div>
-        </div>
+            <div className="text-xs text-muted-foreground">{product.description}</div>
+            <div className="flex flex-wrap items-center gap-3 text-xs">
+              <span className="px-2 py-0.5 rounded bg-muted">{product.category}</span>
+              {product.pack_size && <span className="px-2 py-0.5 rounded bg-muted">{product.pack_size}</span>}
+              <span className="px-2 py-0.5 rounded bg-muted">Per {product.unit}</span>
+            </div>
+            <div className="flex items-baseline gap-2">
+              <div className="text-2xl font-extrabold flex items-center"><IndianRupee className="w-4 h-4" />{Number(product.selling_price).toLocaleString('en-IN')}</div>
+              {Number(product.mrp) > Number(product.selling_price) && (
+                <div className="text-sm line-through text-muted-foreground">{fmtMoney(product.mrp)}</div>
+              )}
+              {Number(product.gst_percent) > 0 && (
+                <div className="text-[10px] uppercase tracking-widest text-muted-foreground">+ GST {product.gst_percent}%</div>
+              )}
+            </div>
+            <div className="text-xs text-muted-foreground border-t border-border pt-2">
+              <div className="flex items-center gap-1"><MapPin className="w-3 h-3" /> {supplier.business_name || 'Supplier'}</div>
+              {supplier.rating_count > 0 && (
+                <div className="flex items-center gap-1">
+                  <Star className="w-3 h-3 fill-yellow-400 text-yellow-400" /> {supplier.rating_avg?.toFixed(1)} ({supplier.rating_count} reviews)
+                </div>
+              )}
+            </div>
 
-        <div className="flex justify-end gap-2 mt-5 pt-4 border-t border-border">
-          <Button variant="outline" onClick={onClose} disabled={sending}>Cancel</Button>
-          <Button
-            onClick={onSubmit}
-            disabled={sending}
-            data-testid="inquiry-submit-btn"
-            className="bg-primary hover:bg-primary/90 text-primary-foreground font-bold"
-          >
-            {sending ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Send className="w-4 h-4 mr-1" />}
-            Send inquiry
-          </Button>
+            {oos ? (
+              notified ? (
+                <Button variant="outline" className="w-full" disabled><BellRing className="w-4 h-4 mr-2" /> We'll notify you</Button>
+              ) : (
+                <Button variant="outline" className="w-full" onClick={onNotify} data-testid="store-detail-notify-btn">
+                  <BellRing className="w-4 h-4 mr-2" /> Notify me when in stock
+                </Button>
+              )
+            ) : (
+              <>
+                <div className="flex items-center gap-3">
+                  <span className="text-xs text-muted-foreground">Quantity</span>
+                  <div className="flex items-center border border-border rounded-lg overflow-hidden">
+                    <button
+                      type="button"
+                      className="px-2.5 py-1 text-muted-foreground hover:bg-muted disabled:opacity-50"
+                      onClick={() => setQty(Math.max(1, qty - 1))}
+                      disabled={qty <= 1}
+                      data-testid="store-detail-qty-minus"
+                    ><Minus className="w-3.5 h-3.5" /></button>
+                    <input
+                      data-testid="store-detail-qty-input"
+                      type="number"
+                      value={qty}
+                      min={1}
+                      max={Number(product.inventory_available || 1)}
+                      onChange={(e) => setQty(Math.max(1, Math.min(Number(product.inventory_available || 1), Number(e.target.value) || 1)))}
+                      className="w-14 text-center bg-transparent text-sm outline-none"
+                    />
+                    <button
+                      type="button"
+                      className="px-2.5 py-1 text-muted-foreground hover:bg-muted disabled:opacity-50"
+                      onClick={() => setQty(Math.min(Number(product.inventory_available || 1), qty + 1))}
+                      disabled={qty >= Number(product.inventory_available || 1)}
+                      data-testid="store-detail-qty-plus"
+                    ><Plus className="w-3.5 h-3.5" /></button>
+                  </div>
+                  <span className="text-xs text-muted-foreground">{product.inventory_available} available</span>
+                </div>
+                <Button className="w-full" onClick={onAdd} data-testid="store-detail-add-to-cart">
+                  <ShoppingBag className="w-4 h-4 mr-2" /> Add to cart
+                </Button>
+              </>
+            )}
+          </div>
         </div>
       </div>
     </div>
