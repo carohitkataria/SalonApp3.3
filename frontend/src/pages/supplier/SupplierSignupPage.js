@@ -186,11 +186,11 @@ export default function SupplierSignupPage() {
               <h2 className="text-sm font-bold text-white flex items-center gap-2"><Building2 className="w-4 h-4 text-amber-400" /> Business details</h2>
               <div>
                 <label className="text-[10px] uppercase tracking-widest font-bold text-zinc-400">Business name *</label>
-                <Input value={form.business_name} onChange={(e) => set('business_name', e.target.value)} placeholder="ABC Beauty Supplies" className="mt-1 bg-zinc-950 border-zinc-800 text-white" />
+                <Input value={form.business_name} onChange={(e) => set('business_name', e.target.value)} placeholder="ABC Beauty Supplies" data-testid="signup-business-name-input" className="mt-1 bg-zinc-950 border-zinc-800 text-white" />
               </div>
               <div>
                 <label className="text-[10px] uppercase tracking-widest font-bold text-zinc-400">Owner / Contact person *</label>
-                <Input value={form.owner_name} onChange={(e) => set('owner_name', e.target.value)} placeholder="Full name" className="mt-1 bg-zinc-950 border-zinc-800 text-white" />
+                <Input value={form.owner_name} onChange={(e) => set('owner_name', e.target.value)} placeholder="Full name" data-testid="signup-owner-name-input" className="mt-1 bg-zinc-950 border-zinc-800 text-white" />
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <div>
@@ -210,20 +210,20 @@ export default function SupplierSignupPage() {
               <h2 className="text-sm font-bold text-white flex items-center gap-2"><Phone className="w-4 h-4 text-amber-400" /> Contact &amp; login</h2>
               <div>
                 <label className="text-[10px] uppercase tracking-widest font-bold text-zinc-400">Mobile *</label>
-                <Input value={form.mobile} onChange={(e) => set('mobile', e.target.value)} placeholder="10-digit mobile" className="mt-1 bg-zinc-950 border-zinc-800 text-white" />
+                <Input value={form.mobile} onChange={(e) => set('mobile', e.target.value)} placeholder="10-digit mobile" data-testid="signup-mobile-input" className="mt-1 bg-zinc-950 border-zinc-800 text-white" />
               </div>
               <div>
                 <label className="text-[10px] uppercase tracking-widest font-bold text-zinc-400">Email</label>
-                <Input type="email" value={form.email} onChange={(e) => set('email', e.target.value)} placeholder="owner@business.com" className="mt-1 bg-zinc-950 border-zinc-800 text-white" />
+                <Input type="email" value={form.email} onChange={(e) => set('email', e.target.value)} placeholder="owner@business.com" data-testid="signup-email-input" className="mt-1 bg-zinc-950 border-zinc-800 text-white" />
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="text-[10px] uppercase tracking-widest font-bold text-zinc-400">Password *</label>
-                  <Input type="password" value={form.password} onChange={(e) => set('password', e.target.value)} placeholder="≥6 chars" className="mt-1 bg-zinc-950 border-zinc-800 text-white" />
+                  <Input type="password" value={form.password} onChange={(e) => set('password', e.target.value)} placeholder="≥6 chars" data-testid="signup-password-input" className="mt-1 bg-zinc-950 border-zinc-800 text-white" />
                 </div>
                 <div>
                   <label className="text-[10px] uppercase tracking-widest font-bold text-zinc-400">Confirm password *</label>
-                  <Input type="password" value={form.confirm_password} onChange={(e) => set('confirm_password', e.target.value)} className="mt-1 bg-zinc-950 border-zinc-800 text-white" />
+                  <Input type="password" value={form.confirm_password} onChange={(e) => set('confirm_password', e.target.value)} data-testid="signup-confirm-password-input" className="mt-1 bg-zinc-950 border-zinc-800 text-white" />
                 </div>
               </div>
               <div>
@@ -278,6 +278,7 @@ export default function SupplierSignupPage() {
                     key={cat}
                     type="button"
                     onClick={() => toggleCategory(cat)}
+                    data-testid={`signup-category-${cat.replace(/ /g, '-')}`}
                     className={`px-3 py-1.5 rounded-full text-xs font-semibold border transition-colors ${
                       form.category_tags.includes(cat)
                         ? 'bg-amber-500 border-amber-500 text-black'
@@ -322,15 +323,15 @@ export default function SupplierSignupPage() {
           )}
 
           <div className="flex items-center justify-between mt-6 pt-4 border-t border-zinc-800">
-            <Button variant="outline" onClick={prevStep} disabled={step === 1}>
+            <Button variant="outline" onClick={prevStep} disabled={step === 1} data-testid="signup-back-btn">
               <ArrowLeft className="w-4 h-4 mr-1" /> Back
             </Button>
             {step < STEPS.length ? (
-              <Button onClick={nextStep} className="bg-amber-500 hover:bg-amber-600 text-black font-bold">
+              <Button onClick={nextStep} data-testid="signup-continue-btn" className="bg-amber-500 hover:bg-amber-600 text-black font-bold">
                 Continue <ArrowRight className="w-4 h-4 ml-1" />
               </Button>
             ) : (
-              <Button onClick={handleSubmit} disabled={submitting} className="bg-amber-500 hover:bg-amber-600 text-black font-bold">
+              <Button onClick={handleSubmit} disabled={submitting} data-testid="signup-submit-btn" className="bg-amber-500 hover:bg-amber-600 text-black font-bold">
                 {submitting && <Loader2 className="w-4 h-4 mr-2 animate-spin" />} Submit application
               </Button>
             )}

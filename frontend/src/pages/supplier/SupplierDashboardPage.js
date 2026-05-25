@@ -17,7 +17,7 @@ const API = `${BACKEND_URL}/api`;
 
 const fmtMoney = (n) => `₹${Number(n || 0).toLocaleString('en-IN', { maximumFractionDigits: 0 })}`;
 
-const Kpi = ({ icon: Icon, label, value, sub, tone = 'amber', to }) => {
+const Kpi = ({ icon: Icon, label, value, sub, tone = 'amber', to, testid }) => {
   const tones = {
     amber: 'text-amber-300 bg-amber-500/10 border-amber-500/30 hover:border-amber-500/60',
     emerald: 'text-emerald-300 bg-emerald-500/10 border-emerald-500/30 hover:border-emerald-500/60',
@@ -25,7 +25,7 @@ const Kpi = ({ icon: Icon, label, value, sub, tone = 'amber', to }) => {
     sky: 'text-sky-300 bg-sky-500/10 border-sky-500/30 hover:border-sky-500/60',
   };
   const inner = (
-    <div className={`rounded-2xl border p-5 transition-colors ${tones[tone] || tones.amber}`}>
+    <div data-testid={testid} className={`rounded-2xl border p-5 transition-colors ${tones[tone] || tones.amber}`}>
       <div className="flex items-start justify-between">
         <div>
           <div className="text-[10px] uppercase tracking-widest font-bold opacity-80">{label}</div>
@@ -75,13 +75,14 @@ export default function SupplierDashboardPage() {
         <div className="rounded-xl border border-rose-500/30 bg-rose-500/10 text-rose-300 text-sm p-4">Could not load dashboard.</div>
       ) : (
         <>
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6" data-testid="supplier-dashboard-kpis">
             <Kpi
               icon={ShoppingCart}
               label="Orders pending"
               value={stats.orders_pending}
               sub="Awaiting your action"
               tone="amber"
+              testid="supplier-dashboard-kpi-orders"
             />
             <Kpi
               icon={Boxes}
@@ -90,6 +91,7 @@ export default function SupplierDashboardPage() {
               sub={`${stats.products_by_category?.length || 0} categories`}
               tone="emerald"
               to="/supplier/products"
+              testid="supplier-dashboard-kpi-products"
             />
             <Kpi
               icon={AlertTriangle}
@@ -98,6 +100,7 @@ export default function SupplierDashboardPage() {
               sub="Re-stock soon"
               tone="rose"
               to="/supplier/products"
+              testid="supplier-dashboard-kpi-lowstock"
             />
             <Kpi
               icon={IndianRupee}
@@ -105,6 +108,7 @@ export default function SupplierDashboardPage() {
               value={fmtMoney(stats.mtd_gmv)}
               sub="Gross value this month"
               tone="sky"
+              testid="supplier-dashboard-kpi-gmv"
             />
           </div>
 

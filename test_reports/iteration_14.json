@@ -1,0 +1,46 @@
+{
+  "summary": "Frontend regression for Phase 8/9 Supplier Marketplace. Steps 1-4 PASSED (signup, pending login, platform approval via API, approved login + 4 KPIs). Steps 5-11 BLOCKED: every navigation to /supplier/products bounces the user to /supplier/login and then back to /supplier/dashboard, so the entire products CRUD flow is unreachable from the UI. This means the iteration-14 fix to authHeaders (useMemo) prevented the infinite re-render loop, but the products page is still unmountable because the SupplierLayout route guard kicks the user out before SupplierAuthContext.refresh() resolves.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [
+      {
+        "flow": "Navigate to /supplier/products (and likely any other supplier-protected route reached via hard navigation, page reload, or NavLink click while supplier state hasn't been refreshed)",
+        "issue": "Page bounces to /supplier/login then to /supplier/dashboard within ~200ms. Navigation log captured via Playwright framenavigated: ['/supplier/products', '/supplier/products', '/supplier/login', '/supplier/login', '/supplier/dashboard']. Result: tab-catalog / tab-samples / add-product-btn never render. The ENTIRE products CRUD flow (manual add, edit, restock, delete, add-from-sample) is unreachable through the UI. Token IS present in localStorage (256 chars) and no API 401s are emitted — the bounce happens client-side before any product fetch fires.",
+        "affected_selectors": ["tab-catalog", "tab-samples", "sample-card-*", "add-product-btn", "editor-*", "product-card-*", "edit-product-*", "restock-*", "delete-product-*"]
+      },
+      {
+        "flow": "Logout from supplier shell",
+        "issue": "After clicking supplier-header-logout-btn, the user lands on /supplier/login (not / as required). Same root cause as above — SupplierLayout's route-guard useEffect fires on the cleared supplier state before navigate('/') commits, so the layout pushes /supplier/login on top. The 'navigate first then logout' fix in handleLogout is INSUFFICIENT because the layout's own useEffect re-runs when supplier transitions to null.",
+        "affected_selectors": ["supplier-header-logout-btn"]
+      }
+    ],
+    "design_issues": []
+  },
+  "test_report_links": ["/app/test_reports/iteration_14.json"],
+  "action_items": [
+    "FIX SupplierLayout route guard: do NOT navigate to /supplier/login while SupplierAuthContext is still loading (i.e., when token is present in localStorage but supplier=null because refresh() is still in flight). Pull `loading` from useSupplierAuth and gate the redirect: `if (!loading && !supplier) navigate('/supplier/login')`. Better: also check `token` and skip redirect when token exists but supplier=null + not loading-failure.",
+    "FIX logout flow: the layout's route-guard effect still races handleLogout. After logout() clears supplier, the effect on the still-mounted Layout fires and pushes /supplier/login over the /, undoing the navigate('/') call. Recommended: in handleLogout, call logout() first to clear token+supplier in a single batch, then use window.location.assign('/') so the layout unmounts via full page nav instead of relying on React-Router transitions racing with the useEffect. Alternatively, add a `loggingOut` flag in the auth context that the layout's useEffect respects (early-return when loggingOut is true).",
+    "After fixes, re-run full happy path: signup → pending → approve (API) → approved login → 4 KPIs → /supplier/products tabs + 30+ samples → add-from-sample → manual add (with editor- testids present) → edit price → restock → delete → logout lands on /."
+  ],
+  "critical_code_review_comments": [
+    "SupplierLayout.js useEffect doesn't gate on `loading`. On hard navigation (page reload, page.goto, or even an internal NavLink click that unmounts/remounts the layout), supplier is briefly null while refresh() is in flight, and the effect immediately redirects to /supplier/login. This is the iteration-14 bug recurring — only the symptom (re-render loop) was addressed, not the underlying race.",
+    "SupplierProductsPage.js is 605 lines. Should be split into ProductCatalog / ProductSamples / ProductEditorModal / RestockModal / DeleteConfirmModal sub-components for maintainability and to keep editor testids easy to scan.",
+    "SupplierAuthContext.refresh() leaves token in localStorage on 403 supplier_not_active but doesn't on 404/5xx — a transient backend hiccup could leave the user in a stale-but-not-blocked state with supplier=null. Consider catching network errors separately and not clearing supplier on them.",
+    "handleLogout in SupplierLayout: navigate('/') then logout() relies on React Router unmounting fast enough. This is fragile. Prefer window.location.replace('/') after logout() — guarantees full unmount and avoids the route-guard race entirely."
+  ],
+  "updated_files": [],
+  "success_rate": {
+    "backend": "not tested (frontend-only request)",
+    "frontend": "36% — 4/11 happy-path steps verified (signup, pending login, approved login, dashboard KPIs); 7/11 blocked by /supplier/products bounce"
+  },
+  "test_credentials": "Approved supplier created during test: mobile=+919900220762 password=Supplier@123 (supplier_id=2fb3bcac-abdc-42ad-b206-51f83b7cffc5). Platform owner OTP flow works as documented — request-otp returns dev OTP in body['otp'], verify-otp returns token in body['access_token'].",
+  "seed_data_creation": "One fresh supplier (+919900220762, Test Supplier Co) created via UI signup and approved via POST /api/platform/suppliers/{id}/approve. Will remain in DB.",
+  "retest_needed": true,
+  "main_agent_can_self_test": false,
+  "context_for_next_testing_agent": "Verified working selectors: signup-business-name-input, signup-owner-name-input, signup-continue-btn (5 steps: business→contact→bank→categories→review), signup-mobile-input/password-input/confirm-password-input on step 2, signup-category-haircare on step 4, signup-submit-btn on step 5. supplier-login-tab-password / supplier-login-mobile-input / supplier-login-password-input / supplier-login-submit-btn all working. supplier-pending-message renders. supplier-dashboard-kpi-{orders,products,lowstock,gmv} all visible on dashboard. Platform OTP keys: ['message','delivery_status','otp','note']. Verify-otp keys: ['access_token','token_type','admin']. Platform suppliers list endpoint returns a plain array of {id,mobile,status,...}. /api/platform/suppliers/{id}/approve returns 200. NOT verifiable until SupplierLayout fix: tab-catalog/tab-samples render, sample count ≥30, add-product-btn, editor-name-input/editor-category-select/editor-unit-select/editor-mrp-input/editor-selling-input/editor-stock-input/editor-save-btn, product-card-{id}, edit-product-{id}, restock-product-{id}, restock-qty-input, restock-submit-btn, delete-product-{id}, confirm-delete-btn, post-logout landing on /.",
+  "rca of the issue": "Root cause: SupplierLayout.js lines 15-21 useEffect fires `navigate('/supplier/login', {replace:true})` whenever supplier is null, without considering that SupplierAuthContext.refresh() is asynchronously fetching the supplier from /api/supplier/me. On any hard navigation to /supplier/products (page.goto, F5 reload, or even NavLink click that remounts the layout), the sequence is: (1) layout mounts with supplier=null, (2) useEffect fires synchronously → router replaces URL with /supplier/login, (3) refresh() resolves and sets supplier, (4) /supplier/login redirects an authenticated supplier to /supplier/dashboard. Net effect: products page is never visible. Reproduction: log in as approved supplier, then in Playwright `await page.goto(BASE + '/supplier/products')`. Observed nav log: ['/supplier/products','/supplier/products','/supplier/login','/supplier/login','/supplier/dashboard']. Mitigation: gate the redirect on `!loading && !supplier` (pull loading from useSupplierAuth), OR keep a `tokenChecked` flag in the auth context that flips true only after the first refresh() settles, and have the layout wait for it before redirecting. Separately, the logout bug has the same root cause family: when logout() flips supplier→null while the layout is still mounted, the same useEffect bounces user from / to /supplier/login. Fix: use window.location.replace('/') after logout() OR add a loggingOut sentinel in context that the effect honors."
+}

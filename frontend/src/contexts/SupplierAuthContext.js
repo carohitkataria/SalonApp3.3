@@ -8,7 +8,7 @@
  * we capture the status (pending_approval / rejected / suspended) so the
  * /supplier/pending screen can display the right message.
  */
-import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback, useMemo } from 'react';
 import axios from 'axios';
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
@@ -21,6 +21,7 @@ const SupplierAuthContext = createContext({
   loading: false,
   blockedStatus: null,           // 'pending_approval' | 'rejected' | 'suspended' | null
   blockedDetail: null,           // { status, message, rejection_reason }
+  authHeaders: {},
   loginWithPassword: async () => {},
   requestOtp: async () => {},
   verifyOtp: async () => {},
@@ -36,8 +37,10 @@ export const SupplierAuthProvider = ({ children }) => {
   const [blockedStatus, setBlockedStatus] = useState(null);
   const [blockedDetail, setBlockedDetail] = useState(null);
 
-  const authHeaders = useCallback(
-    () => (token ? { Authorization: `Bearer ${token}` } : {}),
+  // Stable headers object — only re-created when token changes.
+  // Consumers can safely include this in useEffect dependency arrays.
+  const authHeaders = useMemo(
+    () => (token ? { Authorization: `Bearer ${token}` } : null),
     [token],
   );
 
@@ -48,7 +51,7 @@ export const SupplierAuthProvider = ({ children }) => {
     }
     setLoading(true);
     try {
-      const r = await axios.get(`${API}/supplier/me`, { headers: authHeaders() });
+      const r = await axios.get(`${API}/supplier/me`, { headers: authHeaders });
       setSupplier(r.data);
       setBlockedStatus(null);
       setBlockedDetail(null);
@@ -153,7 +156,7 @@ export const SupplierAuthProvider = ({ children }) => {
         signup,
         logout,
         refresh,
-        authHeaders: authHeaders(),
+        authHeaders,
       }}
     >
       {children}

@@ -51,13 +51,13 @@ export default function SupplierPendingPage() {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-zinc-950 via-zinc-900 to-zinc-950 flex items-center justify-center px-4 py-10">
-      <div className="w-full max-w-lg">
+      <div className="w-full max-w-lg" data-testid="supplier-pending-shell">
         <div className={`rounded-2xl border ${tone.border} ${tone.bg} p-8`}>
           <div className={`w-16 h-16 rounded-2xl ${tone.iconBg} flex items-center justify-center mx-auto mb-5`}>
             <Icon className={`w-8 h-8 ${tone.text}`} />
           </div>
-          <h1 className="text-2xl font-bold text-white text-center mb-3">{config.title}</h1>
-          <p className="text-sm text-zinc-300 text-center leading-relaxed">{config.desc}</p>
+          <h1 className="text-2xl font-bold text-white text-center mb-3" data-testid="supplier-pending-title">{config.title}</h1>
+          <p className="text-sm text-zinc-300 text-center leading-relaxed" data-testid="supplier-pending-message">{config.desc}</p>
 
           {blockedDetail?.rejection_reason && (
             <div className="mt-6 rounded-lg border border-zinc-700 bg-zinc-950/50 p-4">

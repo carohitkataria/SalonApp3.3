@@ -92,12 +92,14 @@ export default function SupplierLoginPage() {
           <div className="flex border border-zinc-800 rounded-lg overflow-hidden mb-5 text-xs font-bold">
             <button
               onClick={() => setMode('password')}
+              data-testid="supplier-login-tab-password"
               className={`flex-1 py-2.5 transition-colors flex items-center justify-center gap-1.5 ${
                 mode === 'password' ? 'bg-amber-500 text-black' : 'bg-transparent text-zinc-400 hover:text-white'
               }`}
             ><KeyRound className="w-3.5 h-3.5" /> PASSWORD</button>
             <button
               onClick={() => setMode('otp')}
+              data-testid="supplier-login-tab-otp"
               className={`flex-1 py-2.5 transition-colors flex items-center justify-center gap-1.5 ${
                 mode === 'otp' ? 'bg-amber-500 text-black' : 'bg-transparent text-zinc-400 hover:text-white'
               }`}
@@ -105,38 +107,38 @@ export default function SupplierLoginPage() {
           </div>
 
           {mode === 'password' ? (
-            <form onSubmit={handlePasswordLogin} className="space-y-4">
+            <form onSubmit={handlePasswordLogin} className="space-y-4" data-testid="supplier-login-password-form">
               <div>
                 <label className="text-[10px] uppercase tracking-widest font-bold text-zinc-400">Mobile</label>
-                <Input value={mobile} onChange={(e) => setMobile(e.target.value)} placeholder="10-digit mobile" className="mt-1 bg-zinc-950 border-zinc-800 text-white" />
+                <Input value={mobile} onChange={(e) => setMobile(e.target.value)} placeholder="10-digit mobile" data-testid="supplier-login-mobile-input" className="mt-1 bg-zinc-950 border-zinc-800 text-white" />
               </div>
               <div>
                 <label className="text-[10px] uppercase tracking-widest font-bold text-zinc-400">Password</label>
                 <div className="relative">
-                  <Input type={showPassword ? 'text' : 'password'} value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Your password" className="mt-1 bg-zinc-950 border-zinc-800 text-white pr-10" />
+                  <Input type={showPassword ? 'text' : 'password'} value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Your password" data-testid="supplier-login-password-input" className="mt-1 bg-zinc-950 border-zinc-800 text-white pr-10" />
                   <button type="button" onClick={() => setShowPassword(!showPassword)} className="absolute right-2 top-1/2 -translate-y-1/2 mt-0.5 p-1 text-zinc-500 hover:text-white">
                     {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                   </button>
                 </div>
               </div>
-              <Button type="submit" disabled={busy} className="w-full bg-amber-500 hover:bg-amber-600 text-black font-bold">
+              <Button type="submit" disabled={busy} data-testid="supplier-login-submit-btn" className="w-full bg-amber-500 hover:bg-amber-600 text-black font-bold">
                 {busy && <Loader2 className="w-4 h-4 mr-2 animate-spin" />} Sign in
               </Button>
             </form>
           ) : (
-            <form onSubmit={otpSent ? handleVerifyOtp : (e) => { e.preventDefault(); handleRequestOtp(); }} className="space-y-4">
+            <form onSubmit={otpSent ? handleVerifyOtp : (e) => { e.preventDefault(); handleRequestOtp(); }} className="space-y-4" data-testid="supplier-login-otp-form">
               <div>
                 <label className="text-[10px] uppercase tracking-widest font-bold text-zinc-400">Mobile</label>
-                <Input value={mobile} onChange={(e) => setMobile(e.target.value)} placeholder="10-digit mobile" disabled={otpSent} className="mt-1 bg-zinc-950 border-zinc-800 text-white" />
+                <Input value={mobile} onChange={(e) => setMobile(e.target.value)} placeholder="10-digit mobile" disabled={otpSent} data-testid="supplier-otp-mobile-input" className="mt-1 bg-zinc-950 border-zinc-800 text-white" />
               </div>
               {otpSent && (
                 <div>
                   <label className="text-[10px] uppercase tracking-widest font-bold text-zinc-400">6-digit OTP</label>
-                  <Input value={otp} onChange={(e) => setOtp(e.target.value)} placeholder="123456" maxLength={6} className="mt-1 bg-zinc-950 border-zinc-800 text-white text-center text-xl tracking-[0.5em]" />
-                  {otpHint && <div className="text-[10px] text-amber-400 mt-1">{otpHint}</div>}
+                  <Input value={otp} onChange={(e) => setOtp(e.target.value)} placeholder="123456" maxLength={6} data-testid="supplier-otp-input" className="mt-1 bg-zinc-950 border-zinc-800 text-white text-center text-xl tracking-[0.5em]" />
+                  {otpHint && <div className="text-[10px] text-amber-400 mt-1" data-testid="supplier-otp-hint">{otpHint}</div>}
                 </div>
               )}
-              <Button type="submit" disabled={busy} className="w-full bg-amber-500 hover:bg-amber-600 text-black font-bold">
+              <Button type="submit" disabled={busy} data-testid="supplier-otp-submit-btn" className="w-full bg-amber-500 hover:bg-amber-600 text-black font-bold">
                 {busy && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
                 {otpSent ? 'Verify OTP' : 'Send OTP'}
               </Button>
@@ -150,7 +152,7 @@ export default function SupplierLoginPage() {
 
           <div className="mt-6 pt-4 border-t border-zinc-800 text-center text-sm">
             <span className="text-zinc-500">New supplier? </span>
-            <Link to="/supplier/signup" className="text-amber-400 hover:text-amber-300 font-semibold">Sign up here</Link>
+            <Link to="/supplier/signup" data-testid="supplier-login-signup-link" className="text-amber-400 hover:text-amber-300 font-semibold">Sign up here</Link>
           </div>
         </div>
 

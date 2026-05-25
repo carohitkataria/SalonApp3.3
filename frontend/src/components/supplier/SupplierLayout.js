@@ -23,43 +23,50 @@ export default function SupplierLayout({ children }) {
   if (!supplier) return null;
 
   const handleLogout = () => {
-    logout();
+    // Navigate FIRST so the layout unmounts before its route-guard effect
+    // fires on the cleared supplier state (otherwise we'd bounce to /supplier/login).
     navigate('/');
+    logout();
   };
 
   return (
-    <div className="min-h-screen bg-zinc-950 text-white">
+    <div className="min-h-screen bg-zinc-950 text-white" data-testid="supplier-shell">
       <header className="sticky top-0 z-30 bg-zinc-950/80 backdrop-blur border-b border-zinc-800">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 h-14 flex items-center justify-between">
-          <Link to="/supplier/dashboard" className="flex items-center gap-2">
+          <Link to="/supplier/dashboard" className="flex items-center gap-2" data-testid="supplier-header-logo">
             <div className="w-8 h-8 rounded-lg bg-amber-500/15 border border-amber-500/40 flex items-center justify-center">
               <Package className="w-4 h-4 text-amber-400" />
             </div>
             <div>
-              <div className="text-sm font-bold leading-tight">{supplier.business_name || 'Supplier'}</div>
+              <div className="text-sm font-bold leading-tight" data-testid="supplier-header-business-name">{supplier.business_name || 'Supplier'}</div>
               <div className="text-[10px] uppercase tracking-widest font-bold text-zinc-500 leading-tight">Marketplace</div>
             </div>
           </Link>
 
           <nav className="hidden sm:flex items-center gap-1">
-            <NavItem to="/supplier/dashboard" icon={LayoutDashboard} label="Dashboard" />
-            <NavItem to="/supplier/products" icon={Boxes} label="Products" />
+            <NavItem to="/supplier/dashboard" icon={LayoutDashboard} label="Dashboard" testid="supplier-nav-dashboard" />
+            <NavItem to="/supplier/products" icon={Boxes} label="Products" testid="supplier-nav-products" />
           </nav>
 
           <div className="flex items-center gap-2">
             <div className="hidden sm:flex items-center gap-2 text-xs text-zinc-400 pr-2">
               <User className="w-3.5 h-3.5" />
-              <span className="font-mono">{supplier.mobile}</span>
+              <span className="font-mono" data-testid="supplier-header-mobile">{supplier.mobile}</span>
             </div>
-            <button onClick={handleLogout} className="p-2 rounded-lg text-zinc-400 hover:bg-zinc-800 hover:text-white" title="Logout">
+            <button
+              onClick={handleLogout}
+              data-testid="supplier-header-logout-btn"
+              className="p-2 rounded-lg text-zinc-400 hover:bg-zinc-800 hover:text-white"
+              title="Logout"
+            >
               <LogOut className="w-4 h-4" />
             </button>
           </div>
         </div>
         {/* Mobile nav */}
         <nav className="sm:hidden flex items-center justify-around border-t border-zinc-800">
-          <NavItem to="/supplier/dashboard" icon={LayoutDashboard} label="Dashboard" mobile />
-          <NavItem to="/supplier/products" icon={Boxes} label="Products" mobile />
+          <NavItem to="/supplier/dashboard" icon={LayoutDashboard} label="Dashboard" mobile testid="supplier-nav-dashboard-mobile" />
+          <NavItem to="/supplier/products" icon={Boxes} label="Products" mobile testid="supplier-nav-products-mobile" />
         </nav>
       </header>
 
@@ -70,10 +77,11 @@ export default function SupplierLayout({ children }) {
   );
 }
 
-function NavItem({ to, icon: Icon, label, mobile }) {
+function NavItem({ to, icon: Icon, label, mobile, testid }) {
   return (
     <NavLink
       to={to}
+      data-testid={testid}
       className={({ isActive }) =>
         `${mobile ? 'flex-1' : ''} flex items-center justify-center gap-1.5 px-3 py-2 text-xs font-bold uppercase tracking-widest rounded-lg transition-colors ${
           isActive
