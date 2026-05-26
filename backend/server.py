@@ -12405,6 +12405,20 @@ salon_store_mod.init_salon_store_router(
 )
 fastapi_app.include_router(salon_store_mod.salon_store_router)
 
+# Phase 14 — Salon Inventory (browse + lifecycle + movement history)
+import salon_inventory as salon_inventory_mod  # noqa: E402
+salon_inventory_mod.init_salon_inventory_router(
+    db=db,
+    get_current_salon_user=get_current_salon_user,
+    resolve_branch_id=resolve_branch_id,
+)
+fastapi_app.include_router(salon_inventory_mod.salon_inventory_router)
+
+# Phase 13 — wire auto-post hook into salon_store.supplier_deliver_order
+salon_store_mod.set_auto_post_hook(
+    lambda order: salon_inventory_mod.auto_post_on_delivery(order, db=db)
+)
+
 # Health check endpoint for Kubernetes liveness/readiness probes
 @fastapi_app.get("/health")
 async def health_check():

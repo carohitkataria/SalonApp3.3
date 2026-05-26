@@ -74,6 +74,7 @@ async def seed():
             "business_name": sup["business_name"],
             "owner_name": sup["owner_name"],
             "phone": sup["phone"],
+            "mobile": sup["phone"],  # supplier_auth queries by `mobile`
             "email": sup["email"],
             "city": sup["city"],
             "state": sup["state"],

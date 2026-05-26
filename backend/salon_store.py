@@ -71,6 +71,15 @@ _db = None
 _get_current_salon_user = None
 _create_in_app_notification = None  # async fn from server.py
 _require_supplier = None            # async dep from supplier_auth
+_auto_post_on_delivery = None       # Phase 13 hook (set by server.py wiring)
+
+
+def set_auto_post_hook(fn) -> None:
+    """Allow server.py to inject the Phase 13 auto-post callback after both
+    modules are imported. The callback is `async fn(order_doc) -> summary`.
+    """
+    global _auto_post_on_delivery
+    _auto_post_on_delivery = fn
 
 salon_store_router = APIRouter(tags=["salon-store"])
 _bearer = HTTPBearer(auto_error=False)
@@ -1021,6 +1030,19 @@ async def supplier_deliver_order(order_id: str, payload: DeliverPayload, supplie
     # Reservations -> consumed (drop reserved counter).
     fresh = await _db.salon_orders.find_one({"id": order_id}, {"_id": 0})
     await _consume_reservations(fresh)
+
+    # Phase 13 — auto-post inventory & finance for the salon.
+    autopost_summary = None
+    if _auto_post_on_delivery is not None:
+        try:
+            autopost_summary = await _auto_post_on_delivery(fresh)
+            await _db.salon_orders.update_one(
+                {"id": order_id},
+                {"$set": {"auto_post_summary": autopost_summary, "updated_at": _now_iso()}},
+            )
+        except Exception as e:
+            logger.error(f"[salon_store] auto_post_on_delivery raised: {e}")
+            autopost_summary = {"error": str(e)}
 
     if _create_in_app_notification:
         try:
