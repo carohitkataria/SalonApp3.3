@@ -1,0 +1,50 @@
+{
+  "summary": "Phase 13 (auto-post inventory + finance on supplier delivery) + Phase 14 (Salon Inventory CRUD + lifecycle + movements) + new payment-mode change endpoint backend tests — 26/26 PASS. Full e2e exercised: salon admin login -> create/list/get/update/soft-delete inventory -> assign/reserve-internal/release/consume/sell lifecycle with 409 guards -> movements log emits correct types/deltas -> place COD checkout against test-supplier-glow -> supplier confirm+ship+deliver -> auto_post_summary populated (finance_posted=true, inventory_items_touched>=1) -> salon_inventory row upserted via product_id_source, qty_total incremented -> salon_inventory_movements purchase_in references order_id -> second deliver returns 409 (transition guard) -> second COD order with same product reuses same inventory row (no duplicate) -> direct double-call of auto_post_on_delivery returns skipped_reason='already_posted' -> PATCH /payment-mode cod->upi mirrors to financial_transactions, same-mode no-op, invalid mode 422, bad JWT 401/404 -> negative paths (no JWT 401/403, foreign id 404, validation errors 422).",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {
+        "endpoint": "POST /api/salon/inventory/{id}/assign",
+        "issue": "The `assign` endpoint semantically treats the incoming `qty` as the NEW absolute reserved-for-internal value (it diffs against the existing reserve), but the movement_type emitted is `assign_to_staff` when staff_id is provided and `reserve_internal` when null. This is consistent but slightly surprising — the API name suggests delta semantics. Recommend documenting clearly in the OpenAPI description (the docstring already mentions it) and possibly renaming to `set-assignment` to make the absolute-value semantics explicit."
+      },
+      {
+        "endpoint": "auto_post_on_delivery (salon_inventory.py line 681)",
+        "issue": "Branch_id resolution uses `order.get('branch_id') or await _resolve_branch_id(...) if _resolve_branch_id else order.get('branch_id')`. Due to Python operator precedence this parses as `order.get('branch_id') or (await _resolve_branch_id(...) if _resolve_branch_id else order.get('branch_id'))` — which is technically correct, but fragile. Wrap explicitly in parentheses for readability and to avoid future regressions."
+      }
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_salon_inventory_phase13_14.py",
+    "/app/test_reports/pytest/phase13_14.xml"
+  ],
+  "action_items": [
+    "Optional: clarify assign endpoint semantics (absolute vs delta) in API doc or rename to /set-assignment.",
+    "Optional: parenthesise branch_id resolution at salon_inventory.py:681 to avoid operator-precedence confusion.",
+    "Cleanup test data: TEST_PH14_*, TEST_LC_*, TEST_MV_* inventory rows and the two COD test orders left in DB (they remain delivered with auto_post_summary; harmless but increases noise)."
+  ],
+  "critical_code_review_comments": [
+    "salon_inventory.py:681 — operator precedence ambiguity on `or ... if ... else ...` chain for branch_id resolution. Works today because both branches return the same fallback, but a maintainer could easily break it. Wrap in parens.",
+    "salon_inventory.py auto_post_on_delivery: cost_price is overwritten on every subsequent delivery (`$set: {cost_price: line.selling_price}`). If the salon-side cost was manually adjusted via PUT /api/salon/inventory/{id}, it will be silently overwritten by the next purchase. Consider only setting cost_price on first insert, or computing a weighted average.",
+    "salon_inventory.py file is 794 lines and currently houses CRUD + lifecycle + Phase 13 hook. Consider splitting into salon_inventory_crud.py, salon_inventory_lifecycle.py, salon_inventory_autopost.py per repo guideline (>700 lines = split).",
+    "salon_store.py change_salon_order_payment_mode: when mirroring to financial_transactions, it does update_many but never validates the txn type/category — a future bug where multiple finance rows reference the same order (e.g. partial refund) would have its payment_mode silently flipped. Add a narrower filter on type='outflow' AND category='inventory_purchase' if that's the intent.",
+    "Phase 14 sell endpoint creates the txn with `reference_id = txn_id` (self-reference) and `reference_type='pos_sale'`. This works but breaks the symmetry with Phase 13 (which uses reference_type='salon_order', reference_id=order_id). If future audit/reconciliation joins txns to source documents, the self-ref pattern is harder to traverse. Consider linking to inventory_item_id via reference_id."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_salon_inventory_phase13_14.py"
+  ],
+  "success_rate": {
+    "backend": "100% (26/26)",
+    "frontend": "not in scope"
+  },
+  "test_credentials": "Salon admin identifier=admin password=salon123 (salon_id 459ff694-c246-4891-a535-fc8f23b58ac3). Supplier glow +919000000001 password supplier123. Both validated.",
+  "seed_data_creation": "Test created: ~6 TEST_PH14_/TEST_LC_/TEST_MV_ salon_inventory rows (one soft-deleted), 2 COD salon_orders against test-supplier-glow (both delivered), 2 mirrored financial_transactions rows (one with payment_mode flipped cod->upi), several salon_inventory_movements rows. Cleanup recommended but not required for retest — tests are idempotent and use uuid suffixes for unique names.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Phase 13/14 backend is fully green. The full e2e test file is at /app/backend/tests/test_salon_inventory_phase13_14.py and can be re-run with `cd /app/backend && REACT_APP_BACKEND_URL=$(grep REACT_APP_BACKEND_URL /app/frontend/.env|cut -d= -f2) python -m pytest tests/test_salon_inventory_phase13_14.py -v`. Key endpoints exercised: GET/POST/PUT/DELETE /api/salon/inventory, /api/salon/inventory/{id}/{assign,reserve-internal,release-internal,consume,sell}, /api/salon/inventory/movements, /api/salon/inventory/{id}/movements, POST /api/salon/store/checkout (cod), POST /api/supplier/orders/{id}/{confirm,ship,deliver}, PATCH /api/salon/store/orders/{id}/payment-mode. Idempotency proven by direct invocation of auto_post_on_delivery twice on same delivered order (both return skipped_reason='already_posted'). Phase 1-12 NOT re-tested per instructions.",
+  "rca of the issue": "N/A — no issues found requiring RCA. The only test failure during development was self-inflicted: the idempotency subprocess didn't inherit DB_NAME because pytest only passed REACT_APP_BACKEND_URL through the env. Fixed by adding `from dotenv import load_dotenv; load_dotenv('/app/backend/.env')` at the top of the subprocess script. Final run: 26 passed in 11.30s."
+}

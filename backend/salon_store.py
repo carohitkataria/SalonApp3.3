@@ -210,6 +210,21 @@ class CancelPayload(BaseModel):
     reason: Optional[str] = Field(default=None, max_length=500)
 
 
+VALID_PAYMENT_MODES_AFTER_DELIVERY = {"cod", "upi", "cashfree", "cash", "card", "bank_transfer", "other"}
+
+
+class PaymentModeChangePayload(BaseModel):
+    payment_mode: str = Field(..., description="cod | upi | cashfree | cash | card | bank_transfer | other")
+    note: Optional[str] = Field(default=None, max_length=500)
+
+    @field_validator("payment_mode")
+    @classmethod
+    def _v_pm(cls, v: str) -> str:
+        if v not in VALID_PAYMENT_MODES_AFTER_DELIVERY:
+            raise ValueError(f"payment_mode must be one of {sorted(VALID_PAYMENT_MODES_AFTER_DELIVERY)}")
+        return v
+
+
 # --------------------------- Browse ----------------------------
 
 @salon_store_router.get("/api/salon/store/products")
@@ -790,6 +805,70 @@ async def cancel_salon_order(
 
     fresh = await _db.salon_orders.find_one({"id": order_id}, {"_id": 0})
     return {"ok": True, "order": fresh}
+
+
+@salon_store_router.patch("/api/salon/store/orders/{order_id}/payment-mode")
+async def change_salon_order_payment_mode(
+    order_id: str,
+    payload: PaymentModeChangePayload,
+    user: dict = Depends(_salon_auth),
+):
+    """Salon can change the payment_mode on an order with an audit log.
+
+    Use-case: supplier captured the order as COD but the salon actually paid
+    via UPI at delivery — keep the financial ledger clean by updating both
+    the order and the auto-posted financial_transactions row.
+    """
+    salon_id = user.get("salon_id") or user.get("sub")
+    doc = await _db.salon_orders.find_one({"id": order_id, "salon_id": salon_id}, {"_id": 0})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Order not found")
+
+    old_mode = doc.get("payment_mode") or "unknown"
+    new_mode = payload.payment_mode
+    if old_mode == new_mode:
+        return {"ok": True, "order": doc, "message": "Payment mode unchanged"}
+
+    audit_entry = {
+        "from": old_mode,
+        "to": new_mode,
+        "note": payload.note,
+        "changed_by": user.get("user_id") or user.get("id"),
+        "changed_at": _now_iso(),
+    }
+
+    await _db.salon_orders.update_one(
+        {"id": order_id},
+        {"$set": {"payment_mode": new_mode, "updated_at": _now_iso()},
+         "$push": {"payment_mode_history": audit_entry,
+                   "status_history": {
+                       "status": doc.get("order_status"),
+                       "timestamp": _now_iso(),
+                       "note": f"Payment mode changed: {old_mode} → {new_mode}"
+                               + (f" · {payload.note}" if payload.note else ""),
+                       "updated_by": user.get("user_id") or user.get("id"),
+                   }}},
+    )
+
+    # Mirror the change onto the linked financial transaction (Phase 13 auto-post).
+    fin_updated = 0
+    try:
+        result = await _db.financial_transactions.update_many(
+            {"reference_type": "salon_order", "reference_id": order_id, "salon_id": salon_id},
+            {"$set": {"payment_mode": new_mode, "updated_at": _now_iso()},
+             "$push": {"payment_mode_history": audit_entry}},
+        )
+        fin_updated = result.modified_count
+    except Exception as e:
+        logger.error(f"[salon_store] failed to mirror payment_mode change to finance: {e}")
+
+    fresh = await _db.salon_orders.find_one({"id": order_id}, {"_id": 0})
+    return {
+        "ok": True,
+        "order": fresh,
+        "financial_transactions_updated": fin_updated,
+        "message": f"Payment mode updated from {old_mode} to {new_mode}",
+    }
 
 
 # --------------------------- Cashfree webhook ------------------
