@@ -678,7 +678,9 @@ async def auto_post_on_delivery(order: dict, *, db) -> dict:
     """
     order_id = order["id"]
     salon_id = order["salon_id"]
-    branch_id = order.get("branch_id") or await _resolve_branch_id(salon_id, None) if _resolve_branch_id else order.get("branch_id")
+    branch_id = order.get("branch_id") or (
+        await _resolve_branch_id(salon_id, None) if _resolve_branch_id else None
+    )
 
     summary = {"inventory_items_touched": 0, "finance_posted": False, "skipped_reason": None}
 
@@ -708,7 +710,6 @@ async def auto_post_on_delivery(order: dict, *, db) -> dict:
                 {"id": existing["id"]},
                 {"$inc": {"qty_total": qty},
                  "$set": {"updated_at": _now_iso(),
-                          "cost_price": float(line.get("selling_price") or existing.get("cost_price") or 0),
                           "source_order_id": order_id}},
                 return_document=True,
                 projection={"_id": 0},

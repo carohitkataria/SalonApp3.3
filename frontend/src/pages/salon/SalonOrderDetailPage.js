@@ -10,8 +10,12 @@ import { useNavigate, useParams } from 'react-router-dom';
 import axios from 'axios';
 import {
   ArrowLeft, Loader2, IndianRupee, Truck, Boxes, MapPin, Phone, ShieldAlert,
+  Wallet, X, History,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Textarea } from '@/components/ui/textarea';
 import { toast } from 'sonner';
 import { StatusBadge, PaymentBadge } from './SalonOrdersPage';
 import { extractErrorMessage } from '@/utils/apiError';
@@ -27,6 +31,7 @@ export default function SalonOrderDetailPage() {
   const [order, setOrder] = useState(null);
   const [loading, setLoading] = useState(true);
   const [cancelling, setCancelling] = useState(false);
+  const [showPaymentModeModal, setShowPaymentModeModal] = useState(false);
 
   const authHeaders = useMemo(() => {
     const raw = localStorage.getItem('salon_user_auth');
@@ -174,8 +179,135 @@ export default function SalonOrderDetailPage() {
               {cancelling ? 'Cancelling…' : 'Cancel order'}
             </Button>
           )}
+
+          <div className="border border-border rounded-xl p-4 bg-card">
+            <div className="text-sm font-bold mb-2 flex items-center gap-2"><Wallet className="w-4 h-4" /> Payment</div>
+            <div className="text-xs space-y-1">
+              <div className="flex justify-between">
+                <span className="text-muted-foreground">Mode</span>
+                <span className="font-semibold uppercase" data-testid="order-payment-mode-current">{order.payment_mode || '—'}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-muted-foreground">Status</span>
+                <span className="font-semibold uppercase">{order.payment_status || '—'}</span>
+              </div>
+            </div>
+            <Button
+              variant="outline"
+              size="sm"
+              className="w-full mt-3"
+              onClick={() => setShowPaymentModeModal(true)}
+              data-testid="order-change-payment-mode-btn"
+            >
+              <Wallet className="w-3.5 h-3.5 mr-1" /> Change payment mode
+            </Button>
+            {Array.isArray(order.payment_mode_history) && order.payment_mode_history.length > 0 && (
+              <div className="mt-3 border-t border-border pt-2">
+                <div className="text-[10px] uppercase tracking-widest font-bold text-muted-foreground flex items-center gap-1 mb-1">
+                  <History className="w-3 h-3" /> Change log
+                </div>
+                <div className="space-y-1.5 max-h-32 overflow-y-auto">
+                  {order.payment_mode_history.slice().reverse().map((h, idx) => (
+                    <div key={idx} className="text-[11px] text-muted-foreground" data-testid={`order-payment-mode-history-${idx}`}>
+                      <span className="font-semibold text-foreground uppercase">{h.from}</span> → <span className="font-semibold text-foreground uppercase">{h.to}</span>
+                      {h.note && <span className="block italic">"{h.note}"</span>}
+                      <span className="block text-[10px]">{new Date(h.changed_at).toLocaleString()}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
         </aside>
       </main>
+
+      {showPaymentModeModal && (
+        <PaymentModeModal
+          order={order}
+          authHeaders={authHeaders}
+          onClose={() => setShowPaymentModeModal(false)}
+          onSaved={() => { setShowPaymentModeModal(false); fetchOrder(); }}
+        />
+      )}
+    </div>
+  );
+}
+
+
+function PaymentModeModal({ order, authHeaders, onClose, onSaved }) {
+  const [mode, setMode] = useState(order.payment_mode || 'cod');
+  const [note, setNote] = useState('');
+  const [saving, setSaving] = useState(false);
+
+  const submit = async (e) => {
+    e?.preventDefault();
+    setSaving(true);
+    try {
+      const r = await axios.patch(
+        `${API}/salon/store/orders/${order.id}/payment-mode`,
+        { payment_mode: mode, note: note || undefined },
+        { headers: authHeaders }
+      );
+      toast.success(r.data.message || 'Payment mode updated');
+      onSaved();
+    } catch (e) {
+      toast.error(extractErrorMessage(e, 'Failed to change payment mode'));
+    } finally { setSaving(false); }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4" onClick={onClose}>
+      <form
+        className="bg-card border border-border rounded-2xl w-full max-w-md"
+        onClick={(e) => e.stopPropagation()}
+        onSubmit={submit}
+      >
+        <header className="px-5 py-3 border-b border-border flex items-center justify-between">
+          <div>
+            <div className="text-base font-bold">Change payment mode</div>
+            <div className="text-[11px] text-muted-foreground">Order #{order.id.slice(0, 8)}</div>
+          </div>
+          <button type="button" onClick={onClose} className="p-1.5 rounded hover:bg-muted" data-testid="order-payment-mode-close-btn"><X className="w-4 h-4" /></button>
+        </header>
+        <div className="p-5 space-y-3">
+          <div>
+            <Label className="text-[10px] uppercase tracking-widest text-muted-foreground">New payment mode</Label>
+            <select
+              value={mode}
+              onChange={(e) => setMode(e.target.value)}
+              data-testid="order-payment-mode-select"
+              className="mt-1 w-full bg-background border border-border rounded px-3 py-2 text-sm"
+            >
+              <option value="cod">COD (Cash on Delivery)</option>
+              <option value="upi">UPI</option>
+              <option value="cash">Cash</option>
+              <option value="card">Card</option>
+              <option value="cashfree">Cashfree (online)</option>
+              <option value="bank_transfer">Bank Transfer</option>
+              <option value="other">Other</option>
+            </select>
+          </div>
+          <div>
+            <Label className="text-[10px] uppercase tracking-widest text-muted-foreground">Reason / note (optional)</Label>
+            <Textarea
+              value={note}
+              onChange={(e) => setNote(e.target.value)}
+              placeholder="e.g. Paid via UPI at delivery instead of COD"
+              data-testid="order-payment-mode-note"
+              className="mt-1"
+            />
+          </div>
+          <div className="text-[11px] bg-amber-500/10 border border-amber-500/30 text-amber-700 dark:text-amber-400 rounded p-2">
+            This will also update the matching entry in your Financials ledger, with a change-log entry retained for audit.
+          </div>
+        </div>
+        <footer className="px-5 py-3 border-t border-border flex justify-end gap-2">
+          <Button type="button" variant="outline" onClick={onClose}>Cancel</Button>
+          <Button type="submit" disabled={saving} data-testid="order-payment-mode-submit-btn">
+            {saving ? <><Loader2 className="w-4 h-4 mr-1 animate-spin" /> Saving…</> : 'Confirm change'}
+          </Button>
+        </footer>
+      </form>
     </div>
   );
 }

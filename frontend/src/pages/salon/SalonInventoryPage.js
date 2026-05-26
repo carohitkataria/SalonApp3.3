@@ -117,8 +117,11 @@ export default function SalonInventoryPage() {
           </Button>
           <div className="flex-1">
             <div className="text-sm font-bold">Inventory</div>
-            <div className="text-[10px] uppercase tracking-widest text-muted-foreground/80">Phase 14 · stock & movements</div>
+            <div className="text-[10px] uppercase tracking-widest text-muted-foreground/80">Keep & manage stock · Phase 14</div>
           </div>
+          <Button size="sm" variant="outline" onClick={() => navigate('/salon/orders')} data-testid="inv-view-orders-btn">
+            <Truck className="w-4 h-4 mr-1" /> Orders
+          </Button>
           <Button size="sm" onClick={() => setShowCreate(true)} data-testid="inv-create-btn">
             <Plus className="w-4 h-4 mr-1" /> Add item
           </Button>

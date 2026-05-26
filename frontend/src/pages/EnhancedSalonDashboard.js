@@ -38,7 +38,7 @@ import {
   Clock, User, Phone, Bell, MapPin, Settings, CheckCircle, Calendar,
   Users, ArrowLeft, FileText, Download, Plus, X, TrendingUp, Menu,
   Shield, DollarSign, Database, Pin, PinOff, Edit, CreditCard, Banknote, Smartphone,
-  LayoutDashboard, Activity, Zap, Wallet, Search, Building2, ShoppingBag
+  LayoutDashboard, Activity, Zap, Wallet, Search, Building2, ShoppingBag, Boxes
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
@@ -987,7 +987,7 @@ export default function EnhancedSalonDashboard() {
     { id: 'customer-master', label: 'Customer Master', icon: Database, show: true },
     { id: 'analytics', label: 'Analytics', icon: TrendingUp, show: checkIsAdmin() || checkIsBranchManager() || checkHasPermission('can_access_analytics') },
     { id: 'marketplace', label: 'Marketplace', icon: ShoppingBag, show: checkIsAdmin(), route: '/salon/marketplace' },
-    { id: 'store-orders', label: 'My Store Orders', icon: ShoppingBag, show: checkIsAdmin() || checkIsBranchManager(), route: '/salon/orders' },
+    { id: 'inventory', label: 'Inventory', icon: Boxes, show: checkIsAdmin() || checkIsBranchManager(), route: '/salon/inventory' },
     { id: 'gallery', label: 'Gallery', icon: FileText, show: true },
     { id: 'salon', label: 'Salon Settings', icon: Settings, show: checkIsAdmin() || checkHasPermission('can_edit_salon') }
   ].filter(item => item.show);

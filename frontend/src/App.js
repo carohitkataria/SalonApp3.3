@@ -47,11 +47,12 @@ import SupplierProductsPage from '@/pages/supplier/SupplierProductsPage';
 import SupplierOrdersPage from '@/pages/supplier/SupplierOrdersPage';
 import SupplierOrderDetailPage from '@/pages/supplier/SupplierOrderDetailPage';
 
-// Salon-side Marketplace (Phase 10–12)
+// Salon-side Marketplace (Phase 10–12) + Inventory (Phase 14)
 import MarketplacePage from '@/pages/salon/MarketplacePage';
 import CheckoutPage from '@/pages/salon/CheckoutPage';
 import SalonOrdersPage from '@/pages/salon/SalonOrdersPage';
 import SalonOrderDetailPage from '@/pages/salon/SalonOrderDetailPage';
+import SalonInventoryPage from '@/pages/salon/SalonInventoryPage';
 
 import '@/App.css';
 
@@ -100,6 +101,7 @@ function App() {
                   <Route path="/salon/checkout" element={<CheckoutPage />} />
                   <Route path="/salon/orders" element={<SalonOrdersPage />} />
                   <Route path="/salon/orders/:orderId" element={<SalonOrderDetailPage />} />
+                  <Route path="/salon/inventory" element={<SalonInventoryPage />} />
 
                   {/* Subscription / Payment */}
                   <Route path="/subscription/callback" element={<PaymentCallbackPage />} />

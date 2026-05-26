@@ -854,7 +854,9 @@ async def change_salon_order_payment_mode(
     fin_updated = 0
     try:
         result = await _db.financial_transactions.update_many(
-            {"reference_type": "salon_order", "reference_id": order_id, "salon_id": salon_id},
+            {"reference_type": "salon_order", "reference_id": order_id,
+             "salon_id": salon_id, "type": "outflow",
+             "category": "inventory_purchase"},
             {"$set": {"payment_mode": new_mode, "updated_at": _now_iso()},
              "$push": {"payment_mode_history": audit_entry}},
         )
