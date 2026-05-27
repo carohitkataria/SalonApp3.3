@@ -241,6 +241,10 @@ function PaymentModeModal({ order, authHeaders, onClose, onSaved }) {
 
   const submit = async (e) => {
     e?.preventDefault();
+    if (mode === (order.payment_mode || 'cod')) {
+      toast.info('That is already the current payment mode. Pick a different one.');
+      return;
+    }
     setSaving(true);
     try {
       const r = await axios.patch(

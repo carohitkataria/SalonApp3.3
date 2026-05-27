@@ -1145,6 +1145,7 @@ export default function EnhancedSalonDashboard() {
                     return (
                       <button
                         key={item.id}
+                        data-testid={`nav-${item.id}`}
                         onClick={() => {
                           if (item.route) {
                             // External-route menu items (e.g. Marketplace) — navigate
