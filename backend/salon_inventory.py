@@ -178,6 +178,71 @@ class SellPayload(BaseModel):
         return v
 
 
+class RestockPayload(BaseModel):
+    """Phase 17 — manual stock-in for salon inventory items."""
+    qty: int = Field(..., ge=1)
+    cost_price: Optional[float] = Field(default=None, ge=0)
+    note: Optional[str] = Field(default=None, max_length=500)
+    payment_mode: Optional[str] = Field(default="cash")
+    record_finance: bool = Field(default=False)  # set True to log an inventory_purchase outflow
+
+
+# Module-level hook (injected by server.py) for cross-module notifications
+_fire_customer_restock_for_product = None
+_in_app_notifier = None
+
+
+def set_notification_hooks(*, fire_customer_restock=None, in_app_notifier=None):
+    """Wire Phase 16 notification hooks after both modules import."""
+    global _fire_customer_restock_for_product, _in_app_notifier
+    if fire_customer_restock is not None:
+        _fire_customer_restock_for_product = fire_customer_restock
+    if in_app_notifier is not None:
+        _in_app_notifier = in_app_notifier
+
+
+async def _maybe_low_stock_alert(item: dict) -> None:
+    """Phase 16 — send in-app alert when qty_total dips to/below threshold.
+
+    Idempotent per `low_stock_alert_sent` flag; reset when we restock above
+    threshold.
+    """
+    if _in_app_notifier is None:
+        return
+    threshold = int(item.get("low_stock_threshold") or 0)
+    qty = int(item.get("qty_total") or 0)
+    already_sent = bool(item.get("low_stock_alert_sent"))
+    if threshold > 0 and qty <= threshold and not already_sent:
+        try:
+            await _in_app_notifier(
+                user_type="salon",
+                user_id=item["salon_id"],
+                title="Low stock alert",
+                message=f"'{item.get('name')}' is low ({qty} {item.get('unit') or 'units'} left, threshold {threshold}).",
+                notification_type="inventory_low_stock",
+                setting_key="inventory_low_stock",
+                salon_id=item["salon_id"],
+                related_id=item["id"],
+            )
+        except Exception as e:
+            logger.error(f"[salon_inventory] low stock notify failed: {e}")
+        await _db.salon_inventory.update_one(
+            {"id": item["id"]},
+            {"$set": {"low_stock_alert_sent": True, "low_stock_alert_at": _now_iso()}},
+        )
+
+
+async def _maybe_clear_low_stock_flag(item: dict) -> None:
+    """If qty bounced back above threshold, clear the alert flag so the next dip re-fires."""
+    threshold = int(item.get("low_stock_threshold") or 0)
+    qty = int(item.get("qty_total") or 0)
+    if item.get("low_stock_alert_sent") and qty > threshold:
+        await _db.salon_inventory.update_one(
+            {"id": item["id"]},
+            {"$set": {"low_stock_alert_sent": False}, "$unset": {"low_stock_alert_at": ""}},
+        )
+
+
 # ===================== Helpers =====================
 
 def _strip(o: dict) -> dict:
@@ -584,6 +649,7 @@ async def consume(item_id: str, payload: ConsumePayload, user: dict = Depends(_s
         staff_id=payload.staff_id, note=payload.note,
         created_by=user.get("user_id") or "salon_user",
     )
+    await _maybe_low_stock_alert(updated)
     return _enrich(updated)
 
 
@@ -653,12 +719,91 @@ async def sell_pos(item_id: str, payload: SellPayload, user: dict = Depends(_sal
         staff_id=payload.staff_id, note=payload.note,
         created_by=user.get("user_id") or "salon_user",
     )
+    await _maybe_low_stock_alert(updated)
     return {
         "ok": True,
         "transaction_id": txn_id,
         "amount": total_amount,
         "item": _enrich(updated),
         "message": f"POS sale of ₹{total_amount:.2f} recorded",
+    }
+
+
+# ===================== Phase 17 — manual restock =====================
+
+
+@salon_inventory_router.post("/api/salon/inventory/{item_id}/restock")
+async def manual_restock(item_id: str, payload: RestockPayload, user: dict = Depends(_salon_auth)):
+    """Manual stock-in entry by salon admin.
+
+    Increases qty_total, logs a `purchase_in` movement, optionally creates an
+    inventory_purchase financial outflow, and fires any pending customer
+    notify-me requests for that item (Phase 16).
+    """
+    salon_id = user.get("salon_id") or user.get("sub")
+    item = await _get_item_or_404(item_id, salon_id)
+    was_zero = int(item.get("qty_total") or 0) == 0
+
+    updated = await _db.salon_inventory.find_one_and_update(
+        {"id": item_id, "salon_id": salon_id},
+        {"$inc": {"qty_total": payload.qty},
+         "$set": {"updated_at": _now_iso(),
+                  **({"cost_price": float(payload.cost_price)} if payload.cost_price is not None else {})}},
+        return_document=True,
+        projection={"_id": 0},
+    )
+    if not updated:
+        raise HTTPException(status_code=409, detail="Concurrent update; please retry")
+
+    await _log_movement(
+        item=updated, movement_type="purchase_in",
+        qty_delta=payload.qty,
+        qty_after=int(updated.get("qty_total") or 0),
+        reference_type="manual_purchase", reference_id=item_id,
+        note=payload.note,
+        created_by=user.get("user_id") or "salon_user",
+    )
+
+    # Optional finance posting
+    fin_id = None
+    if payload.record_finance:
+        unit_cost = float(payload.cost_price if payload.cost_price is not None else (updated.get("cost_price") or 0))
+        amount = round(unit_cost * payload.qty, 2)
+        if amount > 0:
+            fin_id = str(uuid.uuid4())
+            await _db.financial_transactions.insert_one({
+                "id": fin_id,
+                "salon_id": salon_id,
+                "branch_id": updated.get("branch_id"),
+                "type": "outflow",
+                "category": "inventory_purchase",
+                "amount": amount,
+                "payment_mode": payload.payment_mode or "cash",
+                "narration": f"Manual restock · {updated.get('name')} × {payload.qty}",
+                "reference_id": item_id,
+                "reference_type": "manual_restock",
+                "created_by": user.get("user_id") or "salon_user",
+                "date": _today_str(),
+                "created_at": _now_iso(),
+            })
+
+    # Clear low-stock flag if back above threshold.
+    await _maybe_clear_low_stock_flag(updated)
+
+    # Fire customer notify-me for restock if was zero before.
+    fired = 0
+    try:
+        if was_zero and _fire_customer_restock_for_product is not None:
+            fired = await _fire_customer_restock_for_product(salon_id, item_id)
+    except Exception as e:
+        logger.error(f"[salon_inventory] customer restock notify failed: {e}")
+
+    return {
+        "ok": True,
+        "added_qty": payload.qty,
+        "financial_transaction_id": fin_id,
+        "customer_notifications_sent": fired,
+        "item": _enrich(updated),
     }
 
 
@@ -767,6 +912,15 @@ async def auto_post_on_delivery(order: dict, *, db) -> dict:
             })
         except Exception as e:
             logger.error(f"[auto_post_on_delivery] movement insert failed: {e}")
+
+        # Phase 16 — fire customer restock notify-me requests + clear low-stock flag.
+        try:
+            await _maybe_clear_low_stock_flag(updated)
+            if _fire_customer_restock_for_product is not None:
+                await _fire_customer_restock_for_product(salon_id, updated["id"])
+        except Exception as e:
+            logger.error(f"[auto_post_on_delivery] post-restock notify failed: {e}")
+
         summary["inventory_items_touched"] += 1
 
     # 2) Finance posting.

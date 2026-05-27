@@ -25,6 +25,7 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { toast } from 'sonner';
 import { extractErrorMessage } from '@/utils/apiError';
+import SalonHamburgerMenu from '@/components/salon/SalonHamburgerMenu';
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
 const API = `${BACKEND_URL}/api`;
@@ -112,6 +113,7 @@ export default function SalonInventoryPage() {
     <div className="min-h-screen bg-background">
       <header className="sticky top-0 z-30 bg-background/80 backdrop-blur border-b border-border">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 h-14 flex items-center gap-3">
+          <SalonHamburgerMenu activeId="inventory" />
           <Button variant="ghost" size="sm" onClick={() => navigate('/admin/dashboard')} data-testid="inv-back-btn">
             <ArrowLeft className="w-4 h-4 mr-1" /> Back
           </Button>

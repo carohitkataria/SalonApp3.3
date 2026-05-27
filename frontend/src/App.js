@@ -53,6 +53,7 @@ import CheckoutPage from '@/pages/salon/CheckoutPage';
 import SalonOrdersPage from '@/pages/salon/SalonOrdersPage';
 import SalonOrderDetailPage from '@/pages/salon/SalonOrderDetailPage';
 import SalonInventoryPage from '@/pages/salon/SalonInventoryPage';
+import SalonCustomerOrdersPage from '@/pages/salon/SalonCustomerOrdersPage';
 
 import '@/App.css';
 
@@ -102,6 +103,7 @@ function App() {
                   <Route path="/salon/orders" element={<SalonOrdersPage />} />
                   <Route path="/salon/orders/:orderId" element={<SalonOrderDetailPage />} />
                   <Route path="/salon/inventory" element={<SalonInventoryPage />} />
+                  <Route path="/salon/customer-orders" element={<SalonCustomerOrdersPage />} />
 
                   {/* Subscription / Payment */}
                   <Route path="/subscription/callback" element={<PaymentCallbackPage />} />

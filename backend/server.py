@@ -12387,6 +12387,7 @@ fastapi_app.include_router(supplier_auth_mod.supplier_auth_router)
 
 # Phase 9 (Part B) — Supplier products / dashboard / samples router
 supplier_products_mod.init_supplier_products_router(db=db)
+supplier_products_mod.set_notification_hook(in_app_notifier=create_in_app_notification)
 fastapi_app.include_router(supplier_products_mod.supplier_products_router)
 
 # Phase 10 — Salon-facing Marketplace router (browse supplier catalogs + inquiries)
@@ -12417,6 +12418,23 @@ fastapi_app.include_router(salon_inventory_mod.salon_inventory_router)
 # Phase 13 — wire auto-post hook into salon_store.supplier_deliver_order
 salon_store_mod.set_auto_post_hook(
     lambda order: salon_inventory_mod.auto_post_on_delivery(order, db=db)
+)
+
+# Phase 15/16/17 — Customer in-salon shop (products + memberships unified)
+import customer_shop as customer_shop_mod  # noqa: E402
+customer_shop_mod.init_customer_shop_router(
+    db=db,
+    get_current_salon_user=get_current_salon_user,
+    create_in_app_notification=create_in_app_notification,
+    resolve_branch_id=resolve_branch_id,
+    send_low_stock_alert=None,
+)
+fastapi_app.include_router(customer_shop_mod.customer_shop_router)
+
+# Phase 16 — wire cross-module notification hooks now that both are loaded.
+salon_inventory_mod.set_notification_hooks(
+    fire_customer_restock=customer_shop_mod.fire_restock_notifications_for_product,
+    in_app_notifier=create_in_app_notification,
 )
 
 # Health check endpoint for Kubernetes liveness/readiness probes

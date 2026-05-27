@@ -35,10 +35,17 @@ logger = logging.getLogger(__name__)
 
 # Injected by init_supplier_products_router
 _db = None
+_in_app_notifier = None
 
 supplier_products_router = APIRouter(prefix="/api/supplier", tags=["supplier-products"])
 
 ALLOWED_UNITS = {"piece", "ml", "g", "kg", "litre", "pack"}
+
+
+def set_notification_hook(in_app_notifier=None):
+    """Wire Phase 16 notify-me hook after server load."""
+    global _in_app_notifier
+    _in_app_notifier = in_app_notifier
 
 
 # ---------- Models ----------
@@ -321,13 +328,48 @@ async def restock_product(product_id: str, payload: RestockRequest, supplier: di
     )
     if not existing:
         raise HTTPException(status_code=404, detail="Product not found")
+    was_zero = int(existing.get("inventory_available") or 0) == 0
     new_avail = int(existing.get("inventory_available") or 0) + payload.qty
     await _db.supplier_products.update_one(
         {"id": product_id},
         {"$set": {"inventory_available": new_avail, "updated_at": _now_iso()}},
     )
     updated = await _db.supplier_products.find_one({"id": product_id}, {"_id": 0})
-    return {"ok": True, "added_qty": payload.qty, "product": _enrich(updated)}
+
+    # Phase 16 — fire any pending salon notify-me requests when product is back in stock.
+    fired = 0
+    if was_zero and _in_app_notifier is not None:
+        try:
+            cursor = _db.stock_notify_requests.find({
+                "product_id": product_id,
+                "status": "pending",
+            }, {"_id": 0})
+            ids_to_close: list = []
+            async for req in cursor:
+                try:
+                    await _in_app_notifier(
+                        user_type="salon",
+                        user_id=req["salon_id"],
+                        title="Back in stock",
+                        message=f"'{req.get('product_name') or existing.get('name')}' is back in stock and available to order.",
+                        notification_type="stock_back",
+                        setting_key="stock_back",
+                        salon_id=req["salon_id"],
+                        related_id=product_id,
+                    )
+                    ids_to_close.append(req["id"])
+                    fired += 1
+                except Exception as e:
+                    logger.error(f"[supplier_products] notify salon failed: {e}")
+            if ids_to_close:
+                await _db.stock_notify_requests.update_many(
+                    {"id": {"$in": ids_to_close}},
+                    {"$set": {"status": "notified", "notified_at": _now_iso()}},
+                )
+        except Exception as e:
+            logger.error(f"[supplier_products] notify-me sweep failed: {e}")
+
+    return {"ok": True, "added_qty": payload.qty, "salon_notifications_sent": fired, "product": _enrich(updated)}
 
 
 # ---------- Product Samples (read-only catalogue) ----------
