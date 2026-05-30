@@ -54,6 +54,7 @@ import SalonOrdersPage from '@/pages/salon/SalonOrdersPage';
 import SalonOrderDetailPage from '@/pages/salon/SalonOrderDetailPage';
 import SalonInventoryPage from '@/pages/salon/SalonInventoryPage';
 import SalonCustomerOrdersPage from '@/pages/salon/SalonCustomerOrdersPage';
+import StaffSettingsPage from '@/pages/salon/StaffSettingsPage';
 
 import '@/App.css';
 
@@ -104,6 +105,7 @@ function App() {
                   <Route path="/salon/orders/:orderId" element={<SalonOrderDetailPage />} />
                   <Route path="/salon/inventory" element={<SalonInventoryPage />} />
                   <Route path="/salon/customer-orders" element={<SalonCustomerOrdersPage />} />
+                  <Route path="/salon/staff/settings" element={<StaffSettingsPage />} />
 
                   {/* Subscription / Payment */}
                   <Route path="/subscription/callback" element={<PaymentCallbackPage />} />

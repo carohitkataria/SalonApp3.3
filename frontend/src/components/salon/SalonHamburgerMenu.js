@@ -31,6 +31,7 @@ const ITEMS = [
   { id: 'marketplace',     label: 'Marketplace',        icon: ShoppingBag,    route: '/salon/marketplace' },
   { id: 'inventory',       label: 'Inventory',          icon: Boxes,          route: '/salon/inventory' },
   { id: 'customer-orders', label: 'Customer Orders',    icon: Bell,           route: '/salon/customer-orders' },
+  { id: 'staff-settings',  label: 'Staff Settings',    icon: Settings,       route: '/salon/staff/settings' },
   { id: 'gallery',         label: 'Gallery',            icon: FileText,       route: '/admin/dashboard?tab=gallery' },
   { id: 'salon',           label: 'Salon Settings',     icon: Settings,       route: '/admin/dashboard?tab=salon' },
 ];

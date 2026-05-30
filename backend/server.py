@@ -12437,6 +12437,14 @@ salon_inventory_mod.set_notification_hooks(
     in_app_notifier=create_in_app_notification,
 )
 
+# Module 2 — Leave Tracker (leave types config + balance ledger + records)
+import leave_tracker as leave_tracker_mod  # noqa: E402
+leave_tracker_mod.init_leave_tracker_router(
+    db=db,
+    get_current_salon_user=get_current_salon_user,
+)
+fastapi_app.include_router(leave_tracker_mod.leave_tracker_router)
+
 # Health check endpoint for Kubernetes liveness/readiness probes
 @fastapi_app.get("/health")
 async def health_check():
@@ -12454,6 +12462,37 @@ scheduler.add_job(notify_expiring_memberships, 'cron', hour=9, minute=0)
 # End-of-day cleanup at 00:00 IST = 18:30 UTC. Cancels all active (non-final) bookings
 # for the day so they don't carry forward to the next day.
 scheduler.add_job(cancel_active_bookings_end_of_day, 'cron', hour=18, minute=30)
+
+# Module 2 — Leave Tracker scheduled jobs.
+# Monthly accrual on the 1st of every month at 00:30 IST = 19:00 UTC on day-end-of-prev-month.
+# We schedule on the 1st 00:30 IST → UTC = 1st 19:00 UTC of previous day; APScheduler doesn't
+# directly support local-tz cron without pytz, so we keep IST math in the job (`run_monthly_accrual`
+# is idempotent — uses `last_accrual_date`). Schedule at 19:00 UTC daily; it will only do work on
+# the first IST day.
+async def _leave_accrual_job_wrapper():
+    today_ist = (datetime.now(timezone.utc) + timedelta(hours=5, minutes=30)).date()
+    if today_ist.day != 1:
+        return
+    try:
+        await leave_tracker_mod.run_monthly_accrual(db=db)
+    except Exception as e:
+        logger.error(f"[scheduler] monthly accrual failed: {e}")
+
+
+async def _leave_year_end_wrapper():
+    today_ist = (datetime.now(timezone.utc) + timedelta(hours=5, minutes=30)).date()
+    if not (today_ist.month == 4 and today_ist.day == 1):
+        return
+    try:
+        await leave_tracker_mod.run_year_end_close(db=db)
+    except Exception as e:
+        logger.error(f"[scheduler] year-end close failed: {e}")
+
+
+# 00:30 IST == 19:00 UTC previous day.  Run daily — job no-ops outside the trigger date.
+scheduler.add_job(_leave_accrual_job_wrapper, 'cron', hour=19, minute=0)
+# 01:00 IST == 19:30 UTC previous day.
+scheduler.add_job(_leave_year_end_wrapper, 'cron', hour=19, minute=30)
 
 @fastapi_app.on_event("startup")
 async def startup_event():

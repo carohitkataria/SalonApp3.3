@@ -1723,6 +1723,15 @@ export default function EnhancedSalonDashboard() {
 
         {activeTab === 'staff' && salonId && (
           <div className="space-y-6">
+            <div className="flex items-center justify-end">
+              <button
+                onClick={() => navigate('/salon/staff/settings')}
+                data-testid="staff-settings-link"
+                className="inline-flex items-center gap-2 px-3 py-1.5 text-sm rounded-md border border-border hover:bg-muted transition-colors"
+              >
+                <Settings className="w-4 h-4" /> Staff Settings
+              </button>
+            </div>
             <BarberManagement salonId={salonId} getAuthHeaders={getAuthHeaders} />
             <EmployeeRewardPlan
               salonId={salonId}
@@ -1957,7 +1966,7 @@ export default function EnhancedSalonDashboard() {
               <SubscriptionBadge salonId={salonId} />
             )}
             <Tabs defaultValue="profile" className="w-full">
-              <TabsList className="w-full grid grid-cols-2 sm:grid-cols-4 h-auto bg-muted/40 p-1 rounded-xl">
+              <TabsList className="w-full grid grid-cols-2 sm:grid-cols-5 h-auto bg-muted/40 p-1 rounded-xl">
                 <TabsTrigger value="profile" className="flex items-center gap-2 data-[state=active]:bg-gold data-[state=active]:text-black py-2.5">
                   <User className="w-4 h-4" />
                   <span className="text-xs sm:text-sm font-semibold">Profile</span>
@@ -1975,6 +1984,10 @@ export default function EnhancedSalonDashboard() {
                 <TabsTrigger value="notifications-cfg" className="flex items-center gap-2 data-[state=active]:bg-gold data-[state=active]:text-black py-2.5">
                   <Bell className="w-4 h-4" />
                   <span className="text-xs sm:text-sm font-semibold">Notification</span>
+                </TabsTrigger>
+                <TabsTrigger value="staff-settings-link" className="flex items-center gap-2 data-[state=active]:bg-gold data-[state=active]:text-black py-2.5" data-testid="settings-tab-staff-settings">
+                  <Users className="w-4 h-4" />
+                  <span className="text-xs sm:text-sm font-semibold">Staff</span>
                 </TabsTrigger>
               </TabsList>
 
@@ -2002,6 +2015,18 @@ export default function EnhancedSalonDashboard() {
                   salonId={salonId}
                   getAuthHeaders={getAuthHeaders}
                 />
+              </TabsContent>
+
+              <TabsContent value="staff-settings-link" className="mt-4">
+                <div className="bg-card border border-border rounded-lg p-6 max-w-2xl">
+                  <h3 className="text-lg font-semibold mb-1">Staff Settings</h3>
+                  <p className="text-sm text-muted-foreground mb-4">
+                    Incentives, leave configuration, and attendance rules.
+                  </p>
+                  <Button onClick={() => navigate('/salon/staff/settings')} data-testid="settings-link-to-staff">
+                    Open Staff Settings →
+                  </Button>
+                </div>
               </TabsContent>
             </Tabs>
           </div>

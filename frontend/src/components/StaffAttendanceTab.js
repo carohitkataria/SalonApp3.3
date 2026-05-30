@@ -10,6 +10,7 @@ import {
   Loader2, AlertCircle, CheckCircle, Banknote, CreditCard, Building, Plane
 } from 'lucide-react';
 import { motion } from 'framer-motion';
+import LeaveBalanceCard from '@/components/leave/LeaveBalanceCard';
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
 const API = `${BACKEND_URL}/api`;
@@ -300,6 +301,13 @@ export default function StaffAttendanceTab({ salonId, barberId, barberName, comp
       animate={{ opacity: 1, y: 0 }}
       className="space-y-6"
     >
+      {/* Module 2 — Leave balance card */}
+      <LeaveBalanceCard
+        salonId={salonId}
+        barberId={barberId}
+        barberName={barberName}
+      />
+
       {/* Attendance Calendar */}
       <div className="bg-card border border-border rounded-lg p-6">
         <div className="flex items-center justify-between mb-6 flex-wrap gap-2">
