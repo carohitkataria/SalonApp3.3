@@ -24,6 +24,7 @@ import Analytics from '@/components/Analytics';
 import EmployeeRewardPlan from '@/components/EmployeeRewardPlan';
 import SubscriptionPaywallModal from '@/components/SubscriptionPaywallModal';
 import SubscriptionBadge from '@/components/SubscriptionBadge';
+import StaffSettingsContent from '@/components/staff/StaffSettingsContent';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { SubscriptionProvider } from '@/contexts/SubscriptionContext';
 import { getSession, clearSession } from '@/utils/sessionManager';
@@ -1727,9 +1728,10 @@ export default function EnhancedSalonDashboard() {
               <button
                 onClick={() => navigate('/salon/staff/settings')}
                 data-testid="staff-settings-link"
-                className="inline-flex items-center gap-2 px-3 py-1.5 text-sm rounded-md border border-border hover:bg-muted transition-colors"
+                className="inline-flex items-center gap-1.5 text-sm font-medium text-gold hover:text-gold/80 underline underline-offset-4 decoration-gold/40 hover:decoration-gold transition-colors"
               >
-                <Settings className="w-4 h-4" /> Staff Settings
+                <Settings className="w-4 h-4" /> Open Staff Settings
+                <ChevronRight className="w-3.5 h-3.5" />
               </button>
             </div>
             <BarberManagement salonId={salonId} getAuthHeaders={getAuthHeaders} />
@@ -2018,15 +2020,13 @@ export default function EnhancedSalonDashboard() {
               </TabsContent>
 
               <TabsContent value="staff-settings-link" className="mt-4">
-                <div className="bg-card border border-border rounded-lg p-6 max-w-2xl">
-                  <h3 className="text-lg font-semibold mb-1">Staff Settings</h3>
-                  <p className="text-sm text-muted-foreground mb-4">
-                    Incentives, leave configuration, and attendance rules.
-                  </p>
-                  <Button onClick={() => navigate('/salon/staff/settings')} data-testid="settings-link-to-staff">
-                    Open Staff Settings →
-                  </Button>
-                </div>
+                <StaffSettingsContent
+                  salonId={salonId}
+                  getAuthHeaders={getAuthHeaders}
+                  isAdmin={checkIsAdmin()}
+                  useUrlTab={false}
+                  defaultTab="incentives"
+                />
               </TabsContent>
             </Tabs>
           </div>

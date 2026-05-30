@@ -24,6 +24,14 @@ A multi-tenant salon management SaaS (React + FastAPI + MongoDB). Most recent fe
 
 ## Implemented (CHANGELOG)
 
+### May 30, 2026 — Module 3: Staff Settings consolidated inline in Salon Settings ✅
+- ✅ **Reusable `StaffSettingsContent`** at `/app/frontend/src/components/staff/StaffSettingsContent.js` — renders the four sub-tabs (Incentive Rules, Leave Configuration, Attendance Rules, Holiday Calendar stub). Accepts `useUrlTab` prop so it can run with `?tab=…` URL sync (standalone page) or with local state (inline embed).
+- ✅ **`StaffSettingsPage`** refactored to a thin wrapper around `StaffSettingsContent`. `/salon/staff/settings` URL still works and now uses URL-synced sub-tabs.
+- ✅ **Salon Settings → Staff** tab in `EnhancedSalonDashboard.js` now renders `StaffSettingsContent` inline (no more "Open in another page" placeholder). Same UI is reachable both inline and via the direct URL.
+- ✅ **Hyperlink button at Staff section** (dashboard left-menu → Staff) — converted the bordered button to a gold text-hyperlink ("Open Staff Settings →") that navigates to `/salon/staff/settings`.
+- ✅ Leave-types defaults (CL/SL/PL/UL) verified end-to-end via Playwright login → Settings → Staff → Leave Configuration.
+
+
 ### May 2026 — Phase 1: Luxury Redesign (Customer-facing) ✅
 - ✅ **Token foundations rewritten** in `frontend/src/index.css` — both light (cream/ivory) and dark (warm charcoal) modes, with brass/champagne primary, bronze accent, sage success, espresso text. All shadcn semantic tokens remapped. New utilities: `.eyebrow`, `.eyebrow-brass`, `.serif-display`, `.serif-italic`, `.lux-card`, `.brass-glow-pulse`, `.brass-text`, `.hero-wash`, `.glass-warm`, `.bg-grain`, `.pill-open/closed/amber/brass/bronze`.
 - ✅ **Tailwind config extended** with `brass`, `champagne`, `bronze`, `sage`, `ivory`, `cream`, `espresso`, `taupe` color tokens. `gold` aliased to brass for back-compat (every existing `text-gold`, `bg-gold` instance now renders brass automatically across all 60+ files without per-file edits).
