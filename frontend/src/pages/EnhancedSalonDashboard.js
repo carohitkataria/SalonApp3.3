@@ -1387,14 +1387,22 @@ export default function EnhancedSalonDashboard() {
                   { id: 'staff', label: 'Staff', icon: Users, color: 'bg-orange-500/10 text-orange-500', desc: 'Manage barbers', show: checkIsAdmin() },
                   { id: 'financials', label: 'Financials', icon: DollarSign, color: 'bg-gold/10 text-gold', desc: 'Cash flow & reports', show: checkIsAdmin() || checkHasPermission('can_access_financials') },
                   { id: 'analytics', label: 'Analytics', icon: TrendingUp, color: 'bg-cyan-500/10 text-cyan-500', desc: 'Performance stats', show: checkIsAdmin() || checkHasPermission('can_access_analytics') },
-                  { id: 'gallery', label: 'Gallery', icon: FileText, color: 'bg-pink-500/10 text-pink-500', desc: 'Salon portfolio', show: true },
+                  { id: 'inventory', label: 'Inventory', icon: Boxes, color: 'bg-pink-500/10 text-pink-500', desc: 'Stock & orders', route: '/salon/inventory', show: checkIsAdmin() || checkIsBranchManager() },
                   { id: 'salon', label: 'Settings', icon: Settings, color: 'bg-gray-500/10 text-gray-400', desc: 'Salon profile', show: checkIsAdmin() || checkHasPermission('can_edit_salon') },
                 ].filter(item => item.show).map(item => {
                   const Icon = item.icon;
                   return (
                     <button
                       key={item.id}
-                      onClick={() => { setActiveTab(item.id); if (!menuPinned) setMenuOpen(false); }}
+                      onClick={() => {
+                        if (item.route) {
+                          navigate(item.route);
+                        } else {
+                          setActiveTab(item.id);
+                          if (!menuPinned) setMenuOpen(false);
+                        }
+                      }}
+                      data-testid={`quick-action-${item.id}`}
                       className="p-4 bg-card border border-border rounded-xl hover:border-gold/40 transition-all text-left group"
                     >
                       <div className={`w-10 h-10 rounded-lg flex items-center justify-center mb-2 ${item.color}`}>
