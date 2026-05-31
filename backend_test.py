@@ -17,7 +17,7 @@ from dotenv import load_dotenv
 load_dotenv('/app/backend/.env')
 
 # Configuration
-BACKEND_URL = os.getenv('BACKEND_PUBLIC_URL', 'https://login-builder-10.preview.emergentagent.com')
+BACKEND_URL = os.getenv('BACKEND_PUBLIC_URL', 'https://geofence-attendance-5.preview.emergentagent.com')
 API_BASE = f"{BACKEND_URL}/api"
 MONGO_URL = os.getenv('MONGO_URL', 'mongodb://localhost:27017')
 DB_NAME = os.getenv('DB_NAME', 'salon_app')

@@ -10,7 +10,7 @@ import json
 from datetime import datetime, timedelta, timezone
 
 # Configuration
-BASE_URL = "https://login-builder-10.preview.emergentagent.com/api"
+BASE_URL = "https://geofence-attendance-5.preview.emergentagent.com/api"
 ADMIN_CREDENTIALS = {
     "identifier": "admin",
     "password": "salon123"
