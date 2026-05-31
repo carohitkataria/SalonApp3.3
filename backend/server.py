@@ -606,6 +606,11 @@ class SalonUserPermissions(BaseModel):
     can_access_analytics: bool = False
     can_access_financials: bool = False
     can_delete_salon: bool = False
+    # New section-visibility permissions
+    can_access_services: bool = False   # See Services & Offerings section
+    can_access_gallery: bool = False    # See Gallery section
+    can_access_staff: bool = False      # See Staff Management section (own profile by default)
+    can_view_all_staff: bool = False    # When can_access_staff, see ALL staff (not just own)
 
 class SalonUserCreate(BaseModel):
     salon_id: str
@@ -656,6 +661,7 @@ class SalonUserToken(BaseModel):
     role: str
     permissions: SalonUserPermissions
     assigned_branch_ids: List[str] = []
+    staff_id: Optional[str] = None  # Linked barber id (for self check-in)
 
 # ============ BRANCH MODELS (Multi-Branch / Multi-Location) ============
 
@@ -2742,7 +2748,11 @@ async def initialize_data():
                 "can_edit_salon": True,
                 "can_access_analytics": True,
                 "can_access_financials": True,
-                "can_delete_salon": True
+                "can_delete_salon": True,
+                "can_access_services": True,
+                "can_access_gallery": True,
+                "can_access_staff": True,
+                "can_view_all_staff": True
             },
             "created_at": datetime.now(timezone.utc).isoformat()
         }
@@ -5043,15 +5053,21 @@ async def salon_user_login(credentials: SalonUserLogin):
     permissions.setdefault("can_access_analytics", False)
     permissions.setdefault("can_edit_salon", False)
     permissions.setdefault("can_delete_salon", False)
+    permissions.setdefault("can_access_services", False)
+    permissions.setdefault("can_access_gallery", False)
+    permissions.setdefault("can_access_staff", False)
+    permissions.setdefault("can_view_all_staff", False)
 
     assigned_branch_ids = salon_user.get("assigned_branch_ids") or []
-    
+    staff_id = salon_user.get("staff_id")
+
     token = create_access_token({
         "sub": salon_user["id"],
         "role": f"salon_{salon_user['role']}",  # salon_admin / salon_staff / salon_branch_manager
         "salon_id": salon_user["salon_id"],
         "permissions": permissions,
         "assigned_branch_ids": assigned_branch_ids,
+        "staff_id": staff_id,
     })
     
     return SalonUserToken(
@@ -5061,6 +5077,7 @@ async def salon_user_login(credentials: SalonUserLogin):
         role=salon_user["role"],
         permissions=SalonUserPermissions(**permissions),
         assigned_branch_ids=assigned_branch_ids,
+        staff_id=staff_id,
     )
 
 @api_router.post("/salon/users", response_model=SalonUser)
@@ -5107,14 +5124,22 @@ async def create_salon_user(user_data: SalonUserCreate, current_user=Depends(get
             "can_edit_salon": False,
             "can_access_analytics": False,
             "can_access_financials": False,
-            "can_delete_salon": False
+            "can_delete_salon": False,
+            "can_access_services": False,
+            "can_access_gallery": False,
+            "can_access_staff": False,
+            "can_view_all_staff": False
         }
     else:
         permissions = user_data.permissions.dict() if user_data.permissions else {
             "can_edit_salon": False,
             "can_access_analytics": False,
             "can_access_financials": False,
-            "can_delete_salon": False
+            "can_delete_salon": False,
+            "can_access_services": False,
+            "can_access_gallery": False,
+            "can_access_staff": False,
+            "can_view_all_staff": False
         }
 
     # Validate role

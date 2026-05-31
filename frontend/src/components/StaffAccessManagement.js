@@ -35,7 +35,11 @@ export default function StaffAccessManagement() {
       can_edit_salon: false,
       can_access_analytics: false,
       can_access_financials: false,
-      can_delete_salon: false
+      can_delete_salon: false,
+      can_access_services: false,
+      can_access_gallery: false,
+      can_access_staff: false,
+      can_view_all_staff: false
     }
   });
   
@@ -90,13 +94,17 @@ export default function StaffAccessManagement() {
   };
 
   const handlePermissionChange = (permission, checked) => {
-    setFormData(prev => ({
-      ...prev,
-      permissions: {
+    setFormData(prev => {
+      const nextPerms = {
         ...prev.permissions,
         [permission]: checked
+      };
+      // If staff-management access is turned off, also clear "view all staff".
+      if (permission === 'can_access_staff' && !checked) {
+        nextPerms.can_view_all_staff = false;
       }
-    }));
+      return { ...prev, permissions: nextPerms };
+    });
   };
 
   const handleSubmit = async (e) => {
@@ -165,7 +173,11 @@ export default function StaffAccessManagement() {
         can_edit_salon: !!perms.can_edit_salon,
         can_access_analytics: !!perms.can_access_analytics,
         can_access_financials: !!perms.can_access_financials,
-        can_delete_salon: !!perms.can_delete_salon
+        can_delete_salon: !!perms.can_delete_salon,
+        can_access_services: !!perms.can_access_services,
+        can_access_gallery: !!perms.can_access_gallery,
+        can_access_staff: !!perms.can_access_staff,
+        can_view_all_staff: !!perms.can_view_all_staff
       }
     });
     setShowAddForm(true);
@@ -198,7 +210,11 @@ export default function StaffAccessManagement() {
         can_edit_salon: false,
         can_access_analytics: false,
         can_access_financials: false,
-        can_delete_salon: false
+        can_delete_salon: false,
+        can_access_services: false,
+        can_access_gallery: false,
+        can_access_staff: false,
+        can_view_all_staff: false
       }
     });
     setEditingUser(null);
@@ -453,12 +469,72 @@ export default function StaffAccessManagement() {
                       Can delete salon
                     </Label>
                   </div>
+
+                  {/* Section visibility */}
+                  <div className="pt-3 mt-1 border-t border-border">
+                    <p className="text-sm font-semibold mb-2">Section access</p>
+                  </div>
+
+                  <div className="flex items-center space-x-2">
+                    <Checkbox
+                      id="can_access_services"
+                      checked={formData.permissions.can_access_services}
+                      onCheckedChange={(checked) => handlePermissionChange('can_access_services', checked)}
+                      className="data-[state=checked]:bg-gold data-[state=checked]:border-gold"
+                    />
+                    <Label htmlFor="can_access_services" className="cursor-pointer">
+                      Can see Services &amp; Offerings section
+                    </Label>
+                  </div>
+
+                  <div className="flex items-center space-x-2">
+                    <Checkbox
+                      id="can_access_gallery"
+                      checked={formData.permissions.can_access_gallery}
+                      onCheckedChange={(checked) => handlePermissionChange('can_access_gallery', checked)}
+                      className="data-[state=checked]:bg-gold data-[state=checked]:border-gold"
+                    />
+                    <Label htmlFor="can_access_gallery" className="cursor-pointer">
+                      Can see Gallery section
+                    </Label>
+                  </div>
+
+                  <div className="flex items-center space-x-2">
+                    <Checkbox
+                      id="can_access_staff"
+                      checked={formData.permissions.can_access_staff}
+                      onCheckedChange={(checked) => handlePermissionChange('can_access_staff', checked)}
+                      className="data-[state=checked]:bg-gold data-[state=checked]:border-gold"
+                    />
+                    <Label htmlFor="can_access_staff" className="cursor-pointer">
+                      Can see Staff Management section
+                    </Label>
+                  </div>
+
+                  {/* Nested: only show "view all staff" when staff-management access is granted */}
+                  {formData.permissions.can_access_staff && (
+                    <div className="flex items-start space-x-2 ml-6 pl-3 border-l-2 border-gold/30">
+                      <Checkbox
+                        id="can_view_all_staff"
+                        checked={formData.permissions.can_view_all_staff}
+                        onCheckedChange={(checked) => handlePermissionChange('can_view_all_staff', checked)}
+                        className="mt-0.5 data-[state=checked]:bg-gold data-[state=checked]:border-gold"
+                      />
+                      <Label htmlFor="can_view_all_staff" className="cursor-pointer">
+                        Can see all staff details
+                        <span className="block text-xs text-muted-foreground font-normal">
+                          If unchecked, this user can only see their own profile.
+                        </span>
+                      </Label>
+                    </div>
+                  )}
                 </div>
                 <p className="text-xs text-muted-foreground mt-3">
-                  By default, staff can view/update tokens and handle walk-ins. 
-                  They cannot access Settings, Analytics, Financials, or Reports unless granted above.
-                  Services & Offerings is always visible — staff can view all services and choose
-                  which ones they personally provide (when linked to a staff member).
+                  By default, staff can view/update tokens and handle walk-ins.
+                  They cannot access Settings, Analytics, Financials, Reports, Services,
+                  Gallery, or Staff Management unless granted above.
+                  When "Staff Management" is granted without "view all staff", the user
+                  only sees their own linked profile.
                 </p>
               </div>
 
@@ -552,10 +628,24 @@ export default function StaffAccessManagement() {
                         {user.permissions?.can_delete_salon && (
                           <span className="text-xs px-2 py-1 bg-muted rounded">Delete Salon</span>
                         )}
+                        {user.permissions?.can_access_services && (
+                          <span className="text-xs px-2 py-1 bg-muted rounded">Services</span>
+                        )}
+                        {user.permissions?.can_access_gallery && (
+                          <span className="text-xs px-2 py-1 bg-muted rounded">Gallery</span>
+                        )}
+                        {user.permissions?.can_access_staff && (
+                          <span className="text-xs px-2 py-1 bg-muted rounded">
+                            Staff {user.permissions?.can_view_all_staff ? '(All)' : '(Own)'}
+                          </span>
+                        )}
                         {!user.permissions?.can_edit_salon &&
                          !user.permissions?.can_access_analytics &&
                          !user.permissions?.can_access_financials &&
-                         !user.permissions?.can_delete_salon && (
+                         !user.permissions?.can_delete_salon &&
+                         !user.permissions?.can_access_services &&
+                         !user.permissions?.can_access_gallery &&
+                         !user.permissions?.can_access_staff && (
                           <span className="text-xs text-muted-foreground">Default permissions only</span>
                         )}
                       </div>

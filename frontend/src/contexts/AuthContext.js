@@ -142,7 +142,8 @@ export const AuthProvider = ({ children }) => {
         userId: response.data.user_id,
         role: response.data.role,
         permissions: response.data.permissions,
-        assignedBranchIds: response.data.assigned_branch_ids || []
+        assignedBranchIds: response.data.assigned_branch_ids || [],
+        staffId: response.data.staff_id || null
       };
       
       setSalonUser(authData);

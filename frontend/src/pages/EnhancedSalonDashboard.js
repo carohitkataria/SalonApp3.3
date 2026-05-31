@@ -12,6 +12,7 @@ import { Input } from '@/components/ui/input';
 import { toast } from 'sonner';
 import ThemeToggle from '@/components/ThemeToggle';
 import BarberManagement from '@/components/BarberManagement';
+import StaffCheckInWidget from '@/components/StaffCheckInWidget';
 import BranchManagement from '@/components/BranchManagement';
 import BranchSelector from '@/components/BranchSelector';
 import CustomerMaster from '@/components/CustomerMaster';
@@ -90,7 +91,9 @@ export default function EnhancedSalonDashboard() {
     
     // Check restricted tabs
     const restrictedTabs = {
-      'staff': isAdmin || isBM,
+      'staff': isAdmin || isBM || hasPermission('can_access_staff'),
+      'services': isAdmin || isBM || hasPermission('can_access_services'),
+      'gallery': isAdmin || isBM || hasPermission('can_access_gallery'),
       'financials': isAdmin || isBM || hasPermission('can_access_financials'),
       'analytics': isAdmin || isBM || hasPermission('can_access_analytics'),
       'salon': isAdmin || hasPermission('can_edit_salon'),
@@ -136,7 +139,9 @@ export default function EnhancedSalonDashboard() {
     })();
 
     const restrictedTabs = {
-      'staff': isAdmin || isBM,
+      'staff': isAdmin || isBM || hasPermission('can_access_staff'),
+      'services': isAdmin || isBM || hasPermission('can_access_services'),
+      'gallery': isAdmin || isBM || hasPermission('can_access_gallery'),
       'financials': isAdmin || isBM || hasPermission('can_access_financials'),
       'analytics': isAdmin || isBM || hasPermission('can_access_analytics'),
       'salon': isAdmin || hasPermission('can_edit_salon'),
@@ -1138,14 +1143,14 @@ export default function EnhancedSalonDashboard() {
   const menuItems = [
     { id: 'home', label: 'Home', icon: LayoutDashboard, show: true },
     { id: 'queue', label: 'Token Queue', icon: Calendar, show: true },
-    { id: 'staff', label: 'Staff Management', icon: Users, show: checkIsAdmin() || checkIsBranchManager() },
-    { id: 'services', label: 'Services & Offerings', icon: Scissors, show: true },
+    { id: 'staff', label: 'Staff Management', icon: Users, show: checkIsAdmin() || checkIsBranchManager() || checkHasPermission('can_access_staff') },
+    { id: 'services', label: 'Services & Offerings', icon: Scissors, show: checkIsAdmin() || checkIsBranchManager() || checkHasPermission('can_access_services') },
     { id: 'financials', label: 'Financials', icon: DollarSign, show: checkIsAdmin() || checkIsBranchManager() || checkHasPermission('can_access_financials') },
     { id: 'customer-master', label: 'Customer Master', icon: Database, show: true },
     { id: 'analytics', label: 'Analytics', icon: TrendingUp, show: checkIsAdmin() || checkIsBranchManager() || checkHasPermission('can_access_analytics') },
     { id: 'marketplace', label: 'Marketplace', icon: ShoppingBag, show: checkIsAdmin(), route: '/salon/marketplace' },
     { id: 'inventory', label: 'Inventory', icon: Boxes, show: checkIsAdmin() || checkIsBranchManager() },
-    { id: 'gallery', label: 'Gallery', icon: FileText, show: true },
+    { id: 'gallery', label: 'Gallery', icon: FileText, show: checkIsAdmin() || checkIsBranchManager() || checkHasPermission('can_access_gallery') },
     { id: 'salon', label: 'Salon Settings', icon: Settings, show: checkIsAdmin() || checkHasPermission('can_edit_salon') }
   ].filter(item => item.show);
 
@@ -1408,6 +1413,26 @@ export default function EnhancedSalonDashboard() {
               </div>
             </div>
 
+            {/* Staff self check-in (only in geo_checkin mode + linked staff) */}
+            {(() => {
+              let su = salonUser;
+              if (!su?.staffId) {
+                try {
+                  const raw = localStorage.getItem('salon_user_auth');
+                  if (raw) su = JSON.parse(raw);
+                } catch (e) { /* noop */ }
+              }
+              const staffId = su?.staffId || su?.staff_id || null;
+              if (!staffId || !salonId) return null;
+              return (
+                <StaffCheckInWidget
+                  salonId={salonId}
+                  staffId={staffId}
+                  getAuthHeaders={getAuthHeaders}
+                />
+              );
+            })()}
+
             {/* Summary Cards */}
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
               <div 
@@ -1539,8 +1564,8 @@ export default function EnhancedSalonDashboard() {
                 {[
                   { id: 'queue', label: 'Token Queue', icon: Calendar, color: 'bg-blue-500/10 text-blue-500', desc: 'Manage live queue', show: true },
                   { id: 'customer-master', label: 'Customers', icon: Database, color: 'bg-purple-500/10 text-purple-500', desc: 'Customer records', show: true },
-                  { id: 'services', label: 'Services', icon: Scissors, color: 'bg-emerald-500/10 text-emerald-500', desc: 'Offerings & memberships', show: true },
-                  { id: 'staff', label: 'Staff', icon: Users, color: 'bg-orange-500/10 text-orange-500', desc: 'Manage barbers', show: checkIsAdmin() },
+                  { id: 'services', label: 'Services', icon: Scissors, color: 'bg-emerald-500/10 text-emerald-500', desc: 'Offerings & memberships', show: checkIsAdmin() || checkIsBranchManager() || checkHasPermission('can_access_services') },
+                  { id: 'staff', label: 'Staff', icon: Users, color: 'bg-orange-500/10 text-orange-500', desc: 'Manage barbers', show: checkIsAdmin() || checkIsBranchManager() || checkHasPermission('can_access_staff') },
                   { id: 'financials', label: 'Financials', icon: DollarSign, color: 'bg-gold/10 text-gold', desc: 'Cash flow & reports', show: checkIsAdmin() || checkHasPermission('can_access_financials') },
                   { id: 'analytics', label: 'Analytics', icon: TrendingUp, color: 'bg-cyan-500/10 text-cyan-500', desc: 'Performance stats', show: checkIsAdmin() || checkHasPermission('can_access_analytics') },
                   { id: 'inventory', label: 'Inventory', icon: Boxes, color: 'bg-pink-500/10 text-pink-500', desc: 'Stock & orders', show: checkIsAdmin() || checkIsBranchManager() },
@@ -1886,26 +1911,52 @@ export default function EnhancedSalonDashboard() {
           </div>
         )}
 
-        {activeTab === 'staff' && salonId && (
-          <div className="space-y-6">
-            <div className="flex items-center justify-end">
-              <button
-                onClick={() => navigate('/salon/staff/settings')}
-                data-testid="staff-settings-link"
-                className="inline-flex items-center gap-1.5 text-sm font-medium text-gold hover:text-gold/80 underline underline-offset-4 decoration-gold/40 hover:decoration-gold transition-colors"
-              >
-                <Settings className="w-4 h-4" /> Open Staff Settings
-                <ChevronRight className="w-3.5 h-3.5" />
-              </button>
+        {activeTab === 'staff' && salonId && (() => {
+          // Determine whether this user can see ALL staff or only their own profile.
+          let su = salonUser;
+          try {
+            const raw = localStorage.getItem('salon_user_auth');
+            if (raw) su = JSON.parse(raw);
+          } catch (e) { /* noop */ }
+          const elevated = checkIsAdmin() || checkIsBranchManager() || checkHasPermission('can_view_all_staff');
+          const ownStaffId = su?.staffId || su?.staff_id || null;
+          const restrictedToOwn = !elevated; // has can_access_staff but not view-all
+
+          return (
+            <div className="space-y-6">
+              {!restrictedToOwn && (
+                <div className="flex items-center justify-end">
+                  <button
+                    onClick={() => navigate('/salon/staff/settings')}
+                    data-testid="staff-settings-link"
+                    className="inline-flex items-center gap-1.5 text-sm font-medium text-gold hover:text-gold/80 underline underline-offset-4 decoration-gold/40 hover:decoration-gold transition-colors"
+                  >
+                    <Settings className="w-4 h-4" /> Open Staff Settings
+                    <ChevronRight className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              )}
+              {restrictedToOwn && !ownStaffId ? (
+                <div className="bg-card border border-border rounded-lg p-8 text-center text-muted-foreground">
+                  Your account is not linked to a staff profile yet. Please ask your admin to link it.
+                </div>
+              ) : (
+                <BarberManagement
+                  salonId={salonId}
+                  getAuthHeaders={getAuthHeaders}
+                  restrictToBarberId={restrictedToOwn ? ownStaffId : null}
+                />
+              )}
+              {!restrictedToOwn && (
+                <EmployeeRewardPlan
+                  salonId={salonId}
+                  getAuthHeaders={getAuthHeaders}
+                  isAdmin={checkIsAdmin()}
+                />
+              )}
             </div>
-            <BarberManagement salonId={salonId} getAuthHeaders={getAuthHeaders} />
-            <EmployeeRewardPlan
-              salonId={salonId}
-              getAuthHeaders={getAuthHeaders}
-              isAdmin={checkIsAdmin()}
-            />
-          </div>
-        )}
+          );
+        })()}
 
         {activeTab === 'customer-master' && (
           <CustomerMaster salonId={salonId} getAuthHeaders={getAuthHeaders} />

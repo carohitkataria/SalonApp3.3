@@ -39,7 +39,7 @@ const SPECIALIZATION_OPTIONS = [
   { value: 'custom', label: 'Custom' }
 ];
 
-export default function BarberManagement({ salonId, getAuthHeaders }) {
+export default function BarberManagement({ salonId, getAuthHeaders, restrictToBarberId = null }) {
   const navigate = useNavigate();
   const { isAdmin, isBranchManager, getSalonUserHeaders } = useAuth();
   const { branches, refreshBranches } = useBranch();
@@ -61,7 +61,6 @@ export default function BarberManagement({ salonId, getAuthHeaders }) {
   };
   const activeBarbers = barbers.filter((b) => !isInactive(b));
   const inactiveBarbers = barbers.filter(isInactive);
-
   // Staff transfer dialog state
   const [transferStaff, setTransferStaff] = useState(null);
   const [transferToBranch, setTransferToBranch] = useState('');
@@ -143,7 +142,8 @@ export default function BarberManagement({ salonId, getAuthHeaders }) {
   const fetchBarbers = async () => {
     try {
       const response = await axios.get(`${API}/salons/${salonId}/barbers`);
-      setBarbers(response.data);
+      const list = Array.isArray(response.data) ? response.data : [];
+      setBarbers(restrictToBarberId ? list.filter((b) => b.id === restrictToBarberId) : list);
     } catch (error) {
       console.error('Error fetching barbers:', error);
       toast.error('Failed to load barbers');
@@ -281,7 +281,7 @@ export default function BarberManagement({ salonId, getAuthHeaders }) {
             }
             setShowAddForm(!showAddForm);
           }}
-          className="bg-gold text-black hover:bg-gold/90"
+          className={`bg-gold text-black hover:bg-gold/90 ${restrictToBarberId ? 'hidden' : ''}`}
           data-testid="add-barber-btn"
         >
           <Plus className="w-4 h-4 mr-2" />
