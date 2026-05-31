@@ -2,7 +2,7 @@
 import requests
 from datetime import datetime, timedelta, timezone
 
-BASE_URL = "https://leave-tracker-test.preview.emergentagent.com/api"
+BASE_URL = "https://services-menu-qr.preview.emergentagent.com/api"
 
 # Get IST today
 ist = timezone(timedelta(hours=5, minutes=30))

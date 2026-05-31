@@ -34,7 +34,7 @@
     "/app/backend/tests/test_module4_crossmod_gaps.py (new, +4 tests)"
   ],
   "success_rate": {"backend": "100% (50/50 pytest)", "frontend": "100% (4/4 critical flows: attendance mode selector + geo panel + save toast; analytics staff-attendance sub-tab; salary card test-ids present; calendar duration cell conditionally renders correctly)"},
-  "test_credentials": "salon admin via POST /api/salon/users/login identifier='+917503070727' password='salon123'; salon_id=a6f10c9e-f0e0-4128-8246-00282188c70b; barbers Imran (53bce57f-d480-4349-af69-b6656d39fe01) and Abdul",
+  "test_credentials": "salon admin via POST /api/salon/users/login identifier='+917503070727' password='salon123'; salon_id=services-menu-qr; barbers Imran (53bce57f-d480-4349-af69-b6656d39fe01) and Abdul",
   "seed_data_creation": "Created+deleted 1 temp leave-type 'SNAP*' for snapshot test; cleaned up after. Also cleaned 7 stale 'SNAP*' types left by earlier failed iterations during my development of the snapshot test — salon is back to clean state with only original 10 types.",
   "retest_needed": false,
   "main_agent_can_self_test": true,
