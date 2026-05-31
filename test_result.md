@@ -3454,11 +3454,11 @@ test_plan:
 backend:
   - task: "Module 2 — Leave Types Config CRUD"
     implemented: true
-    working: "NA"
+    working: true
     file: "/app/backend/leave_tracker.py"
     stuck_count: 0
     priority: "high"
-    needs_retesting: true
+    needs_retesting: false
     status_history:
         - working: "NA"
           agent: "main"
@@ -3479,111 +3479,135 @@ backend:
 
             Default seed: CL (acc 1, max 30, cf 10), SL (acc 1, max 12, lapse 100%),
               PL (acc 1.25, cf 30, permanent_only), UL (acc 0, neg allowed).
+        - working: true
+          agent: "testing"
+          comment: |
+            PASS (5/5). Default seed of CL/SL/PL/UL verified. Duplicate 409
+            verified. Mutual-exclusion on POST initially returned 422
+            (Pydantic validator) — fixed by main agent to return 400 by moving
+            the check into the route. PUT clear_carry_forward / clear_lapse
+            flags work. DELETE soft-deletes; include_inactive=true exposes
+            inactive rows.
+        - working: true
+          agent: "main"
+          comment: |
+            Fix: removed model_validator from LeaveTypeConfigIn; moved
+            mutual-exclusion check into the POST route so it now raises
+            HTTPException(400) consistently with PUT.
 
   - task: "Module 2 — Leave Balance + Ledger + Manual Adjust"
     implemented: true
-    working: "NA"
+    working: true
     file: "/app/backend/leave_tracker.py"
     stuck_count: 0
     priority: "high"
-    needs_retesting: true
+    needs_retesting: false
     status_history:
         - working: "NA"
           agent: "main"
           comment: |
             Endpoints:
               GET  /api/salons/{salon_id}/barbers/{barber_id}/leave-balance
-                   ?financial_year=YYYY-YY  (defaults to current Indian FY)
-                   Returns one row per active leave-type config, auto-creating
-                   missing leave_balances docs.
               GET  .../leave-balance/ledger
-                   ?financial_year=&leave_type_code=&page=&page_size=
-                   Returns paginated leave_balance_movements (newest first).
               POST .../leave-balance/adjust
-                   Body: {leave_type_code, qty_delta, reason, financial_year?}
-                   Applies a manual_adjustment movement.  Respects
-                   allow_negative_balance and max_balance_cap on the config.
 
-            Behaviour to verify:
-              * Cap clamp: if balance would exceed max_balance_cap and qty_delta>0,
-                effective_delta is reduced to (cap - current); ledger row reflects
-                the clamped value.
-              * Negative guard: if allow_negative_balance=false and balance would
-                go below 0, effective_delta is clamped to -current.
-              * Ledger pagination + filtering by leave_type_code works.
+            Behaviour: cap clamp, negative-balance guard, ledger pagination
+            + filter by leave_type_code.
+        - working: true
+          agent: "testing"
+          comment: |
+            PASS (3/3). Auto-creates one balance row per active leave-type
+            on first GET. FY format YYYY-YY confirmed. Manual adjust
+            correctly clamps to max_balance_cap, blocks below-zero when
+            allow_negative_balance=false, and inserts ledger rows with the
+            effective (clamped) delta. Pagination + leave_type_code filter
+            confirmed.
 
   - task: "Module 2 — Leave Records CRUD with Balance Side-effects"
     implemented: true
-    working: "NA"
+    working: true
     file: "/app/backend/leave_tracker.py"
     stuck_count: 0
     priority: "high"
-    needs_retesting: true
+    needs_retesting: false
     status_history:
         - working: "NA"
           agent: "main"
           comment: |
-            Endpoints:
-              POST   /api/salons/{salon_id}/leave-records
-                     Body: {barber_id, leave_type_code, date, half_day, note?}
-                     Debits balance (-1 or -0.5 if half_day).  Returns 409 on
-                     duplicate active record for same (barber, date).
-                     Returns 409 if balance < debit and allow_negative=false.
-              PUT    .../leave-records/{record_id}
-                     Updates leave_type_code / half_day / note.  Restores the
-                     old type's balance and debits the new type's balance.
-                     Rolls back atomically on insufficient new-type balance.
-              DELETE .../leave-records/{record_id}
-                     Soft-cancels (status='cancelled') and restores balance.
-              GET    .../leave-records?barber_id=&from=&to=&type=
-                     Lists active records (status != 'cancelled').
-
-            Side effects:
-              * Each balance change inserts a leave_balance_movements row.
-              * `barbers.leave_dates` array is kept in sync (back-compat with
-                pre-Module-2 attendance logic that reads it).
+            POST/PUT/DELETE/GET /api/salons/{salon_id}/leave-records with
+            balance side-effects, duplicate-date 409, insufficient-balance
+            409, atomic rollback on PUT, barbers.leave_dates sync.
+        - working: false
+          agent: "testing"
+          comment: |
+            HIGH-PRIORITY BUG: PUT rollback on insufficient target-type
+            balance double-debits the OLD type by 1 day. RCA: stale
+            `old_balance` dict passed back into rollback call.
+        - working: true
+          agent: "main"
+          comment: |
+            Fix: `_apply_balance_change` already returns the post-update
+            balance dict. update_leave_record now captures that return
+            value as `old_balance_after_restore` and passes it to the
+            rollback _apply_balance_change call (lines 905-918, 925-938 in
+            leave_tracker.py). Manual curl verified CL balance unchanged
+            after a failed PUT→SL (was 29.0 before, stayed 29.0 after).
+            All 20 pytest assertions now pass.
+        - working: true
+          agent: "testing"
+          comment: |
+            PASS (8/8) after fix. test_update_type_rollback_on_insufficient
+            now confirms CL balance is unchanged across the failed PUT.
+            All other record flows (create full/half day, duplicate 409,
+            insufficient 409, type change, delete, list filters) pass.
 
   - task: "Module 2 — Auth & Cross-Salon Isolation"
     implemented: true
-    working: "NA"
+    working: true
     file: "/app/backend/leave_tracker.py"
     stuck_count: 0
     priority: "high"
-    needs_retesting: true
+    needs_retesting: false
     status_history:
-        - working: "NA"
-          agent: "main"
+        - working: true
+          agent: "testing"
           comment: |
-            All leave-tracker endpoints require Bearer token via
-            `get_current_salon_user` and call `_assert_salon_owns(user, salon_id)`.
-            Expected:
-              * No token → 401.
-              * Valid token but salon_id mismatch → 403.
+            PASS (2/2). No token → 401. Token for one salon attempting to
+            access a different salon_id → 403.
 
   - task: "Module 3 — Staff Settings: attendance_rules PATCH on /api/salons/{id}"
     implemented: true
-    working: "NA"
+    working: true
     file: "/app/backend/server.py, /app/frontend/src/components/staff/StaffSettingsContent.js"
     stuck_count: 0
     priority: "medium"
-    needs_retesting: true
+    needs_retesting: false
     status_history:
-        - working: "NA"
+        - working: false
+          agent: "testing"
+          comment: |
+            THREE COMPOUNDING BUGS: (1) Backend only had PUT — frontend used
+            PATCH → 405. (2) Endpoint used legacy get_current_salon which
+            refuses salon_admin tokens → 401. (3) SalonUpdate Pydantic
+            model had no attendance_rules field — payload silently dropped.
+        - working: true
           agent: "main"
           comment: |
-            Module 3 consolidates Incentive Rules, Leave Configuration,
-            Attendance Rules and Holiday Calendar into a reusable
-            `StaffSettingsContent` component shared between the standalone
-            page and the inline embed in Salon Settings → Staff.
-
-            Backend changes are minimal — the only direct write path the new
-            UI uses is `PATCH /api/salons/{salon_id}` with body
-            `{ attendance_rules: { geofence_radius_m, late_mark_threshold_min,
-            required_hours_per_day, auto_absent_cutoff_hour } }`.  Verify it
-            persists, requires salon auth, and `GET /api/salons/{salon_id}`
-            returns the saved rules.
-            Incentive Rules sub-tab → existing EmployeeRewardPlan endpoints.
-            Leave Configuration sub-tab → Module 2 endpoints (above).
+            Fix bundle in server.py:
+              * SalonUpdate gained `attendance_rules: Optional[Dict[str, Any]]`.
+              * Salon response model gained `attendance_rules` so GET returns it.
+              * update_salon now uses Depends(get_current_salon_admin) (accepts
+                both legacy 'salon' and new 'salon_admin' tokens) and asserts
+                token_salon_id == path salon_id (403 otherwise).
+              * Added @api_router.patch alias alongside the existing @put so
+                the frontend's axios.patch call now succeeds.
+        - working: true
+          agent: "testing"
+          comment: |
+            PASS (2/2). PATCH and PUT both persist attendance_rules. GET
+            /api/salons/{id} returns the saved rules. Regression check:
+            existing PUT with non-attendance fields still returns 200;
+            no-token returns 403; wrong salon returns 403.
 
 agent_communication:
     - agent: "main"
@@ -3597,45 +3621,33 @@ agent_communication:
           • password: salon123
           • returns access_token + salon_id: a6f10c9e-f0e0-4128-8246-00282188c70b
 
-        Module 2 endpoint surface (all under /api/salons/{salon_id}/...):
-          GET  /leave-types-config            (auto-seeds CL/SL/PL/UL)
-          POST /leave-types-config
-          PUT  /leave-types-config/{id}
-          DELETE /leave-types-config/{id}     (soft delete)
-          GET  /barbers/{barber_id}/leave-balance
-          GET  /barbers/{barber_id}/leave-balance/ledger
-          POST /barbers/{barber_id}/leave-balance/adjust
-          GET  /leave-records
-          POST /leave-records
-          PUT  /leave-records/{id}
-          DELETE /leave-records/{id}
+    - agent: "testing"
+      message: |
+        Iteration 18 — 17/20 pass.
+        High: leave-record PUT rollback double-debits CL (RCA: stale dict).
+        Critical: PATCH /api/salons/{id} returns 405 (frontend axios.patch).
+        Critical: PUT /api/salons/{id} attendance_rules path has 3 gaps
+        (auth dep, model missing field, route only PUT).
+        Minor: POST leave-types-config returns 422 instead of 400 for
+        mutual exclusion.
+        Test suite: /app/backend/tests/test_leave_tracker_module2.py
 
-        Module 3 backend touch-point:
-          PATCH /api/salons/{salon_id}  with {attendance_rules: {...}}.
-          GET /api/salons/{salon_id} must return the persisted attendance_rules.
+    - agent: "main"
+      message: |
+        All 4 issues fixed:
+          1. leave_tracker.py update_leave_record() now passes the post-restore
+             balance dict to the rollback call (not the stale pre-restore dict).
+          2. server.py SalonUpdate gained `attendance_rules: Optional[Dict[str,Any]]`;
+             Salon response model also exposes it.
+          3. server.py update_salon now Depends(get_current_salon_admin) and
+             asserts same-salon ownership; @api_router.patch alias added so
+             frontend axios.patch call works.
+          4. leave_tracker.py POST leave-types-config mutual-exclusion check
+             moved out of Pydantic model_validator into the route so it
+             returns 400 (not 422). Removed unused model_validator import.
 
-        Please verify:
-          1. Default leave-type seed on first GET (codes CL,SL,PL,UL present).
-          2. Mutual-exclusion between carry_forward_rule.enabled and
-             lapse_rule.enabled (400 if both true) — on POST and on PUT.
-          3. Duplicate code 409 on POST.
-          4. Manual balance adjust:
-             - cap clamp (max_balance_cap)
-             - negative guard (allow_negative_balance=false)
-             - ledger row inserted with effective_delta.
-          5. Leave record create:
-             - debits balance by 1 (or 0.5 if half_day)
-             - duplicate (barber, date) → 409
-             - insufficient balance → 409 when allow_negative=false
-             - barbers.leave_dates synced.
-          6. Leave record PUT — change type rolls old balance up and new
-             balance down; atomic rollback if new balance insufficient.
-          7. Leave record DELETE — soft-cancels and restores balance.
-          8. Ledger pagination + filtering.
-          9. Auth: 401 without token, 403 on wrong salon_id.
-          10. Module 3 attendance_rules PATCH + GET round trip.
-
-        DO NOT run frontend tests — user will request separately.
+        Full pytest suite (20/20) passes; manual curl confirms rollback,
+        attendance_rules PATCH/PUT round-trip, cross-salon 403, no-token 403.
 
 agent_communication:
     - agent: "main"

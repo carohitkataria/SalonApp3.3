@@ -24,6 +24,26 @@ A multi-tenant salon management SaaS (React + FastAPI + MongoDB). Most recent fe
 
 ## Implemented (CHANGELOG)
 
+### May 31, 2026 — Module 2: Leave Tracker & Leave Settings backend verified ✅
+- ✅ **`backend/leave_tracker.py`** wired into `server.py` (1040 LOC). Endpoints:
+   - `GET/POST/PUT/DELETE /api/salons/{salon_id}/leave-types-config[/{id}]` — CL/SL/PL/UL auto-seeded on first GET; carry_forward and lapse rules are mutually exclusive (400); duplicate code → 409.
+   - `GET /api/salons/{salon_id}/barbers/{barber_id}/leave-balance[?financial_year=]` — auto-creates one row per active leave-type; Indian FY format `YYYY-YY`.
+   - `GET /api/salons/{salon_id}/barbers/{barber_id}/leave-balance/ledger` — paginated `leave_balance_movements` newest-first; filter by `leave_type_code`.
+   - `POST /api/salons/{salon_id}/barbers/{barber_id}/leave-balance/adjust` — manual adjustments; respects `max_balance_cap` (clamps positive deltas) and `allow_negative_balance` (clamps negative deltas).
+   - `POST/PUT/DELETE/GET /api/salons/{salon_id}/leave-records[/{id}]` — debits balance by 1 (or 0.5 for half-day), duplicate `(barber, date)` → 409, insufficient balance → 409, atomic rollback on PUT type-change if target balance insufficient, soft-cancel on DELETE, `barbers.leave_dates` kept in sync.
+   - Scheduled jobs: `_leave_accrual_job_wrapper` (monthly accrual; runs 19:00 UTC daily, only acts on IST day=1), `_leave_year_end_wrapper` (FY year-end close on Apr 1 IST).
+- ✅ **Bug fix during testing**: PUT `/leave-records/{id}` rollback path was passing a stale `old_balance` dict back into `_apply_balance_change`, causing the OLD type balance to be double-debited when the target type was insufficient. Fixed by capturing the post-restore balance dict and using it for the rollback call.
+- ✅ **Consistency fix**: POST `/leave-types-config` mutual-exclusion now raises `HTTPException(400)` (was raising Pydantic `ValueError` → 422), matching the PUT behaviour.
+- ✅ **Backend test suite**: `/app/backend/tests/test_leave_tracker_module2.py` — 20/20 pytest assertions pass against the live preview URL.
+
+### May 31, 2026 — Module 3: Staff Settings consolidated + attendance_rules persistence ✅
+- ✅ **Inline Staff Settings**: `StaffSettingsContent` (Incentives · Leave · Attendance · Holidays) now renders both at `/salon/staff/settings` and inline inside Salon Settings → Staff.
+- ✅ **Backend bug fix bundle (`server.py`)**:
+   - `SalonUpdate` gained `attendance_rules: Optional[Dict[str, Any]]`.
+   - `Salon` response model gained `attendance_rules` so `GET /api/salons/{id}` echoes it.
+   - `PUT /api/salons/{salon_id}` migrated from legacy `get_current_salon` to `get_current_salon_admin` (so the multi-user `salon_admin` JWT works); adds `salon_id` ownership check (403 on mismatch).
+   - Added `@api_router.patch("/salons/{salon_id}")` alias on the same handler so the frontend's `axios.patch` call from `StaffSettingsContent.js → AttendanceRulesTab.save` succeeds.
+
 ### May 30, 2026 — Module 3: Staff Settings consolidated inline in Salon Settings ✅
 - ✅ **Reusable `StaffSettingsContent`** at `/app/frontend/src/components/staff/StaffSettingsContent.js` — renders the four sub-tabs (Incentive Rules, Leave Configuration, Attendance Rules, Holiday Calendar stub). Accepts `useUrlTab` prop so it can run with `?tab=…` URL sync (standalone page) or with local state (inline embed).
 - ✅ **`StaffSettingsPage`** refactored to a thin wrapper around `StaffSettingsContent`. `/salon/staff/settings` URL still works and now uses URL-synced sub-tabs.

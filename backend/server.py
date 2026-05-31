@@ -120,6 +120,7 @@ class SalonUpdate(BaseModel):
     invoice_prefix: Optional[str] = None
     invoice_start_number: Optional[int] = None
     password: Optional[str] = None  # To update password
+    attendance_rules: Optional[Dict[str, Any]] = None  # Module 3 — Staff Settings attendance config
 
 class SalonPasswordLogin(BaseModel):
     phone: str
@@ -184,6 +185,7 @@ class Salon(BaseModel):
     current_invoice_number: int = 1  # Current invoice counter
     operational_hours: Optional[OperationalHours] = None
     manual_toggle: Optional[ManualToggle] = None
+    attendance_rules: Optional[Dict[str, Any]] = None  # Module 3 — Staff Settings
     created_at: str
 
 # Service Models
@@ -3075,8 +3077,15 @@ async def create_salon(salon: SalonCreate, current_salon=Depends(get_current_sal
     return Salon(**salon_dict)
 
 @api_router.put("/salons/{salon_id}", response_model=Salon)
-async def update_salon(salon_id: str, salon: SalonUpdate, current_salon=Depends(get_current_salon)):
+@api_router.patch("/salons/{salon_id}", response_model=Salon)
+async def update_salon(salon_id: str, salon: SalonUpdate, current_user=Depends(get_current_salon_admin)):
     """Update salon profile (now supports partial updates)"""
+    # Authorise: admin token must belong to the same salon (legacy 'salon' tokens
+    # carry salon_id in 'sub'; new 'salon_admin' tokens carry it as 'salon_id').
+    token_salon_id = current_user.get("salon_id") or current_user.get("sub")
+    if token_salon_id != salon_id:
+        raise HTTPException(status_code=403, detail="Not allowed for this salon")
+
     existing = await db.salons.find_one({"id": salon_id}, {"_id": 0})
     if not existing:
         raise HTTPException(status_code=404, detail="Salon not found")

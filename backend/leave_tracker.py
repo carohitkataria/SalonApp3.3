@@ -50,7 +50,7 @@ from typing import Optional, List
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, Field, field_validator
 
 logger = logging.getLogger(__name__)
 
@@ -185,14 +185,6 @@ class LeaveTypeConfigIn(BaseModel):
         if v not in {"all", "permanent_only"}:
             raise ValueError("applies_to must be 'all' or 'permanent_only'")
         return v
-
-    @model_validator(mode="after")
-    def _v_yr_rules(self):
-        cf_on = bool(self.carry_forward_rule and self.carry_forward_rule.enabled)
-        lp_on = bool(self.lapse_rule and self.lapse_rule.enabled)
-        if cf_on and lp_on:
-            raise ValueError("carry_forward_rule and lapse_rule cannot both be enabled")
-        return self
 
 
 class LeaveTypeConfigUpdate(BaseModel):
@@ -602,6 +594,14 @@ async def list_leave_type_configs(salon_id: str, include_inactive: bool = False,
 async def create_leave_type_config(salon_id: str, payload: LeaveTypeConfigIn,
                                      user: dict = Depends(_salon_auth)):
     _assert_salon_owns(user, salon_id)
+    # Mutual exclusion between carry-forward and lapse rules (consistent 400 with PUT).
+    cf_on = bool(payload.carry_forward_rule and payload.carry_forward_rule.enabled)
+    lp_on = bool(payload.lapse_rule and payload.lapse_rule.enabled)
+    if cf_on and lp_on:
+        raise HTTPException(
+            status_code=400,
+            detail="carry_forward_rule and lapse_rule cannot both be enabled",
+        )
     existing = await _db.leave_types_config.find_one({"salon_id": salon_id, "code": payload.code})
     if existing:
         raise HTTPException(status_code=409, detail=f"Leave type with code '{payload.code}' already exists")
@@ -904,7 +904,7 @@ async def update_leave_record(salon_id: str, record_id: str, payload: LeaveRecor
         leave_type_code=old_type, fy=fy,
     )
     old_debit = 0.5 if old_half else 1.0
-    await _apply_balance_change(
+    old_balance_after_restore = await _apply_balance_change(
         balance=old_balance,
         qty_delta=+old_debit,
         movement_type="type_renamed",
@@ -925,8 +925,9 @@ async def update_leave_record(salon_id: str, record_id: str, payload: LeaveRecor
     allow_neg = bool(new_cfg.get("allow_negative_balance"))
     if not allow_neg and new_balance["current_balance"] < new_debit:
         # Rollback the restore we just did and bail.
+        # NOTE: must use the *post-restore* balance dict so we don't double-debit.
         await _apply_balance_change(
-            balance=old_balance,
+            balance=old_balance_after_restore,
             qty_delta=-old_debit,
             movement_type="type_renamed",
             reference_type="leave_record",
