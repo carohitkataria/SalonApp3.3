@@ -17,26 +17,41 @@ logger = logging.getLogger(__name__)
 # Twilio Configuration
 ACCOUNT_SID = os.environ.get('TWILIO_ACCOUNT_SID')
 AUTH_TOKEN = os.environ.get('TWILIO_AUTH_TOKEN')
+# API Key auth (preferred). When present, we authenticate with the API Key
+# SID + Secret and scope requests to ACCOUNT_SID. This avoids needing the
+# account's primary Auth Token.
+API_KEY_SID = os.environ.get('TWILIO_API_KEY_SID')
+API_KEY_SECRET = os.environ.get('TWILIO_API_KEY_SECRET')
 WHATSAPP_NUMBER = os.environ.get('TWILIO_WHATSAPP_NUMBER', 'whatsapp:+14155238886')
 
 # Initialize Twilio client
 twilio_client = None
 
 def get_twilio_client():
-    """Get or create Twilio client instance"""
+    """Get or create Twilio client instance.
+
+    Auth precedence:
+      1. API Key (SK… + secret) + Account SID  → Client(api_key_sid, api_key_secret, account_sid)
+      2. Account SID + Auth Token              → Client(account_sid, auth_token)
+    Returns None (mock mode) if neither is fully configured.
+    """
     global twilio_client
     if twilio_client is None:
-        logger.info(f"Initializing Twilio client...")
-        logger.info(f"ACCOUNT_SID: {ACCOUNT_SID[:10] if ACCOUNT_SID else 'None'}...")
-        logger.info(f"AUTH_TOKEN: {'*' * 10 if AUTH_TOKEN else 'None'}")
-        
-        if not all([ACCOUNT_SID, AUTH_TOKEN]):
-            logger.warning("Twilio credentials not configured. Using mock mode.")
-            return None
+        logger.info("Initializing Twilio client...")
+        logger.info(f"ACCOUNT_SID: {ACCOUNT_SID[:8] if ACCOUNT_SID else 'None'}...")
+
         try:
-            # Use Account SID and Auth Token for authentication
-            twilio_client = Client(ACCOUNT_SID, AUTH_TOKEN)
-            logger.info("Twilio client initialized successfully with Auth Token authentication")
+            if API_KEY_SID and API_KEY_SECRET and ACCOUNT_SID:
+                logger.info(f"Using API Key auth (API_KEY_SID: {API_KEY_SID[:8]}...)")
+                twilio_client = Client(API_KEY_SID, API_KEY_SECRET, ACCOUNT_SID)
+                logger.info("Twilio client initialized successfully with API Key authentication")
+            elif ACCOUNT_SID and AUTH_TOKEN:
+                logger.info("Using Auth Token authentication")
+                twilio_client = Client(ACCOUNT_SID, AUTH_TOKEN)
+                logger.info("Twilio client initialized successfully with Auth Token authentication")
+            else:
+                logger.warning("Twilio credentials not configured. Using mock mode.")
+                return None
         except Exception as e:
             logger.error(f"Failed to initialize Twilio client: {e}")
             return None
