@@ -9,7 +9,7 @@ import {
   Search, Plus, Star, Package, Sparkles, 
   ChevronDown, ChevronRight, Edit, Trash2,
   Image as ImageIcon, Heart, Home, Save, X, GripVertical,
-  Upload, FileText, Loader2, RefreshCw
+  Upload, FileText, Loader2, RefreshCw, Download, CheckCircle2, AlertTriangle
 } from 'lucide-react';
 import axios from 'axios';
 import { toast } from 'sonner';
@@ -44,6 +44,12 @@ export default function OfferingsModule({ salonId, token }) {
   const [parsedServices, setParsedServices] = useState([]);
   const [parsedPackages, setParsedPackages] = useState([]);
   const [showApplyChoice, setShowApplyChoice] = useState(false);
+
+  // CSV bulk-upload modal state (always ADDS services — never replaces)
+  const [showCsvModal, setShowCsvModal] = useState(false);
+  const [csvFile, setCsvFile] = useState(null);
+  const [csvUploading, setCsvUploading] = useState(false);
+  const [csvResult, setCsvResult] = useState(null);
 
   const handleParseMenu = async () => {
     if (!menuFile) {
@@ -105,6 +111,56 @@ export default function OfferingsModule({ salonId, token }) {
       toast.error(error.response?.data?.detail || 'Failed to apply services');
     } finally {
       setMenuApplying(false);
+    }
+  };
+
+  // ---- CSV bulk upload (additive — never replaces existing services) ----
+  const handleDownloadCsvTemplate = async () => {
+    try {
+      const res = await axios.get(
+        `${API}/salons/${salonId}/services/csv-template`,
+        { responseType: 'blob' }
+      );
+      const url = window.URL.createObjectURL(new Blob([res.data], { type: 'text/csv' }));
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'services_template.csv';
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      window.URL.revokeObjectURL(url);
+    } catch (error) {
+      toast.error('Failed to download template');
+    }
+  };
+
+  const handleUploadCsv = async () => {
+    if (!csvFile) {
+      toast.error('Please choose a CSV file');
+      return;
+    }
+    setCsvUploading(true);
+    setCsvResult(null);
+    try {
+      const fd = new FormData();
+      fd.append('file', csvFile);
+      const res = await axios.post(
+        `${API}/salons/${salonId}/services/upload-csv`,
+        fd,
+        { headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'multipart/form-data' } }
+      );
+      setCsvResult(res.data);
+      if (res.data?.created > 0) {
+        toast.success(res.data.message || `Added ${res.data.created} services`);
+      } else {
+        toast.info(res.data?.message || 'No new services were added');
+      }
+      // Refresh the services list so newly added rows appear immediately.
+      fetchAllData();
+    } catch (error) {
+      toast.error(error.response?.data?.detail || 'Failed to upload CSV');
+    } finally {
+      setCsvUploading(false);
     }
   };
 
@@ -316,6 +372,16 @@ export default function OfferingsModule({ salonId, token }) {
             Upload Menu (PDF / Image)
           </Button>
           <Button
+            onClick={() => { setCsvFile(null); setCsvResult(null); setShowCsvModal(true); }}
+            variant="outline"
+            size="sm"
+            className="text-xs"
+            data-testid="upload-services-csv-btn"
+          >
+            <FileText className="w-3 h-3 mr-1" />
+            Upload CSV
+          </Button>
+          <Button
             onClick={forceReinitialize}
             variant="outline"
             size="sm"
@@ -462,6 +528,107 @@ export default function OfferingsModule({ salonId, token }) {
                 </Button>
               </>
             )}
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Upload Services CSV Modal (additive — never replaces existing) */}
+      <Dialog open={showCsvModal} onOpenChange={(open) => {
+        setShowCsvModal(open);
+        if (!open) { setCsvFile(null); setCsvResult(null); }
+      }}>
+        <DialogContent className="max-w-2xl max-h-[85vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <FileText className="w-5 h-5 text-gold" />
+              Upload Services CSV
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 mt-4">
+            <div className="p-3 rounded-lg bg-blue-50 border border-blue-200 text-sm text-blue-900 dark:bg-blue-900/20 dark:text-blue-200 dark:border-blue-800">
+              <p className="font-semibold mb-1">How it works</p>
+              <ul className="list-disc list-inside space-y-0.5 text-xs">
+                <li>Download the template, fill one service per row, then upload it here.</li>
+                <li>All services are <b>added</b> to your salon — existing services are never replaced or removed.</li>
+                <li>Only <b>service_name</b> is required. Duplicate names (already in your salon) are skipped.</li>
+                <li>Columns: <code>service_name, description, category, gender_tag, default_duration, base_price, price_type, is_favorite, available_at_home, thumbnail_url, images</code>.</li>
+              </ul>
+            </div>
+
+            <Button
+              onClick={handleDownloadCsvTemplate}
+              variant="outline"
+              size="sm"
+              className="text-xs"
+              data-testid="download-csv-template-btn"
+            >
+              <Download className="w-3.5 h-3.5 mr-1" />
+              Download CSV template
+            </Button>
+
+            <div>
+              <Label htmlFor="services-csv-file" className="text-sm font-medium">CSV / Excel file</Label>
+              <Input
+                id="services-csv-file"
+                type="file"
+                accept=".csv,.xlsx,.xls,text/csv"
+                onChange={(e) => { setCsvFile(e.target.files?.[0] || null); setCsvResult(null); }}
+                className="mt-2"
+                data-testid="services-csv-file-input"
+              />
+              {csvFile && (
+                <p className="text-xs text-muted-foreground mt-1">Selected: {csvFile.name} ({Math.round(csvFile.size / 1024)} KB)</p>
+              )}
+            </div>
+
+            {csvResult && (
+              <div className="border border-border rounded-lg overflow-hidden" data-testid="csv-upload-result">
+                <div className="px-3 py-2 bg-muted text-sm font-semibold">Upload summary</div>
+                <div className="p-3 space-y-2 text-sm">
+                  <div className="flex items-center gap-2 text-green-600">
+                    <CheckCircle2 className="w-4 h-4" />
+                    <span><b>{csvResult.created}</b> service(s) added</span>
+                  </div>
+                  {csvResult.skipped_duplicates > 0 && (
+                    <div className="flex items-center gap-2 text-amber-600">
+                      <AlertTriangle className="w-4 h-4" />
+                      <span><b>{csvResult.skipped_duplicates}</b> duplicate(s) skipped</span>
+                    </div>
+                  )}
+                  {Array.isArray(csvResult.errors) && csvResult.errors.length > 0 && (
+                    <div className="text-xs">
+                      <div className="flex items-center gap-2 text-red-600 mb-1">
+                        <AlertTriangle className="w-4 h-4" />
+                        <span><b>{csvResult.errors.length}</b> row(s) had errors:</span>
+                      </div>
+                      <div className="max-h-32 overflow-y-auto rounded bg-muted/50 p-2 space-y-0.5">
+                        {csvResult.errors.map((er, i) => (
+                          <div key={i} className="text-muted-foreground">Row {er.row}: {er.reason}</div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
+            <div className="flex gap-2 pt-2">
+              <Button
+                onClick={handleUploadCsv}
+                disabled={!csvFile || csvUploading}
+                className="flex-1 bg-gold text-black hover:bg-gold/90"
+                data-testid="confirm-upload-csv-btn"
+              >
+                {csvUploading ? (
+                  <><Loader2 className="w-4 h-4 mr-2 animate-spin" /> Uploading...</>
+                ) : (
+                  <><Upload className="w-4 h-4 mr-2" /> Upload & add services</>
+                )}
+              </Button>
+              <Button onClick={() => setShowCsvModal(false)} variant="outline">
+                {csvResult ? 'Done' : 'Cancel'}
+              </Button>
+            </div>
           </div>
         </DialogContent>
       </Dialog>

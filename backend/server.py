@@ -6530,6 +6530,263 @@ async def apply_parsed_menu_services(
     }
 
 
+# CSV column headers for the service uploader (also used for the template).
+SERVICE_CSV_HEADERS = [
+    "service_name",
+    "description",
+    "category",
+    "gender_tag",
+    "default_duration",
+    "base_price",
+    "price_type",
+    "is_favorite",
+    "available_at_home",
+    "thumbnail_url",
+    "images",
+]
+
+
+@api_router.get("/salons/{salon_id}/services/csv-template")
+async def download_services_csv_template(salon_id: str):
+    """Return a ready-to-fill CSV template (headers + two example rows).
+
+    Public so the salon can grab the template before authenticating in the UI.
+    """
+    import csv as _csv
+    buf = io.StringIO()
+    writer = _csv.writer(buf)
+    writer.writerow(SERVICE_CSV_HEADERS)
+    writer.writerow([
+        "Haircut - Men", "Classic scissor cut & style", "Hair",
+        "Men", "30", "250", "fixed", "false", "false", "", "",
+    ])
+    writer.writerow([
+        "Hair Spa", "Relaxing nourishing hair spa", "Spa",
+        "Unisex", "45", "600", "onwards", "true", "true", "", "",
+    ])
+    csv_text = buf.getvalue()
+    return Response(
+        content=csv_text,
+        media_type="text/csv",
+        headers={"Content-Disposition": 'attachment; filename="services_template.csv"'},
+    )
+
+
+@api_router.post("/salons/{salon_id}/services/upload-csv")
+async def upload_services_csv(
+    salon_id: str,
+    file: UploadFile = File(...),
+    current_user=Depends(get_current_salon_user),
+):
+    """Bulk-ADD services to a salon from a CSV (or Excel) file.
+
+    This ALWAYS adds — it never replaces, overwrites or disables existing
+    services. A row whose service_name already exists for this salon (or is
+    repeated within the file) is skipped and reported.
+
+    Columns (case-insensitive headers; only `service_name` is required):
+      service_name*  — name of the service (required)
+      description    — free text
+      category       — grouping, defaults to "General"
+      gender_tag     — Men / Women / Unisex (defaults Unisex)
+      default_duration — minutes (integer, defaults 30)
+      base_price     — number (defaults 0)
+      price_type     — fixed / onwards (defaults fixed)
+      is_favorite    — true/false (defaults false)
+      available_at_home — true/false (defaults false)
+      thumbnail_url  — image URL for the circular category thumbnail
+      images         — one or more image URLs separated by | or ,
+    """
+    salon = await db.salons.find_one({"id": salon_id}, {"_id": 0})
+    if not salon:
+        raise HTTPException(status_code=404, detail="Salon not found")
+
+    if not file or not file.filename:
+        raise HTTPException(status_code=400, detail="No file provided")
+
+    fname = file.filename.lower()
+    if not (fname.endswith(".csv") or fname.endswith(".xlsx") or fname.endswith(".xls")):
+        raise HTTPException(status_code=400, detail="File must be .csv, .xlsx or .xls")
+
+    content = await file.read()
+    if len(content) > 5 * 1024 * 1024:
+        raise HTTPException(status_code=400, detail="File too large (max 5 MB)")
+
+    # ---- Parse rows into list[dict] with lowercased header keys ----
+    rows: List[dict] = []
+    try:
+        if fname.endswith(".csv"):
+            import csv as _csv
+            text = content.decode("utf-8-sig", errors="ignore")
+            reader = _csv.DictReader(io.StringIO(text))
+            for r in reader:
+                rows.append({(k or "").strip().lower(): v for k, v in r.items() if k})
+        else:
+            from openpyxl import load_workbook
+            wb = load_workbook(io.BytesIO(content), data_only=True)
+            ws = wb.active
+            header_row = None
+            for r in ws.iter_rows(min_row=1, max_row=5, values_only=True):
+                if any((c is not None and str(c).strip() != "") for c in r):
+                    header_row = [str(c).strip().lower() if c is not None else "" for c in r]
+                    break
+            if not header_row:
+                raise HTTPException(status_code=400, detail="File is empty")
+            for r in ws.iter_rows(min_row=2, values_only=True):
+                if all(c is None or str(c).strip() == "" for c in r):
+                    continue
+                row = {}
+                for idx, val in enumerate(r):
+                    if idx < len(header_row) and header_row[idx]:
+                        row[header_row[idx]] = val
+                rows.append(row)
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Failed to parse file: {e}")
+
+    if not rows:
+        raise HTTPException(status_code=400, detail="No data rows found in the file")
+
+    # ---- Flexible header resolution + value coercion helpers ----
+    def _norm(s: str) -> str:
+        return str(s).replace(" ", "").replace("_", "").replace(".", "").lower()
+
+    def _find(d: dict, *keys: str):
+        for k in keys:
+            if k in d:
+                return d[k]
+        normed = {_norm(k): v for k, v in d.items()}
+        for k in keys:
+            if _norm(k) in normed:
+                return normed[_norm(k)]
+        return None
+
+    def _truthy(v) -> bool:
+        return str(v).strip().lower() in ("1", "true", "yes", "y", "t", "on")
+
+    def _to_int(v, default: int) -> int:
+        try:
+            s = str(v).strip()
+            if s == "" or s is None:
+                return default
+            return int(float(s))
+        except Exception:
+            return default
+
+    def _to_float(v, default: float) -> float:
+        try:
+            s = str(v).strip().replace(",", "")
+            if s == "":
+                return default
+            return float(s)
+        except Exception:
+            return default
+
+    def _norm_gender(v) -> str:
+        s = str(v or "").strip().lower()
+        if s in ("men", "man", "male", "m"):
+            return "Men"
+        if s in ("women", "woman", "female", "f", "w"):
+            return "Women"
+        return "Unisex"
+
+    def _norm_price_type(v) -> str:
+        s = str(v or "").strip().lower()
+        return "onwards" if s in ("onwards", "onward", "starting", "from") else "fixed"
+
+    def _split_images(v) -> List[str]:
+        if not v:
+            return []
+        raw = str(v)
+        parts = raw.split("|") if "|" in raw else raw.split(",")
+        return [p.strip() for p in parts if p.strip()]
+
+    # ---- Dedup against services already present for THIS salon ----
+    existing = await db.services.find(
+        {"salon_id": salon_id, "is_active": True},
+        {"_id": 0, "service_name": 1},
+    ).to_list(10000)
+    existing_names = {(s.get("service_name") or "").strip().lower() for s in existing}
+
+    now_iso = datetime.now(timezone.utc).isoformat()
+    docs_to_insert: List[dict] = []
+    seen_in_file: set = set()
+    skipped_duplicates = 0
+    errors: List[dict] = []
+
+    # Row numbers reported to the user are 1-based and account for the header
+    # line (so the first data row is row 2 — matches what they see in Excel).
+    for idx, raw in enumerate(rows):
+        row_no = idx + 2
+        name = str(_find(raw, "service_name", "name", "service") or "").strip()
+        if not name:
+            errors.append({"row": row_no, "reason": "Missing service_name"})
+            continue
+        key = name.lower()
+        if key in existing_names:
+            skipped_duplicates += 1
+            continue
+        if key in seen_in_file:
+            skipped_duplicates += 1
+            continue
+
+        seen_in_file.add(key)
+        doc = {
+            "id": str(uuid.uuid4()),
+            "salon_id": salon_id,
+            "service_name": name[:120],
+            "description": str(_find(raw, "description", "desc") or "").strip()[:500] or None,
+            "category": (str(_find(raw, "category", "cat") or "").strip()[:60] or "General"),
+            "gender_tag": _norm_gender(_find(raw, "gender_tag", "gender")),
+            "default_duration": max(1, _to_int(_find(raw, "default_duration", "duration", "minutes"), 30)),
+            "base_price": max(0.0, _to_float(_find(raw, "base_price", "price", "amount"), 0.0)),
+            "price_type": _norm_price_type(_find(raw, "price_type", "pricetype")),
+            "is_favorite": _truthy(_find(raw, "is_favorite", "favorite", "favourite")),
+            "available_at_home": _truthy(_find(raw, "available_at_home", "athome", "home")),
+            "thumbnail_url": (str(_find(raw, "thumbnail_url", "thumbnail", "thumb") or "").strip() or None),
+            "images": _split_images(_find(raw, "images", "image_urls", "image")),
+            "is_active": True,
+            "is_enabled": True,
+            "source": "csv_upload",
+            "created_at": now_iso,
+        }
+        docs_to_insert.append(doc)
+
+    created = 0
+    if docs_to_insert:
+        await db.services.insert_many(docs_to_insert)
+        created = len(docs_to_insert)
+        # Enable each newly-created service for this salon (idempotent mapping).
+        salon_service_docs = [
+            {
+                "id": str(uuid.uuid4()),
+                "salon_id": salon_id,
+                "service_id": d["id"],
+                "is_enabled": True,
+                "created_at": now_iso,
+                "updated_at": now_iso,
+            }
+            for d in docs_to_insert
+        ]
+        await db.salon_services.insert_many(salon_service_docs)
+
+    return {
+        "success": True,
+        "total_rows": len(rows),
+        "created": created,
+        "skipped_duplicates": skipped_duplicates,
+        "errors": errors,
+        "message": (
+            f"Added {created} new service(s)"
+            + (f", skipped {skipped_duplicates} duplicate(s)" if skipped_duplicates else "")
+            + (f", {len(errors)} row(s) had errors" if errors else "")
+            + "."
+        ),
+    }
+
+
+
 @api_router.post("/salons/{salon_id}/salon-booking")
 async def create_salon_booking(salon_id: str, body: dict, current_user=Depends(get_current_salon_user)):
     """Create a booking from the salon side (walk-in, phone call, etc.)"""
