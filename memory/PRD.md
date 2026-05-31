@@ -24,26 +24,33 @@ A multi-tenant salon management SaaS (React + FastAPI + MongoDB). Most recent fe
 
 ## Implemented (CHANGELOG)
 
-### May 31, 2026 — Module 4 (Phase 1 / Backend): Attendance Mode toggle + Payroll-with-Leave-Types + Lock-on-Paid ✅
+### May 31, 2026 — Module 4 (Phase 7 + 8 + cross-module gap fixes): Frontend + Payroll + Reports ✅
+- ✅ **Cross-module gap fixes (backend)**:
+   - `leave_records.leave_type_snapshot` (Module 2) — every leave record now captures `{code, display_name, is_paid}` at create time. `get_monthly_salary` reads `paid/unpaid_leave_days` from the snapshot, so admins editing a leave-type's `is_paid` mid-month does NOT retroactively change historical LOP.
+   - `auto_close_open_checkins_job` skips locked months (salary already paid) — won't overwrite paid attendance.
+   - `GET /api/salons/{salon_id}/staff-attendance/month/{month}` now returns top-level `attendance_mode` + per-barber `has_login` + `no_checkin_capability` so the UI can warn admins that Mode-B-without-login staff need manual marking.
+   - **NEW endpoint** `GET /api/salons/{salon_id}/staff-attendance/report?start_date=&end_date=&branch_id=&barber_ids=&format=json|csv` — salon-wide consolidated attendance with status code per (staff × date), respects `computed_under_mode` so months spanning a mode switch read correctly. CSV download path included.
+- ✅ **Frontend (Phase 7)**:
+   - `staff/StaffSettingsContent.js → AttendanceRulesTab` rewritten as Module 4's source of truth: two-radio mode selector + Mode B `geo_settings` panel (radius, max check-in time, min daily minutes, auto-close, allow-admin-override toggle) + mode-history viewer (last 5). Calls `PUT /api/salons/{id}/attendance-mode`. Legacy Module 3 fields collapsed into a "details" pane.
+   - `staff/StaffAttendanceReport.js` (new) — date range + branch + multi-staff filter chips + colour-coded P/H/A/L/HOL badges + CSV download via the new endpoint.
+   - `Analytics.js` gained a third sub-tab **Staff Attendance** that embeds `StaffAttendanceReport`.
+   - `StaffAttendanceTab.js` — salary card now surfaces `leave_breakdown` chips (per leave-type day counts) + the *"LOP deduction (X days × ₹Y/day) = ₹Z"* line and prefers `final_payable` over `total_payable`. Pay-modal also uses `final_payable`. Calendar cell shows worked-duration (e.g., "7h 45m") when `computed_under_mode='geo_checkin'`.
+- ✅ **Testing**: 50/50 backend pytest green (15 + 11 + 20 + 4 new cross-module gap tests). 4/4 frontend critical flows verified by the testing agent on the public preview URL: mode selector + geo panel save, Analytics Staff Attendance sub-tab, salary card test-ids, calendar duration cell.
+
+### May 31, 2026 — Module 4 (Phase 1 backend): Attendance Mode toggle + Payroll-with-Leave-Types + Lock-on-Paid ✅
 - ✅ **New module `backend/attendance_mode.py`** (~530 LOC):
    - `PUT /api/salons/{salon_id}/attendance-mode` — toggle between `"service_completion"` (Mode A, default, preserves existing behaviour) and `"geo_checkin"` (Mode B, new). Stamps every change into `attendance_mode_history[]` with `effective_from_date = today IST`.
    - `POST /api/salons/{salon_id}/staff-attendance/check-in` — Mode B geo-fenced self/admin check-in (haversine vs branch lat/lng, fallback salon lat/lng). Beyond `check_in_radius_meters` → 409 unless `method='admin_on_behalf'` and `allow_admin_override=true`.
    - `POST /api/salons/{salon_id}/staff-attendance/check-out` — computes `total_minutes` and final status via `compute_mode_b_status` (late_checkin / short_hours / present).
-   - `PUT  /api/salons/{salon_id}/staff-attendance/check-edit/{barber_id}/{date}` — admin override of check-in/out times + optional forced status; `auto_calculated=false`, `override_by/note` stored.
-   - Helpers: `resolve_mode_for_date(salon, date_str)` (looks up mode history, never silently rewrites past days), `is_attendance_locked(db, salon_id, barber_id, date_str)` (returns the YYYY-MM that locks the date if salary is paid).
-   - Scheduled job `auto_close_open_checkins_job` runs at 23:55 IST (18:25 UTC) and marks any check-in without check-out from the previous day as absent.
-- ✅ **Salon model additive fields**: `attendance_mode`, `attendance_mode_history`, `geo_settings` (`check_in_radius_meters=50`, `max_check_in_time="10:30"`, `min_daily_minutes=480`, `allow_admin_override=true`, `auto_close_at="23:59"`). `SalonUpdate` accepts the same so admins can patch directly.
-- ✅ **AttendanceRecord model additive fields**: `check_in_at/lat/lng/distance_meters/method`, `check_out_*`, `total_minutes`, `computed_under_mode`, `half_day_reason`. Both Mode A and Mode B raw data live on the same doc — switching modes is non-destructive.
-- ✅ **`calculate_barber_attendance_for_date` refactored** to dispatch by the mode active on the date (uses `resolve_mode_for_date`). Mode A logic is byte-identical to before; Mode B reads raw check-in/out and runs `compute_mode_b_status`.
-- ✅ **Salary refactor (`GET /staff-salary/month/{month}`)** now:
-   - Computes `working_days_in_month = days_in_month − weekly_offs − public_holidays` (weekly_offs from branch.operational_hours when available, else salon.operational_hours; public_holidays from `salon_holidays`).
-   - Reads Module 2 `leave_records` and buckets by `leave_types_config.is_paid` ⇒ `paid_leave_days`, `unpaid_leave_days`, `leave_breakdown {CL,SL,PL,UL,…}`.
-   - `lop_deduction = (base_compensation / working_days_in_month) × unpaid_leave_days`.
-   - `final_payable = max(0, base_compensation − lop_deduction) + incentive_amount`; `total_payable` stays = `final_payable`.
-   - Stamps `attendance_mode_snapshot` and skips recalculation when `is_paid=true` (history preserved exactly).
-- ✅ **Lock-on-paid** — once a `salary_records.is_paid=true` exists for `(salon_id, barber_id, month)`, the following endpoints return **423 Locked**: `PUT /staff-attendance/override/{barber_id}/{date}`, `DELETE` same, `POST /staff-attendance/calculate/{date}` (skip), `POST /staff-attendance/mark-all-present/{date}` (skip with reason `locked_*`), `POST /staff-holidays`, Mode B check-in / check-out / check-edit.
-- ✅ **Bug fix discovered en route**: `POST /staff-salary/pay/{barber_id}/{month}` was returning 500 because the post-insert MongoDB `_id` (ObjectId) leaked into the JSON response. Fixed by popping `_id` from the transaction dict.
-- ✅ **Pytest suites pass 41/41**: `backend/tests/test_attendance_mode_module4.py` (10), `backend/tests/test_attendance_module4_edge.py` (11, added by testing-agent), `backend/tests/test_leave_tracker_module2.py` (20) regression — no breakages.
+   - `PUT  /api/salons/{salon_id}/staff-attendance/check-edit/{barber_id}/{date}` — admin override of check-in/out times + optional forced status.
+   - Helpers: `resolve_mode_for_date`, `is_attendance_locked`, `compute_mode_b_status`, `haversine_meters`.
+   - Scheduled job `auto_close_open_checkins_job` runs at 23:55 IST.
+- ✅ **Salon model additive fields**: `attendance_mode`, `attendance_mode_history`, `geo_settings`. `SalonUpdate` accepts the same.
+- ✅ **AttendanceRecord model additive fields**: `check_in_at/lat/lng/distance_meters/method`, `check_out_*`, `total_minutes`, `computed_under_mode`, `half_day_reason`. Both Mode A and Mode B raw data coexist on the same doc — switching modes is non-destructive.
+- ✅ **`calculate_barber_attendance_for_date` refactored** to dispatch by the mode active on the date.
+- ✅ **Salary refactor (`GET /staff-salary/month/{month}`)** — `working_days_in_month`, leave breakdown bucketed by `is_paid`, `lop_deduction`, `final_payable`, `attendance_mode_snapshot`. Skip recalc when `is_paid=true`.
+- ✅ **Lock-on-paid** — all attendance write paths return **423** when the month's salary is paid.
+- ✅ **Bug fix bonus**: `POST /staff-salary/pay/.../{month}` no longer 500s (ObjectId leak in response).
 
 ### May 31, 2026 — Module 2: Leave Tracker & Leave Settings backend verified ✅
 - ✅ **`backend/leave_tracker.py`** wired into `server.py` (1040 LOC). Endpoints:
