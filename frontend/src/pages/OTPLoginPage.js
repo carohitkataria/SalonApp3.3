@@ -96,7 +96,8 @@ export default function OTPLoginPage() {
         salonId: response.data.salon_id,
         userId: response.data.user_id,
         role: response.data.role,
-        permissions: response.data.permissions
+        permissions: response.data.permissions,
+        staffId: response.data.staff_id || null
       };
       
       localStorage.setItem('salon_user_auth', JSON.stringify(authData));
