@@ -224,14 +224,13 @@ async def platform_request_otp(payload: OTPRequest):
         whatsapp_result = await _send_whatsapp_otp(mobile, otp)
         response["delivery_status"] = whatsapp_result.get("status", "sent")
         if whatsapp_result.get("status") in ("mock", "failed"):
-            # Surface the OTP so the operator can still log in in dev / when
-            # Twilio is unavailable. The /platform/login route is hidden so the
-            # blast-radius is acceptable.
-            response["otp"] = otp
+            # OTP is never returned in the response. It is logged server-side
+            # for support/debugging only.
+            logger.warning(f"[Platform Admin] OTP for {mobile} (status={whatsapp_result.get('status')}): {otp}")
             response["note"] = (
-                "WhatsApp not configured — OTP returned for development use."
+                "Messaging not configured. Please contact support."
                 if whatsapp_result.get("status") == "mock"
-                else "WhatsApp delivery failed — OTP returned as fallback."
+                else "OTP delivery failed. Please try again."
             )
     else:
         # Do not actually send WhatsApp for unknown numbers, but keep timing similar.

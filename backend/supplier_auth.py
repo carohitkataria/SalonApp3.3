@@ -301,12 +301,12 @@ async def supplier_request_otp(payload: OTPRequest):
         whatsapp_result = await _send_whatsapp_otp(mobile, otp)
         response["delivery_status"] = whatsapp_result.get("status", "sent")
         if whatsapp_result.get("status") in ("mock", "failed"):
-            # Dev fallback — surface OTP since WhatsApp isn't reachable
-            response["otp"] = otp
+            # OTP is never returned in the response — logged server-side only.
+            logger.warning(f"[Supplier Auth] OTP for {mobile} (status={whatsapp_result.get('status')}): {otp}")
             response["note"] = (
-                "WhatsApp not configured — OTP returned for development use."
+                "Messaging not configured. Please contact support."
                 if whatsapp_result.get("status") == "mock"
-                else "WhatsApp delivery failed — OTP returned as fallback."
+                else "OTP delivery failed. Please try again."
             )
     else:
         logger.info(f"[Supplier Auth] OTP request for unknown mobile {mobile}")

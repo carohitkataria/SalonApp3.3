@@ -86,7 +86,6 @@ export default function UserLoginPage() {
       setOtpSent(true);
       setCountdown(RESEND_SECONDS);
       toast.success(res.note || 'OTP sent to your WhatsApp');
-      if (res.otp) toast.info(`Test OTP: ${res.otp}`);
     } else {
       toast.error(res.error);
     }
@@ -140,7 +139,6 @@ export default function UserLoginPage() {
     setCountdown(RESEND_SECONDS);
     setView('pwReset');
     toast.success(res.note || 'OTP sent to your WhatsApp');
-    if (res.otp) toast.info(`Test OTP: ${res.otp}`);
   };
 
   const handleVerifyResetOtp = async () => {

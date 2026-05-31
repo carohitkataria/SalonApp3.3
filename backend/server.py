@@ -4863,12 +4863,12 @@ async def send_otp(request: SalonOTPRequest):
         "delivery_status": whatsapp_result.get('status')
     }
     
-    # Include OTP in response for testing (mock mode or failed delivery)
+    # OTP is NEVER returned in the API response — delivery is via WhatsApp only.
+    # The code is logged server-side for debugging/support.
     if whatsapp_result.get('status') in ['mock', 'failed']:
-        response['otp'] = otp
         if whatsapp_result.get('status') == 'mock':
-            response['note'] = "⚠️ Twilio not configured - OTP shown for testing"
-            logger.warning(f"Mock OTP for {phone}: {otp}")
+            response['note'] = "⚠️ Messaging not configured. Please contact support."
+            logger.warning(f"Mock OTP (Twilio not configured) for {phone}: {otp}")
         else:
             response['error'] = whatsapp_result.get('error')
             response['note'] = "OTP delivery failed. Please try again."
@@ -5398,13 +5398,10 @@ async def send_customer_otp(request: CustomerOTPRequest):
     # send_whatsapp_otp returns status in {'sent','mock','failed'} (no 'success' key).
     status = whatsapp_result.get('status')
     if status == 'mock':
-        # Mock-mode: include OTP for testing and explain
-        response['otp'] = otp
-        response['note'] = "⚠️ Twilio not configured - OTP shown for testing"
-        logger.warning(f"Mock OTP for customer {phone}: {otp}")
+        response['note'] = "⚠️ Messaging not configured. Please contact support."
+        logger.warning(f"Mock OTP (Twilio not configured) for customer {phone}: {otp}")
     elif status == 'failed':
-        # Genuine delivery failure — surface the error and include OTP fallback
-        response['otp'] = otp
+        # Genuine delivery failure — surface the error (OTP never returned)
         response['note'] = "OTP delivery failed. Please try again."
         response['error'] = whatsapp_result.get('error')
         logger.error(f"WhatsApp delivery failed for customer {phone}: {whatsapp_result.get('error')}")
@@ -5632,10 +5629,8 @@ async def auth_customer_send_otp(body: CustomerSendOtpV2In):
         "delivery_status": status_str,
     }
     if status_str == "mock":
-        resp["otp"] = otp
-        resp["note"] = "⚠️ Twilio not configured - OTP shown for testing"
+        resp["note"] = "⚠️ Messaging not configured. Please contact support."
     elif status_str == "failed":
-        resp["otp"] = otp
         resp["note"] = "OTP delivery failed. Please try again."
         resp["error"] = whatsapp_result.get("error")
     else:

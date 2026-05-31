@@ -37,13 +37,9 @@ export default function PlatformLoginPage() {
     setLoading(true);
     setHint(null);
     try {
-      const r = await axios.post(`${API}/platform/auth/request-otp`, {
+      await axios.post(`${API}/platform/auth/request-otp`, {
         mobile: cleaned,
       });
-      // If WhatsApp isn't configured (dev), the API returns the OTP in payload.
-      if (r.data?.otp) {
-        setHint(`Dev OTP: ${r.data.otp}`);
-      }
       toast.success('OTP sent to WhatsApp');
       setStep('otp');
     } catch (err) {
