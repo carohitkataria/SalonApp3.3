@@ -24,6 +24,15 @@ A multi-tenant salon management SaaS (React + FastAPI + MongoDB). Most recent fe
 
 ## Implemented (CHANGELOG)
 
+### May 31, 2026 — Module 7: Per-Service Barber Assignment on Modify Booking ✅
+- ✅ **Token schema** (additive, backward-compatible): `service_assignments[]` (per-line `{service_id, barber_id, barber_name_snapshot, service_price, discount_amount, line_total}`), `order_discount_percent`, `order_discount_amount`, `subtotal`.
+- ✅ **New unified backend endpoint** `PUT /api/tokens/{token_id}/modify` (auth: `get_current_salon_user`) replaces the prior chain of `update-services` + `change-barber` + `update-amount` for the Modify dialog. Validates main barber & line barbers (rejects "any"), resolves per-line prices via `barber_services` → falls back to `service.base_price`, supports both Discount % AND Final ₹ inputs ("last-edited wins"), pro-rata discount allocation per line, recomputes incentive payouts for ALL touched barbers (current month).
+- ✅ **Revenue attribution helpers**: `attribute_token_revenue_to_barbers(token)` and `attribute_token_revenue_to_services(token)` — used by incentives + reports. Legacy tokens (no assignments) credit full `total_amount` to the main `barber_id`.
+- ✅ **Incentive engine** (`_get_barber_actual_sales`): now sums per-barber line shares across completed tokens in the month. Reads the OR-matched query on `barber_id` plus `service_assignments.barber_id`.
+- ✅ **Reports updated to be split-aware**: `/api/analytics/barber-wise-sales` and `/api/analytics/service-wise-sales` use the new helpers. Legacy tokens still resolve correctly.
+- ✅ **Frontend Modify dialog** (`EnhancedSalonDashboard.js`): 2-tab UI (Pick services / Barber assignment). Per-service barber dropdowns with live per-barber prices (testids `assignment-barber-{sid}`, `assignment-price-{sid}`, `assignment-name-{sid}`). Main-barber dropdown overwrites all line barbers; individual line edits afterward are independent. Discount % + Final ₹ inputs sync bidirectionally. "Any available" removed from this screen. Save is disabled while subtotal is 0 (defensive against data-loss).
+- ✅ **Tests**: `/app/backend/tests/test_module7_modify_booking.py` — 11 passed / 1 soft-skipped. Frontend Playwright via testing_agent_v3_fork iteration 23 — 100% green (both iteration-22 UI bugs resolved).
+
 ### May 31, 2026 — Module 6: Services Menu QR + Frictionless Booking ✅
 - ✅ **Removed forced-login walls** on `HomePage`, `SalonSelectionPage`, `SalonMainPage`, `ServicesBrowser`, and `SinglePageBooking`. Customers can now browse salons, pick services, and reach the booking page without an account.
 - ✅ **`BookingIntentContext`** (`/app/frontend/src/contexts/BookingIntentContext.js`) — sessionStorage with 30-min TTL preserves the cart (salon, branch, services, barber, date, shift) across the sign-in detour. Hydrated on `SinglePageBooking` mount; cleared after a successful booking.
