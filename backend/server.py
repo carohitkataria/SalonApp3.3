@@ -434,6 +434,10 @@ class User(BaseModel):
     pincode: Optional[str] = None
     is_otp_verified: Optional[bool] = False  # OTP verification status
     otp_verified_at: Optional[str] = None  # When OTP was verified
+    # Whether the user has set a password for password-based login. We never
+    # return the hash; just a boolean flag so the frontend can show the
+    # right CTA ("Set password" vs "Reset password").
+    has_password: Optional[bool] = False
     created_at: str
 
 
@@ -443,6 +447,38 @@ class CustomerOTPRequest(BaseModel):
 class CustomerOTPVerify(BaseModel):
     phone: str
     otp: str
+
+
+# ============ Module 8 — Customer password-login & long-lived sessions ============
+
+class CustomerCheckAccountIn(BaseModel):
+    phone: str
+
+
+class CustomerSendOtpV2In(BaseModel):
+    phone: str
+    # Used purely for telemetry + UI hints; backend behaviour is the same for
+    # all three purposes. Accepted: "login", "set_password", "reset_password".
+    purpose: Optional[str] = "login"
+
+
+class CustomerVerifyOtpV2In(BaseModel):
+    phone: str
+    otp: str
+    purpose: Optional[str] = "login"
+
+
+class CustomerLoginPasswordIn(BaseModel):
+    phone: str
+    password: str
+
+
+class CustomerSetPasswordIn(BaseModel):
+    phone: str
+    password: str
+    # JWT issued by /verify-otp when purpose ∈ {set_password, reset_password}.
+    # Short-lived (10 min) — proves the caller just verified an OTP.
+    password_reset_token: str
 
 
 class UserProfileUpdate(BaseModel):
@@ -5448,6 +5484,311 @@ async def get_customer_otp_status(phone: str):
         "is_otp_verified": user.get("is_otp_verified", False),
         "otp_verified_at": user.get("otp_verified_at")
     }
+
+
+# ============ Module 8 — Customer Auth (OTP + Password) ============
+# Long-lived session tokens + password-based login + set/reset password via OTP.
+
+# Customer JWT TTL — 365 days so the app feels "never logged out" unless the
+# customer explicitly logs out. (Frontend stores the token in localStorage.)
+CUSTOMER_JWT_TTL_DAYS = 365
+# Short-lived JWT issued after OTP verification when purpose ∈ {set_password,
+# reset_password}. The frontend MUST include it in the next set-password call.
+PASSWORD_RESET_TOKEN_TTL_MIN = 10
+
+
+def _normalize_phone_e164(raw: str) -> str:
+    """Normalise to +91XXXXXXXXXX. Raises 400 on bad input."""
+    if not raw:
+        raise HTTPException(status_code=400, detail="Phone number is required")
+    p = raw.strip().replace(" ", "").replace("-", "")
+    if not p.startswith("+91"):
+        digits = p.lstrip("+")
+        if digits.startswith("91") and len(digits) == 12:
+            p = "+" + digits
+        elif digits.startswith("0") and len(digits) == 11:
+            p = "+91" + digits[1:]
+        elif len(digits) == 10:
+            p = "+91" + digits
+        else:
+            raise HTTPException(status_code=400, detail="Invalid phone number format")
+    if len(p) != 13 or not p[1:].isdigit():
+        raise HTTPException(status_code=400, detail="Invalid phone number format")
+    return p
+
+
+def _issue_customer_session_token(user: dict) -> str:
+    """Mint a long-lived customer JWT. The frontend treats this as the session."""
+    now = datetime.now(timezone.utc)
+    payload = {
+        "sub": user.get("id"),
+        "phone": user.get("phone"),
+        "role": "customer",
+        "iat": int(now.timestamp()),
+        "exp": int((now + timedelta(days=CUSTOMER_JWT_TTL_DAYS)).timestamp()),
+    }
+    return jwt.encode(payload, SECRET_KEY, algorithm=ALGORITHM)
+
+
+def _issue_password_reset_token(phone: str) -> str:
+    """Short-lived JWT proving the caller just verified an OTP for password ops."""
+    now = datetime.now(timezone.utc)
+    payload = {
+        "phone": phone,
+        "scope": "password_reset",
+        "iat": int(now.timestamp()),
+        "exp": int((now + timedelta(minutes=PASSWORD_RESET_TOKEN_TTL_MIN)).timestamp()),
+    }
+    return jwt.encode(payload, SECRET_KEY, algorithm=ALGORITHM)
+
+
+def _verify_password_reset_token(token: str, expected_phone: str) -> None:
+    """Raise HTTPException 401 if the token is invalid / wrong phone / expired."""
+    try:
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+    except jwt.ExpiredSignatureError:
+        raise HTTPException(status_code=401, detail="Reset link expired. Please request a new OTP.")
+    except jwt.InvalidTokenError:
+        raise HTTPException(status_code=401, detail="Invalid reset token")
+    if payload.get("scope") != "password_reset":
+        raise HTTPException(status_code=401, detail="Invalid reset token scope")
+    if payload.get("phone") != expected_phone:
+        raise HTTPException(status_code=401, detail="Reset token does not match this phone")
+
+
+def _user_to_public(user: dict) -> dict:
+    """Strip sensitive fields and add the derived `has_password` flag."""
+    out = {k: v for k, v in user.items() if k not in ("password_hash", "_id")}
+    out["has_password"] = bool(user.get("password_hash"))
+    return out
+
+
+async def _ensure_user_for_otp(phone: str) -> dict:
+    """Get-or-create a lightweight user document so first-contact OTP works."""
+    user = await db.users.find_one({"phone": phone}, {"_id": 0})
+    if user:
+        return user
+    new_user = {
+        "id": str(uuid.uuid4()),
+        "name": "",
+        "phone": phone,
+        "is_otp_verified": False,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    }
+    await db.users.insert_one(new_user)
+    return new_user
+
+
+@api_router.post("/auth/customer/check-account")
+async def auth_customer_check_account(body: CustomerCheckAccountIn):
+    """Tells the frontend which CTA to show on the password tab — set or reset."""
+    phone = _normalize_phone_e164(body.phone)
+    user = await db.users.find_one({"phone": phone}, {"_id": 0})
+    return {
+        "phone": phone,
+        "exists": bool(user),
+        "has_password": bool(user and user.get("password_hash")),
+        "is_otp_verified": bool(user and user.get("is_otp_verified")),
+    }
+
+
+@api_router.post("/auth/customer/send-otp")
+async def auth_customer_send_otp(body: CustomerSendOtpV2In):
+    """Send a WhatsApp OTP for customer login, set-password, or reset-password.
+
+    Auto-creates the user on first-contact login OTP so first-time signup works
+    on the same screen.
+    """
+    phone = _normalize_phone_e164(body.phone)
+    purpose = (body.purpose or "login").lower()
+    if purpose not in {"login", "set_password", "reset_password"}:
+        raise HTTPException(status_code=400, detail="Invalid purpose")
+
+    user = await db.users.find_one({"phone": phone}, {"_id": 0})
+    if purpose in {"set_password", "reset_password"} and not user:
+        raise HTTPException(status_code=404, detail="No account found for this phone")
+    if purpose == "reset_password" and not (user and user.get("password_hash")):
+        raise HTTPException(status_code=400, detail="No password set. Use 'set password' instead.")
+    if purpose == "login" and not user:
+        await _ensure_user_for_otp(phone)
+
+    otp = generate_otp()
+    logger.info(f"[auth/customer/send-otp] phone={phone} purpose={purpose} otp={otp}")
+    await db.customer_otp.delete_many({"phone": phone})
+    await db.customer_otp.insert_one({
+        "phone": phone,
+        "otp": otp,
+        "purpose": purpose,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "expires_at": (datetime.now(timezone.utc) + timedelta(minutes=10)).isoformat(),
+    })
+
+    whatsapp_result = await send_whatsapp_otp(phone, otp)
+    status_str = whatsapp_result.get("status")
+    resp = {
+        "success": True,
+        "phone": phone,
+        "purpose": purpose,
+        "delivery_status": status_str,
+    }
+    if status_str == "mock":
+        resp["otp"] = otp
+        resp["note"] = "⚠️ Twilio not configured - OTP shown for testing"
+    elif status_str == "failed":
+        resp["otp"] = otp
+        resp["note"] = "OTP delivery failed. Please try again."
+        resp["error"] = whatsapp_result.get("error")
+    else:
+        resp["note"] = "OTP sent to your WhatsApp. Please check your messages."
+    return resp
+
+
+@api_router.post("/auth/customer/verify-otp")
+async def auth_customer_verify_otp(body: CustomerVerifyOtpV2In):
+    """Verify a WhatsApp OTP. Depending on `purpose`:
+      • login            → issue a long-lived session token + return user
+      • set_password     → issue a short-lived password_reset_token
+      • reset_password   → issue a short-lived password_reset_token
+    """
+    phone = _normalize_phone_e164(body.phone)
+    purpose = (body.purpose or "login").lower()
+    if purpose not in {"login", "set_password", "reset_password"}:
+        raise HTTPException(status_code=400, detail="Invalid purpose")
+
+    stored = await db.customer_otp.find_one({"phone": phone})
+    if not stored:
+        raise HTTPException(status_code=400, detail="No OTP found. Please request a new OTP.")
+    try:
+        expires_at = datetime.fromisoformat(stored["expires_at"].replace("Z", "+00:00"))
+    except Exception:
+        expires_at = datetime.now(timezone.utc) - timedelta(seconds=1)
+    if datetime.now(timezone.utc) > expires_at:
+        await db.customer_otp.delete_many({"phone": phone})
+        raise HTTPException(status_code=400, detail="OTP has expired. Please request a new OTP.")
+    if stored["otp"] != (body.otp or "").strip():
+        raise HTTPException(status_code=400, detail="Invalid OTP")
+
+    await db.customer_otp.delete_many({"phone": phone})
+
+    user = await db.users.find_one({"phone": phone}, {"_id": 0})
+    if not user:
+        user = await _ensure_user_for_otp(phone)
+
+    await db.users.update_one(
+        {"phone": phone},
+        {"$set": {
+            "is_otp_verified": True,
+            "otp_verified_at": datetime.now(timezone.utc).isoformat(),
+        }},
+    )
+    user["is_otp_verified"] = True
+    user["otp_verified_at"] = datetime.now(timezone.utc).isoformat()
+
+    if purpose == "login":
+        token = _issue_customer_session_token(user)
+        logger.info(f"[auth/customer/verify-otp] login OK phone={phone} user={user.get('id')}")
+        return {
+            "success": True,
+            "purpose": "login",
+            "access_token": token,
+            "token_type": "bearer",
+            "user": _user_to_public(user),
+            "needs_profile": not (user.get("name") or "").strip(),
+        }
+
+    reset_token = _issue_password_reset_token(phone)
+    return {
+        "success": True,
+        "purpose": purpose,
+        "password_reset_token": reset_token,
+        "expires_in_minutes": PASSWORD_RESET_TOKEN_TTL_MIN,
+    }
+
+
+@api_router.post("/auth/customer/set-password")
+async def auth_customer_set_password(body: CustomerSetPasswordIn):
+    """Set (or reset) a customer's login password. Requires the short-lived
+    `password_reset_token` returned by /auth/customer/verify-otp.
+    """
+    phone = _normalize_phone_e164(body.phone)
+    pw = (body.password or "").strip()
+    if len(pw) < 6:
+        raise HTTPException(status_code=400, detail="Password must be at least 6 characters")
+    if len(pw) > 128:
+        raise HTTPException(status_code=400, detail="Password is too long")
+
+    _verify_password_reset_token(body.password_reset_token, phone)
+
+    user = await db.users.find_one({"phone": phone}, {"_id": 0})
+    if not user:
+        raise HTTPException(status_code=404, detail="No account found for this phone")
+
+    password_hash = pwd_context.hash(pw)
+    await db.users.update_one(
+        {"phone": phone},
+        {"$set": {
+            "password_hash": password_hash,
+            "password_set_at": datetime.now(timezone.utc).isoformat(),
+            "is_otp_verified": True,
+        }},
+    )
+    user["password_hash"] = password_hash
+    user["is_otp_verified"] = True
+
+    session_token = _issue_customer_session_token(user)
+    return {
+        "success": True,
+        "access_token": session_token,
+        "token_type": "bearer",
+        "user": _user_to_public(user),
+    }
+
+
+@api_router.post("/auth/customer/login-password")
+async def auth_customer_login_password(body: CustomerLoginPasswordIn):
+    """Customer login with phone + password. Issues a long-lived session JWT."""
+    phone = _normalize_phone_e164(body.phone)
+    pw = (body.password or "").strip()
+    if not pw:
+        raise HTTPException(status_code=400, detail="Password is required")
+
+    user = await db.users.find_one({"phone": phone}, {"_id": 0})
+    if not user or not user.get("password_hash"):
+        raise HTTPException(status_code=401, detail="Invalid phone or password")
+    if not pwd_context.verify(pw, user["password_hash"]):
+        raise HTTPException(status_code=401, detail="Invalid phone or password")
+
+    token = _issue_customer_session_token(user)
+    logger.info(f"[auth/customer/login-password] OK phone={phone}")
+    return {
+        "success": True,
+        "access_token": token,
+        "token_type": "bearer",
+        "user": _user_to_public(user),
+    }
+
+
+async def get_current_customer(
+    credentials: HTTPAuthorizationCredentials = Depends(security),
+) -> dict:
+    """Bearer-token dependency that resolves the customer User document."""
+    payload = verify_token(credentials.credentials)
+    if not payload or payload.get("role") != "customer":
+        raise HTTPException(status_code=401, detail="Invalid customer session")
+    user = await db.users.find_one({"id": payload.get("sub")}, {"_id": 0})
+    if not user:
+        raise HTTPException(status_code=401, detail="Customer not found")
+    return user
+
+
+@api_router.get("/auth/customer/me")
+async def auth_customer_me(user=Depends(get_current_customer)):
+    """Returns the currently-logged-in customer. Frontend calls this on boot
+    (with the localStorage token) to rehydrate the session."""
+    return {"user": _user_to_public(user)}
+
+
+
 
 @api_router.get("/salons/{salon_id}/customers")
 async def get_salon_customers(salon_id: str, branch_id: Optional[str] = None, current_user=Depends(get_current_salon_user)):
