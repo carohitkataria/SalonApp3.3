@@ -10,7 +10,7 @@ import os
 from datetime import datetime, timedelta, timezone
 
 # Read backend URL from frontend/.env
-BACKEND_URL = "https://phase-completion-7.preview.emergentagent.com/api"
+BACKEND_URL = "https://leave-tracker-test.preview.emergentagent.com/api"
 
 # Platform admin mobile from backend/.env
 PLATFORM_OWNER_MOBILE = "7503070727"
