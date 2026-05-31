@@ -3432,18 +3432,210 @@ frontend:
 
 metadata:
   created_by: "main_agent"
-  version: "phase17"
-  test_sequence: 4
+  version: "module2_module3"
+  test_sequence: 5
   run_ui: false
 
 test_plan:
   current_focus:
-    - "Phase 15 — Customer in-salon Shop (products + memberships unified)"
-    - "Phase 16 — Notifications (stock-back, low-stock, customer order lifecycle)"
-    - "Phase 17 — Polish: manual restock, partial fulfilment, refunds"
+    - "Module 2 — Leave Tracker: leave-types-config CRUD"
+    - "Module 2 — Leave Tracker: balance + ledger + manual adjust"
+    - "Module 2 — Leave Tracker: leave-records CRUD + balance side-effects"
+    - "Module 2 — Leave Tracker: auth + cross-salon isolation"
+    - "Module 3 — Staff Settings Consolidation backend touchpoints (attendance_rules patch)"
   stuck_tasks: []
   test_all: false
   test_priority: "high_first"
+
+# =================================================================
+# Module 2 — Leave Tracker & Leave Settings (May 30, 2026)
+# =================================================================
+
+backend:
+  - task: "Module 2 — Leave Types Config CRUD"
+    implemented: true
+    working: "NA"
+    file: "/app/backend/leave_tracker.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: true
+    status_history:
+        - working: "NA"
+          agent: "main"
+          comment: |
+            Endpoints under /api/salons/{salon_id}/leave-types-config:
+              GET    — list (auto-seeds CL/SL/PL/UL if none exist)
+              POST   — create new type
+              PUT /{cfg_id}  — partial update (display_name, accrual,
+                              carry_forward_rule, lapse_rule, etc.)
+              DELETE /{cfg_id}  — soft delete (is_active=false)
+
+            Validation:
+              * code must be alphanumeric upper-case (server uppercases).
+              * carry_forward_rule.enabled and lapse_rule.enabled
+                are mutually exclusive — 400 if both true.
+              * Duplicate code in same salon → 409.
+              * applies_to ∈ {"all","permanent_only"}.
+
+            Default seed: CL (acc 1, max 30, cf 10), SL (acc 1, max 12, lapse 100%),
+              PL (acc 1.25, cf 30, permanent_only), UL (acc 0, neg allowed).
+
+  - task: "Module 2 — Leave Balance + Ledger + Manual Adjust"
+    implemented: true
+    working: "NA"
+    file: "/app/backend/leave_tracker.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: true
+    status_history:
+        - working: "NA"
+          agent: "main"
+          comment: |
+            Endpoints:
+              GET  /api/salons/{salon_id}/barbers/{barber_id}/leave-balance
+                   ?financial_year=YYYY-YY  (defaults to current Indian FY)
+                   Returns one row per active leave-type config, auto-creating
+                   missing leave_balances docs.
+              GET  .../leave-balance/ledger
+                   ?financial_year=&leave_type_code=&page=&page_size=
+                   Returns paginated leave_balance_movements (newest first).
+              POST .../leave-balance/adjust
+                   Body: {leave_type_code, qty_delta, reason, financial_year?}
+                   Applies a manual_adjustment movement.  Respects
+                   allow_negative_balance and max_balance_cap on the config.
+
+            Behaviour to verify:
+              * Cap clamp: if balance would exceed max_balance_cap and qty_delta>0,
+                effective_delta is reduced to (cap - current); ledger row reflects
+                the clamped value.
+              * Negative guard: if allow_negative_balance=false and balance would
+                go below 0, effective_delta is clamped to -current.
+              * Ledger pagination + filtering by leave_type_code works.
+
+  - task: "Module 2 — Leave Records CRUD with Balance Side-effects"
+    implemented: true
+    working: "NA"
+    file: "/app/backend/leave_tracker.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: true
+    status_history:
+        - working: "NA"
+          agent: "main"
+          comment: |
+            Endpoints:
+              POST   /api/salons/{salon_id}/leave-records
+                     Body: {barber_id, leave_type_code, date, half_day, note?}
+                     Debits balance (-1 or -0.5 if half_day).  Returns 409 on
+                     duplicate active record for same (barber, date).
+                     Returns 409 if balance < debit and allow_negative=false.
+              PUT    .../leave-records/{record_id}
+                     Updates leave_type_code / half_day / note.  Restores the
+                     old type's balance and debits the new type's balance.
+                     Rolls back atomically on insufficient new-type balance.
+              DELETE .../leave-records/{record_id}
+                     Soft-cancels (status='cancelled') and restores balance.
+              GET    .../leave-records?barber_id=&from=&to=&type=
+                     Lists active records (status != 'cancelled').
+
+            Side effects:
+              * Each balance change inserts a leave_balance_movements row.
+              * `barbers.leave_dates` array is kept in sync (back-compat with
+                pre-Module-2 attendance logic that reads it).
+
+  - task: "Module 2 — Auth & Cross-Salon Isolation"
+    implemented: true
+    working: "NA"
+    file: "/app/backend/leave_tracker.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: true
+    status_history:
+        - working: "NA"
+          agent: "main"
+          comment: |
+            All leave-tracker endpoints require Bearer token via
+            `get_current_salon_user` and call `_assert_salon_owns(user, salon_id)`.
+            Expected:
+              * No token → 401.
+              * Valid token but salon_id mismatch → 403.
+
+  - task: "Module 3 — Staff Settings: attendance_rules PATCH on /api/salons/{id}"
+    implemented: true
+    working: "NA"
+    file: "/app/backend/server.py, /app/frontend/src/components/staff/StaffSettingsContent.js"
+    stuck_count: 0
+    priority: "medium"
+    needs_retesting: true
+    status_history:
+        - working: "NA"
+          agent: "main"
+          comment: |
+            Module 3 consolidates Incentive Rules, Leave Configuration,
+            Attendance Rules and Holiday Calendar into a reusable
+            `StaffSettingsContent` component shared between the standalone
+            page and the inline embed in Salon Settings → Staff.
+
+            Backend changes are minimal — the only direct write path the new
+            UI uses is `PATCH /api/salons/{salon_id}` with body
+            `{ attendance_rules: { geofence_radius_m, late_mark_threshold_min,
+            required_hours_per_day, auto_absent_cutoff_hour } }`.  Verify it
+            persists, requires salon auth, and `GET /api/salons/{salon_id}`
+            returns the saved rules.
+            Incentive Rules sub-tab → existing EmployeeRewardPlan endpoints.
+            Leave Configuration sub-tab → Module 2 endpoints (above).
+
+agent_communication:
+    - agent: "main"
+      message: |
+        Module 2 — Leave Tracker & Leave Settings and Module 3 — Staff Settings
+        Consolidation are ready for BACKEND-ONLY testing.
+
+        Test credentials live in /app/memory/test_credentials.md:
+          • POST /api/salon/users/login
+          • identifier: +917503070727
+          • password: salon123
+          • returns access_token + salon_id: a6f10c9e-f0e0-4128-8246-00282188c70b
+
+        Module 2 endpoint surface (all under /api/salons/{salon_id}/...):
+          GET  /leave-types-config            (auto-seeds CL/SL/PL/UL)
+          POST /leave-types-config
+          PUT  /leave-types-config/{id}
+          DELETE /leave-types-config/{id}     (soft delete)
+          GET  /barbers/{barber_id}/leave-balance
+          GET  /barbers/{barber_id}/leave-balance/ledger
+          POST /barbers/{barber_id}/leave-balance/adjust
+          GET  /leave-records
+          POST /leave-records
+          PUT  /leave-records/{id}
+          DELETE /leave-records/{id}
+
+        Module 3 backend touch-point:
+          PATCH /api/salons/{salon_id}  with {attendance_rules: {...}}.
+          GET /api/salons/{salon_id} must return the persisted attendance_rules.
+
+        Please verify:
+          1. Default leave-type seed on first GET (codes CL,SL,PL,UL present).
+          2. Mutual-exclusion between carry_forward_rule.enabled and
+             lapse_rule.enabled (400 if both true) — on POST and on PUT.
+          3. Duplicate code 409 on POST.
+          4. Manual balance adjust:
+             - cap clamp (max_balance_cap)
+             - negative guard (allow_negative_balance=false)
+             - ledger row inserted with effective_delta.
+          5. Leave record create:
+             - debits balance by 1 (or 0.5 if half_day)
+             - duplicate (barber, date) → 409
+             - insufficient balance → 409 when allow_negative=false
+             - barbers.leave_dates synced.
+          6. Leave record PUT — change type rolls old balance up and new
+             balance down; atomic rollback if new balance insufficient.
+          7. Leave record DELETE — soft-cancels and restores balance.
+          8. Ledger pagination + filtering.
+          9. Auth: 401 without token, 403 on wrong salon_id.
+          10. Module 3 attendance_rules PATCH + GET round trip.
+
+        DO NOT run frontend tests — user will request separately.
 
 agent_communication:
     - agent: "main"

@@ -1,0 +1,70 @@
+{
+  "summary": "Backend testing for Module 2 (Leave Tracker & Leave Settings) and Module 3 (Staff Settings — attendance_rules). 20 pytest cases executed against the public REACT_APP_BACKEND_URL using salon-admin JWT. Module 2: 17/18 pass; 1 real bug in leave-record PUT rollback path (stale balance dict causes balance drift on insufficient-target rollback). Module 3: 0/2 pass — PATCH endpoint not implemented (405) AND existing PUT /salons/{id} does not accept attendance_rules (field missing on SalonUpdate model) and also rejects salon_admin tokens (uses legacy get_current_salon).",
+  "backend_issues": {
+    "critical": [
+      {
+        "endpoint": "PUT /api/salons/{salon_id}/leave-records/{record_id}",
+        "issue": "Rollback after insufficient target-type balance leaves the OLD type balance 1 day LOWER than before the PUT. Reproduces 100%: create CL record (CL bal X→X-1), PUT change to SL (SL=0, insufficient → returns 409 as expected), CL balance now X-2 instead of staying X-1. RCA: in update_leave_record() the rollback at lines 928-938 passes the stale `old_balance` dict captured at line 902 (current_balance = pre-restore value). _apply_balance_change reads `balance.get('current_balance')` from that stale dict and computes next_balance = stale_value - 1.0, effectively double-debiting. Fix: capture the return value of the restore call (`old_balance = await _apply_balance_change(...)` on line 907) and pass THAT dict to the rollback call on line 928, OR re-read balance from DB before rollback.",
+        "priority": "HIGH"
+      },
+      {
+        "endpoint": "PATCH /api/salons/{salon_id}",
+        "issue": "Returns 405 Method Not Allowed. Backend only defines @api_router.put('/salons/{salon_id}') (server.py:3077). The frontend caller StaffSettingsContent.js:156 uses axios.patch — so saving attendance_rules from Staff Settings UI will always fail. Fix: either add @api_router.patch('/salons/{salon_id}') alias, or change the frontend to PUT.",
+        "priority": "CRITICAL"
+      },
+      {
+        "endpoint": "PUT /api/salons/{salon_id} (attendance_rules persistence)",
+        "issue": "Two compounding bugs: (a) Returns 401 Invalid authentication credentials when called with the salon-admin (multi-user) token because update_salon depends on get_current_salon which only accepts the legacy role='salon' (server.py:766-775, 3078). The newer /api/salon/users/login issues role='salon_admin' tokens that this endpoint refuses. (b) Even if auth passed, SalonUpdate Pydantic model (server.py:104-122) has NO `attendance_rules` field, so the payload would be silently dropped at line 3085 (`update_data = {k: v for k, v in salon.model_dump().items() if v is not None}`). Fix: switch update_salon to Depends(get_current_salon_admin) + add `_check_salon_admin_for_salon(current_user, salon_id)`, and add `attendance_rules: Optional[Dict[str, Any]] = None` to SalonUpdate (or a typed AttendanceRules submodel).",
+        "priority": "CRITICAL"
+      }
+    ],
+    "minor": [
+      {
+        "endpoint": "POST /api/salons/{salon_id}/leave-types-config (mutual exclusion)",
+        "issue": "Mutual-exclusion violation on create returns 422 (Pydantic validator) instead of the 400 mentioned in the spec. Test currently accepts either (in/422). Consider catching the ValueError in the route and re-raising as HTTPException(400) for API consistency with the PUT path which DOES return 400."
+      }
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [
+      {
+        "flow": "Staff Settings → Attendance Rules → Save",
+        "issue": "Frontend uses axios.patch but backend has no PATCH route — save will always 405. See StaffSettingsContent.js line 156.",
+        "affected_selectors": []
+      }
+    ],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_leave_tracker_module2.py",
+    "/app/test_reports/pytest/leave_tracker_module2.xml"
+  ],
+  "action_items": [
+    "Fix update_leave_record() rollback at /app/backend/leave_tracker.py lines 928-938 to use the post-restore balance dict (return value of line 907) instead of the stale pre-restore dict.",
+    "Add PATCH method support for /api/salons/{salon_id} OR change frontend StaffSettingsContent.js to use PUT.",
+    "Add `attendance_rules` field to SalonUpdate model (server.py:104) so the PUT endpoint actually persists it.",
+    "Change update_salon dependency from get_current_salon (legacy-only) to a dependency that also accepts salon_admin tokens (e.g. get_current_salon_admin + salon ownership check).",
+    "Make leave-types-config CREATE return 400 for mutual-exclusion error (currently 422) to match the PUT behaviour and spec."
+  ],
+  "critical_code_review_comments": [
+    "leave_tracker.py update_leave_record() — the in-memory `old_balance` dict is reused across mutate calls; this is the classic stale-read bug. Always re-fetch or use return values after a write.",
+    "server.py SalonUpdate is a flat field list — every new salon-level setting (operational_hours, attendance_rules, notification_settings, financials.settings, etc.) requires either explicit fields or a generic `settings`/`extra` Dict[str, Any]. Currently attendance_rules silently drops.",
+    "server.py /api/salons/{salon_id} PUT still uses the legacy get_current_salon dependency; almost every other salon-scoped mutation has migrated to get_current_salon_user / get_current_salon_admin. This is an auth-coverage gap.",
+    "leave_tracker.py — POST leave-types-config raises a Pydantic ValueError for mutual exclusion (auto-422) while PUT explicitly raises HTTPException(400). Inconsistent."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_leave_tracker_module2.py (NEW)"
+  ],
+  "success_rate": {"backend": "85% (17/20 tests pass)", "frontend": "not tested"},
+  "test_credentials": "salon-admin via POST /api/salon/users/login {identifier:'+917503070727', password:'salon123'} → access_token; salon_id=a6f10c9e-f0e0-4128-8246-00282188c70b. Barber selected dynamically from GET /api/salons/{id}/barbers.",
+  "seed_data_creation": "Test-only mutations: small CL/SL/PL adjustments and short-lived leave records on future dates (today+200..208). Each test cleans up records it creates. The cumulative adjustments on barber leave balances ARE intentionally preserved (no negative side-effects since allow_negative=false clamps).",
+  "retest_needed": true,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Reusable test suite at /app/backend/tests/test_leave_tracker_module2.py. To re-run after fixes: `pytest /app/backend/tests/test_leave_tracker_module2.py -v`. The 3 failing tests are TestLeaveRecords::test_update_type_rollback_on_insufficient, TestAttendanceRules::test_patch_attendance_rules, TestAttendanceRules::test_put_persists_attendance_rules. All assertions and RCA in this report. Frontend testing was intentionally skipped per request.",
+  "rca_of_the_issues": {
+    "leave_record_put_rollback": "In /app/backend/leave_tracker.py update_leave_record(), the variable `old_balance` is read once before the restore (+old_debit) call. The restore mutates the DB but the local `old_balance` dict still holds the pre-restore current_balance. When the new-type balance is insufficient, the rollback call at line 928 passes the SAME stale dict to _apply_balance_change, which computes next_balance = stale_current_balance + (-old_debit). Net effect: the restore is NOT undone (DB stays at restored value), then the rollback under-shoots by old_debit, so the OLD type balance ends up old_debit BELOW the pre-PUT value. Reproduction: ensure CL has balance >=1 and SL=0; create CL leave-record on a future date; PUT leave_type_code=SL. Expected: 409 + CL balance unchanged. Actual: 409 + CL balance is 1 day lower than pre-PUT.",
+    "module3_attendance_rules": "Three separate gaps: (1) Route mismatch — frontend PATCH vs backend PUT. (2) Auth mismatch — update_salon uses legacy get_current_salon which only accepts role='salon' tokens, but the salon-admin login returns role='salon_admin'. (3) Schema gap — SalonUpdate Pydantic model has no attendance_rules field, so even a successful PUT silently drops the payload.",
+    "mitigation": "See action_items. All three Module 3 fixes are in server.py around lines 104-122 (SalonUpdate model) and 3077-3095 (update_salon route). Leave-record fix is localised to leave_tracker.py lines 928-938."
+  }
+}
