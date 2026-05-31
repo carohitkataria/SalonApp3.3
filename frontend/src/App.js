@@ -54,7 +54,6 @@ import MarketplacePage from '@/pages/salon/MarketplacePage';
 import CheckoutPage from '@/pages/salon/CheckoutPage';
 import SalonOrdersPage from '@/pages/salon/SalonOrdersPage';
 import SalonOrderDetailPage from '@/pages/salon/SalonOrderDetailPage';
-import SalonInventoryPage from '@/pages/salon/SalonInventoryPage';
 import SalonCustomerOrdersPage from '@/pages/salon/SalonCustomerOrdersPage';
 import StaffSettingsPage from '@/pages/salon/StaffSettingsPage';
 
@@ -107,7 +106,7 @@ function App() {
                   <Route path="/salon/checkout" element={<CheckoutPage />} />
                   <Route path="/salon/orders" element={<SalonOrdersPage />} />
                   <Route path="/salon/orders/:orderId" element={<SalonOrderDetailPage />} />
-                  <Route path="/salon/inventory" element={<SalonInventoryPage />} />
+                  <Route path="/salon/inventory" element={<Navigate to="/salon/dashboard?tab=inventory" replace />} />
                   <Route path="/salon/customer-orders" element={<SalonCustomerOrdersPage />} />
                   <Route path="/salon/staff/settings" element={<StaffSettingsPage />} />
 

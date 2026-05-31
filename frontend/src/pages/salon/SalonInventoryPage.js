@@ -52,6 +52,16 @@ const MOVEMENT_TYPE_LABELS = {
 };
 
 export default function SalonInventoryPage() {
+  return <InventoryView />;
+}
+
+/**
+ * The inventory UI. Rendered standalone by SalonInventoryPage (with its own
+ * page chrome) OR embedded inside the dashboard as a tab (embedded=true), in
+ * which case the page-level hamburger + back button + full-screen wrapper are
+ * omitted since the dashboard already provides them.
+ */
+export function InventoryView({ embedded = false }) {
   const navigate = useNavigate();
 
   const [tab, setTab] = useState('items');
@@ -110,13 +120,15 @@ export default function SalonInventoryPage() {
   const lowStockCount = useMemo(() => items.filter(i => i.is_low_stock).length, [items]);
 
   return (
-    <div className="min-h-screen bg-background">
-      <header className="sticky top-0 z-30 bg-background/80 backdrop-blur border-b border-border">
+    <div className={embedded ? '' : 'min-h-screen bg-background'}>
+      <header className={embedded ? 'bg-background/80 backdrop-blur border-b border-border' : 'sticky top-0 z-30 bg-background/80 backdrop-blur border-b border-border'}>
         <div className="max-w-7xl mx-auto px-4 sm:px-6 h-14 flex items-center gap-3">
-          <SalonHamburgerMenu activeId="inventory" />
-          <Button variant="ghost" size="sm" onClick={() => navigate('/admin/dashboard')} data-testid="inv-back-btn">
-            <ArrowLeft className="w-4 h-4 mr-1" /> Back
-          </Button>
+          {!embedded && <SalonHamburgerMenu activeId="inventory" />}
+          {!embedded && (
+            <Button variant="ghost" size="sm" onClick={() => navigate('/salon/dashboard')} data-testid="inv-back-btn">
+              <ArrowLeft className="w-4 h-4 mr-1" /> Back
+            </Button>
+          )}
           <div className="flex-1">
             <div className="text-sm font-bold">Inventory</div>
             <div className="text-[10px] uppercase tracking-widest text-muted-foreground/80">Keep & manage stock · Phase 14</div>

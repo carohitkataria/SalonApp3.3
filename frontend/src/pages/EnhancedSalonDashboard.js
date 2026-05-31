@@ -25,6 +25,7 @@ import EmployeeRewardPlan from '@/components/EmployeeRewardPlan';
 import SubscriptionPaywallModal from '@/components/SubscriptionPaywallModal';
 import SubscriptionBadge from '@/components/SubscriptionBadge';
 import StaffSettingsContent from '@/components/staff/StaffSettingsContent';
+import { InventoryView } from '@/pages/salon/SalonInventoryPage';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { SubscriptionProvider } from '@/contexts/SubscriptionContext';
 import { getSession, clearSession } from '@/utils/sessionManager';
@@ -54,10 +55,9 @@ export default function EnhancedSalonDashboard() {
   const { selectedBranchId } = useBranch();
   
   const [activeTab, setActiveTab] = useState(() => {
-    // URL param takes precedence, then localStorage, then 'home'
+    // URL param is the single source of truth; absent param => 'home'.
     const urlTab = new URLSearchParams(window.location.search).get('tab');
-    const storedTab = localStorage.getItem('salon_active_tab') || 'home';
-    const requestedTab = urlTab || storedTab;
+    const requestedTab = urlTab || 'home';
     
     // SECURITY: Check if requested tab is allowed for this user
     const isAdmin = (() => {
@@ -101,59 +101,64 @@ export default function EnhancedSalonDashboard() {
     return allowed ? requestedTab : 'home';
   });
 
-  // React to URL param changes so notification clicks jump to the right tab
-  // SECURITY: Also validate against permissions
+  // SINGLE DATA FLOW: URL (?tab=) -> activeTab. Every section/menu click writes
+  // the URL via setSearchParams; this effect reads it back and sets activeTab.
+  // Absent param => 'home'. Permission-gated tabs fall back to 'home'.
   useEffect(() => {
-    const tab = searchParams.get('tab');
-    if (tab && tab !== activeTab) {
-      // Build allowed tabs based on current permissions
-      const isAdmin = (() => {
-        let storedSalonUser = null;
-        try {
-          const raw = localStorage.getItem('salon_user_auth');
-          if (raw) storedSalonUser = JSON.parse(raw);
-        } catch (e) { storedSalonUser = null; }
-        if (storedSalonUser) return storedSalonUser?.role === 'admin';
-        return !!localStorage.getItem('salon_admin_token');
-      })();
-      
-      const hasPermission = (permission) => {
-        let storedSalonUser = null;
-        try {
-          const raw = localStorage.getItem('salon_user_auth');
-          if (raw) storedSalonUser = JSON.parse(raw);
-        } catch (e) { storedSalonUser = null; }
-        if (storedSalonUser?.role === 'admin') return true;
-        return !!storedSalonUser?.permissions?.[permission];
-      };
-      
-      // Check if tab is allowed for this user
-      const isBM = (() => {
-        try {
-          const raw = localStorage.getItem('salon_user_auth');
-          if (raw) return JSON.parse(raw)?.role === 'branch_manager';
-        } catch (e) {}
-        return false;
-      })();
-      const restrictedTabs = {
-        'staff': isAdmin || isBM,
-        'financials': isAdmin || isBM || hasPermission('can_access_financials'),
-        'analytics': isAdmin || isBM || hasPermission('can_access_analytics'),
-        'salon': isAdmin || hasPermission('can_edit_salon'),
-        'branches': isAdmin || isBM
-      };
-      
-      const allowed = restrictedTabs[tab] ?? true;
-      if (allowed) {
-        setActiveTab(tab);
-      } else {
-        // Redirect to home if not allowed
-        setActiveTab('home');
-        try { localStorage.setItem('salon_active_tab', 'home'); } catch (e) {}
-      }
-    }
+    const tab = searchParams.get('tab') || 'home';
+
+    const isAdmin = (() => {
+      let storedSalonUser = null;
+      try {
+        const raw = localStorage.getItem('salon_user_auth');
+        if (raw) storedSalonUser = JSON.parse(raw);
+      } catch (e) { storedSalonUser = null; }
+      if (storedSalonUser) return storedSalonUser?.role === 'admin';
+      return !!localStorage.getItem('salon_admin_token');
+    })();
+
+    const hasPermission = (permission) => {
+      let storedSalonUser = null;
+      try {
+        const raw = localStorage.getItem('salon_user_auth');
+        if (raw) storedSalonUser = JSON.parse(raw);
+      } catch (e) { storedSalonUser = null; }
+      if (storedSalonUser?.role === 'admin') return true;
+      return !!storedSalonUser?.permissions?.[permission];
+    };
+
+    const isBM = (() => {
+      try {
+        const raw = localStorage.getItem('salon_user_auth');
+        if (raw) return JSON.parse(raw)?.role === 'branch_manager';
+      } catch (e) {}
+      return false;
+    })();
+
+    const restrictedTabs = {
+      'staff': isAdmin || isBM,
+      'financials': isAdmin || isBM || hasPermission('can_access_financials'),
+      'analytics': isAdmin || isBM || hasPermission('can_access_analytics'),
+      'salon': isAdmin || hasPermission('can_edit_salon'),
+      'branches': isAdmin || isBM,
+      'inventory': isAdmin || isBM,
+    };
+
+    const allowed = restrictedTabs[tab] ?? true;
+    const resolved = allowed ? tab : 'home';
+    setActiveTab((prev) => (prev === resolved ? prev : resolved));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchParams]);
+
+  // Navigate to a dashboard section by writing the URL. Home clears the param
+  // so the bare /salon/dashboard URL resolves to Home.
+  const goToTab = (id) => {
+    if (!id || id === 'home') {
+      setSearchParams({});
+    } else {
+      setSearchParams({ tab: id });
+    }
+  };
   const [salonId, setSalonId] = useState(null);
   const [salon, setSalon] = useState(null);
   const [barbers, setBarbers] = useState([]);
@@ -322,14 +327,13 @@ export default function EnhancedSalonDashboard() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedBranchId]);
 
-  // SECURITY: Reset active tab to 'home' if it's not in the menuItems list
-  // (e.g., a staff user with a stale `salon_active_tab=financials` from a previous
-  // admin session must not silently land on a forbidden tab).
+  // SECURITY: Reset active tab to 'home' if it's not allowed for this user
+  // (e.g., a staff user landing on a forbidden tab from a stale deep-link).
+  // 'notifications' and 'branches' are valid non-menu tabs.
   useEffect(() => {
-    const allowedIds = menuItems.map(m => m.id);
+    const allowedIds = [...menuItems.map(m => m.id), 'notifications', 'branches'];
     if (activeTab && !allowedIds.includes(activeTab)) {
-      setActiveTab('home');
-      try { localStorage.setItem('salon_active_tab', 'home'); } catch (e) {}
+      goToTab('home');
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [salonUser, salonId]);
@@ -1140,7 +1144,7 @@ export default function EnhancedSalonDashboard() {
     { id: 'customer-master', label: 'Customer Master', icon: Database, show: true },
     { id: 'analytics', label: 'Analytics', icon: TrendingUp, show: checkIsAdmin() || checkIsBranchManager() || checkHasPermission('can_access_analytics') },
     { id: 'marketplace', label: 'Marketplace', icon: ShoppingBag, show: checkIsAdmin(), route: '/salon/marketplace' },
-    { id: 'inventory', label: 'Inventory', icon: Boxes, show: checkIsAdmin() || checkIsBranchManager(), route: '/salon/inventory' },
+    { id: 'inventory', label: 'Inventory', icon: Boxes, show: checkIsAdmin() || checkIsBranchManager() },
     { id: 'gallery', label: 'Gallery', icon: FileText, show: true },
     { id: 'salon', label: 'Salon Settings', icon: Settings, show: checkIsAdmin() || checkHasPermission('can_edit_salon') }
   ].filter(item => item.show);
@@ -1197,7 +1201,7 @@ export default function EnhancedSalonDashboard() {
               
               <div 
                 className="hidden sm:block p-3 bg-gradient-to-br from-gold/20 to-gold/5 rounded-xl border border-gold/30 flex-shrink-0 cursor-pointer hover:bg-gold/30 transition-colors overflow-hidden"
-                onClick={() => setActiveTab('home')}
+                onClick={() => goToTab('home')}
                 title="Go to Home"
               >
                 {salon?.logo_url ? (
@@ -1215,7 +1219,7 @@ export default function EnhancedSalonDashboard() {
               <BranchSelector compact />
               <button
                 onClick={() => {
-                  setActiveTab('notifications');
+                  goToTab('notifications');
                   if (!menuPinned) setMenuOpen(false);
                 }}
                 className="relative p-2 hover:bg-gold/10 rounded-lg transition-colors"
@@ -1307,7 +1311,7 @@ export default function EnhancedSalonDashboard() {
                             navigate(item.route);
                             return;
                           }
-                          setActiveTab(item.id);
+                          goToTab(item.id);
                           if (!menuPinned) setMenuOpen(false);
                         }}
                         className={`w-full flex items-center space-x-3 px-4 py-3 rounded-lg transition-all ${
@@ -1408,7 +1412,7 @@ export default function EnhancedSalonDashboard() {
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
               <div 
                 className="bg-card border border-border rounded-xl p-4 hover:border-gold/30 transition-colors cursor-pointer"
-                onClick={() => setActiveTab('queue')}
+                onClick={() => goToTab('queue')}
                 title="View Queue"
               >
                 <div className="flex items-center gap-2 mb-2">
@@ -1420,8 +1424,8 @@ export default function EnhancedSalonDashboard() {
               <div 
                 className="bg-card border border-border rounded-xl p-4 hover:border-gold/30 transition-colors cursor-pointer"
                 onClick={() => {
-                  setActiveTab('queue');
                   setFilter('waiting');
+                  goToTab('queue');
                 }}
                 title="View Waiting Tokens"
               >
@@ -1434,8 +1438,8 @@ export default function EnhancedSalonDashboard() {
               <div 
                 className="bg-card border border-border rounded-xl p-4 hover:border-gold/30 transition-colors cursor-pointer"
                 onClick={() => {
-                  setActiveTab('queue');
                   setFilter('completed');
+                  goToTab('queue');
                 }}
                 title="View Completed Tokens"
               >
@@ -1447,7 +1451,7 @@ export default function EnhancedSalonDashboard() {
               </div>
               <div 
                 className="bg-card border border-border rounded-xl p-4 hover:border-gold/30 transition-colors cursor-pointer"
-                onClick={() => setActiveTab('analytics')}
+                onClick={() => goToTab('analytics')}
                 title="View Analytics"
               >
                 <div className="flex items-center gap-2 mb-2">
@@ -1520,7 +1524,7 @@ export default function EnhancedSalonDashboard() {
               })()}
               {tokens.filter(t => t.status === 'waiting' || t.status === 'called').length > 5 && (
                 <button
-                  onClick={() => setActiveTab('queue')}
+                  onClick={() => goToTab('queue')}
                   className="w-full mt-3 py-2 text-xs text-gold hover:text-gold/80 font-medium transition-colors"
                 >
                   View all {tokens.filter(t => t.status === 'waiting' || t.status === 'called').length} in queue →
@@ -1539,7 +1543,7 @@ export default function EnhancedSalonDashboard() {
                   { id: 'staff', label: 'Staff', icon: Users, color: 'bg-orange-500/10 text-orange-500', desc: 'Manage barbers', show: checkIsAdmin() },
                   { id: 'financials', label: 'Financials', icon: DollarSign, color: 'bg-gold/10 text-gold', desc: 'Cash flow & reports', show: checkIsAdmin() || checkHasPermission('can_access_financials') },
                   { id: 'analytics', label: 'Analytics', icon: TrendingUp, color: 'bg-cyan-500/10 text-cyan-500', desc: 'Performance stats', show: checkIsAdmin() || checkHasPermission('can_access_analytics') },
-                  { id: 'inventory', label: 'Inventory', icon: Boxes, color: 'bg-pink-500/10 text-pink-500', desc: 'Stock & orders', route: '/salon/inventory', show: checkIsAdmin() || checkIsBranchManager() },
+                  { id: 'inventory', label: 'Inventory', icon: Boxes, color: 'bg-pink-500/10 text-pink-500', desc: 'Stock & orders', show: checkIsAdmin() || checkIsBranchManager() },
                   { id: 'salon', label: 'Settings', icon: Settings, color: 'bg-gray-500/10 text-gray-400', desc: 'Salon profile', show: checkIsAdmin() || checkHasPermission('can_edit_salon') },
                 ].filter(item => item.show).map(item => {
                   const Icon = item.icon;
@@ -1550,7 +1554,7 @@ export default function EnhancedSalonDashboard() {
                         if (item.route) {
                           navigate(item.route);
                         } else {
-                          setActiveTab(item.id);
+                          goToTab(item.id);
                           if (!menuPinned) setMenuOpen(false);
                         }
                       }}
@@ -2196,14 +2200,16 @@ export default function EnhancedSalonDashboard() {
           <BranchManagement salonId={salonId} />
         )}
 
+        {activeTab === 'inventory' && salonId && (checkIsAdmin() || checkIsBranchManager()) && (
+          <InventoryView embedded />
+        )}
+
         {activeTab === 'notifications' && salonId && (
           <SalonNotificationsPanel
             salonId={salonId}
             onCountUpdate={(count) => setUnreadNotifCount(count)}
             onNavigate={(tabId) => {
-              setActiveTab(tabId);
-              localStorage.setItem('salon_active_tab', tabId);
-              setSearchParams({ tab: tabId });
+              goToTab(tabId);
             }}
           />
         )}

@@ -21,19 +21,19 @@ import { useAuth } from '@/contexts/AuthContext';
 import ThemeToggle from '@/components/ThemeToggle';
 
 const ITEMS = [
-  { id: 'home',            label: 'Home',              icon: LayoutDashboard, route: '/admin/dashboard?tab=home' },
-  { id: 'queue',           label: 'Token Queue',        icon: Calendar,       route: '/admin/dashboard?tab=queue' },
-  { id: 'staff',           label: 'Staff Management',   icon: Users,          route: '/admin/dashboard?tab=staff' },
-  { id: 'services',        label: 'Services & Offerings', icon: Scissors,    route: '/admin/dashboard?tab=services' },
-  { id: 'financials',      label: 'Financials',         icon: DollarSign,     route: '/admin/dashboard?tab=financials' },
-  { id: 'customer-master', label: 'Customer Master',    icon: Database,       route: '/admin/dashboard?tab=customer-master' },
-  { id: 'analytics',       label: 'Analytics',          icon: TrendingUp,     route: '/admin/dashboard?tab=analytics' },
+  { id: 'home',            label: 'Home',              icon: LayoutDashboard, route: '/salon/dashboard?tab=home' },
+  { id: 'queue',           label: 'Token Queue',        icon: Calendar,       route: '/salon/dashboard?tab=queue' },
+  { id: 'staff',           label: 'Staff Management',   icon: Users,          route: '/salon/dashboard?tab=staff' },
+  { id: 'services',        label: 'Services & Offerings', icon: Scissors,    route: '/salon/dashboard?tab=services' },
+  { id: 'financials',      label: 'Financials',         icon: DollarSign,     route: '/salon/dashboard?tab=financials' },
+  { id: 'customer-master', label: 'Customer Master',    icon: Database,       route: '/salon/dashboard?tab=customer-master' },
+  { id: 'analytics',       label: 'Analytics',          icon: TrendingUp,     route: '/salon/dashboard?tab=analytics' },
   { id: 'marketplace',     label: 'Marketplace',        icon: ShoppingBag,    route: '/salon/marketplace' },
-  { id: 'inventory',       label: 'Inventory',          icon: Boxes,          route: '/salon/inventory' },
+  { id: 'inventory',       label: 'Inventory',          icon: Boxes,          route: '/salon/dashboard?tab=inventory' },
   { id: 'customer-orders', label: 'Customer Orders',    icon: Bell,           route: '/salon/customer-orders' },
   { id: 'staff-settings',  label: 'Staff Settings',    icon: Settings,       route: '/salon/staff/settings' },
-  { id: 'gallery',         label: 'Gallery',            icon: FileText,       route: '/admin/dashboard?tab=gallery' },
-  { id: 'salon',           label: 'Salon Settings',     icon: Settings,       route: '/admin/dashboard?tab=salon' },
+  { id: 'gallery',         label: 'Gallery',            icon: FileText,       route: '/salon/dashboard?tab=gallery' },
+  { id: 'salon',           label: 'Salon Settings',     icon: Settings,       route: '/salon/dashboard?tab=salon' },
 ];
 
 export default function SalonHamburgerMenu({ activeId, className = '' }) {
