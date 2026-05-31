@@ -847,7 +847,24 @@ backend:
 
 
 frontend:
-  - task: "Module 8 — Customer Auth Login Page (OTP + Password + persistent session)"
+  - task: "Fix SalonHamburgerMenu drawer clipped on Marketplace (portal to body)"
+    implemented: true
+    working: true
+    file: "/app/frontend/src/components/salon/SalonHamburgerMenu.js"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+        - working: "NA"
+          agent: "main"
+          comment: "BUG: On /salon/marketplace the shared hamburger drawer opened but was clipped to a small top-left box (see user screenshot). ROOT CAUSE: MarketplacePage header uses `sticky ... backdrop-blur`; CSS backdrop-filter creates a containing block for position:fixed descendants, so the drawer's `fixed top-0 bottom-0` was measured against the short header and clipped. FIX: render the backdrop + drawer via React createPortal(..., document.body) so they escape any transformed/filtered/overflow ancestor; bumped z-index (backdrop z-[100], drawer z-[101]). This fixes all pages using SalonHamburgerMenu (Marketplace, Customer Orders, Staff Settings, standalone Inventory). Please verify on /salon/marketplace: clicking the hamburger (data-testid='salon-hamburger-btn') opens a FULL-HEIGHT drawer (data-testid='salon-hamburger-drawer') covering top→bottom of the viewport, all nav items visible (Home, Token Queue, Staff, Services, Financials, Customer Master, Analytics, Marketplace, Inventory, Customer Orders, Staff Settings, Gallery, Salon Settings), backdrop dims the whole page, and clicking 'Inventory' navigates to /salon/dashboard?tab=inventory."
+        - working: false
+          agent: "testing"
+          comment: "❌ INITIAL TEST FAILED: Drawer did not appear in DOM after clicking hamburger button. ROOT CAUSE IDENTIFIED: AnimatePresence was wrapping createPortal from the outside, which breaks exit animation detection in framer-motion. According to framer-motion documentation (2024-2025), AnimatePresence detects when its DIRECT children are removed from the React tree, but portal boundaries break this detection. The pattern `<AnimatePresence>{open && createPortal(...)}</AnimatePresence>` does not work correctly."
+        - working: true
+          agent: "testing"
+          comment: "✅ BUG FIX VERIFIED AND WORKING: Fixed AnimatePresence/createPortal structure by moving AnimatePresence INSIDE the createPortal (correct pattern: `createPortal(<AnimatePresence>{open && <motion.div>...}</AnimatePresence>, document.body)`). COMPREHENSIVE TEST RESULTS: 1) DRAWER FULL-HEIGHT ✅ PASS - Drawer dimensions: 1080px height covering entire 1080px viewport (top: 0px, bottom: 1080px), NOT clipped to small box in top-left corner. 2) BACKDROP OVERLAY ✅ PASS - Dark backdrop (bg-black/50) visible and dims entire page behind drawer. 3) ALL NAV ITEMS VISIBLE ✅ PASS - All 13/13 nav items visible: Home, Token Queue, Staff Management, Services & Offerings, Financials, Customer Master, Analytics, Marketplace, Inventory, Customer Orders, Staff Settings, Gallery, Salon Settings. 4) LOWER ITEMS ACCESSIBLE ✅ PASS - Lower nav items (Gallery, Salon Settings) accessible via scroll within drawer. 5) NAVIGATION WORKING ✅ PASS - Clicking 'Inventory' successfully navigates to /salon/dashboard?tab=inventory. 6) CLOSE FUNCTIONALITY ✅ PASS - Drawer closes via X button and backdrop click. SCREENSHOTS: Captured 5 screenshots showing full-height drawer, all nav items visible, backdrop overlay, and successful navigation. The hamburger menu bug fix is production-ready and working correctly on /salon/marketplace."
+
     implemented: true
     working: true
     file: "/app/frontend/src/pages/UserLoginPage.js, /app/frontend/src/contexts/AuthContext.js"
