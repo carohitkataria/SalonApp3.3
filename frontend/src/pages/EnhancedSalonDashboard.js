@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useWebSocket } from '@/contexts/WebSocketContext';
 import { useAuth } from '@/contexts/AuthContext';
@@ -184,6 +184,16 @@ export default function EnhancedSalonDashboard() {
   const [selectedNewBarber, setSelectedNewBarber] = useState(null);
   const [confirmPaymentMode, setConfirmPaymentMode] = useState('cash');
   const [finalAmount, setFinalAmount] = useState(0);
+  // Module 7 — per-service barber assignment + order discount on Modify dialog
+  // Map: { [service_id]: { barber_id, price } } — `price` is the barber-specific
+  // service price loaded from /api/barbers/{id}/services.
+  const [serviceAssignments, setServiceAssignments] = useState({});
+  // Cache of barber-specific service prices: { [barber_id]: { [service_id]: price } }
+  const [barberPriceCache, setBarberPriceCache] = useState({});
+  const [orderDiscountPercent, setOrderDiscountPercent] = useState(0);
+  // Tracks which discount field the user typed into last so we can correctly
+  // recompute the other (true => discount %; false => final ₹).
+  const discountSourceRef = useRef('percent');
   
   // Payment Confirmation Dialog (for Complete action)
   const [showPaymentConfirmDialog, setShowPaymentConfirmDialog] = useState(false);
@@ -647,71 +657,153 @@ export default function EnhancedSalonDashboard() {
     }
   };
 
-  // Unified save handler for the modify dialog
+  // Module 7 — load per-barber service prices on demand
+  const ensureBarberPrices = async (barberId) => {
+    if (!barberId || barberId === 'any') return {};
+    if (barberPriceCache[barberId]) return barberPriceCache[barberId];
+    try {
+      const res = await axios.get(`${API}/barbers/${barberId}/services`);
+      const map = {};
+      (res.data || []).forEach((s) => {
+        // /api/barbers/{id}/services returns merged service info with
+        // `barber_price` overlay (falls back to base_price when unassigned).
+        map[s.id] = Number(s.barber_price ?? s.base_price ?? 0);
+      });
+      setBarberPriceCache((prev) => ({ ...prev, [barberId]: map }));
+      return map;
+    } catch (err) {
+      console.warn('Failed to load barber prices for', barberId, err);
+      return {};
+    }
+  };
+
+  const priceForServiceByBarber = (barberId, serviceId) => {
+    const m = barberPriceCache[barberId] || {};
+    if (m[serviceId] != null) return m[serviceId];
+    // Fall back to global base price from `allServices`
+    const svc = allServices.find((s) => s.id === serviceId);
+    return Number(svc?.base_price || 0);
+  };
+
+  // Unified save handler for the modify dialog (Module 7: single PUT /modify endpoint)
   const handleSaveAllModifications = async () => {
     if (!selectedToken) return;
-    let anyChange = false;
+    if (!selectedNewBarber || selectedNewBarber === 'any') {
+      toast.error('Please pick a main barber');
+      return;
+    }
+    if (!selectedNewServices.length) {
+      toast.error('Add at least one service');
+      return;
+    }
+
+    // Hard guard against accidental zero-out: every line must have a non-zero
+    // price OR the user must have explicitly typed a final amount.
+    const assignments = selectedNewServices.map((sid) => {
+      const a = serviceAssignments[sid] || {};
+      const bid = a.barber_id || selectedNewBarber;
+      const price = a.price != null ? Number(a.price) : priceForServiceByBarber(bid, sid);
+      return { service_id: sid, barber_id: bid, service_price: price };
+    });
+
+    const subtotalCalc = assignments.reduce((s, a) => s + Number(a.service_price || 0), 0);
+    if (subtotalCalc <= 0 && Number(finalAmount) <= 0) {
+      toast.error('Prices are still loading. Please wait a moment and retry.');
+      return;
+    }
+    const finalNum = Number(finalAmount);
+    const pctNum = Number(orderDiscountPercent);
+
+    // "Last edited wins": if user typed a Final that disagrees with the pct
+    // computation, we send final_amount; else send order_discount_percent.
+    const pctImplied = subtotalCalc > 0 ? ((subtotalCalc - finalNum) / subtotalCalc) * 100 : 0;
+    const payload = { main_barber_id: selectedNewBarber, service_assignments: assignments };
+    if (Math.abs(pctImplied - pctNum) > 0.5) {
+      payload.final_amount = finalNum;
+    } else {
+      payload.order_discount_percent = pctNum;
+    }
+    if (confirmPaymentMode && confirmPaymentMode !== 'not_confirmed') {
+      payload.payment_mode = confirmPaymentMode;
+      if (!selectedToken.payment_confirmed || selectedToken.payment_mode !== confirmPaymentMode) {
+        payload.payment_confirmed = true;
+      }
+    }
 
     try {
-      // 1. Check if services changed
-      const originalServices = selectedToken.selected_services || [];
-      const servicesChanged = JSON.stringify([...selectedNewServices].sort()) !== JSON.stringify([...originalServices].sort());
-      if (servicesChanged && selectedNewServices.length > 0) {
-        await axios.put(
-          `${API}/tokens/${selectedToken.id}/update-services`,
-          { service_ids: selectedNewServices },
-          { headers: getAuthHeaders() }
-        );
-        anyChange = true;
-      }
-
-      // 2. Check if barber changed
-      if (selectedNewBarber && selectedNewBarber !== selectedToken.barber_id) {
-        await axios.put(
-          `${API}/tokens/${selectedToken.id}/change-barber`,
-          { barber_id: selectedNewBarber },
-          { headers: getAuthHeaders() }
-        );
-        anyChange = true;
-      }
-
-      // 3. Update final amount if changed
-      if (parseFloat(finalAmount) !== parseFloat(selectedToken.total_amount)) {
-        await axios.put(
-          `${API}/tokens/${selectedToken.id}/update-amount`,
-          { final_amount: parseFloat(finalAmount) },
-          { headers: getAuthHeaders() }
-        );
-        anyChange = true;
-      }
-
-      // 4. Handle payment: confirm if needed, or update mode if changed
-      if (confirmPaymentMode && confirmPaymentMode !== 'not_confirmed') {
-        const needsConfirmation = !selectedToken.payment_confirmed;
-        const modeChanged = selectedToken.payment_mode !== confirmPaymentMode;
-        
-        if (needsConfirmation || modeChanged) {
-          await axios.post(
-            `${API}/tokens/${selectedToken.id}/confirm-payment`,
-            { payment_mode: confirmPaymentMode },
-            { headers: getAuthHeaders() }
-          );
-          anyChange = true;
-        }
-      }
-
-      if (anyChange) {
-        toast.success('Booking updated successfully');
-      } else {
-        toast.info('No changes detected');
-      }
-
+      await axios.put(
+        `${API}/tokens/${selectedToken.id}/modify`,
+        payload,
+        { headers: getAuthHeaders() }
+      );
+      toast.success('Booking updated successfully');
       setAddServicesDialog(false);
       fetchTokens(salonId);
     } catch (error) {
       toast.error(error.response?.data?.detail || 'Failed to update booking');
     }
   };
+
+  // Module 7 — when the main barber changes, overwrite every service line's
+  // barber with the new main (per spec: "if the main barber is changed, all
+  // services should change"). The first time we open the dialog, `mainBarber`
+  // already matches all lines so this is a no-op.
+  const mainBarberInitRef = useRef(null);
+  useEffect(() => {
+    if (!addServicesDialog) {
+      mainBarberInitRef.current = null;
+      return;
+    }
+    if (mainBarberInitRef.current === null) {
+      mainBarberInitRef.current = selectedNewBarber;
+      return;
+    }
+    if (selectedNewBarber && selectedNewBarber !== mainBarberInitRef.current) {
+      mainBarberInitRef.current = selectedNewBarber;
+      // Overwrite ALL line barbers with the new main; clear cached prices on
+      // those rows so they refetch from the new barber's price list.
+      ensureBarberPrices(selectedNewBarber);
+      setServiceAssignments((curr) => {
+        const upd = {};
+        Object.keys(curr).forEach((sid) => {
+          upd[sid] = { barber_id: selectedNewBarber, price: null };
+        });
+        return upd;
+      });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedNewBarber, addServicesDialog]);
+
+  // Module 7 — subtotal + discount/final synchronisation. Memoised so the
+  // bottom bar always shows current numbers.
+  const modifySubtotal = useMemo(() => {
+    return selectedNewServices.reduce((sum, sid) => {
+      const a = serviceAssignments[sid] || {};
+      const bid = a.barber_id || selectedNewBarber;
+      const price = a.price != null ? Number(a.price) : priceForServiceByBarber(bid, sid);
+      return sum + Number(price || 0);
+    }, 0);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedNewServices, serviceAssignments, selectedNewBarber, barberPriceCache, allServices]);
+
+  // Keep Final ₹ and Discount % in sync. The user's last edit (tracked by
+  // discountSourceRef) is authoritative; the other field is recomputed.
+  useEffect(() => {
+    if (!addServicesDialog) return;
+    if (discountSourceRef.current === 'percent') {
+      const pct = Math.max(0, Math.min(100, Number(orderDiscountPercent) || 0));
+      const final = Math.max(0, modifySubtotal * (1 - pct / 100));
+      setFinalAmount(Number(final.toFixed(2)));
+    } else {
+      // 'final' was last edited — derive the implied %
+      const final = Math.max(0, Number(finalAmount) || 0);
+      const pct = modifySubtotal > 0
+        ? Math.max(0, Math.min(100, ((modifySubtotal - final) / modifySubtotal) * 100))
+        : 0;
+      setOrderDiscountPercent(Number(pct.toFixed(2)));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [modifySubtotal, orderDiscountPercent, finalAmount, addServicesDialog]);
 
   const fetchNotificationCount = async (sid) => {
     try {
@@ -771,20 +863,73 @@ export default function EnhancedSalonDashboard() {
         enabled = fallback.data || [];
       }
       setAllServices(enabled);
+      return enabled;
     } catch (error) {
       console.error('Error fetching services:', error);
       toast.error('Failed to load services');
+      return [];
     }
   };
 
   const handleOpenAddServices = async (token) => {
     setSelectedToken(token);
-    setSelectedNewServices(token.selected_services || []); // Pre-select existing services
-    setSelectedNewBarber(token.barber_id);
+    setSelectedNewServices(token.selected_services || []);
+    // "any" tokens shouldn't reach this screen post-confirmation; if a legacy
+    // doc still has it, fall back to the first active barber.
+    const mainBarber = (!token.barber_id || token.barber_id === 'any')
+      ? (barbers.find((b) => b.is_active)?.id || barbers[0]?.id || '')
+      : token.barber_id;
+    setSelectedNewBarber(mainBarber);
     setConfirmPaymentMode(token.payment_confirmed ? (token.payment_mode || 'cash') : 'not_confirmed');
-    setFinalAmount(token.total_amount || 0);
+    setOrderDiscountPercent(Number(token.order_discount_percent || 0));
     setServiceSearchQuery('');
-    await fetchAllServices();
+    setModifyTab('assignment');
+
+    // Fetch services FIRST so we can resolve names + base prices synchronously
+    // when building the initial assignments. This guarantees the dialog opens
+    // with a non-zero subtotal and the assignment table shows real service
+    // names (not raw UUIDs).
+    const services = await fetchAllServices();
+    const serviceById = Object.fromEntries(services.map((s) => [s.id, s]));
+
+    // Pre-load barber-specific prices for the main barber AND every barber
+    // referenced in an existing split.
+    const existing = token.service_assignments || [];
+    const barberIdsToLoad = new Set([mainBarber]);
+    existing.forEach((a) => a.barber_id && barberIdsToLoad.add(a.barber_id));
+    const cachesByBarber = {};
+    await Promise.all(
+      Array.from(barberIdsToLoad).map(async (bid) => {
+        cachesByBarber[bid] = await ensureBarberPrices(bid);
+      })
+    );
+
+    // Seed initial assignments with EXPLICIT prices. Priority:
+    //   1) Persisted line price on token.service_assignments
+    //   2) Barber-specific price from /barbers/{id}/services
+    //   3) Service base_price from /salons/{id}/services/enabled
+    const initialAssignments = {};
+    if (existing.length) {
+      existing.forEach((a) => {
+        initialAssignments[a.service_id] = {
+          barber_id: a.barber_id,
+          price: Number(a.service_price || 0),
+        };
+      });
+    } else {
+      (token.selected_services || []).forEach((sid) => {
+        const cache = cachesByBarber[mainBarber] || {};
+        const price = cache[sid] != null ? cache[sid] : (serviceById[sid]?.base_price || 0);
+        initialAssignments[sid] = { barber_id: mainBarber, price: Number(price) };
+      });
+    }
+    setServiceAssignments(initialAssignments);
+
+    // Initial Final ₹ = the token's existing total_amount (so an immediate Save
+    // without edits never zeroes the order).
+    setFinalAmount(Number(token.total_amount || 0));
+    discountSourceRef.current = 'percent';
+
     setAddServicesDialog(true);
   };
 
@@ -815,15 +960,22 @@ export default function EnhancedSalonDashboard() {
   };
 
   const toggleServiceSelection = (serviceId) => {
-    setSelectedNewServices(prev => {
-      const next = prev.includes(serviceId)
-        ? prev.filter(id => id !== serviceId)
-        : [...prev, serviceId];
-      // Auto-recalculate final amount from selected services
-      const total = allServices
-        .filter(s => next.includes(s.id))
-        .reduce((sum, s) => sum + (s.base_price || 0), 0);
-      setFinalAmount(total);
+    setSelectedNewServices((prev) => {
+      const isAdding = !prev.includes(serviceId);
+      const next = isAdding ? [...prev, serviceId] : prev.filter((id) => id !== serviceId);
+      // Maintain per-service assignment map in sync.
+      setServiceAssignments((curr) => {
+        const upd = { ...curr };
+        if (isAdding) {
+          // Seed newly-added service with the current main barber.
+          if (!upd[serviceId]) {
+            upd[serviceId] = { barber_id: selectedNewBarber, price: null };
+          }
+        } else {
+          delete upd[serviceId];
+        }
+        return upd;
+      });
       return next;
     });
   };
@@ -2059,11 +2211,11 @@ export default function EnhancedSalonDashboard() {
 
       {/* Modify Booking Dialog */}
       <Dialog open={addServicesDialog} onOpenChange={setAddServicesDialog}>
-        <DialogContent className="max-w-2xl max-h-[85vh] overflow-hidden flex flex-col">
+        <DialogContent className="max-w-3xl max-h-[90vh] overflow-hidden flex flex-col" data-testid="modify-booking-dialog">
           <DialogHeader>
             <DialogTitle className="text-lg">Modify Booking</DialogTitle>
           </DialogHeader>
-          
+
           {selectedToken && (
             <>
               {/* Compact Info Row */}
@@ -2076,106 +2228,210 @@ export default function EnhancedSalonDashboard() {
                 </span>
               </div>
 
-              {/* Horizontal Controls Row: Services label | Barber dropdown | Payment dropdown */}
-              <div className="flex items-center gap-3 mt-2 flex-shrink-0">
-                <div className="flex-shrink-0 text-sm font-semibold text-gold border border-gold/30 bg-gold/5 px-3 py-2 rounded-lg">
-                  Services
+              {/* Main barber + Payment row */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-2 mt-2 flex-shrink-0">
+                <div>
+                  <Label className="text-xs text-muted-foreground">Main barber (customer-facing)</Label>
+                  <select
+                    value={selectedNewBarber || ''}
+                    onChange={(e) => setSelectedNewBarber(e.target.value)}
+                    className="w-full h-9 px-3 rounded-lg border border-border bg-background text-sm focus:outline-none focus:ring-2 focus:ring-gold/50"
+                    data-testid="modify-main-barber-select"
+                  >
+                    {barbers.filter((b) => b.is_active !== false).map((b) => (
+                      <option key={b.id} value={b.id}>{b.name}</option>
+                    ))}
+                  </select>
                 </div>
-                
-                {/* Barber Dropdown */}
-                <select
-                  value={selectedNewBarber || ''}
-                  onChange={(e) => setSelectedNewBarber(e.target.value)}
-                  className="flex-1 h-9 px-3 rounded-lg border border-border bg-background text-sm focus:outline-none focus:ring-2 focus:ring-gold/50"
-                >
-                  <option value="any">Any Available</option>
-                  {barbers.map(b => (
-                    <option key={b.id} value={b.id}>{b.name}</option>
-                  ))}
-                </select>
-
-                {/* Payment Dropdown */}
-                <select
-                  value={confirmPaymentMode}
-                  onChange={(e) => setConfirmPaymentMode(e.target.value)}
-                  className="flex-1 h-9 px-3 rounded-lg border border-border bg-background text-sm focus:outline-none focus:ring-2 focus:ring-gold/50"
-                >
-                  <option value="not_confirmed">Not Confirmed</option>
-                  <option value="cash">Cash</option>
-                  <option value="upi">UPI</option>
-                  <option value="wallet">Wallet</option>
-                  <option value="card">Card</option>
-                </select>
+                <div>
+                  <Label className="text-xs text-muted-foreground">Payment mode</Label>
+                  <select
+                    value={confirmPaymentMode}
+                    onChange={(e) => setConfirmPaymentMode(e.target.value)}
+                    className="w-full h-9 px-3 rounded-lg border border-border bg-background text-sm focus:outline-none focus:ring-2 focus:ring-gold/50"
+                    data-testid="modify-payment-mode-select"
+                  >
+                    <option value="not_confirmed">Not Confirmed</option>
+                    <option value="cash">Cash</option>
+                    <option value="upi">UPI</option>
+                    <option value="wallet">Wallet</option>
+                    <option value="card">Card</option>
+                  </select>
+                </div>
               </div>
 
-              {/* Service Search */}
-              <div className="mt-2 flex-shrink-0">
-                <Input
-                  type="text"
-                  placeholder="Search services..."
-                  value={serviceSearchQuery}
-                  onChange={(e) => setServiceSearchQuery(e.target.value)}
-                  className="w-full h-9 text-sm"
-                />
+              {/* Tabs: Services search vs Assignment table */}
+              <div className="mt-3 flex items-center gap-2 border-b border-border flex-shrink-0">
+                <button
+                  type="button"
+                  onClick={() => setModifyTab('services')}
+                  className={`px-3 py-1.5 text-xs font-semibold transition-colors ${
+                    modifyTab === 'services' ? 'text-gold border-b-2 border-gold' : 'text-muted-foreground'
+                  }`}
+                  data-testid="modify-tab-services"
+                >
+                  Pick services ({selectedNewServices.length})
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setModifyTab('assignment')}
+                  className={`px-3 py-1.5 text-xs font-semibold transition-colors ${
+                    modifyTab === 'assignment' ? 'text-gold border-b-2 border-gold' : 'text-muted-foreground'
+                  }`}
+                  data-testid="modify-tab-assignment"
+                >
+                  Barber assignment
+                </button>
               </div>
 
-              {/* Service List — only this part scrolls */}
-              <div className="mt-2 space-y-1.5 overflow-y-auto flex-1 min-h-0 pr-1">
-                {allServices
-                  .filter(service => 
-                    service.service_name.toLowerCase().includes(serviceSearchQuery.toLowerCase()) ||
-                    service.category?.toLowerCase().includes(serviceSearchQuery.toLowerCase())
-                  )
-                  .map(service => {
-                    const isSelected = selectedNewServices.includes(service.id);
-                    return (
-                      <div 
-                        key={service.id}
-                        className={`flex items-center gap-3 px-3 py-2 border rounded-lg cursor-pointer transition-all text-sm ${
-                          isSelected ? 'border-gold bg-gold/5' : 'border-border hover:border-gold/40'
-                        }`}
-                        onClick={() => toggleServiceSelection(service.id)}
-                      >
-                        <Checkbox
-                          checked={isSelected}
-                          onCheckedChange={() => toggleServiceSelection(service.id)}
-                        />
-                        <span className="flex-1 font-medium">{service.service_name}</span>
-                        <span className="text-xs text-muted-foreground">{service.category}</span>
-                        <span className="font-bold text-gold">₹{service.base_price}</span>
+              {/* Services picker pane */}
+              {modifyTab === 'services' && (
+                <>
+                  <div className="mt-2 flex-shrink-0">
+                    <Input
+                      type="text"
+                      placeholder="Search services..."
+                      value={serviceSearchQuery}
+                      onChange={(e) => setServiceSearchQuery(e.target.value)}
+                      className="w-full h-9 text-sm"
+                    />
+                  </div>
+                  <div className="mt-2 space-y-1.5 overflow-y-auto flex-1 min-h-0 pr-1">
+                    {allServices
+                      .filter((service) =>
+                        service.service_name.toLowerCase().includes(serviceSearchQuery.toLowerCase()) ||
+                        service.category?.toLowerCase().includes(serviceSearchQuery.toLowerCase())
+                      )
+                      .map((service) => {
+                        const isSelected = selectedNewServices.includes(service.id);
+                        return (
+                          <div
+                            key={service.id}
+                            className={`flex items-center gap-3 px-3 py-2 border rounded-lg cursor-pointer transition-all text-sm ${
+                              isSelected ? 'border-gold bg-gold/5' : 'border-border hover:border-gold/40'
+                            }`}
+                            onClick={() => toggleServiceSelection(service.id)}
+                          >
+                            <Checkbox checked={isSelected} onCheckedChange={() => toggleServiceSelection(service.id)} />
+                            <span className="flex-1 font-medium">{service.service_name}</span>
+                            <span className="text-xs text-muted-foreground">{service.category}</span>
+                            <span className="font-bold text-gold">₹{service.base_price}</span>
+                          </div>
+                        );
+                      })}
+                  </div>
+                </>
+              )}
+
+              {/* Per-service Assignment pane */}
+              {modifyTab === 'assignment' && (
+                <div className="mt-2 overflow-y-auto flex-1 min-h-0 pr-1" data-testid="service-assignment-table">
+                  {selectedNewServices.length === 0 && (
+                    <p className="text-center text-muted-foreground py-6 text-sm">
+                      Pick at least one service first.
+                    </p>
+                  )}
+                  {selectedNewServices.length > 0 && (
+                    <div className="border border-border rounded-lg overflow-hidden">
+                      <div className="grid grid-cols-12 gap-2 px-3 py-2 bg-muted text-[11px] uppercase tracking-wide text-muted-foreground font-semibold">
+                        <div className="col-span-5">Service</div>
+                        <div className="col-span-2 text-right">Price</div>
+                        <div className="col-span-5">Barber</div>
                       </div>
-                    );
-                  })}
-                {allServices.filter(service => 
-                  service.service_name.toLowerCase().includes(serviceSearchQuery.toLowerCase()) ||
-                  service.category?.toLowerCase().includes(serviceSearchQuery.toLowerCase())
-                ).length === 0 && (
-                  <p className="text-center text-muted-foreground py-6 text-sm">No services found</p>
-                )}
-              </div>
+                      {selectedNewServices.map((sid) => {
+                        const svc = allServices.find((s) => s.id === sid);
+                        const a = serviceAssignments[sid] || {};
+                        const bid = a.barber_id || selectedNewBarber;
+                        const price = a.price != null ? a.price : priceForServiceByBarber(bid, sid);
+                        return (
+                          <div
+                            key={sid}
+                            className="grid grid-cols-12 gap-2 items-center px-3 py-2 border-t border-border text-sm"
+                            data-testid={`assignment-row-${sid}`}
+                          >
+                            <div className="col-span-5">
+                              <p className="font-medium truncate" data-testid={`assignment-name-${sid}`}>
+                                {svc?.service_name || 'Service'}
+                              </p>
+                              <p className="text-[11px] text-muted-foreground">{svc?.category || ''}</p>
+                            </div>
+                            <div className="col-span-2 text-right font-bold text-gold" data-testid={`assignment-price-${sid}`}>
+                              ₹{Number(price || 0).toFixed(0)}
+                            </div>
+                            <div className="col-span-5">
+                              <select
+                                value={bid || ''}
+                                onChange={async (e) => {
+                                  const newBid = e.target.value;
+                                  await ensureBarberPrices(newBid);
+                                  setServiceAssignments((curr) => ({
+                                    ...curr,
+                                    [sid]: { barber_id: newBid, price: null },
+                                  }));
+                                }}
+                                className="w-full h-8 px-2 rounded border border-border bg-background text-sm focus:outline-none focus:ring-2 focus:ring-gold/40"
+                                data-testid={`assignment-barber-${sid}`}
+                              >
+                                {barbers.filter((b) => b.is_active !== false).map((b) => (
+                                  <option key={b.id} value={b.id}>{b.name}</option>
+                                ))}
+                              </select>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              )}
 
-              {/* Final Amount + Actions — always visible at bottom */}
+              {/* Bottom summary bar: subtotal, discount %, discount ₹, final, save */}
               <div className="flex-shrink-0 pt-3 mt-2 border-t border-border bg-background">
-                <div className="flex items-center gap-3">
-                  <div className="text-xs text-muted-foreground whitespace-nowrap">
-                    Svc: <span className="font-semibold text-foreground">₹{allServices.filter(s => selectedNewServices.includes(s.id)).reduce((sum, s) => sum + (s.base_price || 0), 0)}</span>
+                <div className="flex flex-wrap items-center gap-3">
+                  <div className="text-xs">
+                    Subtotal: <span className="font-semibold text-foreground" data-testid="modify-subtotal">₹{modifySubtotal.toFixed(0)}</span>
                   </div>
                   <div className="flex items-center gap-1">
+                    <Label className="text-xs whitespace-nowrap">Discount %</Label>
+                    <Input
+                      type="number"
+                      value={orderDiscountPercent}
+                      onChange={(e) => {
+                        discountSourceRef.current = 'percent';
+                        setOrderDiscountPercent(e.target.value);
+                      }}
+                      className="w-16 h-8 text-sm"
+                      min={0}
+                      max={100}
+                      step="0.5"
+                      data-testid="modify-discount-percent"
+                    />
+                  </div>
+                  <div className="text-xs">
+                    Off: <span className="font-semibold text-red-500" data-testid="modify-discount-amount">−₹{Math.max(0, modifySubtotal - Number(finalAmount || 0)).toFixed(0)}</span>
+                  </div>
+                  <div className="flex items-center gap-1 ml-auto">
                     <Label className="text-xs font-semibold whitespace-nowrap">Final ₹</Label>
                     <Input
                       type="number"
                       value={finalAmount}
-                      onChange={(e) => setFinalAmount(e.target.value)}
+                      onChange={(e) => {
+                        discountSourceRef.current = 'final';
+                        setFinalAmount(e.target.value);
+                      }}
                       className="w-24 h-8 text-sm font-bold text-gold"
                       min={0}
+                      data-testid="modify-final-amount"
                     />
                   </div>
                   <Button
                     onClick={handleSaveAllModifications}
-                    className="flex-1 bg-gold text-black hover:bg-gold/90 h-8 text-sm"
+                    disabled={modifySubtotal === 0}
+                    className="bg-gold text-black hover:bg-gold/90 h-8 text-sm disabled:opacity-50"
+                    data-testid="modify-save-btn"
                   >
                     <CheckCircle className="w-4 h-4 mr-1.5" />
-                    Save Changes
+                    Save
                   </Button>
                 </div>
               </div>

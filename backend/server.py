@@ -488,6 +488,13 @@ class TokenModel(BaseModel):
     barber_name: str
     selected_services: List[str]
     total_amount: float
+    # Module 7 — per-service barber assignment (additive, backward-compatible)
+    # When present, `total_amount` = sum(line_total). When absent/empty, behave
+    # as legacy: all services credited to `barber_id`.
+    service_assignments: Optional[List[Dict[str, Any]]] = None
+    order_discount_percent: Optional[float] = 0.0
+    order_discount_amount: Optional[float] = 0.0
+    subtotal: Optional[float] = None  # Pre-discount sum of line prices
     # 75%-rule capacity tracking
     total_service_minutes: Optional[int] = None
     blocked_minutes: Optional[int] = None
@@ -1855,6 +1862,75 @@ async def calculate_booking_total(service_ids: List[str], barber_id: str) -> flo
         if pricing:
             total += pricing.get("price", 0)
     return total
+
+
+# ============ Module 7 — Per-service barber revenue attribution ============
+
+def attribute_token_revenue_to_barbers(token: dict) -> Dict[str, float]:
+    """Return {barber_id: revenue_credited} for one token after pro-rata
+    order-discount allocation across service lines.
+
+    Legacy tokens (no `service_assignments` or empty list) → full credit to the
+    main `barber_id`. Split tokens credit each line to its assigned barber.
+    Invariant: sum(returned.values()) ≈ token.total_amount.
+    """
+    assignments = token.get("service_assignments") or []
+    if not assignments:
+        bid = token.get("barber_id")
+        if not bid or bid == "any":
+            return {}
+        return {bid: float(token.get("total_amount") or 0)}
+
+    subtotal = sum(float(a.get("service_price") or 0) for a in assignments)
+    discount_amt = float(token.get("order_discount_amount") or 0)
+    out: Dict[str, float] = {}
+    for a in assignments:
+        sp = float(a.get("service_price") or 0)
+        share = (discount_amt * (sp / subtotal)) if subtotal > 0 else 0.0
+        line_attr = sp - share
+        bid = a.get("barber_id")
+        if not bid:
+            continue
+        out[bid] = out.get(bid, 0.0) + line_attr
+    return out
+
+
+def attribute_token_revenue_to_services(token: dict) -> List[Dict[str, Any]]:
+    """Return per-service revenue (after pro-rata discount) for one token.
+
+    Each row: {service_id, barber_id, service_price, line_total}.
+    Legacy tokens distribute total_amount evenly across selected_services.
+    """
+    assignments = token.get("service_assignments") or []
+    if assignments:
+        subtotal = sum(float(a.get("service_price") or 0) for a in assignments)
+        discount_amt = float(token.get("order_discount_amount") or 0)
+        rows: List[Dict[str, Any]] = []
+        for a in assignments:
+            sp = float(a.get("service_price") or 0)
+            share = (discount_amt * (sp / subtotal)) if subtotal > 0 else 0.0
+            rows.append({
+                "service_id": a.get("service_id"),
+                "barber_id": a.get("barber_id"),
+                "service_price": sp,
+                "line_total": round(sp - share, 2),
+            })
+        return rows
+
+    services = token.get("selected_services") or []
+    if not services:
+        return []
+    per = float(token.get("total_amount") or 0) / len(services)
+    return [
+        {
+            "service_id": sid,
+            "barber_id": token.get("barber_id"),
+            "service_price": per,
+            "line_total": round(per, 2),
+        }
+        for sid in services
+    ]
+
 
 async def broadcast_update(event_type: str, data: dict):
     """Broadcast updates via WebSocket"""
@@ -8263,6 +8339,185 @@ async def update_token_amount(token_id: str, body: dict, current_salon=Depends(g
     return {"message": f"Amount updated to ₹{final_amount}", "token": TokenModel(**updated_token)}
 
 
+# ============ Module 7 — Unified modify booking with per-service split ============
+
+class ServiceAssignmentIn(BaseModel):
+    service_id: str
+    barber_id: str
+    # service_price is optional in input — if not provided, we look it up from
+    # barber_services. Salon UI can override (e.g., for custom pricing).
+    service_price: Optional[float] = None
+
+
+class TokenModifyIn(BaseModel):
+    """Payload for PUT /api/tokens/{token_id}/modify."""
+    main_barber_id: Optional[str] = None
+    service_assignments: Optional[List[ServiceAssignmentIn]] = None
+    order_discount_percent: Optional[float] = None  # 0-100
+    final_amount: Optional[float] = None  # If supplied, treated as authoritative
+    payment_mode: Optional[str] = None
+    payment_confirmed: Optional[bool] = None
+
+
+async def _resolve_assignment_price(barber_id: str, service_id: str) -> float:
+    """Look up barber-specific price for a service; fall back to base price."""
+    bs = await db.barber_services.find_one(
+        {"barber_id": barber_id, "service_id": service_id}, {"_id": 0, "price": 1}
+    )
+    if bs and bs.get("price") is not None:
+        return float(bs.get("price") or 0)
+    svc = await db.services.find_one({"id": service_id}, {"_id": 0, "base_price": 1})
+    return float((svc or {}).get("base_price") or 0)
+
+
+@api_router.put("/tokens/{token_id}/modify")
+async def modify_token_v2(
+    token_id: str,
+    payload: TokenModifyIn,
+    current_salon=Depends(get_current_salon_user),
+):
+    """Unified modify-booking endpoint (Module 7).
+
+    Replaces the prior chain of `update-services` + `change-barber` +
+    `update-amount` with a single transactional update that supports:
+      • Main barber change (customer-facing)
+      • Per-service barber assignment (revenue split for reports + incentives)
+      • Order-level discount (% AND/OR final ₹ override — last-edited wins on the client)
+      • Payment mode + payment confirmation toggle
+    """
+    token = await db.tokens.find_one({"id": token_id}, {"_id": 0})
+    if not token:
+        raise HTTPException(status_code=404, detail="Token not found")
+    if token.get("status") == "completed":
+        raise HTTPException(status_code=400, detail="Cannot modify a completed booking")
+
+    salon_id = token["salon_id"]
+
+    # --- 1. Main barber (customer-facing). "any" is NOT accepted on this path.
+    new_main_barber_id = payload.main_barber_id or token.get("barber_id")
+    if new_main_barber_id == "any":
+        raise HTTPException(status_code=400, detail="A specific main barber must be selected")
+    main_barber = await db.barbers.find_one(
+        {"id": new_main_barber_id, "salon_id": salon_id, "is_active": True}, {"_id": 0}
+    )
+    if not main_barber:
+        raise HTTPException(status_code=400, detail="Main barber not found or inactive")
+
+    # --- 2. Resolve service_assignments
+    assignments_in = payload.service_assignments or []
+    if not assignments_in:
+        # No split provided — credit everything to the main barber (legacy shape)
+        services = token.get("selected_services") or []
+        assignments_in = [
+            ServiceAssignmentIn(service_id=sid, barber_id=new_main_barber_id)
+            for sid in services
+        ]
+
+    # New flat services list = the assignments' service_ids (de-duped, preserving order)
+    new_services_list: List[str] = []
+    seen = set()
+    for a in assignments_in:
+        if a.service_id not in seen:
+            seen.add(a.service_id)
+            new_services_list.append(a.service_id)
+
+    # --- 3. Validate all line barbers belong to the salon and are active
+    line_barber_ids = list({a.barber_id for a in assignments_in})
+    line_barbers = await db.barbers.find(
+        {"id": {"$in": line_barber_ids}, "salon_id": salon_id}, {"_id": 0}
+    ).to_list(100)
+    barber_map = {b["id"]: b for b in line_barbers}
+    for bid in line_barber_ids:
+        b = barber_map.get(bid)
+        if not b:
+            raise HTTPException(status_code=400, detail=f"Barber {bid} not found in this salon")
+        if not b.get("is_active", True):
+            raise HTTPException(status_code=400, detail=f"Barber {b.get('name')} is inactive")
+
+    # --- 4. Compute line prices, subtotal, discount, total
+    resolved: List[Dict[str, Any]] = []
+    subtotal = 0.0
+    for a in assignments_in:
+        price = a.service_price
+        if price is None:
+            price = await _resolve_assignment_price(a.barber_id, a.service_id)
+        price = float(price or 0)
+        subtotal += price
+        resolved.append({
+            "service_id": a.service_id,
+            "barber_id": a.barber_id,
+            "barber_name_snapshot": (barber_map.get(a.barber_id) or {}).get("name", ""),
+            "service_price": round(price, 2),
+        })
+
+    subtotal = round(subtotal, 2)
+
+    # Discount resolution priority:
+    #  • If final_amount provided AND no order_discount_percent → derive % from final.
+    #  • Else use order_discount_percent (0–100), final = subtotal - discount.
+    #  • Final wins if BOTH provided (matches "last-edited wins" UX).
+    if payload.final_amount is not None:
+        final_amount = max(0.0, float(payload.final_amount))
+        diff = max(0.0, subtotal - final_amount)
+        discount_pct = (diff / subtotal * 100.0) if subtotal > 0 else 0.0
+        discount_amt = diff
+    else:
+        discount_pct = max(0.0, min(100.0, float(payload.order_discount_percent or 0)))
+        discount_amt = round(subtotal * discount_pct / 100.0, 2)
+        final_amount = round(subtotal - discount_amt, 2)
+
+    # Pro-rata per-line discount allocation → compute line_total for each row
+    for row in resolved:
+        sp = row["service_price"]
+        share = (discount_amt * (sp / subtotal)) if subtotal > 0 else 0.0
+        row["discount_amount"] = round(share, 2)
+        row["line_total"] = round(sp - share, 2)
+
+    # --- 5. Persist
+    update_doc: Dict[str, Any] = {
+        "barber_id": new_main_barber_id,
+        "barber_name": main_barber.get("name", ""),
+        "selected_services": new_services_list,
+        "service_assignments": resolved,
+        "subtotal": subtotal,
+        "order_discount_percent": round(discount_pct, 2),
+        "order_discount_amount": round(discount_amt, 2),
+        "total_amount": final_amount,
+    }
+    if payload.payment_mode is not None:
+        update_doc["payment_mode"] = payload.payment_mode
+    if payload.payment_confirmed is not None:
+        update_doc["payment_confirmed"] = bool(payload.payment_confirmed)
+        if payload.payment_confirmed:
+            update_doc["payment_status"] = "paid"
+
+    await db.tokens.update_one({"id": token_id}, {"$set": update_doc})
+
+    # --- 6. Recompute incentive payouts for ALL barbers touched (new + old)
+    touched_barber_ids = set(line_barber_ids)
+    old_assignments = token.get("service_assignments") or []
+    for a in old_assignments:
+        if a.get("barber_id"):
+            touched_barber_ids.add(a["barber_id"])
+    if token.get("barber_id") and token.get("barber_id") != "any":
+        touched_barber_ids.add(token["barber_id"])
+
+    ym = (token.get("date") or "")[:7] or datetime.now(timezone.utc).strftime("%Y-%m")
+    for bid in touched_barber_ids:
+        try:
+            await _recompute_incentive_payout(salon_id, bid, ym)
+        except Exception as ex:
+            logging.warning("Incentive recompute failed for barber=%s month=%s: %s", bid, ym, ex)
+
+    updated = await db.tokens.find_one({"id": token_id}, {"_id": 0})
+    await broadcast_update("token_updated", updated)
+
+    return {
+        "message": "Booking updated",
+        "token": TokenModel(**updated),
+    }
+
+
 @api_router.get("/salons/{salon_id}/customers/{phone}/wallet")
 async def get_customer_wallet(salon_id: str, phone: str):
     """Return customer's active wallet balance with this salon.
@@ -10119,14 +10374,14 @@ async def _get_barber_target(plan_config: dict, barber: dict) -> float:
 
 
 async def _get_barber_actual_sales(salon_id: str, barber_id: str, year_month: str) -> float:
-    """Sum of total_amount on completed tokens for this barber in the given month (YYYY-MM).
+    """Sum of revenue credited to this barber on completed tokens in the month.
 
-    Tokens are dated using the `date` field (YYYY-MM-DD). For older / migrated
-    rows that may not have `date` set, we fall back to the YYYY-MM prefix of
-    `created_at`.
+    Module 7: tokens may have `service_assignments` that split revenue across
+    barbers. We sum `line_attributed_revenue` per assignment for this barber
+    (pro-rata discount applied). Legacy tokens (no `service_assignments`) fall
+    back to crediting the full `total_amount` to the token's main `barber_id`.
     """
     start = f"{year_month}-01"
-    # Compute end of month
     try:
         y, m = year_month.split("-")
         y_i, m_i = int(y), int(m)
@@ -10139,23 +10394,29 @@ async def _get_barber_actual_sales(salon_id: str, barber_id: str, year_month: st
 
     cursor = db.tokens.find({
         "salon_id": salon_id,
-        "barber_id": barber_id,
         "status": "completed",
-        "$or": [
-            {"date": {"$gte": start, "$lt": next_first}},
-            {"booking_date": {"$gte": start, "$lt": next_first}},
-            # Fallback for legacy tokens with neither date nor booking_date set
-            {
-                "date": {"$in": [None, ""]},
-                "booking_date": {"$in": [None, ""]},
-                "created_at": {"$gte": start, "$lt": next_first + "T99"},
-            },
+        # Match either as the main barber OR as a line-assignment barber.
+        "$and": [
+            {"$or": [
+                {"barber_id": barber_id},
+                {"service_assignments.barber_id": barber_id},
+            ]},
+            {"$or": [
+                {"date": {"$gte": start, "$lt": next_first}},
+                {"booking_date": {"$gte": start, "$lt": next_first}},
+                {
+                    "date": {"$in": [None, ""]},
+                    "booking_date": {"$in": [None, ""]},
+                    "created_at": {"$gte": start, "$lt": next_first + "T99"},
+                },
+            ]},
         ],
-    }, {"_id": 0, "total_amount": 1})
+    }, {"_id": 0})
 
     total = 0.0
     async for tok in cursor:
-        total += float(tok.get("total_amount") or 0)
+        per_barber = attribute_token_revenue_to_barbers(tok)
+        total += per_barber.get(barber_id, 0.0)
     return total
 
 
@@ -10459,31 +10720,53 @@ async def get_barber_wise_sales(
     end_date: str,
     current_salon=Depends(get_current_salon_user)
 ):
-    """Get barber-wise sales for the salon"""
-    # Get all completed tokens in date range
+    """Get barber-wise sales for the salon.
+
+    Module 7: respects per-service `service_assignments` so split-barber tokens
+    correctly credit each barber's share (pro-rata discount applied).
+    """
     tokens = await db.tokens.find({
         "salon_id": salon_id,
         "date": {"$gte": start_date, "$lte": end_date},
         "status": "completed"
     }, {"_id": 0}).to_list(10000)
-    
-    # Group by barber
-    barber_wise = {}
+
+    # Pre-load barber names so split-token credits show the right label even if
+    # `barber_name_snapshot` is missing.
+    barber_id_set: set = set()
+    for tok in tokens:
+        if tok.get("barber_id"):
+            barber_id_set.add(tok["barber_id"])
+        for a in (tok.get("service_assignments") or []):
+            if a.get("barber_id"):
+                barber_id_set.add(a["barber_id"])
+    barbers = await db.barbers.find(
+        {"id": {"$in": list(barber_id_set)}}, {"_id": 0, "id": 1, "name": 1}
+    ).to_list(1000)
+    name_by_id = {b["id"]: b.get("name", "Unknown") for b in barbers}
+
+    barber_wise: Dict[str, Dict[str, Any]] = {}
     for token in tokens:
-        barber_id = token["barber_id"]
-        barber_name = token.get("barber_name", "Unknown")
-        
-        if barber_id not in barber_wise:
-            barber_wise[barber_id] = {
-                "barber_id": barber_id,
-                "barber_name": barber_name,
-                "total_sales": 0,
-                "total_bookings": 0
-            }
-        barber_wise[barber_id]["total_sales"] += token.get("total_amount", 0)
-        barber_wise[barber_id]["total_bookings"] += 1
-    
-    # Convert to list and sort by sales
+        per_barber = attribute_token_revenue_to_barbers(token)
+        # Track which barbers participated in this token for booking-count math.
+        # A split token counts as ONE booking for every participating barber.
+        contributing = set(per_barber.keys())
+        if not contributing and token.get("barber_id"):
+            contributing.add(token["barber_id"])
+        for bid in contributing:
+            if bid not in barber_wise:
+                barber_wise[bid] = {
+                    "barber_id": bid,
+                    "barber_name": name_by_id.get(bid) or token.get("barber_name") or "Unknown",
+                    "total_sales": 0.0,
+                    "total_bookings": 0,
+                }
+            barber_wise[bid]["total_sales"] += per_barber.get(bid, 0.0)
+            barber_wise[bid]["total_bookings"] += 1
+
+    for row in barber_wise.values():
+        row["total_sales"] = round(row["total_sales"], 2)
+
     result = sorted(barber_wise.values(), key=lambda x: x["total_sales"], reverse=True)
     return {"data": result}
 
@@ -10494,42 +10777,42 @@ async def get_service_wise_sales(
     end_date: str,
     current_salon=Depends(get_current_salon_user)
 ):
-    """Get top 10 services by sales"""
-    # Get all completed tokens in date range
+    """Get top 10 services by count + revenue.
+
+    Module 7: revenue uses real per-service line_total (pro-rata discount)
+    when `service_assignments` is available; legacy tokens fall back to an
+    even distribution of total_amount across selected_services.
+    """
     tokens = await db.tokens.find({
         "salon_id": salon_id,
         "date": {"$gte": start_date, "$lte": end_date},
         "status": "completed"
     }, {"_id": 0}).to_list(10000)
-    
-    # Get all services
-    services_dict = {}
-    all_services = await db.services.find({"salon_id": salon_id}, {"_id": 0}).to_list(1000)
-    for service in all_services:
-        services_dict[service["id"]] = service["service_name"]
-    
-    # Count service usage
-    service_count = {}
+
+    all_services = await db.services.find({}, {"_id": 0}).to_list(2000)
+    name_by_id = {s["id"]: s.get("service_name", "Unknown Service") for s in all_services}
+
+    bucket: Dict[str, Dict[str, Any]] = {}
     for token in tokens:
-        for service_id in token.get("selected_services", []):
-            service_name = services_dict.get(service_id, "Unknown Service")
-            if service_id not in service_count:
-                service_count[service_id] = {
-                    "service_id": service_id,
-                    "service_name": service_name,
+        rows = attribute_token_revenue_to_services(token)
+        for r in rows:
+            sid = r.get("service_id")
+            if not sid:
+                continue
+            if sid not in bucket:
+                bucket[sid] = {
+                    "service_id": sid,
+                    "service_name": name_by_id.get(sid, "Unknown Service"),
                     "count": 0,
-                    "revenue": 0
+                    "revenue": 0.0,
                 }
-            service_count[service_id]["count"] += 1
-    
-    # Calculate approximate revenue per service
-    for service_id, data in service_count.items():
-        service = next((s for s in all_services if s["id"] == service_id), None)
-        if service:
-            data["revenue"] = data["count"] * service.get("base_price", 0)
-    
-    # Get top 10
-    result = sorted(service_count.values(), key=lambda x: x["count"], reverse=True)[:10]
+            bucket[sid]["count"] += 1
+            bucket[sid]["revenue"] += float(r.get("line_total") or 0)
+
+    for row in bucket.values():
+        row["revenue"] = round(row["revenue"], 2)
+
+    result = sorted(bucket.values(), key=lambda x: x["count"], reverse=True)[:10]
     return {"data": result}
 
 @api_router.get("/analytics/gender-distribution")

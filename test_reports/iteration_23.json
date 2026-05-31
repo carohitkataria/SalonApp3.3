@@ -1,0 +1,38 @@
+{
+  "summary": "Iteration 23 retest of Module 7 (Per-Service Barber Assignment on Modify Booking). Backend pytest suite: 11/11 hard tests pass (1 soft-skip for incentives by design). Frontend regressions and the two iteration-22 bugs all resolved.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_module7_modify_booking.py",
+    "/app/tests/test_module7_fe_backend.py",
+    "/app/tests/setup_test_token.py",
+    "/app/test_reports/pytest/iteration_23.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "EnhancedSalonDashboard.js is ~3052 lines — consider splitting the Modify Booking dialog into its own component for maintainability (DRY/file-size).",
+    "Subtotal guard now correctly prevents zero-amount saves; consider also disabling Save while serviceAssignments is still loading (currently the in-handler toast covers this fallback)."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "100%", "frontend": "100%"},
+  "test_credentials": "Salon admin: identifier='admin', password='salon123'. Customer phone 7503070727.",
+  "seed_data_creation": "Created test token id=34b806ab-49fe-43b7-9baf-5e28e5cae247 (customer 'TEST M7 FE Modify', services Haircut+Beard, total ₹276) via /app/tests/setup_test_token.py. Ensured salon services 36ab7dd7 (Haircut) and c904dc04 (Beard) are enabled for salon 62609c3d-…",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Backend pytest suite at /app/backend/tests/test_module7_modify_booking.py is the regression authority (11 hard + 1 soft-skip). Frontend dialog behaviour verified via Playwright against the live preview URL: subtotal renders >0 within 300ms of dialog open (Bug #1 fixed), assignment-name elements render human-readable names (Bug #2 fixed), bidirectional discount sync works, main-barber overwrite + per-line override works, Save end-to-end produces a token whose total_amount = subtotal*(1-discount). Backend backward-compat (PUT with only final_amount=existing total) is non-destructive — subtotal becomes resolved sum, discount = max(0, sub-final), total = final. To recreate the test token, run python /app/tests/setup_test_token.py (it cancels any existing waiting token for 7503070727 first).",
+  "test_results_detail": {
+    "backend_pytest": "11 passed, 1 skipped, 6 warnings in 3.30s (test_module7_modify_booking.py)",
+    "bug1_subtotal_zero_dataloss": "FIXED — subtotal=₹276 at 300ms, stays ₹276 at 700ms; save-btn enabled; backward-compat PUT keeps total_amount unchanged at ₹276.",
+    "bug2_uuid_as_name": "FIXED — assignment-name-36ab7dd7 shows 'Haircut', assignment-name-c904dc04 shows 'Beard Trim' (no UUIDs, no 'undefined').",
+    "save_button_guard": "Verified by code inspection at line 2429 (disabled={modifySubtotal === 0}). UI cannot trivially zero via real flow now; visual confirmation skipped as instructed.",
+    "discount_sync_regression": "Disc%=20 → Final=₹220.8 (=276*0.8) ✓. Final=₹193 → Disc%=30.07 (≈30) ✓.",
+    "main_barber_overwrite_regression": "Changing modify-main-barber-select propagates to both assignment-barber-* selects ✓. Changing one assignment line independently leaves the other on the main ✓.",
+    "save_e2e_regression": "PUT /api/tokens/{id}/modify with 2-barber split (₹400+₹600) + 10% discount → subtotal=1000, total=900, disc%=10; GET confirms service_assignments persisted with correct barber_ids ✓.",
+    "backward_compat_regression": "PUT with only final_amount=276 (existing total) → subtotal resolves to 276, order_discount_amount=0, total stays 276, service_assignments intact ✓."
+  },
+  "rca_of_the_issue": "Iteration 22's two FE bugs were caused by (a) opening the Modify dialog before the per-barber price cache and allServices were populated, so the first render computed subtotal from missing prices (=0); (b) the assignment row name used a fallback that included the raw service_id when allServices wasn't ready. Iteration 23 fix preloads barber prices via Promise.all, awaits fetchAllServices, and seeds explicit prices into serviceAssignments BEFORE opening the dialog; name element now falls back to literal 'Service'. Verified live."
+}
