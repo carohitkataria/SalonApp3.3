@@ -1981,6 +1981,10 @@ export default function EnhancedSalonDashboard() {
                   <User className="w-4 h-4" />
                   <span className="text-xs sm:text-sm font-semibold">Profile</span>
                 </TabsTrigger>
+                <TabsTrigger value="staff-settings-link" className="flex items-center gap-2 data-[state=active]:bg-gold data-[state=active]:text-black py-2.5" data-testid="settings-tab-staff-settings">
+                  <Users className="w-4 h-4" />
+                  <span className="text-xs sm:text-sm font-semibold">Staff</span>
+                </TabsTrigger>
                 <TabsTrigger value="operations" className="flex items-center gap-2 data-[state=active]:bg-gold data-[state=active]:text-black py-2.5">
                   <Clock className="w-4 h-4" />
                   <span className="text-xs sm:text-sm font-semibold">Operations</span>
@@ -1995,10 +1999,6 @@ export default function EnhancedSalonDashboard() {
                   <Bell className="w-4 h-4" />
                   <span className="text-xs sm:text-sm font-semibold">Notification</span>
                 </TabsTrigger>
-                <TabsTrigger value="staff-settings-link" className="flex items-center gap-2 data-[state=active]:bg-gold data-[state=active]:text-black py-2.5" data-testid="settings-tab-staff-settings">
-                  <Users className="w-4 h-4" />
-                  <span className="text-xs sm:text-sm font-semibold">Staff</span>
-                </TabsTrigger>
               </TabsList>
 
               <TabsContent value="profile" className="mt-4">
@@ -2007,6 +2007,16 @@ export default function EnhancedSalonDashboard() {
                   onUpdate={(updatedSalon) => setSalon(updatedSalon)}
                   getAuthHeaders={getAuthHeaders}
                   onDeleteSalon={handleLogout}
+                />
+              </TabsContent>
+
+              <TabsContent value="staff-settings-link" className="mt-4">
+                <StaffSettingsContent
+                  salonId={salonId}
+                  getAuthHeaders={getAuthHeaders}
+                  isAdmin={checkIsAdmin()}
+                  useUrlTab={false}
+                  defaultTab="incentives"
                 />
               </TabsContent>
 
@@ -2024,16 +2034,6 @@ export default function EnhancedSalonDashboard() {
                 <SalonNotificationSettings
                   salonId={salonId}
                   getAuthHeaders={getAuthHeaders}
-                />
-              </TabsContent>
-
-              <TabsContent value="staff-settings-link" className="mt-4">
-                <StaffSettingsContent
-                  salonId={salonId}
-                  getAuthHeaders={getAuthHeaders}
-                  isAdmin={checkIsAdmin()}
-                  useUrlTab={false}
-                  defaultTab="incentives"
                 />
               </TabsContent>
             </Tabs>
