@@ -870,6 +870,51 @@ backend:
 
 
 frontend:
+  - task: "Staff Access Management UI — new section permissions, revoke/restore, reset password, unique login_id"
+    implemented: true
+    working: "NA"
+    file: "/app/frontend/src/components/StaffAccessManagement.js"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: true
+    status_history:
+        - working: "NA"
+          agent: "main"
+          comment: "Added Section access checkboxes (Services, Gallery, Staff Management; nested 'See all staff details' shows only when Staff Management is checked). Added per-user Reset Password (KeyRound icon → prompt for new pwd, PUT password) and Revoke/Restore access (Ban/RotateCcw icon → DELETE to deactivate, PUT status:active to restore). Added client-side login_id uniqueness check before submit (case-insensitive against loaded users). Hardened error rendering with getErrorMessage() so 422 arrays never crash the toast."
+  - task: "Geofencing attendance mode in Settings + Attendance calendar + Admin override"
+    implemented: true
+    working: "NA"
+    file: "/app/frontend/src/components/staff/StaffSettingsContent.js, /app/frontend/src/components/StaffAttendanceTab.js"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: true
+    status_history:
+        - working: "NA"
+          agent: "main"
+          comment: "Verify: admin can switch attendance mode to Geo check-in in Salon Settings → Staff → Attendance Rules (/salon/staff/settings?tab=attendance) and it persists; the StaffAttendanceTab calendar renders and reflects records; admin can click a past date to cycle status (present→half_day→absent→holiday→clear) and it persists with a toast."
+  - task: "Remove Employee Reward Plan from dashboard Staff Management tab (kept in Salon Settings → Staff)"
+    implemented: true
+    working: "NA"
+    file: "/app/frontend/src/pages/EnhancedSalonDashboard.js"
+    stuck_count: 0
+    priority: "medium"
+    needs_retesting: true
+    status_history:
+        - working: "NA"
+          agent: "main"
+          comment: "Removed the duplicated EmployeeRewardPlan block (and its import) from the dashboard 'staff' tab. The staff tab now shows only BarberManagement. Reward plan still available under Salon Settings → Staff → Incentive Rules."
+  - task: "Barber profile image upload crash fix (React child / 422)"
+    implemented: true
+    working: "NA"
+    file: "/app/frontend/src/pages/StaffProfilePage.js"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: true
+    status_history:
+        - working: "NA"
+          agent: "main"
+          comment: "Photo upload/remove now send ONLY {profile_image} instead of the whole profileData (which contained compensation:'' → 422). Error handling stringifies Pydantic arrays so the toast never renders an object (fixes 'Objects are not valid as a React child')."
+
   - task: "Fix SalonHamburgerMenu drawer clipped on Marketplace (portal to body)"
     implemented: true
     working: true
@@ -1113,8 +1158,10 @@ metadata:
 
 test_plan:
   current_focus:
-    - "Staff section permissions (services/gallery/staff + view_all_staff) and staff_id in login token"
-    - "Staff Geo Check-in / Check-out endpoints (Mode B) end-to-end"
+    - "Geofencing attendance mode in Settings + Attendance calendar + Admin override"
+    - "Staff Access Management UI — new section permissions, revoke/restore, reset password, unique login_id"
+    - "Remove Employee Reward Plan from dashboard Staff Management tab (kept in Salon Settings → Staff)"
+    - "Barber profile image upload crash fix (React child / 422)"
   stuck_tasks: []
   test_all: false
   test_priority: "high_first"

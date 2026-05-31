@@ -592,10 +592,12 @@ export default function StaffProfilePage() {
       const token = localStorage.getItem('salon_admin_token') ||
                     JSON.parse(localStorage.getItem('salon_user_auth') || '{}').token;
 
-      // Persist immediately so it's visible without entering "Edit" mode
+      // Persist immediately so it's visible without entering "Edit" mode.
+      // Send ONLY the profile_image field — sending the full profileData
+      // (which may contain compensation:'' etc.) triggers a 422.
       await axios.put(
         `${API}/barbers/${staffId}`,
-        { ...profileData, profile_image: base64 },
+        { profile_image: base64 },
         { headers: { Authorization: `Bearer ${token}` } }
       );
       setProfileData(prev => ({ ...prev, profile_image: base64 }));
@@ -603,7 +605,11 @@ export default function StaffProfilePage() {
       toast.success('Profile photo updated');
     } catch (error) {
       console.error(error);
-      toast.error(error?.response?.data?.detail || 'Failed to upload profile photo');
+      const detail = error?.response?.data?.detail;
+      let msg = 'Failed to upload profile photo';
+      if (typeof detail === 'string') msg = detail;
+      else if (Array.isArray(detail) && detail.length) msg = detail.map((d) => d?.msg || 'Invalid').join(', ');
+      toast.error(msg);
     } finally {
       setUploadingPhoto(false);
     }
@@ -616,7 +622,7 @@ export default function StaffProfilePage() {
                     JSON.parse(localStorage.getItem('salon_user_auth') || '{}').token;
       await axios.put(
         `${API}/barbers/${staffId}`,
-        { ...profileData, profile_image: '' },
+        { profile_image: '' },
         { headers: { Authorization: `Bearer ${token}` } }
       );
       setProfileData(prev => ({ ...prev, profile_image: '' }));

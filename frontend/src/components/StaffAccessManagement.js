@@ -6,7 +6,7 @@ import { Label } from '@/components/ui/label';
 import { Checkbox } from '@/components/ui/checkbox';
 import { toast } from 'sonner';
 import { 
-  UserPlus, Edit2, Trash2, Eye, EyeOff, Users, Shield, X, Save, Building2
+  UserPlus, Edit2, Eye, EyeOff, Users, Shield, X, Save, Building2, KeyRound, Ban, RotateCcw
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useAuth } from '@/contexts/AuthContext';
@@ -107,8 +107,75 @@ export default function StaffAccessManagement() {
     });
   };
 
+  // Safely turn any axios error into a renderable string (FastAPI 422 returns
+  // an array of objects which must never be rendered directly as a React child).
+  const getErrorMessage = (error, fallback) => {
+    const detail = error?.response?.data?.detail;
+    if (typeof detail === 'string') return detail;
+    if (Array.isArray(detail) && detail.length) {
+      return detail.map((d) => d?.msg || 'Invalid value').join(', ');
+    }
+    if (detail && typeof detail === 'object' && detail.message) return detail.message;
+    return fallback;
+  };
+
+  // Revoke (deactivate) or restore (reactivate) a staff user's login access.
+  const handleToggleAccess = async (user) => {
+    const revoking = user.status === 'active';
+    const verb = revoking ? 'revoke access for' : 'restore access for';
+    if (!window.confirm(`Are you sure you want to ${verb} "${user.name}"?`)) return;
+    try {
+      if (revoking) {
+        // DELETE deactivates (sets status inactive)
+        await axios.delete(`${API}/salon/users/${user.id}`, { headers: getSalonUserHeaders() });
+      } else {
+        await axios.put(
+          `${API}/salon/users/${user.id}`,
+          { status: 'active' },
+          { headers: getSalonUserHeaders() }
+        );
+      }
+      toast.success(revoking ? 'Access revoked' : 'Access restored');
+      fetchStaffUsers();
+    } catch (error) {
+      toast.error(getErrorMessage(error, 'Failed to update access'));
+    }
+  };
+
+  // Reset a staff user's password to a new value.
+  const handleResetPassword = async (user) => {
+    const newPassword = window.prompt(`Enter a new password for "${user.name}" (min 6 characters):`);
+    if (newPassword === null) return; // cancelled
+    if (!newPassword || newPassword.trim().length < 6) {
+      toast.error('Password must be at least 6 characters');
+      return;
+    }
+    try {
+      await axios.put(
+        `${API}/salon/users/${user.id}`,
+        { password: newPassword.trim() },
+        { headers: getSalonUserHeaders() }
+      );
+      toast.success(`Password reset for ${user.name}`);
+    } catch (error) {
+      toast.error(getErrorMessage(error, 'Failed to reset password'));
+    }
+  };
+
+
   const handleSubmit = async (e) => {
     e.preventDefault();
+
+    // Client-side uniqueness check for login_id (case-insensitive),
+    const enteredId = (formData.login_id || '').trim().toLowerCase();
+    const clash = staffUsers.find(
+      (u) => (u.login_id || '').trim().toLowerCase() === enteredId && u.id !== editingUser?.id
+    );
+    if (clash) {
+      toast.error(`Login ID "${formData.login_id}" is already taken. Please choose a unique Login ID.`);
+      return;
+    }
+
     setLoading(true);
 
     try {
@@ -151,7 +218,7 @@ export default function StaffAccessManagement() {
       resetForm();
       fetchStaffUsers();
     } catch (error) {
-      toast.error(error.response?.data?.detail || 'Failed to save staff user');
+      toast.error(getErrorMessage(error, 'Failed to save staff user'));
     } finally {
       setLoading(false);
     }
@@ -181,20 +248,6 @@ export default function StaffAccessManagement() {
       }
     });
     setShowAddForm(true);
-  };
-
-  const handleDelete = async (userId) => {
-    if (!window.confirm('Are you sure you want to deactivate this user?')) return;
-
-    try {
-      await axios.delete(`${API}/salon/users/${userId}`, {
-        headers: getSalonUserHeaders()
-      });
-      toast.success('Staff user deactivated');
-      fetchStaffUsers();
-    } catch (error) {
-      toast.error('Failed to deactivate staff user');
-    }
   };
 
   const resetForm = () => {
@@ -652,23 +705,37 @@ export default function StaffAccessManagement() {
                     )}
                   </div>
 
-                  <div className="flex space-x-2 ml-4">
+                  <div className="flex flex-wrap gap-2 ml-4 justify-end">
                     <Button
                       size="sm"
                       variant="outline"
                       onClick={() => handleEdit(user)}
+                      title="Edit user"
                     >
                       <Edit2 className="w-4 h-4" />
                     </Button>
                     {user.role !== 'admin' && (
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={() => handleDelete(user.id)}
-                        className="text-red-500 hover:text-red-600"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </Button>
+                      <>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => handleResetPassword(user)}
+                          data-testid={`reset-password-${user.id}`}
+                          title="Reset password"
+                        >
+                          <KeyRound className="w-4 h-4" />
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => handleToggleAccess(user)}
+                          data-testid={`toggle-access-${user.id}`}
+                          className={user.status === 'active' ? 'text-red-500 hover:text-red-600' : 'text-green-600 hover:text-green-700'}
+                          title={user.status === 'active' ? 'Revoke access' : 'Restore access'}
+                        >
+                          {user.status === 'active' ? <Ban className="w-4 h-4" /> : <RotateCcw className="w-4 h-4" />}
+                        </Button>
+                      </>
                     )}
                   </div>
                 </div>

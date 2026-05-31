@@ -22,7 +22,6 @@ import MyProfile from '@/components/MyProfile';
 import SalonNotificationSettings from '@/components/SalonNotificationSettings';
 import OperationalHoursModule from '@/components/OperationalHoursModule';
 import Analytics from '@/components/Analytics';
-import EmployeeRewardPlan from '@/components/EmployeeRewardPlan';
 import SubscriptionPaywallModal from '@/components/SubscriptionPaywallModal';
 import SubscriptionBadge from '@/components/SubscriptionBadge';
 import StaffSettingsContent from '@/components/staff/StaffSettingsContent';
@@ -1945,13 +1944,6 @@ export default function EnhancedSalonDashboard() {
                   salonId={salonId}
                   getAuthHeaders={getAuthHeaders}
                   restrictToBarberId={restrictedToOwn ? ownStaffId : null}
-                />
-              )}
-              {!restrictedToOwn && (
-                <EmployeeRewardPlan
-                  salonId={salonId}
-                  getAuthHeaders={getAuthHeaders}
-                  isAdmin={checkIsAdmin()}
                 />
               )}
             </div>
