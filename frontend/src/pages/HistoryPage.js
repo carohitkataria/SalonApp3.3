@@ -266,6 +266,16 @@ export default function HistoryPage() {
                   </div>
                 </div>
 
+                {/* Express booking (non-OTP-verified at booking time) badge */}
+                {booking.is_otp_verified_at_booking === false && (
+                  <div className="px-4 py-2 bg-amber-500/10 border-b border-amber-500/20" data-testid={`express-badge-${booking.id}`}>
+                    <p className="text-[11px] text-amber-700 dark:text-amber-300 font-medium flex items-center gap-1.5">
+                      <span className="inline-block w-1.5 h-1.5 rounded-full bg-amber-500" />
+                      Express booking — placed without OTP verification
+                    </p>
+                  </div>
+                )}
+
                 {/* Details */}
                 <div className="p-4 space-y-3">
                   <div className="grid grid-cols-3 gap-3 text-sm">

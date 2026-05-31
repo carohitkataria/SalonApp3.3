@@ -63,21 +63,22 @@ export default function SalonMainPage() {
   }, [searchParams]);
 
   useEffect(() => {
-    if (!isUserLoggedIn) {
-      navigate('/user/login', { state: { from: `/salon/${salonId}` } });
-      return;
-    }
     fetchSalonData();
     fetchLiveStatus();
-    fetchUserBookings();
-    fetchWalletBalance();
-    
-    const interval = setInterval(() => {
-      fetchLiveStatus();
+    if (isUserLoggedIn) {
       fetchUserBookings();
       fetchWalletBalance();
+    }
+
+    const interval = setInterval(() => {
+      fetchLiveStatus();
+      if (isUserLoggedIn) {
+        fetchUserBookings();
+        fetchWalletBalance();
+      }
     }, 30000);
     return () => clearInterval(interval);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isUserLoggedIn, salonId]);
 
   // Listen for tab change events from hamburger menu

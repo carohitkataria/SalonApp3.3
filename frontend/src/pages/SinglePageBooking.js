@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
+import { useBookingIntent } from '@/contexts/BookingIntentContext';
 import axios from 'axios';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -244,7 +245,8 @@ const CategorySection = ({ category, services, selectedServices, onToggle, price
 export default function SinglePageBooking() {
   const { salonId } = useParams();
   const navigate = useNavigate();
-  const { user, isUserLoggedIn, isUserOtpVerified } = useAuth();
+  const { user, isUserLoggedIn, isUserOtpVerified, loginUser } = useAuth();
+  const { saveIntent, getIntent, clearIntent } = useBookingIntent();
   const [searchParams] = useSearchParams();
   const source = searchParams.get('source') || 'online';
   const forSelf = searchParams.get('for') === 'self';
@@ -288,6 +290,12 @@ export default function SinglePageBooking() {
   const [otherPersonName, setOtherPersonName] = useState('');
   const [otherPersonPhone, setOtherPersonPhone] = useState('');
   const [otherPersonGender, setOtherPersonGender] = useState('');
+  // Frictionless checkout — identity captured at the payment step when the
+  // customer is NOT signed in. We do NOT send an OTP; the resulting user is
+  // marked is_otp_verified=false and the booking is tagged accordingly.
+  const [guestName, setGuestName] = useState('');
+  const [guestPhone, setGuestPhone] = useState('');
+  const [guestGender, setGuestGender] = useState('');
   const [fastestAvailable, setFastestAvailable] = useState(!preselectedBarber);
   const [searchQuery, setSearchQuery] = useState('');
   const [openCategories, setOpenCategories] = useState({});
@@ -304,10 +312,6 @@ export default function SinglePageBooking() {
 
   // Fetch data on mount
   useEffect(() => {
-    if (!isUserLoggedIn) {
-      navigate('/user/login', { state: { from: `/book/${salonId}${modifyTokenId ? `?modify=${modifyTokenId}` : ''}` } });
-      return;
-    }
     fetchSalonData();
     fetchShifts();
     fetchLiveStatus();
@@ -317,7 +321,37 @@ export default function SinglePageBooking() {
     fetchCustomerBookings();
     const interval = setInterval(fetchLiveStatus, 30000);
     return () => clearInterval(interval);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isUserLoggedIn, salonId]);
+
+  // Force "self" for unauthenticated guest checkout — they can't book for others.
+  useEffect(() => {
+    if (!isUserLoggedIn && !bookingForSelf) setBookingForSelf(true);
+  }, [isUserLoggedIn, bookingForSelf]);
+
+  // Hydrate cart from BookingIntent (sessionStorage, 30-min TTL) so customers
+  // returning from the sign-in flow keep their selections.
+  const intentHydratedRef = useRef(false);
+  useEffect(() => {
+    if (intentHydratedRef.current) return;
+    const intent = getIntent();
+    if (!intent || intent.salon_id !== salonId) return;
+    intentHydratedRef.current = true;
+    setFormData((prev) => ({
+      ...prev,
+      selectedServices: Array.isArray(intent.services) && intent.services.length
+        ? intent.services
+        : prev.selectedServices,
+      barberId: intent.barber_id || prev.barberId,
+      date: intent.date || prev.date,
+      shift: intent.shift || prev.shift,
+    }));
+    if (intent.barber_id && intent.barber_id !== 'any') setFastestAvailable(false);
+    if (intent.branch_id) setBranchId(intent.branch_id);
+    // Once consumed, drop it so we don't re-hydrate on every render.
+    clearIntent();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [salonId]);
 
   // Reschedule flow: when ?modify=<tokenId> is present in URL, hydrate the form
   // with the existing booking's data so the customer can edit the SAME token
@@ -615,6 +649,7 @@ export default function SinglePageBooking() {
   };
 
   const fetchCustomerMembership = async () => {
+    if (!user || !user.phone) return;
     try {
       const response = await axios.get(`${API}/salons/${salonId}/customer-membership/${user.phone}`);
       if (response.data.has_membership) {
@@ -746,6 +781,42 @@ export default function SinglePageBooking() {
       : (service.barber_price || service.base_price);
   };
 
+  // Persist the current selection into BookingIntent (sessionStorage, 30-min TTL)
+  // so that signing in mid-flow doesn't lose the cart.
+  const persistIntent = () => {
+    saveIntent({
+      salon_id: salonId,
+      branch_id: branchId || null,
+      services: formData.selectedServices,
+      barber_id: fastestAvailable ? 'any' : formData.barberId,
+      date: formData.date,
+      shift: formData.shift,
+      return_to: `/book/${salonId}${branchId ? `?branch=${branchId}` : ''}`,
+    });
+  };
+
+  // Resolve a customer record before placing the booking. If the user is already
+  // signed in, we just return the user. Otherwise we register a lightweight
+  // (non-OTP) customer using the guest identity form.
+  const ensureCustomer = async () => {
+    if (isUserLoggedIn && user?.id) return user;
+
+    // Booking-for-others doesn't need the booker to be signed in either — but
+    // we still need SOME identity to attach the booking to. Use guest fields.
+    const name = (guestName || '').trim();
+    const phoneDigits = (guestPhone || '').replace(/\D/g, '').replace(/^91/, '');
+    if (!name) { toast.error('Please enter your name'); return null; }
+    if (phoneDigits.length !== 10) { toast.error('Please enter a valid 10-digit mobile number'); return null; }
+    if (!guestGender) { toast.error('Please select your gender'); return null; }
+
+    const result = await loginUser(name, phoneDigits, guestGender);
+    if (!result.success) {
+      toast.error(result.error || 'Could not register your details. Please try again.');
+      return null;
+    }
+    return result.user;
+  };
+
   const handleSubmit = async (e) => {
     if (e) e.preventDefault();
 
@@ -792,12 +863,17 @@ export default function SinglePageBooking() {
         return;
       }
 
+      // Frictionless flow — make sure we have a customer record (existing or newly
+      // created lightweight one). Returns the user object (or throws).
+      const customer = await ensureCustomer();
+      if (!customer) { setLoading(false); return; }
+
       const bookingData = {
         salon_id: salonId,
         branch_id: branchId || undefined,
-        user_id: user.id,
-        customer_name: bookingForSelf ? user.name : otherPersonName,
-        phone: bookingForSelf ? user.phone : otherPersonPhone,
+        user_id: customer.id,
+        customer_name: bookingForSelf ? customer.name : otherPersonName,
+        phone: bookingForSelf ? customer.phone : otherPersonPhone,
         date: formData.date,
         shift: formData.shift,
         barber_id: fastestAvailable ? 'any' : formData.barberId,
@@ -805,13 +881,14 @@ export default function SinglePageBooking() {
         source: source,
         booking_type: formData.bookingType,
         booking_for_self: bookingForSelf,
-        customer_gender: bookingForSelf ? (user.gender || 'Men') : otherPersonGender,
+        customer_gender: bookingForSelf ? (customer.gender || 'Men') : otherPersonGender,
         payment_mode: paymentMode
       };
 
       const response = await axios.post(`${API}/bookings`, bookingData);
       setBookedToken(response.data);
       setBookingStep('success');
+      clearIntent();
       
       // Refresh membership data if wallet was used
       if (paymentMode === 'wallet') {
@@ -866,12 +943,14 @@ export default function SinglePageBooking() {
       }
 
       // First create the booking
+      const customer = await ensureCustomer();
+      if (!customer) { setLoading(false); return; }
       const bookingData = {
         salon_id: salonId,
         branch_id: branchId || undefined,
-        user_id: user.id,
-        customer_name: bookingForSelf ? user.name : otherPersonName,
-        phone: bookingForSelf ? user.phone : otherPersonPhone,
+        user_id: customer.id,
+        customer_name: bookingForSelf ? customer.name : otherPersonName,
+        phone: bookingForSelf ? customer.phone : otherPersonPhone,
         date: formData.date,
         shift: formData.shift,
         barber_id: fastestAvailable ? 'any' : formData.barberId,
@@ -879,7 +958,7 @@ export default function SinglePageBooking() {
         source: source,
         booking_type: formData.bookingType,
         booking_for_self: bookingForSelf,
-        customer_gender: bookingForSelf ? (user.gender || 'Men') : otherPersonGender,
+        customer_gender: bookingForSelf ? (customer.gender || 'Men') : otherPersonGender,
         payment_mode: 'upi'
       };
 
@@ -893,6 +972,7 @@ export default function SinglePageBooking() {
 
       setBookedToken(response.data);
       setBookingStep('success');
+      clearIntent();
       toast.success('Booking confirmed with UPI payment!');
     } catch (error) {
       toast.error(error.response?.data?.detail || 'Failed to create booking');
@@ -1050,6 +1130,66 @@ export default function SinglePageBooking() {
               </div>
             </div>
           </div>
+
+          {/* Frictionless Identity — show only when NOT signed in. We capture
+              Name + Mobile + Gender without sending an OTP. The booking will
+              be tagged as "not OTP-verified" until the customer verifies. */}
+          {!isUserLoggedIn && (
+            <div className="bg-card border border-border rounded-xl p-4 space-y-3" data-testid="guest-identity-card">
+              <div className="flex items-center justify-between flex-wrap gap-2">
+                <h3 className="text-sm font-medium text-foreground">Your details</h3>
+                <button
+                  type="button"
+                  onClick={() => {
+                    persistIntent();
+                    navigate('/login', { state: { from: `/book/${salonId}${branchId ? `?branch=${branchId}` : ''}` } });
+                  }}
+                  className="text-xs text-gold hover:underline"
+                  data-testid="signin-for-faster-btn"
+                >
+                  Sign in for faster bookings →
+                </button>
+              </div>
+              <p className="text-xs text-muted-foreground -mt-1">
+                We only need a few details to confirm your slot. No OTP required to book.
+              </p>
+              <Input
+                value={guestName}
+                onChange={(e) => setGuestName(e.target.value)}
+                placeholder="Full name"
+                className="h-10"
+                data-testid="guest-name-input"
+              />
+              <div className="flex gap-2">
+                <span className="inline-flex items-center px-3 h-10 rounded-lg border border-border bg-background text-sm text-muted-foreground">+91</span>
+                <Input
+                  value={guestPhone}
+                  onChange={(e) => setGuestPhone(e.target.value.replace(/\D/g, '').slice(0, 10))}
+                  placeholder="10-digit mobile"
+                  inputMode="numeric"
+                  className="h-10 flex-1"
+                  data-testid="guest-phone-input"
+                />
+              </div>
+              <div className="flex gap-2 flex-wrap">
+                {['Men', 'Women', 'Other'].map((g) => (
+                  <button
+                    key={g}
+                    type="button"
+                    onClick={() => setGuestGender(g)}
+                    className={`px-4 py-2 rounded-full border-2 text-sm font-medium transition-all ${
+                      guestGender === g
+                        ? 'bg-gold text-black border-gold'
+                        : 'bg-background text-foreground border-border hover:border-gold/50'
+                    }`}
+                    data-testid={`guest-gender-${g.toLowerCase()}`}
+                  >
+                    {g}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
 
           {/* Coupon Code */}
           <div className="bg-card border border-border rounded-xl p-4">
@@ -1388,7 +1528,8 @@ export default function SinglePageBooking() {
 
         {/* Section 1: Who & When */}
         <div className="space-y-4">
-          {/* Booking For */}
+          {/* Booking For — only shown when signed in (guest checkout = self only) */}
+          {isUserLoggedIn && (
           <div>
             <p className="text-sm font-medium text-muted-foreground mb-2">Booking for</p>
             <div className="flex gap-2 flex-wrap">
@@ -1400,6 +1541,7 @@ export default function SinglePageBooking() {
               </SelectChip>
             </div>
           </div>
+          )}
 
           {/* Someone Else Details */}
           <AnimatePresence>

@@ -42,7 +42,7 @@ export default function BranchManagement({ salonId }) {
   const [form, setForm] = useState(emptyForm);
   const [saving, setSaving] = useState(false);
 
-  const [qrDialog, setQrDialog] = useState(null); // { qr_code, booking_url, branch_name }
+  const [qrDialog, setQrDialog] = useState(null); // { qr_code, booking_url|menu_url, branch_name, qr_type }
   const [qrLoading, setQrLoading] = useState(false);
 
   useEffect(() => {
@@ -177,9 +177,25 @@ export default function BranchManagement({ salonId }) {
         `${API}/salons/${salonId}/branches/${branch.id}/qr-code`,
         { params: { base_url: baseUrl } }
       );
-      setQrDialog(res.data);
+      setQrDialog({ ...res.data, qr_type: 'booking' });
     } catch (e) {
       toast.error('Failed to generate QR code');
+    } finally {
+      setQrLoading(false);
+    }
+  };
+
+  const showMenuQR = async (branch) => {
+    setQrLoading(true);
+    try {
+      const baseUrl = window.location.origin;
+      const res = await axios.get(
+        `${API}/salons/${salonId}/branches/${branch.id}/services-menu-qr`,
+        { params: { base_url: baseUrl } }
+      );
+      setQrDialog({ ...res.data, qr_type: 'menu' });
+    } catch (e) {
+      toast.error('Failed to generate Services Menu QR');
     } finally {
       setQrLoading(false);
     }
@@ -189,7 +205,8 @@ export default function BranchManagement({ salonId }) {
     if (!qrDialog?.qr_code) return;
     const link = document.createElement('a');
     link.href = qrDialog.qr_code;
-    link.download = `branch-${qrDialog.branch_name?.replace(/\s+/g, '-').toLowerCase() || 'qr'}.png`;
+    const suffix = qrDialog.qr_type === 'menu' ? 'menu-qr' : 'booking-qr';
+    link.download = `branch-${qrDialog.branch_name?.replace(/\s+/g, '-').toLowerCase() || 'branch'}-${suffix}.png`;
     link.click();
   };
 
@@ -310,7 +327,16 @@ export default function BranchManagement({ salonId }) {
                     data-testid={`qr-branch-${branch.id}`}
                     disabled={qrLoading}
                   >
-                    <QrCode className="w-3 h-3 mr-1" /> QR
+                    <QrCode className="w-3 h-3 mr-1" /> Booking QR
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => showMenuQR(branch)}
+                    data-testid={`menu-qr-branch-${branch.id}`}
+                    disabled={qrLoading}
+                  >
+                    <QrCode className="w-3 h-3 mr-1" /> Menu QR
                   </Button>
                   {!branch.is_main_branch && branch.status === 'active' && !readOnly && (
                     <Button
@@ -462,10 +488,17 @@ export default function BranchManagement({ salonId }) {
       <Dialog open={!!qrDialog} onOpenChange={(o) => !o && setQrDialog(null)}>
         <DialogContent className="max-w-md" data-testid="branch-qr-dialog">
           <DialogHeader>
-            <DialogTitle>{qrDialog?.branch_name} – Booking QR</DialogTitle>
+            <DialogTitle>
+              {qrDialog?.branch_name} – {qrDialog?.qr_type === 'menu' ? 'Services Menu QR' : 'Booking QR'}
+            </DialogTitle>
           </DialogHeader>
           {qrDialog && (
             <div className="text-center space-y-3">
+              <p className="text-xs text-muted-foreground -mt-2">
+                {qrDialog.qr_type === 'menu'
+                  ? 'Print this and place it on tables — scanning opens your services menu, customers can pick services and book.'
+                  : 'Print this in your branch — scanning takes customers straight to the booking flow.'}
+              </p>
               <div className="bg-white p-6 rounded-lg inline-block">
                 <img
                   src={qrDialog.qr_code}
@@ -474,7 +507,9 @@ export default function BranchManagement({ salonId }) {
                   data-testid="branch-qr-image"
                 />
               </div>
-              <p className="text-xs text-muted-foreground break-all px-4">{qrDialog.booking_url}</p>
+              <p className="text-xs text-muted-foreground break-all px-4">
+                {qrDialog.menu_url || qrDialog.booking_url}
+              </p>
               <Button
                 onClick={downloadQR}
                 data-testid="branch-qr-download"

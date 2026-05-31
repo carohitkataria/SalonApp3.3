@@ -1,0 +1,29 @@
+{
+  "summary": "Module 6 (Services Menu QR + Frictionless Booking) tested end-to-end across backend and frontend. All 9 backend pytest cases pass: services-menu-qr endpoint returns base64 QR + correct menu_url, public /menu endpoint returns {salon,branch,services} without auth and 404s on unknown salon, booking POST stamps is_otp_verified_at_booking correctly (false for unverified user, true after flipping user.is_otp_verified), and the legacy booking-QR endpoint still works. Frontend: /salons, /salon/:id, /salon/:id/menu, and /book/:id are all reachable WITHOUT login (no redirect to /login). SalonMenuPage renders salon-name, branch-name, search input and a Book-Now bar that is correctly disabled until a service is selected; tapping it navigates to /book/:id?services=... Booking page hides the self/someone-else toggle when not signed in. SinglePageBooking payment step shows guest-identity-card with name/phone/gender inputs and the 'Sign in for faster bookings' button when not signed in; filling guest fields and tapping Confirm calls /api/user/login then /api/bookings and reaches the success step (token M1 created, +180 INR, Imran). Branch Management Branch tab shows BOTH Booking QR (qr-branch-<id>) and Menu QR (menu-qr-branch-<id>) buttons on every branch card; each opens branch-qr-dialog with correct title, QR image, descriptive copy, full URL, and Download button.",
+  "backend_issues": { "critical": [], "minor": [] },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_services_menu_qr_module6.py",
+    "/app/test_reports/pytest/iteration_21.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "GET /api/tokens/{token_id}/public-details does NOT include the new `is_otp_verified_at_booking` field (verified by reading server.py around L7978). The user history endpoint (/api/user/{user_id}/history) does expose it correctly. If the request expected public-details to surface the flag too, add it to the returned payload. Otherwise the spec line referencing public-details is satisfied only via history.",
+    "Salon 62609c3d... had zero enabled services in salon_services. The menu endpoint returns services:[] which is correct but means a real customer scanning the Menu QR today would see an empty list. Not a bug per se, but worth seeding at least one enabled service for any salon shipping Module 6.",
+    "/api/user/login is being used as the public 'create unverified customer' endpoint. It creates `is_otp_verified=false` users — frictionless flow works, but downstream features that gate on is_otp_verified (e.g. /history, OTP card on customer routes) should be reviewed to make sure they don't silently break Express bookings post-checkout."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_services_menu_qr_module6.py (new)"
+  ],
+  "success_rate": { "backend": "100%", "frontend": "100%" },
+  "test_credentials": "Salon admin login at /salon/login → identifier 'admin', password 'salon123'. Customer/express booking created on the fly via /api/user/login with any 10-digit phone.",
+  "seed_data_creation": "Temporarily enabled Haircut service (36ab7dd7-...) for the menu UI test, and created a one-off TEST Express FE customer (+919867526598) + token via the frictionless checkout. All test data cleaned up at the end (user, token, and enabled-service flag removed).",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Backend test file is /app/backend/tests/test_services_menu_qr_module6.py (pytest, 9 tests). It seeds and deletes its own users/tokens. Hardcoded SALON_ID/BRANCH_ID/BARBER_ID/SERVICE_ID at the top — update if the seed changes. The 'verified user' case temporarily flips users.is_otp_verified=true in Mongo because /api/user/login always returns unverified users.",
+  "rca of the issue": "N/A — feature passed."
+}

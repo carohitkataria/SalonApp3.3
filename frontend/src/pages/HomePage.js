@@ -1,4 +1,3 @@
-import { useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { Button } from '@/components/ui/button';
@@ -9,16 +8,6 @@ import ThemeToggle from '@/components/ThemeToggle';
 export default function HomePage() {
   const navigate = useNavigate();
   const { user, isUserLoggedIn, logoutUser } = useAuth();
-
-  useEffect(() => {
-    if (!isUserLoggedIn) {
-      navigate('/user/login');
-    }
-  }, [isUserLoggedIn]);
-
-  if (!isUserLoggedIn || !user) {
-    return null;
-  }
 
   return (
     <div className="min-h-screen bg-background">
@@ -58,23 +47,37 @@ export default function HomePage() {
 
       {/* User Info & Actions */}
       <div className="max-w-7xl mx-auto px-4 py-12">
-        <div className="bg-card border border-border rounded-lg p-6 mb-8">
+        <div className="bg-card border border-border rounded-lg p-6 mb-8" data-testid="home-user-card">
           <div className="flex items-center justify-between">
             <div className="flex items-center space-x-4">
               <div className="w-12 h-12 bg-gold/20 rounded-full flex items-center justify-center">
                 <UserIcon className="w-6 h-6 text-gold" />
               </div>
-              <div>
-                <p className="text-sm text-muted-foreground">Welcome back,</p>
-                <p className="text-lg font-bold text-foreground">{user.name}</p>
-                <p className="text-xs text-muted-foreground">{user.phone}</p>
-              </div>
+              {isUserLoggedIn && user ? (
+                <div>
+                  <p className="text-sm text-muted-foreground">Welcome back,</p>
+                  <p className="text-lg font-bold text-foreground">{user.name}</p>
+                  <p className="text-xs text-muted-foreground">{user.phone}</p>
+                </div>
+              ) : (
+                <div>
+                  <p className="text-sm text-muted-foreground">Welcome,</p>
+                  <p className="text-lg font-bold text-foreground">Browse salons freely</p>
+                  <p className="text-xs text-muted-foreground">Sign in for faster bookings &amp; history</p>
+                </div>
+              )}
             </div>
             <div className="flex items-center space-x-2">
               <ThemeToggle />
-              <Button onClick={logoutUser} variant="outline" size="sm">
-                Logout
-              </Button>
+              {isUserLoggedIn ? (
+                <Button onClick={logoutUser} variant="outline" size="sm" data-testid="home-logout-btn">
+                  Logout
+                </Button>
+              ) : (
+                <Button onClick={() => navigate('/login')} size="sm" className="bg-gold text-black hover:bg-gold/90" data-testid="home-signin-btn">
+                  Sign In
+                </Button>
+              )}
             </div>
           </div>
         </div>

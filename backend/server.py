@@ -504,6 +504,11 @@ class TokenModel(BaseModel):
     completed_at: Optional[str] = None
     recall_count: int = 0
     invoice_id: Optional[str] = None  # Link to invoice
+    # Frictionless booking — snapshot of the booking-time OTP-verification state
+    # of the customer. False for "non-OTP-verified" express bookings made by
+    # guests/unverified users; true once they verify via OTP. Used by the
+    # history UI to surface a small badge.
+    is_otp_verified_at_booking: Optional[bool] = False
     created_at: str
 
 class AddServicesRequest(BaseModel):
@@ -3402,6 +3407,37 @@ async def get_branch_qr(
     }
 
 
+@api_router.get("/salons/{salon_id}/branches/{branch_id}/services-menu-qr")
+async def get_branch_services_menu_qr(
+    salon_id: str,
+    branch_id: str,
+    base_url: Optional[str] = None,
+):
+    """Public endpoint: return a Services-Menu QR code (base64 PNG) for the
+    branch. Salons can print this like a menu — scanning it lands the customer
+    on the salon's services page where they can pick services and tap "Book".
+    """
+    branch = await db.salon_branches.find_one(
+        {"id": branch_id, "salon_id": salon_id}, {"_id": 0}
+    )
+    if not branch:
+        raise HTTPException(status_code=404, detail="Branch not found")
+
+    effective_base = (base_url or os.environ.get("PUBLIC_BASE_URL") or "").rstrip("/")
+    menu_url = (
+        f"{effective_base}/salon/{salon_id}/menu?branch={branch_id}"
+        if effective_base
+        else f"/salon/{salon_id}/menu?branch={branch_id}"
+    )
+    qr_code = await _generate_branch_qr(menu_url)
+
+    return {
+        "qr_code": qr_code,
+        "menu_url": menu_url,
+        "branch_name": branch.get("branch_name"),
+    }
+
+
 # ----- Staff Branch Transfers (Phase 2) -----
 
 @api_router.post("/salons/{salon_id}/staff-branch-transfers", response_model=StaffBranchTransfer)
@@ -3777,6 +3813,78 @@ async def get_salon_enabled_services(salon_id: str):
     ).to_list(1000)
     
     return services
+
+
+@api_router.get("/salons/{salon_id}/menu")
+async def get_salon_menu(salon_id: str, branch: Optional[str] = None):
+    """Public endpoint that powers the printable Services-Menu QR landing page.
+
+    Returns salon + branch + enabled services + active barbers in one call so
+    customers landing from the QR can see everything they need to pick services
+    and start a booking — no login required.
+    """
+    salon = await db.salons.find_one({"id": salon_id}, {"_id": 0})
+    if not salon:
+        raise HTTPException(status_code=404, detail="Salon not found")
+
+    # Resolve effective branch (explicit > main). Branch is optional but if a
+    # branch_id is supplied we surface its metadata.
+    branch_doc = None
+    if branch:
+        branch_doc = await db.salon_branches.find_one(
+            {"id": branch, "salon_id": salon_id}, {"_id": 0}
+        )
+    if not branch_doc:
+        branch_doc = await db.salon_branches.find_one(
+            {"salon_id": salon_id, "is_main_branch": True}, {"_id": 0}
+        )
+
+    # Enabled services with category info
+    salon_services = await db.salon_services.find(
+        {"salon_id": salon_id, "is_enabled": True}, {"_id": 0}
+    ).to_list(1000)
+    service_ids = [ss["service_id"] for ss in salon_services]
+    services = await db.services.find(
+        {"id": {"$in": service_ids}, "is_active": True}, {"_id": 0}
+    ).to_list(1000)
+
+    # Apply per-salon price overrides (if any)
+    override_map = {
+        ss["service_id"]: ss.get("salon_price")
+        for ss in salon_services
+        if ss.get("salon_price") is not None
+    }
+    for svc in services:
+        if svc["id"] in override_map:
+            svc["base_price"] = override_map[svc["id"]]
+
+    # Group by category, sorted
+    services.sort(key=lambda s: (s.get("category") or "General", s.get("service_name") or ""))
+
+    return {
+        "salon": {
+            "id": salon.get("id"),
+            "salon_name": salon.get("salon_name"),
+            "logo_url": salon.get("logo_url"),
+            "address": salon.get("address"),
+            "city": salon.get("city"),
+            "phone": salon.get("phone"),
+            "operational_hours": salon.get("operational_hours"),
+        },
+        "branch": (
+            {
+                "id": branch_doc.get("id"),
+                "branch_name": branch_doc.get("branch_name"),
+                "address": branch_doc.get("address"),
+                "city": branch_doc.get("city"),
+                "phone": branch_doc.get("phone"),
+                "is_main_branch": branch_doc.get("is_main_branch", False),
+            }
+            if branch_doc
+            else None
+        ),
+        "services": services,
+    }
 
 @api_router.get("/salons/{salon_id}/services/all")
 async def get_all_services_with_salon_status(salon_id: str):
@@ -7261,6 +7369,13 @@ async def create_booking(booking: BookingCreate):
     if not booking_branch_id and barber and barber.get("branch_id"):
         booking_branch_id = barber.get("branch_id")
 
+    # Snapshot the booking-time OTP-verification state of the booker so the
+    # history UI can mark "express / non-OTP-verified" bookings.
+    is_otp_verified_at_booking = False
+    booker_user = await db.users.find_one({"phone": phone}, {"_id": 0, "is_otp_verified": 1})
+    if booker_user and booker_user.get("is_otp_verified"):
+        is_otp_verified_at_booking = True
+
     # Create token
     token_dict = {
         "id": str(uuid.uuid4()),
@@ -7288,6 +7403,7 @@ async def create_booking(booking: BookingCreate):
         "source": booking.source,
         "booking_type": booking.booking_type,
         "booking_for_self": booking.booking_for_self,
+        "is_otp_verified_at_booking": is_otp_verified_at_booking,
         "allocated_at": datetime.now(timezone.utc).isoformat(),
         "created_at": datetime.now(timezone.utc).isoformat()
     }

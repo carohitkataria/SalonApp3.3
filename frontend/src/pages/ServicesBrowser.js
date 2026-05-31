@@ -30,36 +30,38 @@ export default function ServicesBrowser() {
   const [activeTab, setActiveTab] = useState('services');
 
   useEffect(() => {
-    if (!isUserLoggedIn) {
-      navigate('/user/login');
-      return;
-    }
-
     fetchData();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isUserLoggedIn, salonId]);
 
   const fetchData = async () => {
     try {
       setLoading(true);
-      const [salonRes, servicesRes, packagesRes, favoritesRes] = await Promise.all([
+      // Public calls — work without auth
+      const [salonRes, servicesRes, packagesRes] = await Promise.all([
         axios.get(`${API}/salons/${salonId}`),
         axios.get(`${API}/services`),
         axios.get(`${API}/packages`),
-        axios.get(`${API}/services/favorites`)
       ]);
 
       setSalon(salonRes.data);
       setAllServices(servicesRes.data);
       setPackages(packagesRes.data);
-      setFavoriteServices(favoritesRes.data);
 
-      // Fetch recent services for the user
-      if (user?.id) {
+      // Auth-only enrichments — skip silently when not logged in
+      if (isUserLoggedIn) {
         try {
-          const recentRes = await axios.get(`${API}/users/${user.id}/recent-services`);
-          setRecentServices(recentRes.data.services || []);
-        } catch (err) {
-          console.log('No recent services found');
+          const favoritesRes = await axios.get(`${API}/services/favorites`);
+          setFavoriteServices(favoritesRes.data);
+        } catch (err) { /* ignore */ }
+
+        if (user?.id) {
+          try {
+            const recentRes = await axios.get(`${API}/users/${user.id}/recent-services`);
+            setRecentServices(recentRes.data.services || []);
+          } catch (err) {
+            console.log('No recent services found');
+          }
         }
       }
     } catch (error) {

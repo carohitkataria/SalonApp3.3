@@ -145,11 +145,6 @@ export default function SalonSelectionPage() {
   const [showCityDropdown, setShowCityDropdown] = useState(false);
 
   useEffect(() => {
-    if (!isUserLoggedIn) {
-      navigate('/user/login');
-      return;
-    }
-
     // Load all salons immediately for faster initial display
     fetchAllSalons();
     fetchCities();

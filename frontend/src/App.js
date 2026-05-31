@@ -5,6 +5,7 @@ import { WebSocketProvider } from '@/contexts/WebSocketContext';
 import { ThemeProvider } from '@/contexts/ThemeContext';
 import { SupplierAuthProvider } from '@/contexts/SupplierAuthContext';
 import { CartProvider } from '@/contexts/CartContext';
+import { BookingIntentProvider } from '@/contexts/BookingIntentContext';
 import { Toaster } from '@/components/ui/sonner';
 
 // Layout
@@ -21,6 +22,7 @@ import SinglePageBooking from '@/pages/SinglePageBooking';
 import HistoryPage from '@/pages/HistoryPage';
 import TokenDashboard from '@/pages/TokenDashboard';
 import ServicesBrowser from '@/pages/ServicesBrowser';
+import SalonMenuPage from '@/pages/SalonMenuPage';
 import BarberProfilePage from '@/pages/BarberProfilePage';
 import SalonRatingsPage from '@/pages/SalonRatingsPage';
 import CustomerWalletPage from '@/pages/CustomerWalletPage';
@@ -66,6 +68,7 @@ function App() {
           <WebSocketProvider>
             <SupplierAuthProvider>
             <CartProvider>
+            <BookingIntentProvider>
             <div className="App">
               <Toaster position="top-center" richColors />
               <BrowserRouter>
@@ -89,6 +92,7 @@ function App() {
                   <Route path="/book/:salonId" element={<CustomerLayout><SinglePageBooking /></CustomerLayout>} />
                   <Route path="/salon/:salonId/queue" element={<CustomerLayout><TokenDashboard /></CustomerLayout>} />
                   <Route path="/salon/:salonId/services" element={<CustomerLayout><ServicesBrowser /></CustomerLayout>} />
+                  <Route path="/salon/:salonId/menu" element={<SalonMenuPage />} />
                   <Route path="/salon/:salonId/barber/:barberId" element={<CustomerLayout><BarberProfilePage /></CustomerLayout>} />
                   <Route path="/salon/:salonId/ratings" element={<CustomerLayout><SalonRatingsPage /></CustomerLayout>} />
                   <Route path="/salon/:salonId/wallet" element={<CustomerLayout><CustomerWalletPage /></CustomerLayout>} />
@@ -132,6 +136,7 @@ function App() {
                 </Routes>
               </BrowserRouter>
             </div>
+            </BookingIntentProvider>
             </CartProvider>
             </SupplierAuthProvider>
           </WebSocketProvider>
