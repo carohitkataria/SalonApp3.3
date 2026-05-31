@@ -440,7 +440,15 @@ export default function StaffAttendanceTab({ salonId, barberId, barberName, comp
                 ? (isOnLeaveDate ? `Click to remove leave (${dateStr})` : `Click to mark on leave (${dateStr})`)
                 : isFuture
                   ? 'Future date — turn on Leave Mode to set leave for this day'
-                  : `Click to change (${status || 'not marked'})`;
+                  : record?.computed_under_mode === 'geo_checkin'
+                    ? [
+                        `Mode: Geo check-in`,
+                        record?.check_in_at ? `In: ${new Date(record.check_in_at).toLocaleTimeString()}` : null,
+                        record?.check_out_at ? `Out: ${new Date(record.check_out_at).toLocaleTimeString()}` : null,
+                        record?.total_minutes ? `Worked: ${Math.floor(record.total_minutes / 60)}h ${record.total_minutes % 60}m` : null,
+                        record?.half_day_reason ? `Reason: ${record.half_day_reason}` : null,
+                      ].filter(Boolean).join(' · ')
+                    : `Click to change (${status || 'not marked'})`;
             
             return (
               <button
@@ -464,6 +472,11 @@ export default function StaffAttendanceTab({ salonId, barberId, barberName, comp
                   <span className={isFuture && !leaveMode ? '' : 'text-[10px] opacity-70'}>{day}</span>
                   {status && status !== 'future' && (
                     <span className="text-[10px]">{STATUS_LABELS[status]}</span>
+                  )}
+                  {record?.computed_under_mode === 'geo_checkin' && (record?.total_minutes ?? 0) > 0 && (
+                    <span className="text-[8px] opacity-80" data-testid={`attn-duration-${dateStr}`}>
+                      {Math.floor(record.total_minutes / 60)}h{record.total_minutes % 60 ? `${record.total_minutes % 60}m` : ''}
+                    </span>
                   )}
                 </div>
               </button>
@@ -535,9 +548,44 @@ export default function StaffAttendanceTab({ salonId, barberId, barberName, comp
               <p className="text-xs text-gold">Incentive</p>
               <p className="text-xl font-bold text-gold">₹{salary.incentive_amount || 0}</p>
             </div>
+
+            {/* Module 4 — Leave breakdown + LOP deduction */}
+            {(salary.leave_breakdown && Object.keys(salary.leave_breakdown).length > 0) || (salary.lop_deduction > 0) ? (
+              <div className="col-span-2 md:col-span-4 bg-card border border-border rounded-lg p-4" data-testid="salary-leave-breakdown">
+                <p className="text-sm font-semibold text-foreground mb-2">Leave Breakdown</p>
+                <div className="flex flex-wrap gap-3 text-xs">
+                  {Object.entries(salary.leave_breakdown || {}).map(([code, days]) => (
+                    <span key={code} className="px-2 py-1 rounded bg-muted text-foreground">
+                      <strong>{code}</strong>: {days} {days === 1 ? 'day' : 'days'}
+                    </span>
+                  ))}
+                  <span className="px-2 py-1 rounded bg-emerald-500/10 text-emerald-700">
+                    Paid leaves: {salary.paid_leave_days || 0}
+                  </span>
+                  <span className="px-2 py-1 rounded bg-rose-500/10 text-rose-700">
+                    Unpaid leaves: {salary.unpaid_leave_days || 0}
+                  </span>
+                </div>
+                {salary.lop_deduction > 0 && salary.working_days_in_month > 0 && (
+                  <p className="text-sm mt-3 text-rose-700" data-testid="salary-lop-line">
+                    <strong>LOP deduction</strong>: {salary.unpaid_leave_days} {salary.unpaid_leave_days === 1 ? 'day' : 'days'} × ₹
+                    {Math.round((salary.base_compensation || salary.base_salary || 0) / salary.working_days_in_month)}/day
+                    {' '}= <strong>−₹{Math.round(salary.lop_deduction)}</strong>
+                  </p>
+                )}
+              </div>
+            ) : null}
+
             <div className="bg-card border-2 border-gold rounded-lg p-4 col-span-2 md:col-span-4">
               <p className="text-sm text-gold font-semibold">Total Payable</p>
-              <p className="text-3xl font-bold text-gold">₹{salary.total_payable}</p>
+              <p className="text-3xl font-bold text-gold" data-testid="salary-final-payable">
+                ₹{salary.final_payable ?? salary.total_payable}
+              </p>
+              {salary.attendance_mode_snapshot && (
+                <p className="text-[10px] text-muted-foreground mt-1">
+                  Computed under mode: {salary.attendance_mode_snapshot === 'geo_checkin' ? 'Geo check-in' : 'Service completion'}
+                </p>
+              )}
             </div>
           </div>
         ) : (
@@ -567,7 +615,7 @@ export default function StaffAttendanceTab({ salonId, barberId, barberName, comp
           <div className="space-y-4 py-4">
             <div className="bg-muted/50 rounded-lg p-4">
               <p className="text-sm text-muted-foreground">Amount to Pay</p>
-              <p className="text-2xl font-bold text-gold">₹{salary?.total_payable || 0}</p>
+              <p className="text-2xl font-bold text-gold">₹{salary?.final_payable ?? salary?.total_payable ?? 0}</p>
               <p className="text-xs text-muted-foreground mt-1">
                 To: {barberName} | Month: {monthName}
               </p>

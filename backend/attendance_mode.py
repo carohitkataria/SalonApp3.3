@@ -573,7 +573,10 @@ async def auto_close_open_checkins_job(db):
     """At `geo_settings.auto_close_at` IST, mark any open check-ins as
     absent (no check-out logged).  Per spec: 'If check-out is missing and
     the day has passed, mark Absent.'  We run this job right after the
-    salon's auto_close_at boundary; the record stays editable by admin."""
+    salon's auto_close_at boundary; the record stays editable by admin.
+
+    Cross-module guard: must skip locked months (salary already paid).
+    """
     salons = await db.salons.find({"attendance_mode": "geo_checkin"}, {"_id": 0, "id": 1, "geo_settings": 1}).to_list(length=10_000)
     closed = 0
     for s in salons:
@@ -586,6 +589,10 @@ async def auto_close_open_checkins_job(db):
             "check_in_at": {"$ne": None}, "check_out_at": None,
         }, {"_id": 0}).to_list(length=10_000)
         for r in open_recs:
+            # Lock-on-paid guard.
+            locked = await is_attendance_locked(db, s["id"], r["barber_id"], yesterday)
+            if locked:
+                continue
             await db.attendance.update_one(
                 {"id": r["id"]},
                 {"$set": {

@@ -846,6 +846,13 @@ async def create_leave_record(salon_id: str, payload: LeaveRecordIn,
         "created_at": now,
         "updated_at": now,
         "created_by": user.get("user_id") or user.get("id"),
+        # Module 4 — snapshot is_paid/display_name at record creation time so
+        # later salary math is immune to admins editing the leave-type config.
+        "leave_type_snapshot": {
+            "code": cfg.get("code"),
+            "display_name": cfg.get("display_name"),
+            "is_paid": bool(cfg.get("is_paid", True)),
+        },
     }
     await _db.leave_records.insert_one(rec_doc.copy())
     rec_doc.pop("_id", None)

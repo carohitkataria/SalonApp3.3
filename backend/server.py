@@ -10979,23 +10979,47 @@ async def get_monthly_attendance(
     barber_query = {"salon_id": salon_id, "is_barber": True, "is_active": True}
     if barber_id:
         barber_query["id"] = barber_id
-    barbers = await db.barbers.find(barber_query, {"_id": 0, "id": 1, "name": 1, "compensation": 1}).to_list(100)
-    
+    barbers = await db.barbers.find(barber_query, {"_id": 0, "id": 1, "name": 1, "compensation": 1, "branch_id": 1}).to_list(100)
+
+    # Module 4 — surface "has_login" so the UI can warn admins that a
+    # staff under Mode B will rely on admin-manual marking.
+    barber_ids = [b["id"] for b in barbers]
+    if barber_ids:
+        users_with_login = await db.salon_users.find(
+            {"salon_id": salon_id, "staff_id": {"$in": barber_ids}, "status": "active"},
+            {"_id": 0, "staff_id": 1},
+        ).to_list(length=500)
+    else:
+        users_with_login = []
+    staff_with_login = {u.get("staff_id") for u in users_with_login if u.get("staff_id")}
+
+    # Resolve current mode for the UI to render the right hint.
+    salon = await db.salons.find_one({"id": salon_id}, {"_id": 0, "attendance_mode": 1}) or {}
+    current_mode = salon.get("attendance_mode") or "service_completion"
+
     # Build response
     response = {
         "month": month,
+        "attendance_mode": current_mode,
         "barbers": []
     }
-    
+
     for barber in barbers:
         barber_records = [r for r in records if r.get("barber_id") == barber["id"]]
+        has_login = barber["id"] in staff_with_login
+        # Under Mode B, a staff without login can't self check-in — admin
+        # must mark manually.  Surface this so the UI/admin sees it.
+        no_checkin_capability = (current_mode == "geo_checkin") and not has_login
         response["barbers"].append({
             "barber_id": barber["id"],
             "barber_name": barber["name"],
+            "branch_id": barber.get("branch_id"),
             "compensation": barber.get("compensation", 0),
+            "has_login": has_login,
+            "no_checkin_capability": no_checkin_capability,
             "attendance": barber_records
         })
-    
+
     return response
 
 
@@ -11369,6 +11393,158 @@ async def get_barber_leave_dates(salon_id: str, barber_id: str, current_user=Dep
     }
 
 
+@api_router.get("/salons/{salon_id}/staff-attendance/report")
+async def staff_attendance_report(
+    salon_id: str,
+    start_date: str,  # YYYY-MM-DD
+    end_date: str,    # YYYY-MM-DD
+    branch_id: Optional[str] = None,
+    barber_ids: Optional[str] = None,  # comma-separated
+    format: str = "json",  # "json" | "csv"
+    current_user=Depends(get_current_salon_user),
+):
+    """Module 4 Phase 7 — Consolidated staff attendance report.
+
+    Returns one row per (barber × date) within the range, with the status
+    that was *computed under the mode active on that date* (so months
+    that span a mode switch read correctly).  Columns:
+      Branch, Date, Staff Code, Staff Name, Status (P/H/A/L/HOL),
+      Leave Type (if on leave), Check-in, Check-out, Worked Minutes,
+      Override By, Override Note, Mode.
+    """
+    if current_user.get("role") not in ("admin", "salon_admin", "salon", "salon_branch_manager"):
+        raise HTTPException(status_code=403, detail="Admin / branch manager access required")
+    # Validate date format
+    try:
+        d_start = datetime.strptime(start_date, "%Y-%m-%d").date()
+        d_end = datetime.strptime(end_date, "%Y-%m-%d").date()
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid date format; expected YYYY-MM-DD")
+    if d_end < d_start:
+        raise HTTPException(status_code=400, detail="end_date must be on or after start_date")
+
+    # Resolve barbers (optionally filter by branch / explicit list).
+    barber_q: dict = {"salon_id": salon_id, "is_active": True}
+    if branch_id:
+        barber_q["branch_id"] = branch_id
+    if barber_ids:
+        ids_list = [x.strip() for x in barber_ids.split(",") if x.strip()]
+        barber_q["id"] = {"$in": ids_list}
+    barbers = await db.barbers.find(
+        barber_q, {"_id": 0, "id": 1, "name": 1, "branch_id": 1}
+    ).to_list(length=1000)
+    barber_by_id = {b["id"]: b for b in barbers}
+
+    # Branch names cache.
+    branch_ids_used = {b.get("branch_id") for b in barbers if b.get("branch_id")}
+    branches_map: dict = {}
+    if branch_ids_used:
+        for br in await db.branches.find(
+            {"id": {"$in": list(branch_ids_used)}}, {"_id": 0, "id": 1, "branch_name": 1}
+        ).to_list(length=200):
+            branches_map[br["id"]] = br.get("branch_name") or br["id"]
+
+    # All attendance docs in the window.
+    att_docs = await db.attendance.find({
+        "salon_id": salon_id,
+        "barber_id": {"$in": list(barber_by_id.keys())},
+        "date": {"$gte": start_date, "$lte": end_date},
+    }, {"_id": 0}).to_list(length=20000)
+    by_key: dict = {(d["barber_id"], d["date"]): d for d in att_docs}
+
+    # Leaves in the window (for status='leave' rows and leave-type labelling).
+    leave_docs = await db.leave_records.find({
+        "salon_id": salon_id,
+        "barber_id": {"$in": list(barber_by_id.keys())},
+        "date": {"$gte": start_date, "$lte": end_date},
+        "status": {"$ne": "cancelled"},
+    }, {"_id": 0}).to_list(length=20000)
+    leave_by_key: dict = {(d["barber_id"], d["date"]): d for d in leave_docs}
+
+    # Public holidays in window.
+    pub_hols = await db.salon_holidays.find({
+        "salon_id": salon_id,
+        "date": {"$gte": start_date, "$lte": end_date},
+    }, {"_id": 0, "date": 1}).to_list(length=400)
+    public_holiday_dates = {h["date"] for h in pub_hols}
+
+    rows: list[dict] = []
+    cur = d_start
+    one_day = timedelta(days=1)
+    while cur <= d_end:
+        ds = cur.strftime("%Y-%m-%d")
+        for b in barbers:
+            att = by_key.get((b["id"], ds)) or {}
+            lv = leave_by_key.get((b["id"], ds))
+            if lv:
+                status_code = "L"
+                leave_label = lv.get("leave_type_code")
+            elif ds in public_holiday_dates or att.get("status") == "holiday":
+                status_code = "HOL"
+                leave_label = None
+            elif att.get("status") == "present":
+                status_code = "P"
+                leave_label = None
+            elif att.get("status") == "half_day":
+                status_code = "H"
+                leave_label = None
+            elif att.get("status") == "absent":
+                status_code = "A"
+                leave_label = None
+            else:
+                status_code = ""
+                leave_label = None
+            rows.append({
+                "branch": branches_map.get(b.get("branch_id"), "—"),
+                "branch_id": b.get("branch_id"),
+                "date": ds,
+                "staff_id": b["id"],
+                "staff_name": b["name"],
+                "status": status_code,
+                "leave_type": leave_label,
+                "check_in": att.get("check_in_at"),
+                "check_out": att.get("check_out_at"),
+                "worked_minutes": att.get("total_minutes"),
+                "half_day_reason": att.get("half_day_reason"),
+                "override_by": att.get("override_by"),
+                "override_note": att.get("override_note"),
+                "mode": att.get("computed_under_mode"),
+            })
+        cur += one_day
+
+    if format.lower() == "csv":
+        import io, csv
+        output = io.StringIO()
+        writer = csv.writer(output)
+        writer.writerow([
+            "Branch", "Date", "Staff ID", "Staff Name", "Status",
+            "Leave Type", "Check-in", "Check-out", "Worked (min)",
+            "Half-day Reason", "Override By", "Override Note", "Mode",
+        ])
+        for r in rows:
+            writer.writerow([
+                r["branch"], r["date"], r["staff_id"], r["staff_name"], r["status"],
+                r["leave_type"] or "", r["check_in"] or "", r["check_out"] or "",
+                r["worked_minutes"] if r["worked_minutes"] is not None else "",
+                r["half_day_reason"] or "", r["override_by"] or "", r["override_note"] or "",
+                r["mode"] or "",
+            ])
+        output.seek(0)
+        filename = f"attendance_{salon_id}_{start_date}_to_{end_date}.csv"
+        return StreamingResponse(
+            io.BytesIO(output.getvalue().encode()),
+            media_type="text/csv",
+            headers={"Content-Disposition": f"attachment; filename={filename}"},
+        )
+
+    return {
+        "salon_id": salon_id,
+        "start_date": start_date,
+        "end_date": end_date,
+        "rows": rows,
+    }
+
+
 @api_router.get("/salons/{salon_id}/staff-salary/month/{month}")
 async def get_monthly_salary(
     salon_id: str,
@@ -11486,7 +11662,7 @@ async def get_monthly_salary(
             "barber_id": barber["id"],
             "date": {"$regex": f"^{month}"},
             "status": {"$ne": "cancelled"},
-        }, {"_id": 0, "leave_type_code": 1, "half_day": 1}).to_list(length=400)
+        }, {"_id": 0, "leave_type_code": 1, "half_day": 1, "leave_type_snapshot": 1}).to_list(length=400)
         leave_breakdown: dict[str, float] = {}
         paid_leave_days = 0.0
         unpaid_leave_days = 0.0
@@ -11494,7 +11670,15 @@ async def get_monthly_salary(
             code = (lr.get("leave_type_code") or "").upper()
             qty = 0.5 if lr.get("half_day") else 1.0
             leave_breakdown[code] = leave_breakdown.get(code, 0.0) + qty
-            if is_paid_by_code.get(code, True):
+            # Module 4 — prefer the snapshot stored on the record (immune to
+            # admins editing the leave-type config mid-month).  Fall back to
+            # the live config for legacy records that pre-date the snapshot.
+            snap = lr.get("leave_type_snapshot") or {}
+            if "is_paid" in snap:
+                is_paid_for_record = bool(snap["is_paid"])
+            else:
+                is_paid_for_record = is_paid_by_code.get(code, True)
+            if is_paid_for_record:
                 paid_leave_days += qty
             else:
                 unpaid_leave_days += qty

@@ -6,9 +6,10 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { toast } from 'sonner';
 import { BarChart, Bar, PieChart, Pie, Cell, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
-import { TrendingUp, Users, Scissors, Download, Calendar, Award, BarChart3 } from 'lucide-react';
+import { TrendingUp, Users, Scissors, Download, Calendar, Award, BarChart3, ClipboardList } from 'lucide-react';
 import { motion } from 'framer-motion';
 import IncentiveDashboard from './IncentiveDashboard';
+import StaffAttendanceReport from './staff/StaffAttendanceReport';
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
 const API = `${BACKEND_URL}/api`;
@@ -131,9 +132,22 @@ export default function Analytics({ salonId, getAuthHeaders, isAdmin = true }) {
         >
           <Award className="w-4 h-4" /> Incentives
         </button>
+        <button
+          onClick={() => setSection('attendance')}
+          className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition ${
+            section === 'attendance'
+              ? 'bg-gold/15 text-gold border border-gold/40'
+              : 'text-muted-foreground hover:text-foreground'
+          }`}
+          data-testid="analytics-tab-attendance"
+        >
+          <ClipboardList className="w-4 h-4" /> Staff Attendance
+        </button>
       </div>
 
-      {section === 'incentives' ? (
+      {section === 'attendance' ? (
+        <StaffAttendanceReport salonId={salonId} getAuthHeaders={getAuthHeaders} />
+      ) : section === 'incentives' ? (
         <IncentiveDashboard
           salonId={salonId}
           getAuthHeaders={getAuthHeaders}

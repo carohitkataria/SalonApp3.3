@@ -100,7 +100,8 @@ class TestGeoCheckIn:
                           headers=auth,
                           json={"mode": "geo_checkin",
                                 "geo_settings": {"check_in_radius_meters": radius,
-                                                  "max_check_in_time": "23:59"}},
+                                                  "max_check_in_time": "23:59",
+                                                  "min_daily_minutes": 480}},
                           timeout=30)
         assert r.status_code == 200, r.text
 
@@ -311,3 +312,75 @@ class TestLockOnPaid:
                           headers=auth, json={"status": "present"}, timeout=30)
         assert r.status_code == 423, r.text
         assert "locked" in r.json()["detail"].lower()
+
+
+class TestSalonWideReport:
+    def test_report_json_default_window(self, auth, barber_id):
+        # Pick a small window that should contain at least the records created
+        # by previous tests (2030-04).
+        r = requests.get(
+            f"{BASE_URL}/api/salons/{SALON_ID}/staff-attendance/report",
+            headers=auth,
+            params={"start_date": "2030-04-01", "end_date": "2030-04-30"},
+            timeout=30,
+        )
+        assert r.status_code == 200, r.text
+        body = r.json()
+        assert body["start_date"] == "2030-04-01"
+        assert body["end_date"] == "2030-04-30"
+        assert isinstance(body["rows"], list)
+        # 30 days × N barbers
+        assert len(body["rows"]) >= 30
+        # Status codes are limited to the documented set.
+        for row in body["rows"][:10]:
+            assert row["status"] in ("", "P", "H", "A", "L", "HOL")
+            assert "branch" in row
+            assert "date" in row
+            assert "staff_name" in row
+
+    def test_report_csv_download(self, auth):
+        r = requests.get(
+            f"{BASE_URL}/api/salons/{SALON_ID}/staff-attendance/report",
+            headers=auth,
+            params={"start_date": "2030-04-01", "end_date": "2030-04-02", "format": "csv"},
+            timeout=30,
+        )
+        assert r.status_code == 200, r.text
+        assert "text/csv" in r.headers.get("content-type", "")
+        body = r.text
+        # CSV header row.
+        assert body.startswith("Branch,Date,Staff ID,Staff Name,Status,")
+
+    def test_report_invalid_dates_400(self, auth):
+        # end before start
+        r = requests.get(
+            f"{BASE_URL}/api/salons/{SALON_ID}/staff-attendance/report",
+            headers=auth,
+            params={"start_date": "2030-04-30", "end_date": "2030-04-01"},
+            timeout=30,
+        )
+        assert r.status_code == 400, r.text
+
+    def test_report_no_token_blocked(self):
+        r = requests.get(
+            f"{BASE_URL}/api/salons/{SALON_ID}/staff-attendance/report",
+            params={"start_date": "2030-04-01", "end_date": "2030-04-02"},
+            timeout=30,
+        )
+        assert r.status_code in (401, 403)
+
+
+class TestMonthlyAttendanceHasLogin:
+    def test_monthly_attendance_returns_has_login_and_mode(self, auth):
+        r = requests.get(
+            f"{BASE_URL}/api/salons/{SALON_ID}/staff-attendance/month/2030-04",
+            headers=auth, timeout=30,
+        )
+        assert r.status_code == 200, r.text
+        body = r.json()
+        assert "attendance_mode" in body
+        assert body["attendance_mode"] in ("service_completion", "geo_checkin")
+        assert isinstance(body["barbers"], list)
+        for b in body["barbers"]:
+            assert "has_login" in b
+            assert "no_checkin_capability" in b

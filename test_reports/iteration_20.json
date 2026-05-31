@@ -1,0 +1,43 @@
+{
+  "summary": "Module 4 Phase 7/8 cross-module gap fixes verified end-to-end. Backend: 50/50 pytest green (46 existing regression + 4 new gap tests covering report branch/barber filters, end<start 400, and full leave_type_snapshot lifecycle through POST → list → salary recompute). Frontend: all 4 new UI surfaces verified by Playwright on the public REACT_APP_BACKEND_URL — Attendance Rules mode selector + geo panel + save toast, Analytics 'Staff Attendance' sub-tab + report + CSV button, salary card test-ids in StaffAttendanceTab, and conditional duration cell on calendar.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "/api/salons/{salon_id}/leave-types-config/{id} (DELETE)", "issue": "Soft-delete of a leave-type-config still keeps its FY leave_balances rows visible as 0-balance chips on staff profile. Not blocking — but it surfaces stale 'display_name' chips for callers. Consider filtering balances whose parent type is soft-deleted in GET balances responses."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [
+      {"flow": "Analytics dashboard auto-fetch on mount", "issue": "Sibling Analytics sub-tabs (Performance/Incentives) emit ~10x 401 'Failed to load resource' when opened with the salon_admin login. The NEW 'Staff Attendance' sub-tab works fine (rows load, empty-state renders). The 401s are pre-existing on other Analytics endpoints, not the new /staff-attendance/report.", "affected_selectors": ["[data-testid='analytics-tab-performance']", "[data-testid='analytics-tab-incentives']"]}
+    ],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_attendance_mode_module4.py",
+    "/app/backend/tests/test_attendance_module4_edge.py",
+    "/app/backend/tests/test_leave_tracker_module2.py",
+    "/app/backend/tests/test_module4_crossmod_gaps.py",
+    "/app/test_reports/pytest/iteration_20.xml"
+  ],
+  "action_items": [
+    "(Optional, low-pri) Investigate why Analytics Performance/Incentives sub-tabs throw 401 with salon_admin token — appears to use a different auth header/token storage key. Not regressed by this iteration.",
+    "(Optional, low-pri) Filter soft-deleted leave-types out of GET /barbers/{id}/leave-balance so stale chips don't show on staff profile."
+  ],
+  "critical_code_review_comments": [
+    "auto_close_open_checkins_job (attendance_mode.py lines 572+) correctly guards with a lock check before touching attendance docs — verified by reading the source.",
+    "leave_tracker.py persists leave_type_snapshot on insert (verified live via POST and via GET-list; snapshot.is_paid frozen at creation time).",
+    "server.py GET /staff-attendance/month/{month} surfaces top-level attendance_mode plus per-barber has_login + no_checkin_capability — covered by TestMonthlyAttendanceHasLogin.",
+    "server.py GET /staff-attendance/report supports json + csv; branch_id and barber_ids filters scope correctly; end_date<start_date returns 400; missing token returns 401/403."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_module4_crossmod_gaps.py (new, +4 tests)"
+  ],
+  "success_rate": {"backend": "100% (50/50 pytest)", "frontend": "100% (4/4 critical flows: attendance mode selector + geo panel + save toast; analytics staff-attendance sub-tab; salary card test-ids present; calendar duration cell conditionally renders correctly)"},
+  "test_credentials": "salon admin via POST /api/salon/users/login identifier='+917503070727' password='salon123'; salon_id=a6f10c9e-f0e0-4128-8246-00282188c70b; barbers Imran (53bce57f-d480-4349-af69-b6656d39fe01) and Abdul",
+  "seed_data_creation": "Created+deleted 1 temp leave-type 'SNAP*' for snapshot test; cleaned up after. Also cleaned 7 stale 'SNAP*' types left by earlier failed iterations during my development of the snapshot test — salon is back to clean state with only original 10 types.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Backend pytest pre-runs at 50/50: test_attendance_mode_module4 (15) + test_attendance_module4_edge (11) + test_leave_tracker_module2 (20) + test_module4_crossmod_gaps (4). Salon attendance_mode is left at 'service_completion'. Frontend flow to navigate as salon admin: POST /api/salon/users/login then set localStorage keys ('salon_admin_token', 'salon_user_auth' with {access_token, role:'admin', salon_id}, and 'salon_id') BEFORE goto. Then /salon/staff/settings?tab=attendance for the mode selector, /salon/dashboard → click Analytics → click 'Staff Attendance' for the report, and /salon/staff/{barberId} → click 'Attendance' tab for salary card + calendar duration cells.",
+  "rca of the issue": "No outstanding RCA — all gap-fix tests green, both backend and frontend."
+}
