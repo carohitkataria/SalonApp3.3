@@ -4517,3 +4517,31 @@ agent_communication:
         ✅ Profile photo upload without crashes
         
         The Staff Access / Access Control feature is fully functional and ready for production use.
+
+agent_communication:
+    - agent: "main"
+      message: |
+        ROUND 2 (this session) — Implemented + tested:
+        1) Staff section permissions (can_access_services / can_access_gallery /
+           can_access_staff / can_view_all_staff) added to backend model, login token,
+           and the REAL grant-access UI in StaffProfilePage → Access tab (both the
+           "Create Login Credentials" form and the existing-user permissions list).
+           Nested "Can see all staff details" only shows when "Staff Management" is on.
+        2) staff_id now included in JWT + SalonUserToken + stored by BOTH login paths
+           (AuthContext.loginSalonUser AND OTPLoginPage) → enables staff self check-in.
+        3) Staff Geo Check-in/Check-out widget on dashboard Home (only in geo_checkin
+           mode + linked staff). Live timer + check-out. Backend tested (10/12 explicit
+           pass; the 2 flagged were correct behaviour).
+        4) Geofencing attendance mode in Settings + attendance calendar + admin override
+           — frontend tested PASS.
+        5) Admin can Reset Password and Revoke/Restore access per staff (StaffProfilePage
+           Access tab) — tested PASS.
+        6) Login ID uniqueness checked client-side before assigning (backend already
+           enforced) — implemented.
+        7) Removed duplicate Employee Reward Plan from dashboard Staff Management tab
+           (still available under Salon Settings → Staff → Incentive Rules) — tested PASS.
+        8) FIXED barber profile image upload crash ("Objects are not valid as a React
+           child"): photo upload/remove now send only {profile_image} (avoids 422 from
+           compensation:'') and all error toasts stringify Pydantic arrays — tested PASS.
+        NOTE: StaffAccessManagement.js is an orphan component (not routed); the live UI
+        is StaffProfilePage Access tab. Both were updated for consistency.
