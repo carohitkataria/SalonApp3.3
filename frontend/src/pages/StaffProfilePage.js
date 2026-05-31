@@ -25,7 +25,7 @@ const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
 const API = `${BACKEND_URL}/api`;
 
 // Create Staff User Form Component
-function CreateStaffUserForm({ staffId, staffName, staffMobile, salonId, onSuccess }) {
+function CreateStaffUserForm({ staffId, staffName, staffMobile, salonId, onSuccess, existingLoginIds = [] }) {
   const [formData, setFormData] = useState({
     loginId: '',
     password: '',
@@ -34,13 +34,37 @@ function CreateStaffUserForm({ staffId, staffName, staffMobile, salonId, onSucce
       can_edit_salon: false,
       can_access_analytics: false,
       can_access_financials: false,
-      can_delete_salon: false
+      can_delete_salon: false,
+      can_access_services: false,
+      can_access_gallery: false,
+      can_access_staff: false,
+      can_view_all_staff: false
     }
   });
   const [creating, setCreating] = useState(false);
 
+  const setPerm = (key, checked) => {
+    setFormData((prev) => {
+      const next = { ...prev.permissions, [key]: checked };
+      if (key === 'can_access_staff' && !checked) next.can_view_all_staff = false;
+      return { ...prev, permissions: next };
+    });
+  };
+
   const handleSubmit = async (e) => {
     e.preventDefault();
+
+    if (!formData.loginId) {
+      toast.error('Please enter a login ID');
+      return;
+    }
+
+    // Uniqueness check before assigning (backend also enforces this).
+    const entered = formData.loginId.trim().toLowerCase();
+    if (existingLoginIds.some((id) => (id || '').trim().toLowerCase() === entered)) {
+      toast.error(`Login ID "${formData.loginId}" is already taken. Please choose a unique Login ID.`);
+      return;
+    }
 
     if (formData.password !== formData.confirmPassword) {
       toast.error('Passwords do not match');
@@ -49,11 +73,6 @@ function CreateStaffUserForm({ staffId, staffName, staffMobile, salonId, onSucce
 
     if (formData.password.length < 6) {
       toast.error('Password must be at least 6 characters');
-      return;
-    }
-
-    if (!formData.loginId) {
-      toast.error('Please enter a login ID');
       return;
     }
 
@@ -80,7 +99,11 @@ function CreateStaffUserForm({ staffId, staffName, staffMobile, salonId, onSucce
       toast.success('Staff login credentials created successfully!');
       onSuccess();
     } catch (error) {
-      toast.error(error.response?.data?.detail || 'Failed to create staff user');
+      const detail = error?.response?.data?.detail;
+      let msg = 'Failed to create staff user';
+      if (typeof detail === 'string') msg = detail;
+      else if (Array.isArray(detail) && detail.length) msg = detail.map((d) => d?.msg || 'Invalid').join(', ');
+      toast.error(msg);
     } finally {
       setCreating(false);
     }
@@ -178,6 +201,60 @@ function CreateStaffUserForm({ staffId, staffName, staffMobile, salonId, onSucce
               Can delete salon (Dangerous)
             </Label>
           </div>
+
+          <div className="pt-2 mt-1 border-t border-border">
+            <p className="text-sm font-semibold mb-1">Section access</p>
+          </div>
+
+          <div className="flex items-center space-x-2">
+            <Checkbox
+              id="cu_can_access_services"
+              checked={formData.permissions.can_access_services}
+              onCheckedChange={(checked) => setPerm('can_access_services', checked)}
+            />
+            <Label htmlFor="cu_can_access_services" className="cursor-pointer font-normal">
+              Can see Services &amp; Offerings section
+            </Label>
+          </div>
+
+          <div className="flex items-center space-x-2">
+            <Checkbox
+              id="cu_can_access_gallery"
+              checked={formData.permissions.can_access_gallery}
+              onCheckedChange={(checked) => setPerm('can_access_gallery', checked)}
+            />
+            <Label htmlFor="cu_can_access_gallery" className="cursor-pointer font-normal">
+              Can see Gallery section
+            </Label>
+          </div>
+
+          <div className="flex items-center space-x-2">
+            <Checkbox
+              id="cu_can_access_staff"
+              checked={formData.permissions.can_access_staff}
+              onCheckedChange={(checked) => setPerm('can_access_staff', checked)}
+            />
+            <Label htmlFor="cu_can_access_staff" className="cursor-pointer font-normal">
+              Can see Staff Management section
+            </Label>
+          </div>
+
+          {formData.permissions.can_access_staff && (
+            <div className="flex items-start space-x-2 ml-6 pl-3 border-l-2 border-gold/30">
+              <Checkbox
+                id="cu_can_view_all_staff"
+                checked={formData.permissions.can_view_all_staff}
+                onCheckedChange={(checked) => setPerm('can_view_all_staff', checked)}
+                className="mt-0.5"
+              />
+              <Label htmlFor="cu_can_view_all_staff" className="cursor-pointer font-normal">
+                Can see all staff details
+                <span className="block text-xs text-muted-foreground">
+                  If unchecked, this user sees only their own profile.
+                </span>
+              </Label>
+            </div>
+          )}
         </div>
       </div>
 
@@ -503,8 +580,13 @@ export default function StaffProfilePage() {
     can_edit_salon: false,
     can_access_analytics: false,
     can_access_financials: false,
-    can_delete_salon: false
+    can_delete_salon: false,
+    can_access_services: false,
+    can_access_gallery: false,
+    can_access_staff: false,
+    can_view_all_staff: false
   });
+  const [allLoginIds, setAllLoginIds] = useState([]);
 
   useEffect(() => {
     fetchStaffData();
@@ -547,10 +629,12 @@ export default function StaffProfilePage() {
       const usersResponse = await axios.get(`${API}/salon/users`, {
         headers: { Authorization: `Bearer ${token}` }
       });
-      const linkedUser = usersResponse.data.users?.find(u => u.staff_id === staffId);
+      const allUsers = usersResponse.data.users || [];
+      setAllLoginIds(allUsers.map((u) => u.login_id).filter(Boolean));
+      const linkedUser = allUsers.find(u => u.staff_id === staffId);
       if (linkedUser) {
         setStaffUser(linkedUser);
-        setPermissions(linkedUser.permissions || permissions);
+        setPermissions((prev) => ({ ...prev, ...(linkedUser.permissions || {}) }));
       }
     } catch (error) {
       console.error('Error fetching staff data:', error);
@@ -722,6 +806,62 @@ export default function StaffProfilePage() {
       toast.success('Permissions updated successfully');
     } catch (error) {
       toast.error('Failed to update permissions');
+    }
+  };
+
+  const authHeader = () => {
+    const token = localStorage.getItem('salon_admin_token') ||
+                  JSON.parse(localStorage.getItem('salon_user_auth') || '{}').token;
+    return { Authorization: `Bearer ${token}` };
+  };
+
+  const safeDetail = (error, fallback) => {
+    const detail = error?.response?.data?.detail;
+    if (typeof detail === 'string') return detail;
+    if (Array.isArray(detail) && detail.length) return detail.map((d) => d?.msg || 'Invalid').join(', ');
+    return fallback;
+  };
+
+  // Reset the linked staff user's password.
+  const handleResetStaffPassword = async () => {
+    if (!staffUser) return;
+    const newPassword = window.prompt(`Enter a new password for "${staffUser.login_id}" (min 6 characters):`);
+    if (newPassword === null) return;
+    if (!newPassword || newPassword.trim().length < 6) {
+      toast.error('Password must be at least 6 characters');
+      return;
+    }
+    try {
+      await axios.put(
+        `${API}/salon/users/${staffUser.id}`,
+        { password: newPassword.trim() },
+        { headers: authHeader() }
+      );
+      toast.success('Password reset successfully');
+    } catch (error) {
+      toast.error(safeDetail(error, 'Failed to reset password'));
+    }
+  };
+
+  // Revoke (deactivate) or restore (reactivate) the linked staff user's login access.
+  const handleToggleStaffAccess = async () => {
+    if (!staffUser) return;
+    const revoking = staffUser.status === 'active';
+    if (!window.confirm(`${revoking ? 'Revoke' : 'Restore'} login access for "${staffUser.name}"?`)) return;
+    try {
+      if (revoking) {
+        await axios.delete(`${API}/salon/users/${staffUser.id}`, { headers: authHeader() });
+      } else {
+        await axios.put(
+          `${API}/salon/users/${staffUser.id}`,
+          { status: 'active' },
+          { headers: authHeader() }
+        );
+      }
+      toast.success(revoking ? 'Access revoked' : 'Access restored');
+      fetchStaffData();
+    } catch (error) {
+      toast.error(safeDetail(error, 'Failed to update access'));
     }
   };
 
@@ -1188,6 +1328,7 @@ export default function StaffProfilePage() {
                     staffMobile={staff.mobile}
                     salonId={localStorage.getItem('salon_id')}
                     onSuccess={() => fetchStaffData()}
+                    existingLoginIds={allLoginIds}
                   />
                 </div>
               ) : (
@@ -1214,6 +1355,31 @@ export default function StaffProfilePage() {
                           {staffUser.status}
                         </span>
                       </div>
+                    </div>
+                    <div className="flex flex-wrap gap-2 mt-4 pt-4 border-t border-border">
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        onClick={handleResetStaffPassword}
+                        data-testid="reset-staff-password-btn"
+                      >
+                        <Shield className="w-4 h-4 mr-2" /> Reset Password
+                      </Button>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        onClick={handleToggleStaffAccess}
+                        data-testid="toggle-staff-access-btn"
+                        className={staffUser.status === 'active'
+                          ? 'text-red-500 hover:text-red-600 border-red-500/40'
+                          : 'text-green-600 hover:text-green-700 border-green-500/40'}
+                      >
+                        {staffUser.status === 'active'
+                          ? (<><X className="w-4 h-4 mr-2" /> Revoke Access</>)
+                          : (<><Check className="w-4 h-4 mr-2" /> Restore Access</>)}
+                      </Button>
                     </div>
                   </div>
 
@@ -1278,6 +1444,66 @@ export default function StaffProfilePage() {
                           <p className="text-xs text-muted-foreground text-red-500">⚠️ Dangerous permission - grants delete access</p>
                         </Label>
                       </div>
+
+                      <div className="pt-2">
+                        <p className="text-sm font-semibold">Section access</p>
+                      </div>
+
+                      <div className="flex items-center space-x-2 p-3 border border-border rounded-lg">
+                        <Checkbox
+                          id="ac_can_access_services"
+                          checked={permissions.can_access_services}
+                          onCheckedChange={(checked) => setPermissions({ ...permissions, can_access_services: checked })}
+                          className="data-[state=checked]:bg-gold data-[state=checked]:border-gold"
+                        />
+                        <Label htmlFor="ac_can_access_services" className="cursor-pointer flex-1">
+                          <span className="font-medium">Can see Services &amp; Offerings section</span>
+                        </Label>
+                      </div>
+
+                      <div className="flex items-center space-x-2 p-3 border border-border rounded-lg">
+                        <Checkbox
+                          id="ac_can_access_gallery"
+                          checked={permissions.can_access_gallery}
+                          onCheckedChange={(checked) => setPermissions({ ...permissions, can_access_gallery: checked })}
+                          className="data-[state=checked]:bg-gold data-[state=checked]:border-gold"
+                        />
+                        <Label htmlFor="ac_can_access_gallery" className="cursor-pointer flex-1">
+                          <span className="font-medium">Can see Gallery section</span>
+                        </Label>
+                      </div>
+
+                      <div className="flex items-center space-x-2 p-3 border border-border rounded-lg">
+                        <Checkbox
+                          id="ac_can_access_staff"
+                          checked={permissions.can_access_staff}
+                          onCheckedChange={(checked) => setPermissions({
+                            ...permissions,
+                            can_access_staff: checked,
+                            can_view_all_staff: checked ? permissions.can_view_all_staff : false
+                          })}
+                          className="data-[state=checked]:bg-gold data-[state=checked]:border-gold"
+                        />
+                        <Label htmlFor="ac_can_access_staff" className="cursor-pointer flex-1">
+                          <span className="font-medium">Can see Staff Management section</span>
+                          <p className="text-xs text-muted-foreground">Sees only their own profile unless "all staff" is granted</p>
+                        </Label>
+                      </div>
+
+                      {permissions.can_access_staff && (
+                        <div className="flex items-center space-x-2 p-3 border border-border rounded-lg ml-6 border-l-2 border-l-gold/40">
+                          <Checkbox
+                            id="ac_can_view_all_staff"
+                            checked={permissions.can_view_all_staff}
+                            onCheckedChange={(checked) => setPermissions({ ...permissions, can_view_all_staff: checked })}
+                            className="data-[state=checked]:bg-gold data-[state=checked]:border-gold"
+                          />
+                          <Label htmlFor="ac_can_view_all_staff" className="cursor-pointer flex-1">
+                            <span className="font-medium">Can see all staff details</span>
+                            <p className="text-xs text-muted-foreground">If unchecked, only their own profile is visible</p>
+                          </Label>
+                        </div>
+                      )}
                     </div>
 
                     <div className="flex justify-end mt-6">
