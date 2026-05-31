@@ -121,6 +121,8 @@ class SalonUpdate(BaseModel):
     invoice_start_number: Optional[int] = None
     password: Optional[str] = None  # To update password
     attendance_rules: Optional[Dict[str, Any]] = None  # Module 3 — Staff Settings attendance config
+    attendance_mode: Optional[str] = None  # Module 4 — direct mode set (rare; usually via /attendance-mode)
+    geo_settings: Optional[Dict[str, Any]] = None  # Module 4 — geo check-in config
 
 class SalonPasswordLogin(BaseModel):
     phone: str
@@ -185,7 +187,10 @@ class Salon(BaseModel):
     current_invoice_number: int = 1  # Current invoice counter
     operational_hours: Optional[OperationalHours] = None
     manual_toggle: Optional[ManualToggle] = None
-    attendance_rules: Optional[Dict[str, Any]] = None  # Module 3 — Staff Settings
+    attendance_rules: Optional[Dict[str, Any]] = None  # Module 3 — Staff Settings (legacy placement config)
+    attendance_mode: Optional[str] = "service_completion"  # Module 4 — "service_completion" | "geo_checkin"
+    attendance_mode_history: Optional[List[Dict[str, Any]]] = None  # Module 4 — change audit
+    geo_settings: Optional[Dict[str, Any]] = None  # Module 4 — Mode B configuration
     created_at: str
 
 # Service Models
@@ -9806,6 +9811,19 @@ class AttendanceRecord(BaseModel):
     morning_shift_completed: bool = False
     noon_evening_shift_completed: bool = False
     bookings_count: int = 0
+    # Module 4 — Mode B (geo check-in) raw + computed fields (all optional, coexist with Mode A above)
+    check_in_at: Optional[str] = None
+    check_in_lat: Optional[float] = None
+    check_in_lng: Optional[float] = None
+    check_in_distance_meters: Optional[int] = None
+    check_in_method: Optional[str] = None  # "self" | "admin_on_behalf" | "self_override" | "admin_edit"
+    check_out_at: Optional[str] = None
+    check_out_lat: Optional[float] = None
+    check_out_lng: Optional[float] = None
+    check_out_method: Optional[str] = None
+    total_minutes: Optional[int] = None
+    computed_under_mode: Optional[str] = None  # "service_completion" | "geo_checkin"
+    half_day_reason: Optional[str] = None  # "late_checkin" | "short_hours" | "single_shift" | None
     created_at: str
     updated_at: str
     override_by: Optional[str] = None  # Admin user ID who overrode
@@ -9838,6 +9856,15 @@ class SalaryRecord(BaseModel):
     paid_at: Optional[str] = None
     payment_method: Optional[str] = None
     financial_transaction_id: Optional[str] = None
+    # Module 4 — payroll integration (additive; total_payable stays = final_payable)
+    base_compensation: Optional[float] = None
+    working_days_in_month: Optional[int] = None
+    paid_leave_days: Optional[float] = None
+    unpaid_leave_days: Optional[float] = None
+    leave_breakdown: Optional[Dict[str, float]] = None
+    lop_deduction: Optional[float] = None
+    final_payable: Optional[float] = None
+    attendance_mode_snapshot: Optional[str] = None
     created_at: str
     updated_at: str
 
@@ -10826,72 +10853,100 @@ async def _send_expiry_reminder(m: Dict[str, Any], days_left: int, key: str):
 # ============ STAFF ATTENDANCE ENDPOINTS ============
 
 async def calculate_barber_attendance_for_date(salon_id: str, barber_id: str, date_str: str) -> dict:
-    """Calculate attendance for a barber on a specific date based on completed bookings.
-    
-    Rules (updated):
-    - On leave (date in barber.leave_dates) → status='absent' regardless of completed bookings
-    - Date before joining date (doj) → status='absent' (not yet employed)
-    - Date after last_working_date → status='absent' (no longer employed)
-    - Otherwise: Present if 1+ completed booking, else Absent
+    """Calculate attendance for a barber on a specific date.
+
+    Module 4 — Mode-aware dispatch:
+      • Looks up which attendance_mode was active on `date_str` (via the
+        salon's attendance_mode_history; defaults to "service_completion").
+      • Mode A ("service_completion"): the existing booking-completion rule.
+      • Mode B ("geo_checkin"): read raw check-in/out fields and apply the
+        late-checkin / short-hours rules from compute_mode_b_status.
+
+    Always returns the same dict shape (status, bookings_count, shift flags)
+    so existing callers stay happy; under Mode B we additionally surface
+    total_minutes / half_day_reason / computed_under_mode.
     """
-    # Look up barber to apply employment-window / leave gating
+    # Look up barber to apply employment-window / leave gating.
     barber = await db.barbers.find_one(
         {"id": barber_id, "salon_id": salon_id},
-        {"_id": 0, "doj": 1, "last_working_date": 1, "leave_dates": 1}
+        {"_id": 0, "doj": 1, "last_working_date": 1, "leave_dates": 1, "branch_id": 1}
     ) or {}
-    
+
     leave_dates = barber.get("leave_dates") or []
     doj = (barber.get("doj") or "").strip()
     lwd = (barber.get("last_working_date") or "").strip()
-    
-    # Outside employment window → mark absent (no service required)
+
+    # Outside employment window → absent regardless of mode.
     if doj and date_str < doj:
         return {"status": "absent", "bookings_count": 0,
-                "morning_shift_completed": False, "noon_evening_shift_completed": False}
+                "morning_shift_completed": False, "noon_evening_shift_completed": False,
+                "computed_under_mode": None}
     if lwd and date_str > lwd:
         return {"status": "absent", "bookings_count": 0,
-                "morning_shift_completed": False, "noon_evening_shift_completed": False}
-    
-    # Get completed bookings for this barber on this date
+                "morning_shift_completed": False, "noon_evening_shift_completed": False,
+                "computed_under_mode": None}
+
+    # Module 2 — leave_records take priority across both modes (active record on this date).
+    on_leave_record = await db.leave_records.find_one({
+        "salon_id": salon_id, "barber_id": barber_id, "date": date_str,
+        "status": {"$ne": "cancelled"},
+    }, {"_id": 0, "id": 1})
+
+    # Resolve the mode that governs this date.
+    salon = await db.salons.find_one({"id": salon_id}, {"_id": 0}) or {}
+    mode = attendance_mode_mod.resolve_mode_for_date(salon, date_str)
+
+    if mode == "geo_checkin":
+        # Mode B — read raw check-in/out from the existing attendance doc (if any).
+        record_id = f"{salon_id}_{barber_id}_{date_str}"
+        existing = await db.attendance.find_one({"id": record_id}, {"_id": 0}) or {}
+        # Legacy back-compat: leave_dates list also marks absent under Mode B.
+        on_leave = bool(on_leave_record) or (isinstance(leave_dates, list) and date_str in leave_dates)
+        day_passed = date_str < attendance_mode_mod.current_ist_date()
+        computed = attendance_mode_mod.compute_mode_b_status(salon, existing, day_has_passed=day_passed, on_leave=on_leave)
+        return {
+            "status": computed["status"],
+            "bookings_count": int(existing.get("bookings_count") or 0),
+            "morning_shift_completed": bool(existing.get("morning_shift_completed", False)),
+            "noon_evening_shift_completed": bool(existing.get("noon_evening_shift_completed", False)),
+            "total_minutes": computed["total_minutes"],
+            "half_day_reason": computed["half_day_reason"],
+            "computed_under_mode": "geo_checkin",
+        }
+
+    # ---- Mode A — service_completion (existing logic, unchanged) -------------
     start_of_day = f"{date_str}T00:00:00"
     end_of_day = f"{date_str}T23:59:59"
-    
     completed_bookings = await db.tokens.find({
         "salon_id": salon_id,
         "barber_id": barber_id,
         "status": "completed",
         "completed_at": {"$gte": start_of_day, "$lte": end_of_day}
     }, {"_id": 0, "shift": 1, "token_number": 1}).to_list(100)
-    
+
     bookings_count = len(completed_bookings)
-    
-    # Track shifts (kept for analytics / display)
     shifts_with_bookings = set()
     for booking in completed_bookings:
         shift = booking.get("shift", "").lower()
         if shift:
             shifts_with_bookings.add(shift)
-    
     morning_shift = "morning" in shifts_with_bookings
     noon_evening_shift = "noon" in shifts_with_bookings or "evening" in shifts_with_bookings
-    
-    # Leave overrides everything
-    if isinstance(leave_dates, list) and date_str in leave_dates:
+
+    on_leave = bool(on_leave_record) or (isinstance(leave_dates, list) and date_str in leave_dates)
+    if on_leave:
         return {"status": "absent", "bookings_count": bookings_count,
                 "morning_shift_completed": morning_shift,
-                "noon_evening_shift_completed": noon_evening_shift}
-    
-    # New rule: barber is marked present if at least one service was completed.
-    if bookings_count >= 1:
-        status = "present"
-    else:
-        status = "absent"
-    
+                "noon_evening_shift_completed": noon_evening_shift,
+                "computed_under_mode": "service_completion"}
+
+    status_val = "present" if bookings_count >= 1 else "absent"
     return {
-        "status": status,
+        "status": status_val,
         "bookings_count": bookings_count,
         "morning_shift_completed": morning_shift,
-        "noon_evening_shift_completed": noon_evening_shift
+        "noon_evening_shift_completed": noon_evening_shift,
+        "computed_under_mode": "service_completion",
     }
 
 
@@ -10964,6 +11019,15 @@ async def calculate_daily_attendance(
     
     results = []
     for barber in barbers:
+        # Module 4 — lock-on-paid: skip barbers whose month's salary is already paid.
+        locked = await attendance_mode_mod.is_attendance_locked(db, salon_id, barber["id"], date)
+        if locked:
+            existing_locked = await db.attendance.find_one(
+                {"id": f"{salon_id}_{barber['id']}_{date}"}, {"_id": 0}
+            )
+            if existing_locked:
+                results.append(existing_locked)
+            continue
         # Check if already has an override
         existing = await db.attendance.find_one({
             "salon_id": salon_id,
@@ -10978,7 +11042,7 @@ async def calculate_daily_attendance(
         
         # Calculate attendance
         calc = await calculate_barber_attendance_for_date(salon_id, barber["id"], date)
-        
+
         # Create or update record
         record_id = f"{salon_id}_{barber['id']}_{date}"
         record = {
@@ -10988,9 +11052,12 @@ async def calculate_daily_attendance(
             "date": date,
             "status": calc["status"],
             "auto_calculated": True,
-            "morning_shift_completed": calc["morning_shift_completed"],
-            "noon_evening_shift_completed": calc["noon_evening_shift_completed"],
-            "bookings_count": calc["bookings_count"],
+            "morning_shift_completed": calc.get("morning_shift_completed", False),
+            "noon_evening_shift_completed": calc.get("noon_evening_shift_completed", False),
+            "bookings_count": calc.get("bookings_count", 0),
+            "computed_under_mode": calc.get("computed_under_mode"),
+            "half_day_reason": calc.get("half_day_reason"),
+            "total_minutes": calc.get("total_minutes"),
             "created_at": datetime.now(timezone.utc).isoformat(),
             "updated_at": datetime.now(timezone.utc).isoformat()
         }
@@ -11035,6 +11102,11 @@ async def override_attendance(
         if lwd and date > lwd:
             raise HTTPException(status_code=400, detail=f"Cannot mark present after last working day ({lwd})")
     
+    # Module 4 — lock-on-paid: refuse to modify a month whose salary is paid.
+    locked = await attendance_mode_mod.is_attendance_locked(db, salon_id, barber_id, date)
+    if locked:
+        raise HTTPException(status_code=423, detail=f"Salary for {locked} is already paid; attendance is locked")
+
     record_id = f"{salon_id}_{barber_id}_{date}"
     
     # Check if record exists
@@ -11092,6 +11164,11 @@ async def clear_attendance_override(
     if current_user.get("role") not in ["admin", "salon_admin", "salon"]:
         raise HTTPException(status_code=403, detail="Admin access required")
 
+    # Module 4 — lock-on-paid.
+    locked = await attendance_mode_mod.is_attendance_locked(db, salon_id, barber_id, date)
+    if locked:
+        raise HTTPException(status_code=423, detail=f"Salary for {locked} is already paid; attendance is locked")
+
     record_id = f"{salon_id}_{barber_id}_{date}"
     res = await db.attendance.delete_one({"id": record_id})
     return {
@@ -11122,12 +11199,17 @@ async def mark_all_present(
     barbers = await db.barbers.find(
         {"salon_id": salon_id, "is_active": True}, {"_id": 0}
     ).to_list(500)
-    
+
     now = datetime.now(timezone.utc).isoformat()
     marked, skipped = 0, []
-    
+
     for barber in barbers:
         b_id = barber.get("id")
+        # Module 4 — lock-on-paid skip.
+        locked = await attendance_mode_mod.is_attendance_locked(db, salon_id, b_id, date)
+        if locked:
+            skipped.append({"barber_id": b_id, "name": barber.get("name"), "reason": f"locked_{locked}"})
+            continue
         # Eligibility checks
         doj = (barber.get("doj") or "").strip()
         if doj and date < doj:
@@ -11293,109 +11375,193 @@ async def get_monthly_salary(
     month: str,  # YYYY-MM format
     barber_id: Optional[str] = None
 ):
-    """Calculate and return salary for all barbers for a month based on attendance."""
+    """Calculate and return salary for all barbers for a month.
+
+    Module 4 — Payroll Integration:
+      • working_days_in_month = total_days_in_month − weekly_offs − public_holidays
+        (weekly_offs read from branch.operational_hours where available, else
+        salon.operational_hours; public_holidays from `salon_holidays`.)
+      • Reads `leave_records` and buckets by `leave_types_config.is_paid` →
+          paid_leave_days, unpaid_leave_days, leave_breakdown {code: days}.
+      • lop_deduction = (base_compensation / working_days_in_month) * unpaid_leave_days.
+      • final_payable = base_compensation − lop_deduction + incentive_amount.
+      • Skips recalc when is_paid=true (preserves history exactly).
+      • Stamps `attendance_mode_snapshot` so audit knows which mode governed
+        the bulk of the month (current attendance_mode at compute time).
+    """
     # Validate month format
     try:
         year, mon = month.split("-")
         year, mon = int(year), int(mon)
-    except:
+    except Exception:
         raise HTTPException(status_code=400, detail="Invalid month format. Use YYYY-MM")
-    
-    # Get working days in month (excluding Sundays as default holidays)
+
     num_days = calendar.monthrange(year, mon)[1]
-    
-    # Get barbers
+
+    # Pull salon + holidays once.
+    salon = await db.salons.find_one({"id": salon_id}, {"_id": 0}) or {}
+    salon_op_hours = salon.get("operational_hours") or {}
+    public_holiday_docs = await db.salon_holidays.find({
+        "salon_id": salon_id,
+        "date": {"$regex": f"^{month}"},
+    }, {"_id": 0, "date": 1}).to_list(length=400)
+    public_holiday_dates = {h["date"] for h in public_holiday_docs}
+
+    # Leave-type config (for is_paid lookup, per salon).
+    leave_type_cfgs = await db.leave_types_config.find(
+        {"salon_id": salon_id}, {"_id": 0, "code": 1, "is_paid": 1},
+    ).to_list(length=200)
+    is_paid_by_code = {c["code"]: bool(c.get("is_paid")) for c in leave_type_cfgs}
+
+    # Get barbers.
     barber_query = {"salon_id": salon_id, "is_barber": True, "is_active": True}
     if barber_id:
         barber_query["id"] = barber_id
-    barbers = await db.barbers.find(barber_query, {"_id": 0, "id": 1, "name": 1, "compensation": 1}).to_list(100)
-    
+    barbers = await db.barbers.find(
+        barber_query, {"_id": 0, "id": 1, "name": 1, "compensation": 1, "branch_id": 1}
+    ).to_list(100)
+
+    # Cache branch operational hours so we don't re-fetch per barber.
+    branch_op_cache: dict[str, dict] = {}
+
+    async def _weekly_offs_for_barber(barber: dict) -> set[int]:
+        """Return the set of weekday integers (Mon=0..Sun=6) that are
+        weekly offs for this barber's branch (fallback to salon-level)."""
+        op = None
+        bid = barber.get("branch_id")
+        if bid:
+            if bid not in branch_op_cache:
+                br = await db.branches.find_one({"id": bid}, {"_id": 0, "operational_hours": 1})
+                branch_op_cache[bid] = (br or {}).get("operational_hours") or {}
+            op = branch_op_cache[bid]
+        if not op:
+            op = salon_op_hours
+        weekday_names = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"]
+        offs: set[int] = set()
+        if isinstance(op, dict):
+            for i, name in enumerate(weekday_names):
+                day_cfg = op.get(name) or {}
+                if isinstance(day_cfg, dict) and day_cfg.get("is_holiday"):
+                    offs.add(i)
+        return offs
+
     results = []
     for barber in barbers:
-        # Get attendance records for this month
+        salary_id = f"{salon_id}_{barber['id']}_{month}"
+        existing = await db.salary_records.find_one({"id": salary_id}, {"_id": 0})
+
+        # Lock-on-paid — do not recompute already-paid months.
+        if existing and existing.get("is_paid"):
+            existing["barber_name"] = barber["name"]
+            results.append(existing)
+            continue
+
+        # ---- Working-day calculation ----
+        weekly_offs = await _weekly_offs_for_barber(barber)
+        weekly_off_count = 0
+        for day in range(1, num_days + 1):
+            d = datetime(year, mon, day).weekday()
+            if d in weekly_offs:
+                weekly_off_count += 1
+        public_holiday_count_in_month = sum(
+            1 for d in range(1, num_days + 1)
+            if f"{year:04d}-{mon:02d}-{d:02d}" in public_holiday_dates
+        )
+        working_days_in_month = max(1, num_days - weekly_off_count - public_holiday_count_in_month)
+
+        # ---- Attendance counts (legacy fields kept) ----
         attendance_records = await db.attendance.find({
             "salon_id": salon_id,
             "barber_id": barber["id"],
             "date": {"$regex": f"^{month}"}
-        }, {"_id": 0}).to_list(100)
-        
-        # Count attendance
+        }, {"_id": 0}).to_list(200)
         present_days = sum(1 for r in attendance_records if r.get("status") == "present")
         half_days = sum(1 for r in attendance_records if r.get("status") == "half_day")
         absent_days = sum(1 for r in attendance_records if r.get("status") == "absent")
         holidays = sum(1 for r in attendance_records if r.get("status") == "holiday")
-        
-        # Calculate working days (total days - holidays)
-        working_days = num_days - holidays
-        
-        # Calculate salary
-        base_salary = float(barber.get("compensation", 0))
-        daily_rate = base_salary / num_days if num_days > 0 else 0
-        
-        # Present = full day, Half day = 0.5 day
+
+        # ---- Leave breakdown (Module 2 source of truth) ----
+        leave_rows = await db.leave_records.find({
+            "salon_id": salon_id,
+            "barber_id": barber["id"],
+            "date": {"$regex": f"^{month}"},
+            "status": {"$ne": "cancelled"},
+        }, {"_id": 0, "leave_type_code": 1, "half_day": 1}).to_list(length=400)
+        leave_breakdown: dict[str, float] = {}
+        paid_leave_days = 0.0
+        unpaid_leave_days = 0.0
+        for lr in leave_rows:
+            code = (lr.get("leave_type_code") or "").upper()
+            qty = 0.5 if lr.get("half_day") else 1.0
+            leave_breakdown[code] = leave_breakdown.get(code, 0.0) + qty
+            if is_paid_by_code.get(code, True):
+                paid_leave_days += qty
+            else:
+                unpaid_leave_days += qty
+
+        # ---- Salary math ----
+        base_compensation = float(barber.get("compensation") or 0)
+        per_day_rate = base_compensation / working_days_in_month if working_days_in_month > 0 else 0
+        lop_deduction = round(per_day_rate * unpaid_leave_days, 2)
+
+        # Legacy "calculated_salary" — keep computing the way it used to so
+        # existing readers don't regress.  Effective working days = present + 0.5*half.
+        # We use num_days as the daily-rate divisor (old behaviour).
+        old_daily_rate = base_compensation / num_days if num_days > 0 else 0
         effective_days = present_days + (half_days * 0.5)
-        calculated_salary = round(daily_rate * effective_days, 2)
-        
-        # Get incentive amount for this month
+        calculated_salary = round(old_daily_rate * effective_days, 2)
+
+        # Incentive (existing).
         incentive = await db.incentive_payouts.find_one({
             "salon_id": salon_id,
             "barber_id": barber["id"],
             "month": month,
             "status": {"$in": ["Approved", "Paid"]}
         }, {"_id": 0, "incentive_earned": 1})
-        incentive_amount = incentive.get("incentive_earned", 0) if incentive else 0
-        
-        total_payable = calculated_salary + incentive_amount
-        
-        # Check if salary record exists
-        salary_record = await db.salary_records.find_one({
+        incentive_amount = float(incentive.get("incentive_earned", 0)) if incentive else 0.0
+
+        # ---- New canonical total (Module 4): base − LoP + incentive ----
+        final_payable = round(max(0.0, base_compensation - lop_deduction) + incentive_amount, 2)
+        total_payable = final_payable  # keep total_payable in lock-step with final_payable
+
+        attendance_mode_snapshot = salon.get("attendance_mode") or "service_completion"
+
+        now = datetime.now(timezone.utc).isoformat()
+        record = {
+            "id": salary_id,
             "salon_id": salon_id,
             "barber_id": barber["id"],
-            "month": month
-        }, {"_id": 0})
-        
-        # Create or get salary record
-        salary_id = f"{salon_id}_{barber['id']}_{month}"
-        if not salary_record:
-            salary_record = {
-                "id": salary_id,
-                "salon_id": salon_id,
-                "barber_id": barber["id"],
-                "barber_name": barber["name"],
-                "month": month,
-                "base_salary": base_salary,
-                "working_days": working_days,
-                "present_days": present_days,
-                "half_days": half_days,
-                "absent_days": absent_days,
-                "holidays": holidays,
-                "calculated_salary": calculated_salary,
-                "incentive_amount": incentive_amount,
-                "total_payable": total_payable,
-                "is_paid": False,
-                "created_at": datetime.now(timezone.utc).isoformat(),
-                "updated_at": datetime.now(timezone.utc).isoformat()
-            }
-            await db.salary_records.insert_one(salary_record)
+            "barber_name": barber["name"],
+            "month": month,
+            "base_salary": base_compensation,
+            "base_compensation": base_compensation,
+            "working_days": working_days_in_month,
+            "working_days_in_month": working_days_in_month,
+            "present_days": present_days,
+            "half_days": half_days,
+            "absent_days": absent_days,
+            "holidays": holidays,
+            "paid_leave_days": paid_leave_days,
+            "unpaid_leave_days": unpaid_leave_days,
+            "leave_breakdown": leave_breakdown,
+            "lop_deduction": lop_deduction,
+            "calculated_salary": calculated_salary,
+            "incentive_amount": incentive_amount,
+            "final_payable": final_payable,
+            "total_payable": total_payable,
+            "attendance_mode_snapshot": attendance_mode_snapshot,
+            "is_paid": False,
+            "updated_at": now,
+        }
+        if not existing:
+            record["created_at"] = now
+            await db.salary_records.insert_one(record.copy())
         else:
-            # Update calculated values
-            salary_record.update({
-                "base_salary": base_salary,
-                "working_days": working_days,
-                "present_days": present_days,
-                "half_days": half_days,
-                "absent_days": absent_days,
-                "holidays": holidays,
-                "calculated_salary": calculated_salary,
-                "incentive_amount": incentive_amount,
-                "total_payable": total_payable if not salary_record.get("is_paid") else salary_record.get("total_payable"),
-                "updated_at": datetime.now(timezone.utc).isoformat()
-            })
-            await db.salary_records.update_one({"id": salary_id}, {"$set": salary_record})
-        
-        salary_record["barber_name"] = barber["name"]
-        results.append(salary_record)
-    
+            await db.salary_records.update_one({"id": salary_id}, {"$set": record})
+
+        record.pop("_id", None)
+        results.append(record)
+
     return {"month": month, "salary_records": results}
 
 
@@ -11447,6 +11613,7 @@ async def mark_salary_paid(
         "updated_at": now
     }
     await db.financial_transactions.insert_one(transaction)
+    transaction.pop("_id", None)  # avoid leaking BSON ObjectId in JSON response
     
     # Update salary record
     await db.salary_records.update_one(
@@ -11554,6 +11721,10 @@ async def add_salon_holiday(
     }, {"_id": 0, "id": 1}).to_list(100)
     
     for barber in barbers:
+        # Skip locked months — don't overwrite paid attendance.
+        locked = await attendance_mode_mod.is_attendance_locked(db, salon_id, barber["id"], date)
+        if locked:
+            continue
         record_id = f"{salon_id}_{barber['id']}_{date}"
         await db.attendance.update_one(
             {"id": record_id},
@@ -12454,6 +12625,15 @@ leave_tracker_mod.init_leave_tracker_router(
 )
 fastapi_app.include_router(leave_tracker_mod.leave_tracker_router)
 
+# Module 4 — Attendance Mode (service_completion / geo_checkin toggle + check-in/out)
+import attendance_mode as attendance_mode_mod  # noqa: E402
+attendance_mode_mod.init_attendance_mode(
+    db=db,
+    get_current_salon_user=get_current_salon_user,
+    get_current_salon_admin=get_current_salon_admin,
+)
+fastapi_app.include_router(attendance_mode_mod.attendance_mode_router)
+
 # Health check endpoint for Kubernetes liveness/readiness probes
 @fastapi_app.get("/health")
 async def health_check():
@@ -12502,6 +12682,17 @@ async def _leave_year_end_wrapper():
 scheduler.add_job(_leave_accrual_job_wrapper, 'cron', hour=19, minute=0)
 # 01:00 IST == 19:30 UTC previous day.
 scheduler.add_job(_leave_year_end_wrapper, 'cron', hour=19, minute=30)
+
+# Module 4 — Mode B auto-close open check-ins.  Runs at 18:25 UTC == 23:55 IST,
+# right before the typical `auto_close_at = 23:59`.  Idempotent per the
+# implementation in attendance_mode.py.
+async def _attendance_auto_close_wrapper():
+    try:
+        await attendance_mode_mod.auto_close_open_checkins_job(db=db)
+    except Exception as e:
+        logger.error(f"[scheduler] attendance auto-close failed: {e}")
+
+scheduler.add_job(_attendance_auto_close_wrapper, 'cron', hour=18, minute=25)
 
 @fastapi_app.on_event("startup")
 async def startup_event():
