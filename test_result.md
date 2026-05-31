@@ -105,7 +105,21 @@
 user_problem_statement: "Implement multi-user role-based access system for salon with Admin and Staff roles. Add staff management with employee fields (department, designation, emergency contact, Aadhar, DOJ, DOB, compensation, documents). Create hamburger menu navigation with role-based access control. Add 'Manage Staff Access' section, Financials and Customer Master placeholders. Add notification rules with toggles for both salon and customer sides, including WhatsApp toggles for customer. Add Reschedule/Cancel action links to WhatsApp messages with link-based cancel flow. Fix notification bell overlapping the Map view button on customer search page."
 
 backend:
-  - task: "Real Twilio WhatsApp OTP delivery + never return OTP in API responses"
+  - task: "CSV Service Uploader — additive bulk upload + CSV template"
+    implemented: true
+    working: true
+    file: "/app/backend/server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+        - working: "NA"
+          agent: "main"
+          comment: "NEW: Added two endpoints. (1) POST /api/salons/{salon_id}/services/upload-csv (auth: get_current_salon_user) — accepts a multipart file (.csv/.xlsx/.xls, max 5MB), parses rows (csv.DictReader or openpyxl), and ALWAYS ADDS services for the salon. It NEVER replaces/overwrites/disables existing services. Each new service is inserted into db.services with salon_id + is_active/is_enabled True AND enabled in db.salon_services (same pattern as apply-parsed add mode). Dedup: rows whose service_name already exists for THIS salon, or repeat within the file, are skipped and counted. Flexible case-insensitive headers with aliases (name/service→service_name, price/amount→base_price, duration/minutes→default_duration, gender→gender_tag, etc.). Coerces gender_tag (Men/Women/Unisex), price_type (fixed/onwards), is_favorite/available_at_home (truthy), default_duration (int, min 1), base_price (float, min 0), images (| or , separated). Returns {success, total_rows, created, skipped_duplicates, errors:[{row,reason}], message}. Only service_name is required; empty service_name rows are reported as errors. (2) GET /api/salons/{salon_id}/services/csv-template (public) — returns a downloadable services_template.csv with headers + 2 example rows. PLEASE TEST: (a) template GET returns 200 text/csv with header row containing service_name; (b) upload a valid CSV with 2-3 new services → created==N, they appear in GET /api/salons/{salon_id}/services/enabled and /services/all (is_enabled_for_salon true); (c) re-upload the SAME CSV → created==0, skipped_duplicates==N (existing services preserved, not duplicated); (d) a CSV with a row missing service_name → that row appears in errors[], others still created; (e) endpoint requires auth (401/403 without token). Admin creds: phone +917503070727 / password salon123. Use the salon_id returned by admin login."
+        - working: true
+          agent: "testing"
+          comment: "✅ CSV SERVICE UPLOADER FULLY TESTED AND WORKING: Comprehensive testing completed successfully with 22/22 tests passed. AUTHENTICATION: Admin login working with identifier='admin' and password='salon123', salon_id: c00f83b4-84ec-4f0e-b530-4e5a4f9b536b. TEST RESULTS: 1) CSV TEMPLATE DOWNLOAD - ✅ WORKING (GET /api/salons/{salon_id}/services/csv-template returns HTTP 200, Content-Type: text/csv, header row contains service_name and all 10 expected columns: description, category, gender_tag, default_duration, base_price, price_type, is_favorite, available_at_home, thumbnail_url, images). 2) UPLOAD VALID NEW SERVICES (ADDITIVE) - ✅ WORKING (uploaded CSV with 3 unique services 'QA Haircut IC088V', 'QA Spa IC088V', 'QA Shave IC088V', response: success=true, created=3, skipped_duplicates=0, errors=[], total_rows=3, all 3 services appear in GET /api/salons/{salon_id}/services/enabled). 3) RE-UPLOAD SAME CSV (NO DUPLICATION) - ✅ WORKING (re-uploaded exact same CSV, response: created=0, skipped_duplicates=3, verified each service appears EXACTLY ONCE in enabled list, existing services preserved and not duplicated). 4) ROW-LEVEL ERROR HANDLING - ✅ WORKING (uploaded CSV with 1 row missing service_name and 1 valid row, response: created=1, errors=[{row: 2, reason: 'Missing service_name'}], valid service 'QA Valid Service NNQ4BM' was created and appears in enabled list). 5) AUTH REQUIRED - ✅ WORKING (POST without Authorization header correctly returns 403 'Not authenticated'). CRITICAL REQUIREMENT VERIFIED: Upload is ADDITIVE - never replaces/removes existing services, duplicates are correctly skipped. The CSV Service Uploader feature is production-ready."
+
     implemented: true
     working: true
     file: "/app/backend/twilio_service.py, /app/backend/server.py, /app/backend/platform_admin.py, /app/backend/supplier_auth.py, /app/backend/.env"
@@ -1059,10 +1073,15 @@ metadata:
 
 test_plan:
   current_focus:
-    - "Real Twilio WhatsApp OTP delivery + never return OTP in API responses"
+    - "CSV Service Uploader — additive bulk upload + CSV template"
   stuck_tasks: []
   test_all: false
   test_priority: "high_first"
+
+agent_communication:
+    - agent: "main"
+      message: "CSV SERVICE UPLOADER (backend). Please test the two new endpoints. KEY REQUIREMENT: upload-csv must ADD services and must NOT replace/remove existing ones; duplicate names (already in the salon) must be skipped. Steps: (1) Admin login (phone +917503070727 / password salon123) to get token + salon_id. (2) GET /api/salons/{salon_id}/services/csv-template → 200, Content-Type text/csv, body starts with header row including 'service_name'. (3) Build a CSV in memory with 3 NEW unique service rows (e.g. names with a random suffix so they don't pre-exist), POST as multipart file to /api/salons/{salon_id}/services/upload-csv with the admin Bearer token → expect 200, created==3, skipped_duplicates==0, errors==[]. Then GET /api/salons/{salon_id}/services/enabled and confirm the 3 new names are present. (4) Re-POST the SAME CSV → created==0, skipped_duplicates==3 (proves it does NOT duplicate/replace existing). (5) POST a CSV where one row has an empty service_name and one valid new row → expect created==1 and errors contains a {row, reason:'Missing service_name'} entry. (6) POST without Authorization header → expect 401/403. Report created/skipped/errors for each."
+
 
 agent_communication:
     - agent: "main"
@@ -3848,3 +3867,62 @@ agent_communication:
         - Task marked as working: true, needs_retesting: false
 
 
+
+
+    - agent: "testing"
+      message: |
+        ✅ CSV SERVICE UPLOADER COMPREHENSIVE TESTING COMPLETED - ALL TESTS PASSED (22/22)
+        
+        Tested the CSV Service Uploader endpoints as requested. The CRITICAL requirement is met:
+        Upload is ADDITIVE - it NEVER replaces/removes existing services, duplicates are correctly skipped.
+        
+        TEST RESULTS (22/22 PASSED):
+        
+        AUTHENTICATION:
+        ✅ Admin login working with identifier='admin' and password='salon123'
+        ✅ Salon ID: c00f83b4-84ec-4f0e-b530-4e5a4f9b536b
+        
+        1) CSV TEMPLATE DOWNLOAD (GET /api/salons/{salon_id}/services/csv-template)
+           ✅ HTTP 200
+           ✅ Content-Type: text/csv; charset=utf-8
+           ✅ Header row contains service_name
+           ✅ All 10 expected columns present: service_name, description, category, gender_tag, 
+              default_duration, base_price, price_type, is_favorite, available_at_home, 
+              thumbnail_url, images
+        
+        2) UPLOAD VALID NEW SERVICES - ADDITIVE (POST /api/salons/{salon_id}/services/upload-csv)
+           ✅ Uploaded CSV with 3 unique services: 'QA Haircut IC088V', 'QA Spa IC088V', 'QA Shave IC088V'
+           ✅ Response: success=true, created=3, skipped_duplicates=0, errors=[], total_rows=3
+           ✅ All 3 services appear in GET /api/salons/{salon_id}/services/enabled
+           ✅ Services are enabled for the salon (is_enabled_for_salon=true)
+        
+        3) RE-UPLOAD SAME CSV - NO DUPLICATION (CRITICAL REQUIREMENT)
+           ✅ Re-uploaded exact same CSV
+           ✅ Response: created=0, skipped_duplicates=3
+           ✅ Each service appears EXACTLY ONCE in enabled list (verified individually)
+           ✅ Existing services preserved and NOT duplicated
+           ✅ ADDITIVE REQUIREMENT VERIFIED: No services replaced or removed
+        
+        4) ROW-LEVEL ERROR HANDLING
+           ✅ Uploaded CSV with 1 row missing service_name and 1 valid row
+           ✅ Response: created=1, errors=[{row: 2, reason: 'Missing service_name'}]
+           ✅ Error contains row number and reason
+           ✅ Reason mentions 'service_name'
+           ✅ Valid service 'QA Valid Service NNQ4BM' was created and appears in enabled list
+        
+        5) AUTH REQUIRED
+           ✅ POST without Authorization header correctly returns 403 'Not authenticated'
+        
+        CRITICAL REQUIREMENTS VERIFIED:
+        ✅ Upload is ADDITIVE - never replaces/removes existing services
+        ✅ Duplicate service names (already present for the salon) are skipped
+        ✅ Services appear in enabled list after upload
+        ✅ Re-upload does NOT create duplicates
+        ✅ Row-level error handling works correctly
+        ✅ Authentication is properly enforced
+        
+        The CSV Service Uploader feature is production-ready and working correctly.
+        
+        NEXT STEPS:
+        - Main agent should summarize and finish
+        - Task marked as working: true, needs_retesting: false
