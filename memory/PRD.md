@@ -24,6 +24,27 @@ A multi-tenant salon management SaaS (React + FastAPI + MongoDB). Most recent fe
 
 ## Implemented (CHANGELOG)
 
+### May 31, 2026 — Module 4 (Phase 1 / Backend): Attendance Mode toggle + Payroll-with-Leave-Types + Lock-on-Paid ✅
+- ✅ **New module `backend/attendance_mode.py`** (~530 LOC):
+   - `PUT /api/salons/{salon_id}/attendance-mode` — toggle between `"service_completion"` (Mode A, default, preserves existing behaviour) and `"geo_checkin"` (Mode B, new). Stamps every change into `attendance_mode_history[]` with `effective_from_date = today IST`.
+   - `POST /api/salons/{salon_id}/staff-attendance/check-in` — Mode B geo-fenced self/admin check-in (haversine vs branch lat/lng, fallback salon lat/lng). Beyond `check_in_radius_meters` → 409 unless `method='admin_on_behalf'` and `allow_admin_override=true`.
+   - `POST /api/salons/{salon_id}/staff-attendance/check-out` — computes `total_minutes` and final status via `compute_mode_b_status` (late_checkin / short_hours / present).
+   - `PUT  /api/salons/{salon_id}/staff-attendance/check-edit/{barber_id}/{date}` — admin override of check-in/out times + optional forced status; `auto_calculated=false`, `override_by/note` stored.
+   - Helpers: `resolve_mode_for_date(salon, date_str)` (looks up mode history, never silently rewrites past days), `is_attendance_locked(db, salon_id, barber_id, date_str)` (returns the YYYY-MM that locks the date if salary is paid).
+   - Scheduled job `auto_close_open_checkins_job` runs at 23:55 IST (18:25 UTC) and marks any check-in without check-out from the previous day as absent.
+- ✅ **Salon model additive fields**: `attendance_mode`, `attendance_mode_history`, `geo_settings` (`check_in_radius_meters=50`, `max_check_in_time="10:30"`, `min_daily_minutes=480`, `allow_admin_override=true`, `auto_close_at="23:59"`). `SalonUpdate` accepts the same so admins can patch directly.
+- ✅ **AttendanceRecord model additive fields**: `check_in_at/lat/lng/distance_meters/method`, `check_out_*`, `total_minutes`, `computed_under_mode`, `half_day_reason`. Both Mode A and Mode B raw data live on the same doc — switching modes is non-destructive.
+- ✅ **`calculate_barber_attendance_for_date` refactored** to dispatch by the mode active on the date (uses `resolve_mode_for_date`). Mode A logic is byte-identical to before; Mode B reads raw check-in/out and runs `compute_mode_b_status`.
+- ✅ **Salary refactor (`GET /staff-salary/month/{month}`)** now:
+   - Computes `working_days_in_month = days_in_month − weekly_offs − public_holidays` (weekly_offs from branch.operational_hours when available, else salon.operational_hours; public_holidays from `salon_holidays`).
+   - Reads Module 2 `leave_records` and buckets by `leave_types_config.is_paid` ⇒ `paid_leave_days`, `unpaid_leave_days`, `leave_breakdown {CL,SL,PL,UL,…}`.
+   - `lop_deduction = (base_compensation / working_days_in_month) × unpaid_leave_days`.
+   - `final_payable = max(0, base_compensation − lop_deduction) + incentive_amount`; `total_payable` stays = `final_payable`.
+   - Stamps `attendance_mode_snapshot` and skips recalculation when `is_paid=true` (history preserved exactly).
+- ✅ **Lock-on-paid** — once a `salary_records.is_paid=true` exists for `(salon_id, barber_id, month)`, the following endpoints return **423 Locked**: `PUT /staff-attendance/override/{barber_id}/{date}`, `DELETE` same, `POST /staff-attendance/calculate/{date}` (skip), `POST /staff-attendance/mark-all-present/{date}` (skip with reason `locked_*`), `POST /staff-holidays`, Mode B check-in / check-out / check-edit.
+- ✅ **Bug fix discovered en route**: `POST /staff-salary/pay/{barber_id}/{month}` was returning 500 because the post-insert MongoDB `_id` (ObjectId) leaked into the JSON response. Fixed by popping `_id` from the transaction dict.
+- ✅ **Pytest suites pass 41/41**: `backend/tests/test_attendance_mode_module4.py` (10), `backend/tests/test_attendance_module4_edge.py` (11, added by testing-agent), `backend/tests/test_leave_tracker_module2.py` (20) regression — no breakages.
+
 ### May 31, 2026 — Module 2: Leave Tracker & Leave Settings backend verified ✅
 - ✅ **`backend/leave_tracker.py`** wired into `server.py` (1040 LOC). Endpoints:
    - `GET/POST/PUT/DELETE /api/salons/{salon_id}/leave-types-config[/{id}]` — CL/SL/PL/UL auto-seeded on first GET; carry_forward and lapse rules are mutually exclusive (400); duplicate code → 409.
