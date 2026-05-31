@@ -25,6 +25,41 @@ export const AuthProvider = ({ children }) => {
   const [salonUser, setSalonUser] = useState(null); // New: multi-user salon auth
   const [loading, setLoading] = useState(true);
 
+  // ── Customer session rehydration (Module 8) ──────────────────────────────
+  // The customer session is a long-lived (365-day) JWT stored in localStorage.
+  // On boot we optimistically hydrate `user` from localStorage, then validate
+  // the token against /auth/customer/me in the background. If invalid/expired,
+  // we clear the session so the app falls back to the login screen.
+  useEffect(() => {
+    const token = localStorage.getItem('salon_customer_token');
+    if (!token) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await axios.get(`${API}/auth/customer/me`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (cancelled) return;
+        const freshUser = res.data?.user;
+        if (freshUser) {
+          setUser(freshUser);
+          localStorage.setItem('salon_user', JSON.stringify(freshUser));
+        }
+      } catch (err) {
+        if (cancelled) return;
+        if (err?.response?.status === 401) {
+          // Token invalid/expired — clear the customer session.
+          localStorage.removeItem('salon_customer_token');
+          localStorage.removeItem('salon_user');
+          setUser(null);
+          window.dispatchEvent(new Event('salon-auth-changed'));
+        }
+        // Network errors: keep the optimistic localStorage session.
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
   useEffect(() => {
     const refreshAuth = () => {
       // User
@@ -118,9 +153,110 @@ export const AuthProvider = ({ children }) => {
     }
   };
 
+  // ── Module 8: Customer Auth (OTP + Password + long-lived session) ─────────
+  // Persist the customer session: 365-day JWT + the public user object.
+  const persistCustomerSession = (token, userData) => {
+    if (token) localStorage.setItem('salon_customer_token', token);
+    if (userData) {
+      localStorage.setItem('salon_user', JSON.stringify(userData));
+      setUser(userData);
+    }
+    window.dispatchEvent(new Event('salon-auth-changed'));
+  };
+
+  // Tells the UI whether to show "Set password" or "Reset password".
+  const customerCheckAccount = async (phone) => {
+    try {
+      const res = await axios.post(`${API}/auth/customer/check-account`, { phone });
+      return { success: true, ...res.data };
+    } catch (error) {
+      return { success: false, error: extractErrorMessage(error, 'Could not check account') };
+    }
+  };
+
+  // Send a WhatsApp OTP. purpose ∈ login | set_password | reset_password.
+  const customerSendOtp = async (phone, purpose = 'login') => {
+    try {
+      const res = await axios.post(`${API}/auth/customer/send-otp`, { phone, purpose });
+      if (res.data?.delivery_status === 'failed') {
+        return { success: false, error: res.data?.note || 'OTP delivery failed. Please try again.' };
+      }
+      return { success: true, ...res.data };
+    } catch (error) {
+      return { success: false, error: extractErrorMessage(error, 'Failed to send OTP') };
+    }
+  };
+
+  // Verify OTP. For login → issues session + returns user. For set/reset →
+  // returns a short-lived password_reset_token.
+  const customerVerifyOtp = async (phone, otp, purpose = 'login') => {
+    try {
+      const res = await axios.post(`${API}/auth/customer/verify-otp`, { phone, otp, purpose });
+      if (res.data?.purpose === 'login' && res.data?.access_token) {
+        persistCustomerSession(res.data.access_token, res.data.user);
+      }
+      return { success: true, ...res.data };
+    } catch (error) {
+      return { success: false, error: extractErrorMessage(error, 'Invalid OTP') };
+    }
+  };
+
+  // Set/reset password (requires password_reset_token). Auto-logs in.
+  const customerSetPassword = async (phone, password, passwordResetToken) => {
+    try {
+      const res = await axios.post(`${API}/auth/customer/set-password`, {
+        phone,
+        password,
+        password_reset_token: passwordResetToken,
+      });
+      if (res.data?.access_token) {
+        persistCustomerSession(res.data.access_token, res.data.user);
+      }
+      return { success: true, ...res.data };
+    } catch (error) {
+      return { success: false, error: extractErrorMessage(error, 'Could not set password') };
+    }
+  };
+
+  // Phone + password login. Issues long-lived session JWT.
+  const customerLoginPassword = async (phone, password) => {
+    try {
+      const res = await axios.post(`${API}/auth/customer/login-password`, { phone, password });
+      if (res.data?.access_token) {
+        persistCustomerSession(res.data.access_token, res.data.user);
+      }
+      return { success: true, ...res.data };
+    } catch (error) {
+      return { success: false, error: extractErrorMessage(error, 'Invalid phone or password') };
+    }
+  };
+
+  // Save profile fields (e.g. name/gender) for the logged-in customer and keep
+  // the local session user in sync. `phone` should be the normalized +91 phone.
+  const updateCustomerProfile = async (phone, fields) => {
+    try {
+      const res = await axios.put(`${API}/users/by-phone/${encodeURIComponent(phone)}`, fields);
+      const updated = res.data;
+      const merged = { ...(user || {}), ...updated, ...fields };
+      setUser(merged);
+      localStorage.setItem('salon_user', JSON.stringify(merged));
+      window.dispatchEvent(new Event('salon-auth-changed'));
+      return { success: true, user: merged };
+    } catch (error) {
+      return { success: false, error: extractErrorMessage(error, 'Could not update profile') };
+    }
+  };
+
+  const getCustomerHeaders = () => {
+    const token = localStorage.getItem('salon_customer_token');
+    return token ? { Authorization: `Bearer ${token}` } : {};
+  };
+
   const logoutUser = () => {
     setUser(null);
     localStorage.removeItem('salon_user');
+    localStorage.removeItem('salon_customer_token');
+    window.dispatchEvent(new Event('salon-auth-changed'));
   };
 
   const updateUserOtpStatus = (isVerified, verifiedAt = null) => {
@@ -196,6 +332,13 @@ export const AuthProvider = ({ children }) => {
         updateUserOtpStatus,
         getAdminHeaders,
         getSalonUserHeaders,
+        getCustomerHeaders,
+        customerCheckAccount,
+        customerSendOtp,
+        customerVerifyOtp,
+        customerSetPassword,
+        customerLoginPassword,
+        updateCustomerProfile,
         isAdmin,
         isStaff,
         isBranchManager,

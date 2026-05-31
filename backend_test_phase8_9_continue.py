@@ -5,7 +5,7 @@ Phase 8 + Phase 9 Backend Testing — Continue from existing suppliers
 import requests
 import json
 
-BASE_URL = "https://services-menu-qr.preview.emergentagent.com/api"
+BASE_URL = "https://login-builder-10.preview.emergentagent.com/api"
 PLATFORM_OWNER_MOBILE = "7503070727"
 
 # Test supplier IDs (from previous run)
