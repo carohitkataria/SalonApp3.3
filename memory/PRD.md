@@ -24,6 +24,18 @@ A multi-tenant salon management SaaS (React + FastAPI + MongoDB). Most recent fe
 
 ## Implemented (CHANGELOG)
 
+### May 31, 2026 — Module 6: Services Menu QR + Frictionless Booking ✅
+- ✅ **Removed forced-login walls** on `HomePage`, `SalonSelectionPage`, `SalonMainPage`, `ServicesBrowser`, and `SinglePageBooking`. Customers can now browse salons, pick services, and reach the booking page without an account.
+- ✅ **`BookingIntentContext`** (`/app/frontend/src/contexts/BookingIntentContext.js`) — sessionStorage with 30-min TTL preserves the cart (salon, branch, services, barber, date, shift) across the sign-in detour. Hydrated on `SinglePageBooking` mount; cleared after a successful booking.
+- ✅ **Inline identity capture at checkout** — when not signed in, the payment step shows a `guest-identity-card` with Name + Mobile + Gender inputs (no OTP) and a "Sign in for faster bookings" CTA. On Confirm we lazily call `/api/user/login` (creates `is_otp_verified=false` user) and then `POST /api/bookings`. The booker-for-others toggle is hidden when unauthenticated.
+- ✅ **Backend tagging**: `tokens.is_otp_verified_at_booking` snapshot is set from the booker's User at booking time. History UI shows an amber `Express booking — placed without OTP verification` badge for `is_otp_verified_at_booking === false`.
+- ✅ **New public route `/salon/:salonId/menu`** (`SalonMenuPage.js`) — printable services menu reached via the new QR. Grouped by category, multi-select with sticky Book Now bar, navigates to `/book/:salonId?services=…` carrying the selection.
+- ✅ **New backend endpoints**:
+   - `GET /api/salons/{salon_id}/menu?branch={branch_id}` — public; returns `{salon, branch, services}` in one call.
+   - `GET /api/salons/{salon_id}/branches/{branch_id}/services-menu-qr?base_url=…` — returns `{qr_code (base64 PNG data URI), menu_url, branch_name}`.
+- ✅ **Branch Management** — every branch card now shows both **Booking QR** and **Menu QR** buttons; same dialog with a context-aware title, description, and Download link.
+- ✅ **Testing**: 9/9 backend pytest cases (`/app/backend/tests/test_services_menu_qr_module6.py`) + frontend smoke (testing_agent_v3_fork iteration 21) all green. No regressions to the existing booking-QR endpoint.
+
 ### May 31, 2026 — Module 4 (Phase 7 + 8 + cross-module gap fixes): Frontend + Payroll + Reports ✅
 - ✅ **Cross-module gap fixes (backend)**:
    - `leave_records.leave_type_snapshot` (Module 2) — every leave record now captures `{code, display_name, is_paid}` at create time. `get_monthly_salary` reads `paid/unpaid_leave_days` from the snapshot, so admins editing a leave-type's `is_paid` mid-month does NOT retroactively change historical LOP.
