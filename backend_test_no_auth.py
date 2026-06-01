@@ -10,7 +10,7 @@ from datetime import datetime, timedelta
 import sys
 
 # Configuration
-BASE_URL = "https://geofence-attendance-5.preview.emergentagent.com/api"
+BASE_URL = "https://leave-manager-120.preview.emergentagent.com/api"
 SALON_ID = "91a8e87d-d687-49ea-b3e5-460cc55cf3de"
 
 # Test data

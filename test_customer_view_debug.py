@@ -2,7 +2,7 @@
 import requests
 from datetime import datetime
 
-BASE_URL = "https://geofence-attendance-5.preview.emergentagent.com/api"
+BASE_URL = "https://leave-manager-120.preview.emergentagent.com/api"
 
 # Login
 response = requests.post(f"{BASE_URL}/salon/users/login", json={"identifier": "admin", "password": "salon123"})

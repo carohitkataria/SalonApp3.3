@@ -5,7 +5,7 @@ import pytest
 import requests
 import os
 
-BASE_URL = os.environ.get('REACT_APP_BACKEND_URL', 'https://geofence-attendance-5.preview.emergentagent.com').rstrip('/')
+BASE_URL = os.environ.get('REACT_APP_BACKEND_URL', 'https://leave-manager-120.preview.emergentagent.com').rstrip('/')
 
 # Test salon credentials
 TEST_PHONE = "7503070727"
