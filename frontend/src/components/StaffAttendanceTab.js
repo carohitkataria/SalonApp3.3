@@ -7,10 +7,11 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '
 import { toast } from 'sonner';
 import { 
   Calendar, ChevronLeft, ChevronRight, Check, X, Clock, DollarSign, 
-  Loader2, AlertCircle, CheckCircle, Banknote, CreditCard, Building, Plane
+  Loader2, AlertCircle, CheckCircle, Banknote, CreditCard, Building
 } from 'lucide-react';
 import { motion } from 'framer-motion';
 import LeaveBalanceCard from '@/components/leave/LeaveBalanceCard';
+import AttendanceCellDialog from '@/components/attendance/AttendanceCellDialog';
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
 const API = `${BACKEND_URL}/api`;
@@ -44,7 +45,10 @@ export default function StaffAttendanceTab({ salonId, barberId, barberName, comp
   const [showPayDialog, setShowPayDialog] = useState(false);
   const [paymentMethod, setPaymentMethod] = useState('cash');
   const [paymentNote, setPaymentNote] = useState('');
-  const [leaveMode, setLeaveMode] = useState(false);
+  // Per-cell edit dialog
+  const [editDialog, setEditDialog] = useState({ open: false, dateStr: null });
+  // Active leave records (with leave_type_code) for current month
+  const [leaveRecords, setLeaveRecords] = useState([]);
   // Barber's employment dates + per-date leave list
   const [leaveInfo, setLeaveInfo] = useState({ doj: null, last_working_date: null, leave_dates: [] });
 
@@ -106,11 +110,31 @@ export default function StaffAttendanceTab({ salonId, barberId, barberName, comp
     }
   }, [salonId, barberId, token]);
 
+  const fetchLeaveRecords = useCallback(async () => {
+    if (!salonId || !barberId) return;
+    try {
+      // Pull a wide window covering current month for active leave records
+      const monthStart = `${currentMonth}-01`;
+      const [y, m] = currentMonth.split('-').map(Number);
+      const lastDay = new Date(y, m, 0).getDate();
+      const monthEnd = `${currentMonth}-${String(lastDay).padStart(2, '0')}`;
+      const response = await axios.get(
+        `${API}/salons/${salonId}/leave-records?barber_id=${barberId}&from=${monthStart}&to=${monthEnd}`,
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      setLeaveRecords(response.data.records || []);
+    } catch (error) {
+      console.error('Error fetching leave records:', error);
+      setLeaveRecords([]);
+    }
+  }, [salonId, barberId, currentMonth, token]);
+
   useEffect(() => {
     fetchAttendanceData();
     fetchSalaryData();
     fetchLeaveInfo();
-  }, [fetchAttendanceData, fetchSalaryData, fetchLeaveInfo]);
+    fetchLeaveRecords();
+  }, [fetchAttendanceData, fetchSalaryData, fetchLeaveInfo, fetchLeaveRecords]);
 
   const handleCalculateAttendance = async () => {
     // Calculate for all days up to today in the current month
@@ -136,41 +160,10 @@ export default function StaffAttendanceTab({ salonId, barberId, barberName, comp
     }
   };
 
-  const handleOverrideAttendance = async (dateStr, currentStatus) => {
-    // Cycle through statuses: present -> half_day -> absent -> holiday -> blank (no status)
-    // After "holiday", clicking again clears the entry (DELETE) and the day shows as unset.
-    const statusCycle = ['present', 'half_day', 'absent', 'holiday', null];
-    let nextStatus;
-    if (!currentStatus) {
-      nextStatus = 'present'; // Blank → Present (start of cycle)
-    } else {
-      const idx = statusCycle.indexOf(currentStatus);
-      // If currentStatus is unknown, default to "present" so users can recover.
-      nextStatus = idx === -1 ? 'present' : statusCycle[(idx + 1) % statusCycle.length];
-    }
-
-    try {
-      if (nextStatus === null) {
-        // Clear the override (the cell becomes blank / no status)
-        await axios.delete(
-          `${API}/salons/${salonId}/staff-attendance/override/${barberId}/${dateStr}`,
-          { headers: { Authorization: `Bearer ${token}` } }
-        );
-        toast.success('Attendance cleared');
-      } else {
-        await axios.put(
-          `${API}/salons/${salonId}/staff-attendance/override/${barberId}/${dateStr}`,
-          { status: nextStatus },
-          { headers: { Authorization: `Bearer ${token}` } }
-        );
-        toast.success(`Marked as ${nextStatus.replace('_', ' ')}`);
-      }
-      fetchAttendanceData();
-      fetchSalaryData();
-    } catch (error) {
-      const detail = error?.response?.data?.detail;
-      toast.error(typeof detail === 'string' ? detail : 'Failed to update attendance');
-    }
+  const handleOverrideAttendance = (dateStr) => {
+    // Open the unified edit dialog for this date
+    if (!dateStr) return;
+    setEditDialog({ open: true, dateStr });
   };
 
   const handleMarkAllPresent = async () => {
@@ -209,26 +202,6 @@ export default function StaffAttendanceTab({ salonId, barberId, barberName, comp
       toast.error('Failed to mark all present');
     } finally {
       setBulkLoading(false);
-    }
-  };
-
-  const handleToggleLeave = async (dateStr) => {
-    if (!dateStr) return;
-    const isCurrentlyOnLeave = (leaveInfo.leave_dates || []).includes(dateStr);
-    try {
-      await axios.put(
-        `${API}/salons/${salonId}/barbers/${barberId}/leave-date`,
-        { date: dateStr, is_on_leave: !isCurrentlyOnLeave },
-        { headers: { Authorization: `Bearer ${token}` } }
-      );
-      toast.success(isCurrentlyOnLeave ? `Leave removed for ${dateStr}` : `${barberName || 'Barber'} marked on leave for ${dateStr}`);
-      // Refresh leave info & attendance so calendar updates.
-      fetchLeaveInfo();
-      fetchAttendanceData();
-      fetchSalaryData();
-    } catch (error) {
-      const detail = error?.response?.data?.detail;
-      toast.error(typeof detail === 'string' ? detail : 'Failed to update leave');
     }
   };
 
@@ -327,16 +300,6 @@ export default function StaffAttendanceTab({ salonId, barberId, barberName, comp
               Mark All Present
             </Button>
             <Button
-              onClick={() => setLeaveMode(prev => !prev)}
-              variant={leaveMode ? "default" : "outline"}
-              size="sm"
-              className={leaveMode ? 'bg-blue-600 hover:bg-blue-700 text-white' : ''}
-              title="When ON, clicking a date toggles ON/OFF leave"
-            >
-              <Plane className="w-4 h-4 mr-2" />
-              {leaveMode ? 'Leave Mode: ON' : 'Leave Mode: OFF'}
-            </Button>
-            <Button
               onClick={handleCalculateAttendance}
               disabled={loading}
               variant="outline"
@@ -413,7 +376,10 @@ export default function StaffAttendanceTab({ salonId, barberId, barberName, comp
             }
             
             const { day, dateStr, isFuture, record } = item;
-            const isOnLeaveDate = (leaveInfo.leave_dates || []).includes(dateStr);
+            const leaveRec = leaveRecords.find(
+              (r) => r.date === dateStr && r.status === 'active'
+            );
+            const isOnLeaveDate = !!leaveRec || (leaveInfo.leave_dates || []).includes(dateStr);
             const beforeJoin = !!leaveInfo.doj && dateStr < leaveInfo.doj;
             const afterLast = !!leaveInfo.last_working_date && dateStr > leaveInfo.last_working_date;
             const outOfWindow = beforeJoin || afterLast;
@@ -422,24 +388,20 @@ export default function StaffAttendanceTab({ salonId, barberId, barberName, comp
             const status = isOnLeaveDate
               ? 'on_leave'
               : (record?.status || (isFuture ? 'future' : null));
-            
-            // Click semantics:
-            //  - If outOfWindow: disabled
-            //  - Leave mode ON: toggles leave for ANY date (past/today/future) inside employment window
-            //  - Otherwise: only past/today dates → cycle attendance status
-            const canClick = !outOfWindow && (leaveMode || !isFuture);
+
+            // Any date inside employment window is clickable (incl. future for leave)
+            const canClick = !outOfWindow;
             const handleClick = () => {
               if (!canClick) return;
-              if (leaveMode) return handleToggleLeave(dateStr);
-              return handleOverrideAttendance(dateStr, status);
+              handleOverrideAttendance(dateStr);
             };
 
             const titleText = outOfWindow
               ? (beforeJoin ? `Before joining (${leaveInfo.doj})` : `After last working day (${leaveInfo.last_working_date})`)
-              : leaveMode
-                ? (isOnLeaveDate ? `Click to remove leave (${dateStr})` : `Click to mark on leave (${dateStr})`)
-                : isFuture
-                  ? 'Future date — turn on Leave Mode to set leave for this day'
+              : leaveRec
+                ? `On Leave (${leaveRec.leave_type_code}${leaveRec.half_day ? ' · half' : ''}) — click to edit`
+                : isOnLeaveDate
+                  ? `On Leave (legacy) — click to edit`
                   : record?.computed_under_mode === 'geo_checkin'
                     ? [
                         `Mode: Geo check-in`,
@@ -447,8 +409,9 @@ export default function StaffAttendanceTab({ salonId, barberId, barberName, comp
                         record?.check_out_at ? `Out: ${new Date(record.check_out_at).toLocaleTimeString()}` : null,
                         record?.total_minutes ? `Worked: ${Math.floor(record.total_minutes / 60)}h ${record.total_minutes % 60}m` : null,
                         record?.half_day_reason ? `Reason: ${record.half_day_reason}` : null,
+                        'Click to edit',
                       ].filter(Boolean).join(' · ')
-                    : `Click to change (${status || 'not marked'})`;
+                    : `Click to edit (${status || 'not marked'})`;
             
             return (
               <button
@@ -456,22 +419,24 @@ export default function StaffAttendanceTab({ salonId, barberId, barberName, comp
                 type="button"
                 disabled={!canClick}
                 onClick={handleClick}
+                data-testid={`attn-cell-${dateStr}`}
                 className={`h-10 rounded text-xs font-bold transition-all ${
                   outOfWindow
                     ? 'bg-muted/20 text-muted-foreground cursor-not-allowed opacity-40'
                     : status
                     ? STATUS_COLORS[status]
-                    : (isFuture
-                        ? (leaveMode ? 'bg-muted/50 hover:bg-blue-500/30 cursor-pointer' : 'bg-muted/30 text-muted-foreground cursor-not-allowed')
-                        : 'bg-muted/50 hover:bg-muted cursor-pointer'
-                      )
-                } ${record?.auto_calculated === false || isOnLeaveDate ? 'ring-2 ring-gold' : ''} ${leaveMode && !outOfWindow ? 'ring-1 ring-blue-400/40' : ''}`}
+                    : 'bg-muted/50 hover:bg-muted cursor-pointer'
+                } ${record?.auto_calculated === false || isOnLeaveDate ? 'ring-2 ring-gold' : ''}`}
                 title={titleText}
               >
                 <div className="flex flex-col items-center">
-                  <span className={isFuture && !leaveMode ? '' : 'text-[10px] opacity-70'}>{day}</span>
+                  <span className={isFuture ? '' : 'text-[10px] opacity-70'}>{day}</span>
                   {status && status !== 'future' && (
-                    <span className="text-[10px]">{STATUS_LABELS[status]}</span>
+                    <span className="text-[10px]">
+                      {status === 'on_leave' && leaveRec?.leave_type_code
+                        ? leaveRec.leave_type_code
+                        : STATUS_LABELS[status]}
+                    </span>
                   )}
                   {record?.computed_under_mode === 'geo_checkin' && (record?.total_minutes ?? 0) > 0 && (
                     <span className="text-[8px] opacity-80" data-testid={`attn-duration-${dateStr}`}>
@@ -485,9 +450,9 @@ export default function StaffAttendanceTab({ salonId, barberId, barberName, comp
         </div>
 
         <p className="text-xs text-muted-foreground mt-4">
-          💡 Click on any past/today date to cycle attendance.
-          Toggle <strong>Leave Mode</strong> to mark/unmark leave on any date (incl. future).
-          Days outside the employment window are disabled.
+          💡 Click any date inside the employment window to open the edit dialog —
+          set check-in / check-out times, mark Present / Half-day / Absent / Holiday,
+          or record leave with type (CL / SL / PL / UL).
         </p>
       </div>
 
@@ -665,6 +630,25 @@ export default function StaffAttendanceTab({ salonId, barberId, barberName, comp
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Unified per-cell attendance editor */}
+      <AttendanceCellDialog
+        open={editDialog.open}
+        onOpenChange={(open) => setEditDialog((d) => ({ ...d, open }))}
+        salonId={salonId}
+        barberId={barberId}
+        barberName={barberName}
+        dateStr={editDialog.dateStr}
+        attendanceRecord={attendance.find((a) => a.date === editDialog.dateStr) || null}
+        leaveRecord={leaveRecords.find((r) => r.date === editDialog.dateStr && r.status === 'active') || null}
+        token={token}
+        onSaved={() => {
+          fetchAttendanceData();
+          fetchSalaryData();
+          fetchLeaveInfo();
+          fetchLeaveRecords();
+        }}
+      />
     </motion.div>
   );
 }
