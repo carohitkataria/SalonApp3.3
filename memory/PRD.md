@@ -24,6 +24,15 @@ A multi-tenant salon management SaaS (React + FastAPI + MongoDB). Most recent fe
 
 ## Implemented (CHANGELOG)
 
+### Feb 1, 2026 — Module 8: Unified Admin Attendance Cell Editor + Leave Types (CL/SL/PL/UL) ✅
+- ✅ **New popup** `AttendanceCellDialog` at `/app/frontend/src/components/attendance/AttendanceCellDialog.js`. Opens on any calendar cell click in `StaffAttendanceTab`. Single dialog handles: check-in/check-out time inputs, status (auto / present / half_day / absent / holiday / on_leave), and — when On Leave — leave type dropdown (CL / SL / PL / UL) + half-day checkbox + note.
+- ✅ **Routing logic**: times + auto → `PUT /api/salons/{salon_id}/staff-attendance/check-edit/{barber_id}/{date}` (backend recomputes status from times using salon geo rules); manual status without times → `PUT /staff-attendance/override`; on_leave → `POST /leave-records` with `leave_type_code` (cancels prior active record first); Clear button → DELETE override + cancel active leave-record.
+- ✅ **Legacy Leave Mode toggle removed** from `StaffAttendanceTab.js`. Calendar now fetches `leave_records` for the month and displays the leave-type code (e.g., `UL`) on the cell instead of generic `L`.
+- ✅ **Backend already supported** check-edit (in `/app/backend/attendance_mode.py`) and CL/SL/PL/UL defaults seeded via `/app/backend/leave_tracker.py`. No backend changes needed.
+- ✅ Tested: 9/9 backend pytest pass (`/app/backend/tests/test_attendance_admin_override.py`) + full UI E2E green.
+
+
+
 ### May 31, 2026 — Module 7: Per-Service Barber Assignment on Modify Booking ✅
 - ✅ **Token schema** (additive, backward-compatible): `service_assignments[]` (per-line `{service_id, barber_id, barber_name_snapshot, service_price, discount_amount, line_total}`), `order_discount_percent`, `order_discount_amount`, `subtotal`.
 - ✅ **New unified backend endpoint** `PUT /api/tokens/{token_id}/modify` (auth: `get_current_salon_user`) replaces the prior chain of `update-services` + `change-barber` + `update-amount` for the Modify dialog. Validates main barber & line barbers (rejects "any"), resolves per-line prices via `barber_services` → falls back to `service.base_price`, supports both Discount % AND Final ₹ inputs ("last-edited wins"), pro-rata discount allocation per line, recomputes incentive payouts for ALL touched barbers (current month).
