@@ -33,6 +33,15 @@ A multi-tenant salon management SaaS (React + FastAPI + MongoDB). Most recent fe
 
 
 
+
+### Feb 1, 2026 — Unified Attendance Threshold Settings + login fallback + TZ fix ✅
+- ✅ **Merged settings**: `AttendanceRulesTab` (in `StaffSettingsContent.js`) now shows ONE unified panel with `Geo-fence radius (m)`, `Late mark threshold (min)`, `Required hours per day`, `Auto-absent cutoff (hour, 0-23)`, `Allow admin override`. Removed: the duplicate "Geofence radius (m) — legacy field", the `<details> Other attendance thresholds (legacy)`, the legacy save button, and the absolute-HH:MM fields (`max_check_in_time`, `min_daily_minutes`, `auto_close_at`).
+- ✅ **Backend**: `attendance_mode.py` — `compute_mode_b_status` now prefers `late_mark_threshold_min` (mins after salon's `opening_time` for that weekday) and `required_hours_per_day * 60`. Legacy fields are still accepted as fallback. `auto_close_open_checkins_job` honours `auto_absent_cutoff_hour` and also closes today's open shifts after the cutoff (not just yesterday's). `GeoSettingsPayload` accepts the new keys. Verified end-to-end via curl: 09:15 → present, 09:25 → half_day(late_checkin), short hours → half_day(short_hours).
+- ✅ **Login fallback bug fix**: `OTPLoginPage.js` now falls back to `/api/salon/password-login` on both **404 _and_ 401** from `/salon/users/login` (was 404-only). Legacy password-set-on-salon-doc salons can log in again.
+- ✅ **TZ fix in popup**: `AttendanceCellDialog.combineDateTime` / `isoToTime` now serialise/parse times with the IST offset (`+05:30`) so the admin's browser timezone no longer corrupts check-in/out timestamps.
+- ✅ **Calendar test-ids**: month navigator now exposes `attendance-prev-month`, `attendance-next-month`, `attendance-month-label`.
+
+
 ### May 31, 2026 — Module 7: Per-Service Barber Assignment on Modify Booking ✅
 - ✅ **Token schema** (additive, backward-compatible): `service_assignments[]` (per-line `{service_id, barber_id, barber_name_snapshot, service_price, discount_amount, line_total}`), `order_discount_percent`, `order_discount_amount`, `subtotal`.
 - ✅ **New unified backend endpoint** `PUT /api/tokens/{token_id}/modify` (auth: `get_current_salon_user`) replaces the prior chain of `update-services` + `change-barber` + `update-amount` for the Modify dialog. Validates main barber & line barbers (rejects "any"), resolves per-line prices via `barber_services` → falls back to `service.base_price`, supports both Discount % AND Final ₹ inputs ("last-edited wins"), pro-rata discount allocation per line, recomputes incentive payouts for ALL touched barbers (current month).

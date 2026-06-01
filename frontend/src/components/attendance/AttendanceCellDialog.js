@@ -21,28 +21,34 @@ const STATUS_OPTIONS = [
   { value: 'on_leave', label: 'On Leave' },
 ];
 
-// Convert ISO datetime → "HH:MM" in local time
+// IST offset — the app is India-only and the backend computes everything in IST.
+const IST_OFFSET = '+05:30';
+const IST_OFFSET_MINUTES = 330; // +5h30m
+
+// Convert ISO datetime → "HH:MM" in IST (the salon's timezone)
 function isoToTime(iso) {
   if (!iso) return '';
   try {
     const d = new Date(iso);
     if (isNaN(d.getTime())) return '';
-    const hh = String(d.getHours()).padStart(2, '0');
-    const mm = String(d.getMinutes()).padStart(2, '0');
+    // Shift the absolute instant into IST and read its wall-clock hours/minutes.
+    const ist = new Date(d.getTime() + IST_OFFSET_MINUTES * 60 * 1000);
+    const hh = String(ist.getUTCHours()).padStart(2, '0');
+    const mm = String(ist.getUTCMinutes()).padStart(2, '0');
     return `${hh}:${mm}`;
   } catch {
     return '';
   }
 }
 
-// Combine date "YYYY-MM-DD" + "HH:MM" into ISO datetime
+// Combine date "YYYY-MM-DD" + "HH:MM" into an ISO instant in IST.
+// Building the string with the offset avoids browser-TZ leakage (the previous
+// `new Date().setHours().toISOString()` flow misread UTC browsers as IST).
 function combineDateTime(dateStr, timeStr) {
   if (!dateStr || !timeStr) return null;
-  const [hh, mm] = timeStr.split(':').map(Number);
-  if (Number.isNaN(hh) || Number.isNaN(mm)) return null;
-  const d = new Date(`${dateStr}T00:00:00`);
-  d.setHours(hh, mm, 0, 0);
-  return d.toISOString();
+  if (!/^\d{2}:\d{2}$/.test(timeStr)) return null;
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) return null;
+  return `${dateStr}T${timeStr}:00${IST_OFFSET}`;
 }
 
 export default function AttendanceCellDialog({

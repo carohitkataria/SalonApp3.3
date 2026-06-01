@@ -329,11 +329,11 @@ export default function StaffAttendanceTab({ salonId, barberId, barberName, comp
 
         {/* Month Navigator */}
         <div className="flex items-center justify-between mb-4">
-          <Button variant="ghost" size="sm" onClick={() => navigateMonth(-1)}>
+          <Button variant="ghost" size="sm" onClick={() => navigateMonth(-1)} data-testid="attendance-prev-month">
             <ChevronLeft className="w-4 h-4" />
           </Button>
-          <h4 className="font-semibold text-lg">{monthName}</h4>
-          <Button variant="ghost" size="sm" onClick={() => navigateMonth(1)}>
+          <h4 className="font-semibold text-lg" data-testid="attendance-month-label">{monthName}</h4>
+          <Button variant="ghost" size="sm" onClick={() => navigateMonth(1)} data-testid="attendance-next-month">
             <ChevronRight className="w-4 h-4" />
           </Button>
         </div>
