@@ -46,11 +46,32 @@ IST = timezone(timedelta(hours=5, minutes=30))
 
 DEFAULT_GEO_SETTINGS = {
     "check_in_radius_meters": 50,
+    # New unified threshold fields (preferred).
+    "late_mark_threshold_min": 15,       # mins after salon opening_time before "late"
+    "required_hours_per_day": 8.0,       # working hours required to count as full day
+    "auto_absent_cutoff_hour": 23,       # 0-23 IST; open check-ins auto-closed after this
+    "allow_admin_override": True,
+    # Legacy fields (kept for backward-compat with existing salon docs).
     "max_check_in_time": "10:30",
     "min_daily_minutes": 480,
-    "allow_admin_override": True,
     "auto_close_at": "23:59",
 }
+
+
+# Map of weekday-index → operational_hours sub-doc key.
+_WEEKDAYS = ("monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday")
+
+
+def _opening_time_for_date(salon: dict, date_str: str) -> str:
+    """Return the opening_time (HH:MM) configured for the given date.
+    Falls back to "09:00" if operational_hours not set."""
+    try:
+        d = datetime.strptime(date_str, "%Y-%m-%d").date()
+        day_key = _WEEKDAYS[d.weekday()]
+        hours = (salon.get("operational_hours") or {}).get(day_key) or {}
+        return hours.get("opening_time") or "09:00"
+    except Exception:
+        return "09:00"
 
 
 # ============================================================
@@ -129,7 +150,7 @@ def compute_mode_b_status(salon: dict, attendance_doc: dict, *, day_has_passed: 
     from the raw check-in/out fields already present on `attendance_doc`.
 
     Inputs:
-      • salon              — salon doc (for geo_settings).
+      • salon              — salon doc (for geo_settings + operational_hours).
       • attendance_doc     — raw doc with check_in_at / check_out_at /
                              check_in_*, check_out_* (may be partial).
       • day_has_passed     — True if the date_str is strictly before today IST.
@@ -142,8 +163,24 @@ def compute_mode_b_status(salon: dict, attendance_doc: dict, *, day_has_passed: 
         return {"status": "absent", "half_day_reason": None, "total_minutes": 0}
 
     geo = (salon.get("geo_settings") or {})
-    max_in_min = _parse_hhmm_to_minutes(geo.get("max_check_in_time") or DEFAULT_GEO_SETTINGS["max_check_in_time"])
-    min_day_minutes = int(geo.get("min_daily_minutes") or DEFAULT_GEO_SETTINGS["min_daily_minutes"])
+
+    # --- Late-mark cutoff (minutes-into-day in IST) ---
+    # Prefer the new unified config (late_mark_threshold_min after the day's
+    # opening_time).  Fall back to legacy max_check_in_time HH:MM.
+    if geo.get("late_mark_threshold_min") is not None:
+        opening = _opening_time_for_date(salon, attendance_doc.get("date") or "")
+        opening_min = _parse_hhmm_to_minutes(opening)
+        max_in_min = opening_min + int(geo["late_mark_threshold_min"])
+    else:
+        max_in_min = _parse_hhmm_to_minutes(
+            geo.get("max_check_in_time") or DEFAULT_GEO_SETTINGS["max_check_in_time"]
+        )
+
+    # --- Minimum daily minutes ---
+    if geo.get("required_hours_per_day") is not None:
+        min_day_minutes = int(float(geo["required_hours_per_day"]) * 60)
+    else:
+        min_day_minutes = int(geo.get("min_daily_minutes") or DEFAULT_GEO_SETTINGS["min_daily_minutes"])
 
     ci = attendance_doc.get("check_in_at")
     co = attendance_doc.get("check_out_at")
@@ -210,6 +247,11 @@ async def is_attendance_locked(db, salon_id: str, barber_id: str, date_str: str)
 
 class GeoSettingsPayload(BaseModel):
     check_in_radius_meters: Optional[int] = Field(default=None, ge=10, le=2000)
+    # New unified threshold fields
+    late_mark_threshold_min: Optional[int] = Field(default=None, ge=0, le=240)
+    required_hours_per_day: Optional[float] = Field(default=None, ge=1.0, le=16.0)
+    auto_absent_cutoff_hour: Optional[int] = Field(default=None, ge=0, le=23)
+    # Legacy fields (still accepted)
     max_check_in_time: Optional[str] = None  # "HH:MM"
     min_daily_minutes: Optional[int] = Field(default=None, ge=30, le=24 * 60)
     allow_admin_override: Optional[bool] = None
@@ -570,40 +612,58 @@ async def _check_edit_impl(salon_id: str, barber_id: str, date: str,
 # ============================================================
 
 async def auto_close_open_checkins_job(db):
-    """At `geo_settings.auto_close_at` IST, mark any open check-ins as
-    absent (no check-out logged).  Per spec: 'If check-out is missing and
-    the day has passed, mark Absent.'  We run this job right after the
-    salon's auto_close_at boundary; the record stays editable by admin.
+    """At `geo_settings.auto_absent_cutoff_hour` IST (or legacy
+    `geo_settings.auto_close_at`), mark any open check-ins as absent
+    (no check-out logged).  Per spec: 'If check-out is missing and
+    the day has passed, mark Absent.'
+
+    Behaviour:
+      • Always closes yesterday's still-open check-ins (safe day-rollover).
+      • Additionally closes today's open check-ins if the current IST hour
+        has crossed `auto_absent_cutoff_hour`.
 
     Cross-module guard: must skip locked months (salary already paid).
     """
     salons = await db.salons.find({"attendance_mode": "geo_checkin"}, {"_id": 0, "id": 1, "geo_settings": 1}).to_list(length=10_000)
     closed = 0
+    now_ist = datetime.now(IST)
     for s in salons:
-        # We are called once daily — we operate on yesterday's open shifts
-        # (today's auto_close_at may not have passed yet for all timezones,
-        # but we run at 23:59 IST so yesterday is safe).
-        yesterday = (datetime.now(IST).date() - timedelta(days=1)).strftime("%Y-%m-%d")
-        open_recs = await db.attendance.find({
-            "salon_id": s["id"], "date": yesterday,
-            "check_in_at": {"$ne": None}, "check_out_at": None,
-        }, {"_id": 0}).to_list(length=10_000)
-        for r in open_recs:
-            # Lock-on-paid guard.
-            locked = await is_attendance_locked(db, s["id"], r["barber_id"], yesterday)
-            if locked:
-                continue
-            await db.attendance.update_one(
-                {"id": r["id"]},
-                {"$set": {
-                    "status": "absent",
-                    "half_day_reason": None,
-                    "computed_under_mode": "geo_checkin",
-                    "auto_calculated": True,
-                    "updated_at": datetime.now(IST).isoformat(),
-                }},
-            )
-            closed += 1
+        geo = s.get("geo_settings") or {}
+        # Resolve effective cutoff hour: prefer new field, fall back to legacy HH:MM.
+        cutoff_hour = geo.get("auto_absent_cutoff_hour")
+        if cutoff_hour is None:
+            try:
+                cutoff_hour = _parse_hhmm_to_minutes(
+                    geo.get("auto_close_at") or DEFAULT_GEO_SETTINGS["auto_close_at"]
+                ) // 60
+            except Exception:
+                cutoff_hour = 23
+
+        dates_to_close = [(now_ist.date() - timedelta(days=1)).strftime("%Y-%m-%d")]
+        if now_ist.hour >= int(cutoff_hour):
+            dates_to_close.append(now_ist.date().strftime("%Y-%m-%d"))
+
+        for date_str in dates_to_close:
+            open_recs = await db.attendance.find({
+                "salon_id": s["id"], "date": date_str,
+                "check_in_at": {"$ne": None}, "check_out_at": None,
+            }, {"_id": 0}).to_list(length=10_000)
+            for r in open_recs:
+                # Lock-on-paid guard.
+                locked = await is_attendance_locked(db, s["id"], r["barber_id"], date_str)
+                if locked:
+                    continue
+                await db.attendance.update_one(
+                    {"id": r["id"]},
+                    {"$set": {
+                        "status": "absent",
+                        "half_day_reason": None,
+                        "computed_under_mode": "geo_checkin",
+                        "auto_calculated": True,
+                        "updated_at": datetime.now(IST).isoformat(),
+                    }},
+                )
+                closed += 1
     return {"closed": closed}
 
 

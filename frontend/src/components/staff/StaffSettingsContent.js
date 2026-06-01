@@ -126,22 +126,18 @@ export default function StaffSettingsContent({
 // ===================== Attendance Rules sub-tab (Module 3 placement + Module 4 config) =====================
 
 function AttendanceRulesTab({ salonId, authHeaders }) {
-  // Module 4 — the SOURCE OF TRUTH for attendance configuration.
+  // Module 4 — unified attendance configuration.
+  // Geo-fence settings (radius, admin override) + legacy attendance thresholds
+  // (late mark, required hours, auto-absent cutoff) are now persisted together
+  // on the salon's `geo_settings` payload via PUT /attendance-mode.
   const [mode, setMode] = useState('service_completion');
   const [history, setHistory] = useState([]);
   const [geo, setGeo] = useState({
     check_in_radius_meters: 50,
-    max_check_in_time: '10:30',
-    min_daily_minutes: 480,
-    allow_admin_override: true,
-    auto_close_at: '23:59',
-  });
-  // Legacy placement-only fields kept for backward compatibility.
-  const [rules, setRules] = useState({
-    geofence_radius_m: 50,
     late_mark_threshold_min: 15,
     required_hours_per_day: 8,
     auto_absent_cutoff_hour: 22,
+    allow_admin_override: true,
   });
   const [saving, setSaving] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -151,10 +147,26 @@ function AttendanceRulesTab({ salonId, authHeaders }) {
     try {
       const r = await axios.get(`${API}/salons/${salonId}`, { headers: authHeaders });
       const salon = r.data?.salon || r.data;
-      if (salon?.attendance_rules) setRules((p) => ({ ...p, ...salon.attendance_rules }));
       if (salon?.attendance_mode) setMode(salon.attendance_mode);
       if (Array.isArray(salon?.attendance_mode_history)) setHistory(salon.attendance_mode_history);
-      if (salon?.geo_settings) setGeo((p) => ({ ...p, ...salon.geo_settings }));
+      // Merge geo_settings AND legacy attendance_rules into the unified state.
+      // Legacy fields (attendance_rules.*) take effect only if geo_settings doesn't
+      // already carry the equivalent key — so saving once migrates data forward.
+      const gs = salon?.geo_settings || {};
+      const legacy = salon?.attendance_rules || {};
+      setGeo((p) => ({
+        ...p,
+        check_in_radius_meters:
+          gs.check_in_radius_meters ?? legacy.geofence_radius_m ?? p.check_in_radius_meters,
+        late_mark_threshold_min:
+          gs.late_mark_threshold_min ?? legacy.late_mark_threshold_min ?? p.late_mark_threshold_min,
+        required_hours_per_day:
+          gs.required_hours_per_day ?? legacy.required_hours_per_day ?? p.required_hours_per_day,
+        auto_absent_cutoff_hour:
+          gs.auto_absent_cutoff_hour ?? legacy.auto_absent_cutoff_hour ?? p.auto_absent_cutoff_hour,
+        allow_admin_override:
+          gs.allow_admin_override ?? p.allow_admin_override,
+      }));
     } catch {
       /* defaults retained */
     } finally {
@@ -163,22 +175,6 @@ function AttendanceRulesTab({ salonId, authHeaders }) {
   }, [salonId, authHeaders]);
 
   useEffect(() => { load(); }, [load]);
-
-  const saveLegacyRules = async () => {
-    setSaving(true);
-    try {
-      await axios.patch(
-        `${API}/salons/${salonId}`,
-        { attendance_rules: rules },
-        { headers: authHeaders }
-      );
-      toast.success('Attendance rules saved');
-    } catch (e) {
-      toast.error(e?.response?.data?.detail || 'Failed to save attendance rules');
-    } finally {
-      setSaving(false);
-    }
-  };
 
   const saveModeAndGeo = async (nextMode = mode) => {
     setSaving(true);
@@ -193,7 +189,7 @@ function AttendanceRulesTab({ salonId, authHeaders }) {
       setGeo((p) => ({ ...p, ...(r.data.geo_settings || {}) }));
       toast.success(`Saved — attendance is now '${r.data.attendance_mode === 'geo_checkin' ? 'Geo check-in' : 'Service completion'}'`);
     } catch (e) {
-      toast.error(e?.response?.data?.detail || 'Failed to update attendance mode');
+      toast.error(e?.response?.data?.detail || 'Failed to update attendance configuration');
     } finally {
       setSaving(false);
     }
@@ -260,49 +256,50 @@ function AttendanceRulesTab({ salonId, authHeaders }) {
         </label>
       </div>
 
-      {/* Mode B settings */}
+      {/* Unified attendance threshold settings (shown when geo_checkin mode is selected) */}
       {mode === 'geo_checkin' && (
         <div className="bg-card border border-border rounded-xl p-4 space-y-4" data-testid="geo-settings-panel">
-          <h4 className="text-sm font-semibold">Geo check-in settings</h4>
+          <h4 className="text-sm font-semibold">Geo check-in & attendance thresholds</h4>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
               <Label>Geo-fence radius (m)</Label>
               <Input
                 type="number" min={10} max={2000}
-                value={geo.check_in_radius_meters}
+                value={geo.check_in_radius_meters ?? ''}
                 onChange={(e) => setGeo(g => ({ ...g, check_in_radius_meters: Number(e.target.value) }))}
                 data-testid="geo-radius-input"
               />
+              <p className="text-xs text-muted-foreground mt-1">Staff must check in within this distance from the branch.</p>
             </div>
             <div>
-              <Label>Latest check-in time (HH:MM)</Label>
+              <Label>Late mark threshold (min)</Label>
               <Input
-                value={geo.max_check_in_time}
-                placeholder="10:30"
-                onChange={(e) => setGeo(g => ({ ...g, max_check_in_time: e.target.value }))}
-                data-testid="geo-max-checkin-input"
+                type="number" min={0} max={240}
+                value={geo.late_mark_threshold_min ?? ''}
+                onChange={(e) => setGeo(g => ({ ...g, late_mark_threshold_min: Number(e.target.value) }))}
+                data-testid="attn-late-threshold-input"
               />
-              <p className="text-xs text-muted-foreground mt-1">After this time → half day (late)</p>
+              <p className="text-xs text-muted-foreground mt-1">Minutes after the salon's opening time before a check-in counts as late → half-day.</p>
             </div>
             <div>
-              <Label>Minimum daily minutes</Label>
+              <Label>Required hours per day</Label>
               <Input
-                type="number" min={30} max={1440}
-                value={geo.min_daily_minutes}
-                onChange={(e) => setGeo(g => ({ ...g, min_daily_minutes: Number(e.target.value) }))}
-                data-testid="geo-min-minutes-input"
+                type="number" min={1} max={16} step={0.5}
+                value={geo.required_hours_per_day ?? ''}
+                onChange={(e) => setGeo(g => ({ ...g, required_hours_per_day: Number(e.target.value) }))}
+                data-testid="attn-required-hours-input"
               />
-              <p className="text-xs text-muted-foreground mt-1">Below this → half day (short hours)</p>
+              <p className="text-xs text-muted-foreground mt-1">Worked less than this → half-day (short hours).</p>
             </div>
             <div>
-              <Label>Auto check-out cutoff (HH:MM)</Label>
+              <Label>Auto-absent cutoff (hour, 0-23)</Label>
               <Input
-                value={geo.auto_close_at}
-                placeholder="23:59"
-                onChange={(e) => setGeo(g => ({ ...g, auto_close_at: e.target.value }))}
-                data-testid="geo-autoclose-input"
+                type="number" min={0} max={23}
+                value={geo.auto_absent_cutoff_hour ?? ''}
+                onChange={(e) => setGeo(g => ({ ...g, auto_absent_cutoff_hour: Number(e.target.value) }))}
+                data-testid="attn-auto-absent-input"
               />
-              <p className="text-xs text-muted-foreground mt-1">Closes any open check-ins.</p>
+              <p className="text-xs text-muted-foreground mt-1">Open check-ins still un-closed by this hour are auto-marked absent.</p>
             </div>
           </div>
           <label className="flex items-center gap-2 text-sm">
@@ -334,49 +331,6 @@ function AttendanceRulesTab({ salonId, authHeaders }) {
           </ul>
         </div>
       )}
-
-      {/* Module 3 — legacy placement fields, kept for backward compatibility. */}
-      <details className="bg-card border border-border rounded-xl">
-        <summary className="cursor-pointer px-4 py-3 text-sm font-medium">Other attendance thresholds (legacy)</summary>
-        <div className="p-4 space-y-3">
-          <div>
-            <Label>Geofence radius (m) — legacy field</Label>
-            <Input
-              type="number" min={10} max={1000}
-              value={rules.geofence_radius_m}
-              onChange={(e) => setRules(r => ({ ...r, geofence_radius_m: Number(e.target.value) }))}
-              data-testid="attn-geofence-input"
-            />
-          </div>
-          <div>
-            <Label>Late mark threshold (min)</Label>
-            <Input
-              type="number" min={0} max={120}
-              value={rules.late_mark_threshold_min}
-              onChange={(e) => setRules(r => ({ ...r, late_mark_threshold_min: Number(e.target.value) }))}
-            />
-          </div>
-          <div>
-            <Label>Required hours per day</Label>
-            <Input
-              type="number" min={1} max={16} step={0.5}
-              value={rules.required_hours_per_day}
-              onChange={(e) => setRules(r => ({ ...r, required_hours_per_day: Number(e.target.value) }))}
-            />
-          </div>
-          <div>
-            <Label>Auto-absent cutoff (hour, 0-23)</Label>
-            <Input
-              type="number" min={0} max={23}
-              value={rules.auto_absent_cutoff_hour}
-              onChange={(e) => setRules(r => ({ ...r, auto_absent_cutoff_hour: Number(e.target.value) }))}
-            />
-          </div>
-          <Button onClick={saveLegacyRules} disabled={saving} data-testid="attn-save-btn">
-            {saving && <Loader2 className="w-4 h-4 mr-1 animate-spin" />} Save legacy rules
-          </Button>
-        </div>
-      </details>
     </div>
   );
 }

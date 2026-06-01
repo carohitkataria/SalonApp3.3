@@ -130,7 +130,10 @@ export default function OTPLoginPage() {
             ? (raw.message || raw.detail || raw.error || JSON.stringify(raw))
             : (error?.message || ''));
       // Fallback to legacy salon login if multi-user login fails
-      if (error.response?.status === 404) {
+      // - 404: salon_users record doesn't exist for this phone → try legacy salon record
+      // - 401: salon_users record exists but password mismatch → many legacy salons have
+      //        the password set on the salon doc (not the user doc). Try legacy too.
+      if (error.response?.status === 404 || error.response?.status === 401) {
         try {
           // Try legacy salon password login
           const legacyResponse = await axios.post(`${API}/salon/password-login`, {

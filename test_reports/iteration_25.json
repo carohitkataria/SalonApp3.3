@@ -1,0 +1,35 @@
+{
+  "summary": "Iteration 25 — Unified Admin Attendance Settings + AttendanceCellDialog real-login E2E. Login via UI (401 fallback to /api/salon/password-login) WORKS. Unified panel: all 5 required inputs (geo-radius, late-threshold, required-hours, auto-absent, allow-override) + save button render exactly as specified; all 5 legacy testids and the 'Other attendance thresholds (legacy)' <details> are GONE; values 75/20/8.5/22 save and persist across reload. AttendanceCellDialog opens on May-2026 cell click; all 12 dialog testids present, CL/SL/PL/UL leave-type options render, UL saves and cell shows 'UL', cleanup via Clear works. ONE FUNCTIONAL FAILURE: auto check_in=09:15 / check_out=17:50 was expected to render 'P' (present) but rendered 'H' (half_day) — root cause is the frontend timezone bug already noted in iter-24 code review (AttendanceCellDialog.combineDateTime serialises browser-local HH:MM via toISOString(); CI browser runs UTC, so 09:15 → 09:15Z → 14:45 IST → past the 09:20 late-mark cutoff → backend correctly returns half_day(late_checkin)).",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [
+      {
+        "component": "AttendanceCellDialog.combineDateTime (/app/frontend/src/components/attendance/AttendanceCellDialog.js lines 38-46)",
+        "issue": "Times are sent as browser-local-time → UTC via toISOString(). Admin browsers in any TZ other than IST (incl. the CI test container which runs UTC) cause check-in/out to be saved at the wrong instant, leading to wrong late/half-day verdicts. Reproduction: with geo settings opening_time=09:00, late_mark_threshold_min=20, required_hours_per_day=8.5, save status=auto check_in=09:15 check_out=17:50 from a UTC browser → backend sees 14:45 IST check-in → marks half_day(late_checkin), cell shows 'H 8h35m'. Expected 'P' per request spec.",
+        "selector": "[data-testid='attn-check-in-time']",
+        "priority": "HIGH"
+      }
+    ],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [],
+  "action_items": [
+    "Fix TZ handling in AttendanceCellDialog.combineDateTime: build the ISO with the salon's TZ offset (Asia/Kolkata = +05:30) instead of toISOString() so admins outside IST mark attendance at the correct instant. Suggested approach: format as `${dateStr}T${HH}:${MM}:00+05:30` (or fetch salon.timezone). Mirror the inverse in isoToTime() so the displayed time reflects salon TZ, not browser TZ. Without this fix the unified late_mark_threshold_min / required_hours_per_day rules cannot be exercised correctly from any non-IST browser."
+  ],
+  "critical_code_review_comments": [
+    "Unified panel implementation in StaffSettingsContent.js (lines 259-315) is clean: single geo-settings-panel with exactly the 5 fields requested, no legacy <details>, no duplicate radius input, no separate legacy save button. PUT call uses the new geo_settings keys.",
+    "OTPLoginPage.js 401 fallback (line 136) now correctly retries /api/salon/password-login on both 404 and 401 — verified live: console shows 'POST /salon/users/login 401' followed by successful navigation to /salon/dashboard with the legacy token. Good defensive code in purgeAllSalonAuthData + broadcastAuthChange.",
+    "AttendanceCellDialog TZ bug is the SAME issue flagged in iter-24 code review — still unaddressed. Now blocks meaningful end-to-end verification of late_mark_threshold_min logic from any UTC browser. Recommend prioritising.",
+    "test_credentials.md still says login URL is /salon-login (legacy). Update to /salon/login to match the actual route.",
+    "StaffAttendanceTab month navigator chevron buttons (lines 332-338) have no data-testid, making automated month navigation brittle — recommend data-testid='attendance-prev-month' / 'attendance-next-month'."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "n/a (skipped per request)", "frontend": "23/24 testids & flows PASS (96%); 1 functional FAIL on auto-late-mark verdict due to TZ bug"},
+  "test_credentials": "Salon admin: phone 7503070727 / password Test@1234 at /salon/login (Password tab). 401 fallback to /api/salon/password-login working end-to-end via real form submission — no localStorage injection needed.",
+  "seed_data_creation": "Test exercised attendance overrides + 1 UL leave-record on barber Imran (cadba382-…) for 2026-05-28; cleaned up via Clear button at end of test (override DELETE + leave cancel). Geo settings left at radius=75 / late_mark=20 / required_hours=8.5 / auto_absent=22 / allow_override=true.",
+  "retest_needed": true,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Login flow via real UI form WORKS now — do NOT inject localStorage. After login, /salon/staff/{barber_id} → click 'Attendance' tab → calendar defaults to current month (today=2026-06-01). To click a past date, click the chevron-left button next to the month label (no testid; use page.evaluate with document.querySelector('svg.lucide-chevron-left').closest('button').click()). attn-cell-{YYYY-MM-DD} testids appear on each cell. The TZ bug means auto-mode tests of late_mark logic will mark half_day from any UTC browser even when the request spec expects present — re-run only after main agent fixes combineDateTime / isoToTime in AttendanceCellDialog.js.",
+  "rca of the issue": "Root cause for 'expected P got H' on auto-09:15/17:50 save: AttendanceCellDialog.combineDateTime() at lines 38-46 constructs the ISO via new Date('YYYY-MM-DDT00:00:00').setHours(hh,mm).toISOString(). new Date() parses the date as browser-local, setHours sets local time, toISOString() converts to UTC. Test browser runs in UTC, salon is IST (UTC+05:30). So 09:15 local-UTC is sent as 2026-05-28T09:15:00.000Z which the backend (correctly) interprets in IST as 14:45 — well past opening_time 09:00 + late_mark 20 = 09:20 → late_checkin → half_day. Backend behaviour is correct per the new attendance_mode.py thresholds. Fix is purely frontend: serialise with the salon's TZ offset (e.g. `${dateStr}T${HH}:${MM}:00+05:30`) and parse the same way in isoToTime."
+}
