@@ -48,6 +48,16 @@ A multi-tenant salon management SaaS (React + FastAPI + MongoDB). Most recent fe
 - ✅ **Revenue attribution helpers**: `attribute_token_revenue_to_barbers(token)` and `attribute_token_revenue_to_services(token)` — used by incentives + reports. Legacy tokens (no assignments) credit full `total_amount` to the main `barber_id`.
 - ✅ **Incentive engine** (`_get_barber_actual_sales`): now sums per-barber line shares across completed tokens in the month. Reads the OR-matched query on `barber_id` plus `service_assignments.barber_id`.
 - ✅ **Reports updated to be split-aware**: `/api/analytics/barber-wise-sales` and `/api/analytics/service-wise-sales` use the new helpers. Legacy tokens still resolve correctly.
+
+### Feb 1, 2026 — Twilio production switch (Verify + Content Template) ✅
+- ✅ **OTP send** now routes through Twilio **Verify** service `VAa8d04bc855f3f5820370fddc5f17d8cb`. Channel strategy: WhatsApp primary → automatic SMS fallback on delivery failure. Twilio generates & tracks the OTP; we no longer need template approval for OTP.
+- ✅ **OTP verify** (4 endpoints — salon, customer-legacy, customer-v2, platform admin) now validates via Twilio Verify with safe DB fallback when Verify isn't configured.
+- ✅ **Booking confirmation** WhatsApp now uses approved **Content Template** `HX4ec6d831674ce97cc1dc209327445b81` via Twilio Content API (`content_sid` + `content_variables`). Required for business-initiated messages outside the 24-hr reply window.
+- ✅ **Production WhatsApp sender**: `whatsapp:+918560934455` (SalonHub business sender registered with Twilio). Replaced the sandbox `whatsapp:+14155238886` in `backend/.env`.
+- ✅ **New env vars**: `TWILIO_VERIFY_SERVICE_SID`, `TWILIO_BOOKING_CONFIRMATION_TEMPLATE_SID`.
+- ✅ **Curl-verified**: `POST /api/salon/send-otp` → Twilio Verify SID `VE…`, channel=whatsapp, status=pending; `POST /api/salon/verify-otp` with wrong code → Twilio Verify status=pending valid=False → endpoint returns 400 "Invalid or expired OTP".
+
+
 - ✅ **Frontend Modify dialog** (`EnhancedSalonDashboard.js`): 2-tab UI (Pick services / Barber assignment). Per-service barber dropdowns with live per-barber prices (testids `assignment-barber-{sid}`, `assignment-price-{sid}`, `assignment-name-{sid}`). Main-barber dropdown overwrites all line barbers; individual line edits afterward are independent. Discount % + Final ₹ inputs sync bidirectionally. "Any available" removed from this screen. Save is disabled while subtotal is 0 (defensive against data-loss).
 - ✅ **Tests**: `/app/backend/tests/test_module7_modify_booking.py` — 11 passed / 1 soft-skipped. Frontend Playwright via testing_agent_v3_fork iteration 23 — 100% green (both iteration-22 UI bugs resolved).
 

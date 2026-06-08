@@ -29,6 +29,9 @@ import json
 from twilio_service import (
     send_whatsapp_otp, 
     send_whatsapp_notification,
+    send_booking_confirmation_template,
+    verify_whatsapp_otp,
+    is_verify_configured,
     format_booking_confirmation,
     format_queue_status,
     format_token_near,
@@ -1170,6 +1173,42 @@ def generate_otp():
     """Generate a cryptographically secure random 6-digit OTP"""
     return str(secrets.randbelow(900000) + 100000)
 
+
+async def _otp_is_valid(phone: str, code: str, db_collection) -> bool:
+    """Unified OTP validation.
+
+    Production path:  ask Twilio Verify (`verify_whatsapp_otp`).
+    Dev/mock path:    fall back to the locally-stored OTP doc in
+                      `db_collection` (which we keep populating for audit and
+                      for the legacy mock flow).
+
+    The fallback **only** kicks in when Twilio Verify is not configured
+    (`verify_not_configured`).  Any other Verify failure (wrong code, expired,
+    max attempts) returns False immediately — we never bypass Verify with the
+    stale DB OTP, since the user would have received Twilio's code, not ours.
+    """
+    if not code or not phone:
+        return False
+
+    result = await verify_whatsapp_otp(phone, code)
+    if result.get("valid"):
+        return True
+    if result.get("error") != "verify_not_configured":
+        # Twilio answered → its verdict is final.
+        return False
+
+    # Mock / dev path — check the local OTP store.
+    stored = await db_collection.find_one({"phone": phone})
+    if not stored or stored.get("otp") != code:
+        return False
+    try:
+        expires_at = datetime.fromisoformat(
+            str(stored.get("expires_at", "")).replace("Z", "+00:00")
+        )
+    except Exception:
+        return False
+    return datetime.now(timezone.utc) <= expires_at
+
 def calculate_distance(lat1, lon1, lat2, lon2):
     """Calculate distance between two coordinates in km"""
     R = 6371  # Earth's radius in km
@@ -2126,17 +2165,28 @@ async def send_booking_notification(token_data: dict, notification_type: str):
         salon_id_for_links = token_data.get('salon_id', '')
         
         if notification_type == 'booking_confirmation':
-            message = format_booking_confirmation(
+            # Route through the approved WhatsApp Content Template
+            # (HX4ec6d831674ce97cc1dc209327445b81).  This is required for any
+            # business-initiated message outside the 24h reply window.
+            whatsapp_setting_key = 'whatsapp_booking_confirmation'
+            if whatsapp_setting_key and not await should_send_customer_whatsapp(phone, whatsapp_setting_key):
+                logger.info(
+                    f"WhatsApp notification suppressed for {phone} (setting {whatsapp_setting_key} is OFF)"
+                )
+                return
+            result = await send_booking_confirmation_template(
+                phone_number=phone,
                 customer_name=customer_name,
+                salon_name=salon_name,
                 token_number=token_data.get('token_number', 0),
                 date=token_data.get('date'),
                 time_slot=token_data.get('time_slot'),
                 barber_name=token_data.get('barber_name'),
-                salon_name=salon_name
             )
-            whatsapp_setting_key = 'whatsapp_booking_confirmation'
-            if token_id and salon_id_for_links:
-                action_links = build_action_links(token_id, salon_id_for_links)
+            logger.info(
+                f"Notification sent: booking_confirmation to {phone}, status: {result.get('status')}"
+            )
+            return
         elif notification_type == 'token_called':
             message = format_token_called(
                 customer_name=customer_name,
@@ -4924,35 +4974,32 @@ async def register_salon(salon: SalonCreate):
 
 @api_router.post("/salon/verify-otp", response_model=SalonToken)
 async def verify_otp(request: SalonOTPVerify):
-    """Verify OTP and return access token"""
+    """Verify OTP and return access token.
+
+    Production: validates against Twilio Verify.  Mock/dev: validates against
+    the locally-stored OTP in `db.salon_otp`.
+    """
     phone = request.phone
     if not phone.startswith("+91"):
         phone = f"+91{phone}"
-    
-    # Check OTP
-    otp_record = await db.salon_otp.find_one({"phone": phone, "otp": request.otp})
-    
-    if not otp_record:
-        raise HTTPException(status_code=400, detail="Invalid OTP")
-    
-    expires_at = datetime.fromisoformat(otp_record["expires_at"])
-    if datetime.now(timezone.utc) > expires_at:
-        raise HTTPException(status_code=400, detail="OTP expired")
-    
-    # Mark as verified
+
+    if not await _otp_is_valid(phone, request.otp, db.salon_otp):
+        raise HTTPException(status_code=400, detail="Invalid or expired OTP")
+
+    # Audit: mark any matching local OTP doc as verified, ignore if absent.
     await db.salon_otp.update_one(
         {"phone": phone, "otp": request.otp},
-        {"$set": {"verified": True}}
+        {"$set": {"verified": True}},
     )
-    
+
     # Find salon by phone
     salon = await db.salons.find_one({"phone": phone}, {"_id": 0})
     if not salon:
         raise HTTPException(status_code=404, detail="Salon not found for this phone")
-    
+
     # Generate token
     token = create_access_token({"sub": salon["id"], "role": "salon", "phone": phone})
-    
+
     return SalonToken(access_token=token, salon_id=salon["id"])
 
 @api_router.post("/salon/password-login", response_model=SalonToken)
@@ -5440,54 +5487,45 @@ async def send_customer_otp(request: CustomerOTPRequest):
 
 @api_router.post("/customer/verify-otp")
 async def verify_customer_otp(request: CustomerOTPVerify):
-    """Verify customer OTP and mark user as OTP verified"""
+    """Verify customer OTP and mark user as OTP verified.
+
+    Production: validates against Twilio Verify.  Mock/dev: validates against
+    the locally-stored OTP in `db.customer_otp`.
+    """
     phone = request.phone
     if not phone.startswith("+91"):
         phone = f"+91{phone}"
-    
+
     if len(phone) != 13:
         raise HTTPException(status_code=400, detail="Invalid phone number format")
-    
-    # Get stored OTP
-    stored = await db.customer_otp.find_one({"phone": phone})
-    if not stored:
-        raise HTTPException(status_code=400, detail="No OTP found. Please request a new OTP.")
-    
-    # Check if OTP has expired
-    expires_at = datetime.fromisoformat(stored["expires_at"].replace("Z", "+00:00"))
-    if datetime.now(timezone.utc) > expires_at:
-        await db.customer_otp.delete_many({"phone": phone})
-        raise HTTPException(status_code=400, detail="OTP has expired. Please request a new OTP.")
-    
-    # Verify OTP
-    if stored["otp"] != request.otp:
-        raise HTTPException(status_code=400, detail="Invalid OTP")
-    
-    # OTP is valid - delete it and mark user as verified
+
+    if not await _otp_is_valid(phone, request.otp, db.customer_otp):
+        raise HTTPException(status_code=400, detail="Invalid or expired OTP")
+
+    # OTP is valid — delete the local copy and mark user as verified
     await db.customer_otp.delete_many({"phone": phone})
-    
-    # Update user to mark as OTP verified
+
     user = await db.users.find_one({"phone": phone}, {"_id": 0})
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
-    
+
     await db.users.update_one(
         {"phone": phone},
         {"$set": {
             "is_otp_verified": True,
-            "otp_verified_at": datetime.now(timezone.utc).isoformat()
-        }}
+            "otp_verified_at": datetime.now(timezone.utc).isoformat(),
+        }},
     )
-    
+
     user["is_otp_verified"] = True
     user["otp_verified_at"] = datetime.now(timezone.utc).isoformat()
-    
+
     logger.info(f"Customer {phone} OTP verified successfully")
-    
+
     return {
         "success": True,
         "message": "OTP verified successfully",
-        "user": User(**user)
+        "user": User(**user),
     }
 
 
@@ -5675,19 +5713,11 @@ async def auth_customer_verify_otp(body: CustomerVerifyOtpV2In):
     if purpose not in {"login", "set_password", "reset_password"}:
         raise HTTPException(status_code=400, detail="Invalid purpose")
 
-    stored = await db.customer_otp.find_one({"phone": phone})
-    if not stored:
-        raise HTTPException(status_code=400, detail="No OTP found. Please request a new OTP.")
-    try:
-        expires_at = datetime.fromisoformat(stored["expires_at"].replace("Z", "+00:00"))
-    except Exception:
-        expires_at = datetime.now(timezone.utc) - timedelta(seconds=1)
-    if datetime.now(timezone.utc) > expires_at:
-        await db.customer_otp.delete_many({"phone": phone})
-        raise HTTPException(status_code=400, detail="OTP has expired. Please request a new OTP.")
-    if stored["otp"] != (body.otp or "").strip():
-        raise HTTPException(status_code=400, detail="Invalid OTP")
+    # Production: Twilio Verify.  Mock/dev: db.customer_otp.
+    if not await _otp_is_valid(phone, body.otp, db.customer_otp):
+        raise HTTPException(status_code=400, detail="Invalid or expired OTP")
 
+    # Clean up any local OTP doc (audit only).
     await db.customer_otp.delete_many({"phone": phone})
 
     user = await db.users.find_one({"phone": phone}, {"_id": 0})
@@ -13734,6 +13764,7 @@ fastapi_app.include_router(api_router)
 platform_admin_mod.init_platform_admin_router(
     db=db,
     send_whatsapp_otp=send_whatsapp_otp,
+    otp_is_valid=_otp_is_valid,
     secret_key=SECRET_KEY,
     algorithm=ALGORITHM,
 )

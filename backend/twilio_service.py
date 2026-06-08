@@ -1,7 +1,18 @@
 """
 Twilio WhatsApp and SMS Service
-Handles OTP sending and booking notifications via WhatsApp
+
+Production setup (Feb 2026):
+  • OTP send/verify   → Twilio **Verify** service (`TWILIO_VERIFY_SERVICE_SID`).
+                        Primary channel WhatsApp, automatic fallback to SMS.
+  • Booking & status  → Twilio **Content API** with approved WhatsApp templates
+                        (e.g. `TWILIO_BOOKING_CONFIRMATION_TEMPLATE_SID`) sent
+                        from the production WhatsApp business sender
+                        (`TWILIO_WHATSAPP_NUMBER`).
+  • Freeform messages → still used inside the 24h reply window (in-app status
+                        updates from staff).  Falls back to mock if Twilio
+                        credentials are not configured.
 """
+import json
 from twilio.rest import Client
 import os
 import logging
@@ -23,6 +34,8 @@ AUTH_TOKEN = os.environ.get('TWILIO_AUTH_TOKEN')
 API_KEY_SID = os.environ.get('TWILIO_API_KEY_SID')
 API_KEY_SECRET = os.environ.get('TWILIO_API_KEY_SECRET')
 WHATSAPP_NUMBER = os.environ.get('TWILIO_WHATSAPP_NUMBER', 'whatsapp:+14155238886')
+VERIFY_SERVICE_SID = os.environ.get('TWILIO_VERIFY_SERVICE_SID')
+BOOKING_CONFIRMATION_TEMPLATE_SID = os.environ.get('TWILIO_BOOKING_CONFIRMATION_TEMPLATE_SID')
 
 # Initialize Twilio client
 twilio_client = None
@@ -58,65 +71,203 @@ def get_twilio_client():
     return twilio_client
 
 
-async def send_whatsapp_otp(phone_number: str, otp: str) -> dict:
+async def send_whatsapp_otp(phone_number: str, otp: str = None) -> dict:
     """
-    Send OTP via WhatsApp
-    
-    Args:
-        phone_number: Recipient's phone number in E.164 format (e.g., +919876543210)
-        otp: The OTP code to send
-        
+    Send a login OTP via Twilio **Verify**.
+
+    Twilio Verify generates, sends, and tracks the OTP entirely on its side —
+    we don't need to generate `otp` locally any more.  The `otp` parameter
+    is kept for backwards-compatibility with existing call sites; if it is
+    passed (legacy mock path) and Verify is NOT configured, we'll log it.
+
+    Channel strategy (production):
+      1. Try WhatsApp via Verify  → richest experience for India users.
+      2. On any failure, retry with SMS via Verify.
+
     Returns:
-        dict with status and message_sid or error
+        dict {
+          status: "sent" | "mock" | "failed",
+          message_sid: str,             # Verify SID (VE…)
+          channel:     "whatsapp" | "sms",
+          to:          phone_number,
+        }
     """
     client = get_twilio_client()
-    
-    if client is None:
-        logger.warning(f"Twilio not configured. Mock OTP sent to {phone_number}: {otp}")
+
+    if client is None or not VERIFY_SERVICE_SID:
+        logger.warning(
+            f"Twilio Verify not configured. Mock OTP path for {phone_number}: {otp}"
+        )
         return {
             "status": "mock",
-            "message": f"Mock OTP: {otp} (Twilio not configured)",
-            "otp": otp  # For testing only
+            "message": f"Mock OTP: {otp} (Twilio Verify not configured)",
+            "otp": otp,
         }
-    
+
+    for channel in ("whatsapp", "sms"):
+        try:
+            verification = client.verify.v2.services(VERIFY_SERVICE_SID).verifications.create(
+                to=phone_number,
+                channel=channel,
+            )
+            logger.info(
+                f"Twilio Verify OTP sent via {channel} to {phone_number}. SID: {verification.sid} status={verification.status}"
+            )
+            return {
+                "status": "sent",
+                "message_sid": verification.sid,
+                "channel": channel,
+                "to": phone_number,
+            }
+        except Exception as e:
+            logger.warning(
+                f"Verify OTP via {channel} failed for {phone_number}: {e}"
+            )
+            last_error = str(e)
+
+    return {
+        "status": "failed",
+        "error": last_error,
+        "otp": otp,  # echo back for any legacy fallback
+    }
+
+
+async def verify_whatsapp_otp(phone_number: str, code: str) -> dict:
+    """
+    Validate a user-entered OTP against Twilio Verify.
+
+    Returns:
+        dict {
+          status: "approved" | "pending" | "failed",
+          valid:  bool,
+          error:  str (only on failure),
+        }
+    """
+    client = get_twilio_client()
+
+    if client is None or not VERIFY_SERVICE_SID:
+        logger.warning("Twilio Verify not configured. Cannot verify OTP via Twilio.")
+        return {"status": "failed", "valid": False, "error": "verify_not_configured"}
+
     try:
-        # Format phone number for WhatsApp
-        to_whatsapp = f"whatsapp:{phone_number}"
-        
-        # Create message body
-        message_body = f"""
-🔐 *The Looks Salon - OTP Verification*
-
-Your OTP for salon login is: *{otp}*
-
-This code is valid for 10 minutes.
-Please do not share this code with anyone.
-
-Thank you for using The Looks Salon! 💈
-        """.strip()
-        
-        # Send WhatsApp message
-        message = client.messages.create(
-            body=message_body,
-            from_=WHATSAPP_NUMBER,
-            to=to_whatsapp
+        check = client.verify.v2.services(VERIFY_SERVICE_SID).verification_checks.create(
+            to=phone_number,
+            code=code,
         )
-        
-        logger.info(f"WhatsApp OTP sent successfully to {phone_number}. SID: {message.sid}")
-        
+        valid = (check.status == "approved")
+        logger.info(
+            f"Twilio Verify check for {phone_number}: status={check.status} valid={valid}"
+        )
+        return {"status": check.status, "valid": valid}
+    except Exception as e:
+        logger.error(f"Twilio Verify check failed for {phone_number}: {e}")
+        return {"status": "failed", "valid": False, "error": str(e)}
+
+
+def is_verify_configured() -> bool:
+    """True iff Twilio Verify is fully configured for production OTP."""
+    return bool(VERIFY_SERVICE_SID) and get_twilio_client() is not None
+
+
+async def send_whatsapp_template(
+    phone_number: str,
+    content_sid: str,
+    content_variables: dict,
+    template_name: str = None,
+) -> dict:
+    """
+    Send a WhatsApp message using an approved Content Template (Content API).
+
+    This is the ONLY way to start a WhatsApp conversation outside the 24-hour
+    customer-reply window in production.
+
+    Args:
+        phone_number     : recipient in E.164 format (e.g. +919876543210)
+        content_sid      : approved template SID (HX…)
+        content_variables: dict of variable index → value (keys "1", "2", …)
+        template_name    : logging label (e.g. "booking_confirmation")
+    """
+    client = get_twilio_client()
+
+    if client is None:
+        logger.warning(
+            f"Twilio not configured. Mock template '{template_name}' to {phone_number}: {content_variables}"
+        )
+        return {"status": "mock", "template": template_name, "variables": content_variables}
+
+    try:
+        message = client.messages.create(
+            from_=WHATSAPP_NUMBER,
+            to=f"whatsapp:{phone_number}",
+            content_sid=content_sid,
+            content_variables=json.dumps(
+                {str(k): ("" if v is None else str(v)) for k, v in content_variables.items()}
+            ),
+        )
+        logger.info(
+            f"WhatsApp template '{template_name}' sent to {phone_number}. SID: {message.sid}"
+        )
         return {
             "status": "sent",
             "message_sid": message.sid,
-            "to": phone_number
+            "to": phone_number,
+            "template": template_name,
         }
-        
     except Exception as e:
-        logger.error(f"Failed to send WhatsApp OTP to {phone_number}: {str(e)}")
-        return {
-            "status": "failed",
-            "error": str(e),
-            "otp": otp  # Return OTP for fallback/testing
-        }
+        logger.error(
+            f"Failed to send WhatsApp template '{template_name}' to {phone_number}: {e}"
+        )
+        return {"status": "failed", "error": str(e), "template": template_name}
+
+
+async def send_booking_confirmation_template(
+    phone_number: str,
+    customer_name: str,
+    salon_name: str,
+    token_number,
+    date: str,
+    time_slot: str,
+    barber_name: str,
+) -> dict:
+    """
+    Send the approved booking-confirmation template
+    (HX4ec6d831674ce97cc1dc209327445b81).
+
+    Template variables:
+        {{1}} customer_name
+        {{2}} salon_name
+        {{3}} token_number
+        {{4}} date
+        {{5}} time_slot
+        {{6}} barber_name
+    """
+    if not BOOKING_CONFIRMATION_TEMPLATE_SID:
+        logger.warning(
+            "TWILIO_BOOKING_CONFIRMATION_TEMPLATE_SID not configured — falling back to freeform message."
+        )
+        body = format_booking_confirmation(
+            customer_name=customer_name,
+            token_number=token_number,
+            date=date,
+            time_slot=time_slot,
+            barber_name=barber_name,
+            salon_name=salon_name,
+        )
+        return await send_whatsapp_notification(phone_number, body, "booking_confirmation")
+
+    return await send_whatsapp_template(
+        phone_number=phone_number,
+        content_sid=BOOKING_CONFIRMATION_TEMPLATE_SID,
+        content_variables={
+            "1": customer_name,
+            "2": salon_name,
+            "3": token_number,
+            "4": date,
+            "5": time_slot,
+            "6": barber_name,
+        },
+        template_name="booking_confirmation",
+    )
 
 
 async def send_whatsapp_notification(phone_number: str, message: str, template_name: str = None) -> dict:

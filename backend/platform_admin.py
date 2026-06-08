@@ -31,6 +31,7 @@ logger = logging.getLogger(__name__)
 # These are injected by server.py via `init_platform_admin_router(...)` below.
 _db = None
 _send_whatsapp_otp = None  # async callable(phone, otp) -> dict
+_otp_is_valid = None       # async callable(phone, code, db_collection) -> bool
 _secret_key: str = "change-me"
 _algorithm: str = "HS256"
 
@@ -173,11 +174,12 @@ async def bootstrap_platform_owner():
     return owner_doc
 
 
-def init_platform_admin_router(*, db, send_whatsapp_otp, secret_key: str, algorithm: str = "HS256"):
+def init_platform_admin_router(*, db, send_whatsapp_otp, otp_is_valid, secret_key: str, algorithm: str = "HS256"):
     """Called by server.py at import time to inject shared dependencies."""
-    global _db, _send_whatsapp_otp, _secret_key, _algorithm
+    global _db, _send_whatsapp_otp, _otp_is_valid, _secret_key, _algorithm
     _db = db
     _send_whatsapp_otp = send_whatsapp_otp
+    _otp_is_valid = otp_is_valid
     _secret_key = secret_key
     _algorithm = algorithm
     return platform_router
@@ -242,28 +244,15 @@ async def platform_request_otp(payload: OTPRequest):
 @platform_router.post("/auth/verify-otp")
 async def platform_verify_otp(payload: OTPVerify):
     mobile = _normalize_mobile(payload.mobile)
-    record = await _db.platform_otp.find_one({"mobile": mobile}, {"_id": 0})
 
     # Generic 401 for either missing admin or bad OTP — no enumeration.
     invalid = HTTPException(
         status_code=401, detail="Invalid mobile or OTP. Please try again."
     )
 
-    if not record:
-        raise invalid
-
-    # Expiry check
-    try:
-        exp_dt = datetime.fromisoformat(record["expires_at"].replace("Z", "+00:00"))
-        if exp_dt.tzinfo is None:
-            exp_dt = exp_dt.replace(tzinfo=timezone.utc)
-    except Exception:
-        raise invalid
-    if exp_dt < datetime.now(timezone.utc):
-        await _db.platform_otp.delete_one({"mobile": mobile})
-        raise HTTPException(status_code=401, detail="OTP expired. Please request a new one.")
-
-    if (payload.otp or "").strip() != record.get("otp"):
+    # Production: Twilio Verify.  Mock/dev: db.platform_otp.
+    ok = await _otp_is_valid(mobile, (payload.otp or "").strip(), _db.platform_otp)
+    if not ok:
         raise invalid
 
     admin = await _db.platform_admins.find_one(
