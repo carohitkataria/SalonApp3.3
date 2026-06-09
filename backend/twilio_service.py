@@ -81,16 +81,10 @@ async def send_whatsapp_otp(phone_number: str, otp: str = None) -> dict:
     passed (legacy mock path) and Verify is NOT configured, we'll log it.
 
     Channel strategy (production):
-      1. Try WhatsApp via Verify  → richest experience for India users.
-      2. On any failure, retry with SMS via Verify.
-
-    Returns:
-        dict {
-          status: "sent" | "mock" | "failed",
-          message_sid: str,             # Verify SID (VE…)
-          channel:     "whatsapp" | "sms",
-          to:          phone_number,
-        }
+      • SMS only — Indian Twilio Verify default WhatsApp template currently
+        doesn't deliver reliably from the SalonHub sender, so we route OTP
+        through SMS where delivery is verified working.  Booking & status
+        notifications still go via WhatsApp (Content API + approved templates).
     """
     client = get_twilio_client()
 
@@ -104,7 +98,8 @@ async def send_whatsapp_otp(phone_number: str, otp: str = None) -> dict:
             "otp": otp,
         }
 
-    for channel in ("whatsapp", "sms"):
+    last_error = None
+    for channel in ("sms",):
         try:
             verification = client.verify.v2.services(VERIFY_SERVICE_SID).verifications.create(
                 to=phone_number,
@@ -128,7 +123,7 @@ async def send_whatsapp_otp(phone_number: str, otp: str = None) -> dict:
     return {
         "status": "failed",
         "error": last_error,
-        "otp": otp,  # echo back for any legacy fallback
+        "otp": otp,
     }
 
 

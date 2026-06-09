@@ -4916,15 +4916,18 @@ async def send_otp(request: SalonOTPRequest):
     
     logger.info(f"WhatsApp send result for {phone}: {whatsapp_result}")
     
-    # Build response
+    # Build response — channel is whatever Verify actually used (e.g. "sms").
+    channel = whatsapp_result.get('channel') or 'sms'
+    channel_label = 'WhatsApp' if channel == 'whatsapp' else 'SMS'
     response = {
-        "message": "OTP sent successfully via WhatsApp",
+        "message": f"OTP sent successfully via {channel_label}",
         "salon_exists": salon_exists,
-        "delivery_status": whatsapp_result.get('status')
+        "delivery_status": whatsapp_result.get('status'),
+        "channel": channel,
     }
     
-    # OTP is NEVER returned in the API response — delivery is via WhatsApp only.
-    # The code is logged server-side for debugging/support.
+    # OTP is NEVER returned in the API response — delivery is handled by Twilio.
+    # The local OTP is logged server-side for debugging/support.
     if whatsapp_result.get('status') in ['mock', 'failed']:
         if whatsapp_result.get('status') == 'mock':
             response['note'] = "⚠️ Messaging not configured. Please contact support."
@@ -4932,11 +4935,10 @@ async def send_otp(request: SalonOTPRequest):
         else:
             response['error'] = whatsapp_result.get('error')
             response['note'] = "OTP delivery failed. Please try again."
-            logger.error(f"WhatsApp delivery failed for {phone}: {whatsapp_result.get('error')}")
+            logger.error(f"OTP delivery failed for {phone}: {whatsapp_result.get('error')}")
     else:
-        # For successful WhatsApp delivery, also log OTP for debugging
-        logger.info(f"✅ OTP sent via WhatsApp to {phone}. Check WhatsApp for OTP: {otp}")
-        response['note'] = "OTP sent to your WhatsApp. Please check your messages."
+        logger.info(f"✅ OTP sent via {channel} to {phone}. (Local audit code: {otp})")
+        response['note'] = f"OTP sent to your {channel_label}. Please check your messages."
     
     return response
 
@@ -5456,32 +5458,32 @@ async def send_customer_otp(request: CustomerOTPRequest):
     
     logger.info(f"OTP stored in database for customer {phone}")
     
-    # Send OTP via WhatsApp
+    # Send OTP via Twilio Verify (SMS)
     whatsapp_result = await send_whatsapp_otp(phone, otp)
-    
+
+    channel = whatsapp_result.get('channel') or 'sms'
+    channel_label = 'WhatsApp' if channel == 'whatsapp' else 'SMS'
+
     response = {
         "success": True,
-        "message": "OTP sent successfully via WhatsApp",
+        "message": f"OTP sent successfully via {channel_label}",
         "phone": phone,
         "delivery_status": whatsapp_result.get('status'),
+        "channel": channel,
     }
-    
-    # Build the user-facing note based on the actual Twilio result.
-    # send_whatsapp_otp returns status in {'sent','mock','failed'} (no 'success' key).
+
     status = whatsapp_result.get('status')
     if status == 'mock':
         response['note'] = "⚠️ Messaging not configured. Please contact support."
         logger.warning(f"Mock OTP (Twilio not configured) for customer {phone}: {otp}")
     elif status == 'failed':
-        # Genuine delivery failure — surface the error (OTP never returned)
         response['note'] = "OTP delivery failed. Please try again."
         response['error'] = whatsapp_result.get('error')
-        logger.error(f"WhatsApp delivery failed for customer {phone}: {whatsapp_result.get('error')}")
+        logger.error(f"OTP delivery failed for customer {phone}: {whatsapp_result.get('error')}")
     else:
-        # Successful Twilio handoff
-        response['note'] = "OTP sent to your WhatsApp. Please check your messages."
-        logger.info(f"✅ OTP sent via WhatsApp to customer {phone}")
-    
+        response['note'] = f"OTP sent to your {channel_label}. Please check your messages."
+        logger.info(f"✅ OTP sent via {channel} to customer {phone}")
+
     return response
 
 
