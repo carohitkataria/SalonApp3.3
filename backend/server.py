@@ -508,6 +508,8 @@ class BookingCreate(BaseModel):
     source: str = "online"
     booking_type: str = "instant"  # instant/future
     booking_for_self: bool = True  # True = self, False = others
+    customer_gender: Optional[str] = None  # For guest bookings
+    is_guest: bool = False  # True if booking as guest (no auth)
     payment_mode: Optional[str] = None  # cash/upi/wallet/card
     customer_gender: Optional[str] = None
 
@@ -5840,6 +5842,16 @@ async def auth_customer_me(user=Depends(get_current_customer)):
     return {"user": _user_to_public(user)}
 
 
+@api_router.get("/customer/{phone}/last-salon")
+async def get_customer_last_salon(phone: str):
+    """Get the last visited salon for smart routing"""
+    if not phone.startswith("+91"):
+        phone = f"+91{phone}"
+    
+    customer = await db.customers.find_one({"phone": phone}, {"_id": 0, "last_booking_salon_id": 1})
+    if customer and customer.get("last_booking_salon_id"):
+        return {"salon_id": customer["last_booking_salon_id"]}
+    return {"salon_id": None}
 
 
 @api_router.get("/salons/{salon_id}/customers")
@@ -7913,6 +7925,28 @@ async def create_booking(booking: BookingCreate):
     phone = booking.phone
     if not phone.startswith("+91"):
         phone = f"+91{phone}"
+    
+    # Handle guest booking - create or update customer account
+    customer = await db.customers.find_one({"phone": phone})
+    if not customer:
+        # Create new customer account (unverified for guests)
+        customer = {
+            "id": str(uuid.uuid4()),
+            "phone": phone,
+            "name": booking.customer_name or "Guest",
+            "gender": booking.customer_gender or "other",
+            "is_verified": False if booking.is_guest else True,
+            "created_at": datetime.now(timezone.utc).isoformat(),
+            "last_booking_salon_id": booking.salon_id
+        }
+        await db.customers.insert_one(customer)
+        logger.info(f"Created new customer account: {phone} (guest={booking.is_guest})")
+    else:
+        # Update last visited salon for smart routing
+        await db.customers.update_one(
+            {"phone": phone},
+            {"$set": {"last_booking_salon_id": booking.salon_id}}
+        )
     
     # Check booking limit: Max 2 active bookings per customer per day (1 for self + 1 for others)
     today = datetime.now(timezone.utc).strftime("%Y-%m-%d")

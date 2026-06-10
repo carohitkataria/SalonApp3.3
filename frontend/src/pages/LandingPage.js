@@ -8,9 +8,40 @@ import { motion } from 'framer-motion';
 import SalonHubLogo from '@/components/SalonHubLogo';
 import ThemePicker from '@/components/ThemePicker';
 import Footer from '@/components/Footer';
+import axios from 'axios';
+
+const API_URL = import.meta.env.VITE_API_URL || process.env.REACT_APP_BACKEND_URL;
 
 export default function LandingPage() {
   const navigate = useNavigate();
+
+  // Smart routing for "Get Started" button
+  const handleGetStarted = async () => {
+    // Check if user has visited a salon before
+    const lastSalonId = localStorage.getItem('last_visited_salon_id');
+    
+    if (lastSalonId) {
+      // Returning user - go to last visited salon
+      navigate(`/salon/${lastSalonId}`);
+    } else {
+      // Check if user has a phone number in localStorage (from previous bookings)
+      const customerPhone = localStorage.getItem('customer_phone');
+      if (customerPhone) {
+        try {
+          const response = await axios.get(`${API_URL}/api/customer/${customerPhone}/last-salon`);
+          if (response.data.salon_id) {
+            localStorage.setItem('last_visited_salon_id', response.data.salon_id);
+            navigate(`/salon/${response.data.salon_id}`);
+            return;
+          }
+        } catch (error) {
+          console.warn('Failed to fetch last salon:', error);
+        }
+      }
+      // First-time user - go to salon search
+      navigate('/salons');
+    }
+  };
 
   const features = [
     { icon: Clock,         eyebrow: '01 · LIVE QUEUE',     title: 'Real-time queue, no waiting room',         description: 'Track your token with live position, ETA, and "now serving" status — from anywhere.' },
@@ -101,7 +132,7 @@ export default function LandingPage() {
 
               <div className="mt-10 flex flex-col sm:flex-row gap-3">
                 <Button
-                  onClick={() => navigate('/login')}
+                  onClick={handleGetStarted}
                   className="bg-brass hover:bg-brass-hover text-espresso font-semibold px-7 h-12 rounded-full shadow-brass"
                   data-testid="hero-get-started-btn"
                 >

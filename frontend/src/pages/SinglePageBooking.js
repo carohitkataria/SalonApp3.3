@@ -248,6 +248,14 @@ export default function SinglePageBooking() {
   const { user, isUserLoggedIn, isUserOtpVerified, loginUser } = useAuth();
   const { saveIntent, getIntent, clearIntent } = useBookingIntent();
   const [searchParams] = useSearchParams();
+  
+  // Track salon visit for smart routing
+  useEffect(() => {
+    if (salonId) {
+      localStorage.setItem('last_visited_salon_id', salonId);
+    }
+  }, [salonId]);
+  
   const source = searchParams.get('source') || 'online';
   const forSelf = searchParams.get('for') === 'self';
   const whenParam = searchParams.get('when');
