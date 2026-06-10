@@ -139,7 +139,7 @@ export default function SalonOrderDetailPage() {
             <div className="text-sm font-bold mb-3">Status timeline</div>
             <div className="space-y-3">
               {(order.status_history || []).slice().reverse().map((h, idx) => (
-                <div key={idx} className="flex items-start gap-3">
+                <div key={`${h.timestamp || ''}-${idx}`} className="flex items-start gap-3">
                   <div className="w-2 h-2 rounded-full bg-primary mt-1.5 flex-shrink-0" />
                   <div className="flex-1">
                     <div className="text-xs font-bold capitalize">{(h.status || '').replace('_', ' ')}</div>
@@ -208,7 +208,7 @@ export default function SalonOrderDetailPage() {
                 </div>
                 <div className="space-y-1.5 max-h-32 overflow-y-auto">
                   {order.payment_mode_history.slice().reverse().map((h, idx) => (
-                    <div key={idx} className="text-[11px] text-muted-foreground" data-testid={`order-payment-mode-history-${idx}`}>
+                    <div key={`${h.changed_at || ''}-${idx}`} className="text-[11px] text-muted-foreground" data-testid={`order-payment-mode-history-${idx}`}>
                       <span className="font-semibold text-foreground uppercase">{h.from}</span> → <span className="font-semibold text-foreground uppercase">{h.to}</span>
                       {h.note && <span className="block italic">"{h.note}"</span>}
                       <span className="block text-[10px]">{new Date(h.changed_at).toLocaleString()}</span>

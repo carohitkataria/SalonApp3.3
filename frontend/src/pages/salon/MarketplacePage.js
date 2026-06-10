@@ -61,7 +61,7 @@ export default function MarketplacePage() {
     const raw = localStorage.getItem('salon_user_auth');
     let token = localStorage.getItem('salon_admin_token') || localStorage.getItem('access_token');
     if (!token && raw) {
-      try { token = JSON.parse(raw).token; } catch { /* noop */ }
+      try { token = JSON.parse(raw).token; } catch (e) { console.debug('Bad salon_user_auth JSON:', e); }
     }
     return token ? { Authorization: `Bearer ${token}` } : {};
   }, []);
@@ -95,7 +95,7 @@ export default function MarketplacePage() {
       ]);
       setCategories(c.data.categories || []);
       setBrands(b.data.brands || []);
-    } catch { /* non-fatal */ }
+    } catch (e) { console.debug('Filter fetch failed (non-fatal):', e); }
   }, [authHeaders]);
 
   useEffect(() => { fetchFilters(); }, [fetchFilters]);

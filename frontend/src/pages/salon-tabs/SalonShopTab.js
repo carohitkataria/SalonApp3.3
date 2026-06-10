@@ -68,11 +68,11 @@ export default function SalonShopTab({ salonId }) {
     try {
       const raw = localStorage.getItem(cartKey);
       if (raw) setCart(JSON.parse(raw));
-    } catch { /* noop */ }
+    } catch (e) { console.debug('Cart hydrate failed:', e); }
   }, [cartKey]);
 
   useEffect(() => {
-    try { localStorage.setItem(cartKey, JSON.stringify(cart)); } catch { /* noop */ }
+    try { localStorage.setItem(cartKey, JSON.stringify(cart)); } catch (e) { console.debug('Cart persist failed:', e); }
   }, [cart, cartKey]);
 
   const fetchProducts = useCallback(async () => {
@@ -180,7 +180,7 @@ export default function SalonShopTab({ salonId }) {
       });
       setLastOrderId(r.data?.order?.id);
       setCart([]);
-      try { localStorage.removeItem(cartKey); } catch { /* noop */ }
+      try { localStorage.removeItem(cartKey); } catch (e) { console.debug('Cart remove failed:', e); }
       setStep('success');
       toast.success('Order placed!');
     } catch (e) {

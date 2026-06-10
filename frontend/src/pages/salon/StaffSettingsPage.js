@@ -26,7 +26,7 @@ export default function StaffSettingsPage() {
         const parsed = JSON.parse(raw);
         sid = parsed.salon_id || parsed.salonId || parsed.user?.salon_id;
         if (!token) token = parsed.token;
-      } catch { /* noop */ }
+      } catch (e) { console.debug('Bad salon_user_auth JSON:', e); }
     }
     if (!sid) sid = localStorage.getItem('salon_id');
     const headers = token ? { Authorization: `Bearer ${token}` } : {};

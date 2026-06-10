@@ -156,7 +156,7 @@ export default function SupplierOrderDetailPage() {
               <div className="text-sm font-bold mb-3 flex items-center gap-2"><ClipboardCheck className="w-4 h-4" /> Status timeline</div>
               <div className="space-y-3">
                 {(order.status_history || []).slice().reverse().map((h, idx) => (
-                  <div key={idx} className="flex items-start gap-3">
+                  <div key={`${h.timestamp || ''}-${idx}`} className="flex items-start gap-3">
                     <div className="w-2 h-2 rounded-full bg-primary mt-1.5 flex-shrink-0" />
                     <div className="flex-1">
                       <div className="text-xs font-bold capitalize">{(h.status || '').replace('_', ' ')}</div>

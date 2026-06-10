@@ -466,7 +466,7 @@ export default function OfferingsModule({ salonId, token }) {
                     {parsedServices.length === 0 ? (
                       <p className="p-4 text-sm text-muted-foreground text-center">No services were extracted from the menu.</p>
                     ) : parsedServices.map((s, idx) => (
-                      <div key={idx} className="px-3 py-2 text-xs flex items-center justify-between gap-2">
+                      <div key={`${s.service_name}-${idx}`} className="px-3 py-2 text-xs flex items-center justify-between gap-2">
                         <div className="flex-1 min-w-0">
                           <p className="font-medium truncate">{s.service_name}</p>
                           <p className="text-muted-foreground truncate">
@@ -482,7 +482,7 @@ export default function OfferingsModule({ salonId, token }) {
                       <div className="px-3 py-2 bg-muted/50 text-xs font-semibold">Packages</div>
                       <div className="max-h-32 overflow-y-auto divide-y divide-border">
                         {parsedPackages.map((p, idx) => (
-                          <div key={idx} className="px-3 py-2 text-xs flex items-center justify-between gap-2">
+                          <div key={`${p.package_name}-${idx}`} className="px-3 py-2 text-xs flex items-center justify-between gap-2">
                             <div className="flex-1 min-w-0">
                               <p className="font-medium truncate">{p.package_name}</p>
                               <p className="text-muted-foreground truncate">{(p.service_names || []).join(', ')}</p>
@@ -603,7 +603,7 @@ export default function OfferingsModule({ salonId, token }) {
                       </div>
                       <div className="max-h-32 overflow-y-auto rounded bg-muted/50 p-2 space-y-0.5">
                         {csvResult.errors.map((er, i) => (
-                          <div key={i} className="text-muted-foreground">Row {er.row}: {er.reason}</div>
+                          <div key={`${er.row}-${i}`} className="text-muted-foreground">Row {er.row}: {er.reason}</div>
                         ))}
                       </div>
                     </div>
@@ -1246,7 +1246,7 @@ function ServiceModal({ service, open, onClose, onSave, token }) {
               {formData.images && formData.images.length > 0 && (
                 <div className="grid grid-cols-3 gap-2">
                   {formData.images.map((img, index) => (
-                    <div key={index} className="relative">
+                    <div key={`${img}-${index}`} className="relative">
                       <img 
                         src={img} 
                         alt={`Service ${index + 1}`} 

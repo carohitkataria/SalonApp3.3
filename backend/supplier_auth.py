@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import logging
 import random
+import secrets
 import re
 import string
 import uuid
@@ -124,7 +125,8 @@ def _normalize_mobile(raw: str) -> str:
 
 
 def _generate_otp() -> str:
-    return "".join(random.choices(string.digits, k=6))
+    # Use secrets for cryptographically secure OTP generation
+    return "".join(secrets.choice(string.digits) for _ in range(6))
 
 
 def _now_iso() -> str:

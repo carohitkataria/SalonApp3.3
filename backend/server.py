@@ -2815,7 +2815,7 @@ async def initialize_data():
             "created_at": datetime.now(timezone.utc).isoformat()
         }
         await db.salon_users.insert_one(admin_user)
-        logger.info(f"Created admin user: login_id='admin', password='salon123'")
+        logger.info("Created admin user: login_id='admin' (password from seed config)")
 
     # Seed default subscription plan if none exists
     plan_count = await db.subscription_plans.count_documents({})
@@ -9626,7 +9626,9 @@ async def change_token_barber(token_id: str, body: dict, current_salon=Depends(g
 # ============ MEMBERSHIP PAYMENT CONFIRMATION ============
 
 @api_router.post("/salons/{salon_id}/memberships/{membership_id}/confirm-payment")
-async def confirm_membership_payment(salon_id: str, membership_id: str, body: dict = {}, current_user=Depends(get_current_salon_user)):
+async def confirm_membership_payment(salon_id: str, membership_id: str, body: dict = None, current_user=Depends(get_current_salon_user)):
+    if body is None:
+        body = {}
     """Salon confirms payment for a customer-purchased membership. Credits wallet after confirmation."""
     membership = await db.customer_memberships.find_one({
         "id": membership_id,

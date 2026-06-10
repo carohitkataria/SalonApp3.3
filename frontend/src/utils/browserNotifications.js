@@ -141,7 +141,8 @@ async function showViaServiceWorker(title, body, options = {}) {
       return true;
     }
   } catch (e) {
-    // fall through to direct Notification
+    // SW path failed — fall through to direct Notification
+    console.debug('[Notify] SW notification failed, falling back:', e);
   }
   return false;
 }

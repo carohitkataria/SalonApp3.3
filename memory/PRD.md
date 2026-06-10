@@ -24,6 +24,26 @@ A multi-tenant salon management SaaS (React + FastAPI + MongoDB). Most recent fe
 
 ## Implemented (CHANGELOG)
 
+### Feb 10, 2026 — Code Quality Pass: Quick Wins ✅
+- ✅ **Hardcoded credential leaked in logs** (`server.py:2818`) — removed `password='salon123'` from `logger.info()`; now only logs the login_id with a "from seed config" note.
+- ✅ **Mutable default argument** (`server.py:confirm_membership_payment`) — `body: dict = {}` → `body: dict = None` with explicit `if body is None: body = {}` guard.
+- ✅ **`random` → `secrets` for OTP generation** (real security fix): `platform_admin.py:_generate_otp()` and `supplier_auth.py:_generate_otp()` now use `secrets.choice(string.digits)`. Barber-load-balancing calls in `server.py` (lines 1575/1596/1599) kept on `random` (load balancing, not security).
+- ✅ **Empty catch blocks** in cited frontend files now emit `console.debug` for traceability:
+  - `utils/browserNotifications.js:143` (SW fallback path)
+  - `pages/salon/MarketplacePage.js:64, 98` (auth-token parse + filter fetch)
+  - `pages/salon-tabs/SalonShopTab.js:71, 75, 183` (cart hydrate/persist/remove)
+  - `pages/salon/StaffSettingsPage.js:29` (auth JSON parse)
+- ✅ **Array-index → stable composite keys** in the cited files:
+  - `OfferingsModule.js:469, 485, 606, 1249` (parsed services/packages, CSV error rows, image previews)
+  - `pages/supplier/SupplierOrderDetailPage.js:159` (status timeline)
+  - `pages/salon/SalonOrderDetailPage.js:142, 211` (status timeline + payment-mode history)
+
+### Deferred (intentional, with rationale)
+- 🚫 **localStorage → httpOnly cookies migration**: per agreed scope, out of session — needs dedicated security-review session with backend auth refactor + CSRF protection.
+- 🚫 **React Hook missing-deps fixes for 206 cited instances**: investigated — most are advisory warnings, not blocking lint errors (config doesn't flag `exhaustive-deps` as error). Spot-check: `CartContext.js:117` (flagged with "9 deps missing") already lists all 9 deps. The 206 number appears to be a mix of false positives + already-suppressed-by-design `useEffect` patterns. Blindly adding deps without understanding each component's intended re-render behavior is high-risk (infinite-loop / stale closure regressions). **Recommend per-file review during next refactor pass**.
+- 🚫 **Python complexity refactor of `compute_mode_b_status` / `_check_in_impl` / `list_shop_products`**: deferred — needs dedicated session with attendance + marketplace regression tests; refactoring 18-19 cyclomatic complexity functions blind is the kind of change that introduces silent off-by-one bugs.
+- 🚫 **Component splits** (CustomerMaster 1,092 LOC, OfferingsModule 851 LOC, etc.): deferred for the same reason — each split requires full E2E regression and prop-drilling cleanup. Worth doing, just not in a single batch.
+
 ### Feb 10, 2026 — Public "Subscribe Now" + 30-Day Free Trial (P1) ✅
 - ✅ **Backend pricing refresh** (`server.py` startup):
   - Default monthly plan bumped from ₹499 → **₹999/month/branch** (legacy plans auto-migrated via `subscription_default_price_v3_999` flag).

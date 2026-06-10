@@ -16,6 +16,7 @@ from __future__ import annotations
 import logging
 import os
 import random
+import secrets
 import string
 import uuid
 from datetime import datetime, timedelta, timezone
@@ -77,7 +78,8 @@ def _normalize_mobile(raw: str) -> str:
 
 
 def _generate_otp() -> str:
-    return "".join(random.choices(string.digits, k=6))
+    # Use secrets for cryptographically secure OTP generation
+    return "".join(secrets.choice(string.digits) for _ in range(6))
 
 
 def _make_access_token(admin_doc: dict) -> str:
