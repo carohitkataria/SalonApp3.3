@@ -52,6 +52,50 @@ export const SubscriptionProvider = ({ salonId, children }) => {
     refresh();
   }, [refresh]);
 
+  // Auto-start a free trial when the user arrived from the landing-page CTA.
+  // This is a one-shot side-effect: if `start_trial_intent` is set in
+  // localStorage and the salon hasn't paid + hasn't already used the trial,
+  // we call the backend `start-trial` endpoint and refresh the status.
+  useEffect(() => {
+    if (!salonId) return;
+    let cancelled = false;
+    const tryStartTrial = async () => {
+      const intent = (() => {
+        try { return localStorage.getItem('start_trial_intent'); } catch (_e) { return null; }
+      })();
+      if (intent !== 'true') return;
+      // Clear the flag immediately so we never retry on subsequent mounts.
+      try { localStorage.removeItem('start_trial_intent'); } catch (_e) { /* ignore */ }
+
+      // Build auth header from existing localStorage session.
+      const authHeaders = (() => {
+        try {
+          const sa = JSON.parse(localStorage.getItem('salon_user_auth') || 'null');
+          if (sa?.token) return { Authorization: `Bearer ${sa.token}` };
+        } catch (_e) { /* ignore */ }
+        const legacy = localStorage.getItem('salon_admin_token');
+        return legacy ? { Authorization: `Bearer ${legacy}` } : {};
+      })();
+      if (!authHeaders.Authorization) return; // not logged in yet
+
+      try {
+        await axios.post(
+          `${API}/salons/${salonId}/subscription/start-trial`,
+          {},
+          { headers: authHeaders }
+        );
+        if (!cancelled) {
+          await refresh();
+        }
+      } catch (e) {
+        // Silent on the common "trial already used" / "already subscribed" cases.
+        console.warn('[Subscription] start-trial skipped:', e?.response?.data?.detail || e.message);
+      }
+    };
+    tryStartTrial();
+    return () => { cancelled = true; };
+  }, [salonId, refresh]);
+
   const openPaywall = useCallback((reason = null) => {
     setPaywallReason(reason);
     setPaywallOpen(true);

@@ -2558,9 +2558,12 @@ async def get_subscription_status(salon_id: str) -> dict:
       - base_amount / total_amount / discount_code_applied / discount_amount
         (from the active subscription if any)
       - branches_added_mid_cycle (bool — to show the deferred-billing banner)
+      - trial_used (bool — salon already redeemed its 30-day free trial)
+      - is_trial (bool — current active subscription is the free trial)
     """
     sub = await get_current_subscription(salon_id)
     plan = await get_active_plan()
+    salon_doc = await db.salons.find_one({"id": salon_id}, {"_id": 0, "trial_used": 1})
     now = datetime.now(timezone.utc)
     is_premium = False
     status = "free"
@@ -2631,6 +2634,9 @@ async def get_subscription_status(salon_id: str) -> dict:
         ),
         "trial_ends_at": (sub or {}).get("trial_ends_at"),
         "is_platform_granted": bool((sub or {}).get("payment_status") == "granted"),
+        # 30-day free trial fields (Feb 2026)
+        "trial_used": bool((salon_doc or {}).get("trial_used") or (sub or {}).get("is_trial")),
+        "is_trial": bool((sub or {}).get("is_trial")),
     }
 
 async def enforce_premium_or_within_limit(salon_id: str, *, resource: str) -> None:
@@ -2817,8 +2823,8 @@ async def initialize_data():
         default_plan = {
             "id": str(uuid.uuid4()),
             "plan_name": "SalonHub Pro",
-            "price": 499.0,
-            "price_per_branch": 499.0,  # Phase 2 (Part C)
+            "price": 999.0,
+            "price_per_branch": 999.0,  # Phase 2 (Part C)
             "billing_cycle": "monthly",
             "max_staff": None,
             "max_branches": None,
@@ -2834,7 +2840,53 @@ async def initialize_data():
             "created_at": datetime.now(timezone.utc).isoformat(),
         }
         await db.subscription_plans.insert_one(default_plan)
-        logger.info("Seeded default SalonHub Pro plan @ ₹499/month/branch")
+        logger.info("Seeded default SalonHub Pro plan @ ₹999/month/branch")
+
+    # Seed yearly plan if none exists (₹9999/year/branch — save 17%)
+    yearly_existing = await db.subscription_plans.find_one(
+        {"billing_cycle": "yearly"}, {"_id": 0, "id": 1}
+    )
+    if not yearly_existing:
+        yearly_plan = {
+            "id": str(uuid.uuid4()),
+            "plan_name": "SalonHub Pro (Yearly)",
+            "price": 9999.0,
+            "price_per_branch": 9999.0,
+            "billing_cycle": "yearly",
+            "max_staff": None,
+            "max_branches": None,
+            "features": [
+                "Unlimited Staff",
+                "Multiple Branches",
+                "Branch Management",
+                "Staff Transfers",
+                "Attendance System",
+                "Save ~17% vs monthly",
+            ],
+            "status": "active",
+            "is_default": False,
+            "created_at": datetime.now(timezone.utc).isoformat(),
+        }
+        await db.subscription_plans.insert_one(yearly_plan)
+        logger.info("Seeded SalonHub Pro Yearly plan @ ₹9999/year/branch")
+
+    # One-shot price migration: bump legacy ₹499 default plan to ₹999.
+    # Guarded by a system_flags doc so it only runs once.
+    price_flag = await db.system_flags.find_one(
+        {"key": "subscription_default_price_v3_999"}, {"_id": 0}
+    )
+    if not price_flag or not price_flag.get("value"):
+        res = await db.subscription_plans.update_many(
+            {"price": 499.0, "billing_cycle": "monthly"},
+            {"$set": {"price": 999.0, "price_per_branch": 999.0}},
+        )
+        await db.system_flags.update_one(
+            {"key": "subscription_default_price_v3_999"},
+            {"$set": {"value": True, "ran_at": datetime.now(timezone.utc).isoformat()}},
+            upsert=True,
+        )
+        if res.modified_count:
+            logger.info(f"[Subscription V3] Bumped {res.modified_count} legacy monthly plans 499→999")
 
     # Seed/refresh a 1-year premium subscription for the test salon (+917503070727)
     # so the admin doesn't see "Upgrade to SalonHub Pro" prompts when using premium features.
@@ -13152,6 +13204,92 @@ async def api_subscription_status(salon_id: str):
     if not salon:
         raise HTTPException(status_code=404, detail="Salon not found")
     return await get_subscription_status(salon_id)
+
+
+@api_router.post("/salons/{salon_id}/subscription/start-trial")
+async def api_subscription_start_trial(
+    salon_id: str,
+    current_user=Depends(get_current_salon_user),
+):
+    """Grant a one-time 30-day free trial subscription to this salon.
+
+    Idempotent guards:
+    - Only the salon's own admin can start the trial.
+    - Salon must NOT have used a trial before (`salons.trial_used != true`).
+    - Salon must NOT already have an active paid subscription.
+    Returns the newly-created trial subscription document.
+    """
+    _check_salon_admin_for_salon(current_user, salon_id)
+
+    salon = await db.salons.find_one({"id": salon_id}, {"_id": 0})
+    if not salon:
+        raise HTTPException(status_code=404, detail="Salon not found")
+    if salon.get("trial_used"):
+        raise HTTPException(status_code=400, detail="Free trial already used for this salon")
+
+    existing = await db.salon_subscriptions.find_one(
+        {"salon_id": salon_id, "payment_status": "paid"},
+        {"_id": 0, "id": 1, "expiry_date": 1},
+        sort=[("expiry_date", -1)],
+    )
+    if existing and existing.get("expiry_date"):
+        try:
+            exp_dt = datetime.fromisoformat(existing["expiry_date"].replace("Z", "+00:00"))
+            if exp_dt.tzinfo is None:
+                exp_dt = exp_dt.replace(tzinfo=timezone.utc)
+            if exp_dt > datetime.now(timezone.utc):
+                raise HTTPException(status_code=400, detail="You already have an active subscription")
+        except HTTPException:
+            raise
+        except Exception:
+            pass
+
+    plan = await get_active_plan()
+    if not plan:
+        raise HTTPException(status_code=404, detail="No active plan configured")
+
+    now_dt = datetime.now(timezone.utc)
+    expiry_dt = now_dt + timedelta(days=30)
+    price_per_branch = float(plan.get("price_per_branch") or plan.get("price") or 0)
+    branch_ids = await get_active_branch_ids(salon_id)
+    billable = max(len(branch_ids), 1)
+
+    trial_doc = {
+        "id": str(uuid.uuid4()),
+        "salon_id": salon_id,
+        "plan_id": plan.get("id"),
+        "plan_name": plan.get("plan_name"),
+        "price": price_per_branch,
+        "subscription_status": "active",
+        "start_date": now_dt.isoformat(),
+        "expiry_date": expiry_dt.isoformat(),
+        "payment_status": "paid",  # treat as paid so paywall doesn't block
+        "cashfree_order_id": None,
+        "cashfree_payment_id": "FREE_TRIAL_30D",
+        "auto_renew": False,
+        "is_trial": True,
+        "billable_branch_count": billable,
+        "price_per_branch_snapshot": price_per_branch,
+        "branch_ids_snapshot": branch_ids,
+        "base_amount": 0.0,
+        "discount_code_applied": None,
+        "discount_amount": 0.0,
+        "total_amount": 0.0,
+        "created_at": now_dt.isoformat(),
+        "updated_at": now_dt.isoformat(),
+    }
+    await db.salon_subscriptions.insert_one(trial_doc.copy())
+    await db.salons.update_one(
+        {"id": salon_id},
+        {"$set": {"trial_used": True, "trial_started_at": now_dt.isoformat()}},
+    )
+    logger.info(f"[Trial] Started 30-day free trial for salon {salon_id} until {expiry_dt.isoformat()}")
+    return {
+        "success": True,
+        "subscription": trial_doc,
+        "expires_at": expiry_dt.isoformat(),
+        "trial_days": 30,
+    }
 
 
 @api_router.get("/salons/{salon_id}/subscription/quote")

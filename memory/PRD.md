@@ -24,6 +24,20 @@ A multi-tenant salon management SaaS (React + FastAPI + MongoDB). Most recent fe
 
 ## Implemented (CHANGELOG)
 
+### Feb 10, 2026 — Public "Subscribe Now" + 30-Day Free Trial (P1) ✅
+- ✅ **Backend pricing refresh** (`server.py` startup):
+  - Default monthly plan bumped from ₹499 → **₹999/month/branch** (legacy plans auto-migrated via `subscription_default_price_v3_999` flag).
+  - New **Yearly plan @ ₹9999/year/branch** seeded (`billing_cycle="yearly"`, `is_default=false`, 6 marketing features incl. "Save ~17% vs monthly").
+- ✅ **New endpoint** `POST /api/salons/{salon_id}/subscription/start-trial` (auth: salon admin) — grants a one-time 30-day **free trial** subscription. Idempotent guards: rejects if `salons.trial_used` is already true OR if salon has an active paid subscription. Stamps `salons.trial_used=true` + `trial_started_at`. Trial sub is `payment_status="paid"` + `is_trial=true` so the existing paywall logic treats the salon as premium for 30 days.
+- ✅ **Status endpoint** `GET /api/salons/{salon_id}/subscription/status` now returns two new flags: `trial_used` (bool, derived from `salons` doc) and `is_trial` (bool, derived from active sub).
+- ✅ **Landing-page Pricing section** (`LandingPage.js`): new "Pricing" nav link, "Subscribe Now" header CTA, full-width Pricing section with:
+  - 30-day free trial banner with `Start free trial` CTA (`start-free-trial-btn`).
+  - Two pricing cards (`pricing-card-monthly`, `pricing-card-yearly`) with feature checklists and per-card `Subscribe Monthly` / `Subscribe Yearly` CTAs.
+  - `Best value` badge on the yearly card. Footer fine-print on per-branch billing.
+- ✅ **Trial intent flow**: landing CTAs set `localStorage.start_trial_intent = 'true'` + redirect to `/salon/login` → after login the user lands on `/salon/dashboard` → `SubscriptionContext` reads the flag, auto-calls `/subscription/start-trial`, clears the flag, refreshes the status. The Subscription Panel then shows the new **`trial-active-banner`** with days remaining.
+- ✅ **Manual trial CTA** inside `SubscriptionPanel` (`start-trial-card` + `panel-start-trial-btn`) — eligible salons (not premium AND `trial_used=false`) can activate the 30-day trial without leaving the dashboard.
+- ✅ **Backend tests**: `/app/backend/tests/test_subscription_trial.py` — 4/4 pytest green (plans-v3 seed, trial fields in status, start-trial blocked by active sub, auth-gated endpoint).
+
 ### Feb 10, 2026 — Guest vs Login Checkout Flow + Customer Auth Modal ✅
 - ✅ **New component `CustomerAuthModal`** at `/app/frontend/src/components/CustomerAuthModal.js` — combined Login (Password + OTP sub-tabs) and Sign Up tabs. Uses `useAuth()` helpers: `customerLoginPassword`, `customerSendOtp`, `customerVerifyOtp`, `updateCustomerProfile`. All interactive elements carry `data-testid` (`auth-tab-login`, `auth-tab-signup`, `login-method-password-btn`, `login-method-otp-btn`, `auth-phone-input`, `auth-password-input`, `auth-send-otp-btn`, `auth-otp-input`, `auth-verify-otp-btn`, `signup-name-input`, `signup-phone-input`, `signup-gender-{m/w/o}`, `signup-send-otp-btn`, `signup-verify-otp-btn`). Forgot-password link auto-switches to OTP login.
 - ✅ **Mode chooser at payment step** in `/app/frontend/src/pages/SinglePageBooking.js` — when the customer is not signed in, the payment step now shows a `booking-mode-chooser` card with two options:

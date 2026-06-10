@@ -2,7 +2,7 @@ import { useNavigate } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import {
   Scissors, Clock, Bell, Star, Users, Calendar,
-  Smartphone, MapPin, Sparkles, MessageSquare, Zap, ArrowUpRight, Quote
+  Smartphone, MapPin, Sparkles, MessageSquare, Zap, ArrowUpRight, Quote, Check, Gift
 } from 'lucide-react';
 import { motion } from 'framer-motion';
 import SalonHubLogo from '@/components/SalonHubLogo';
@@ -43,6 +43,74 @@ export default function LandingPage() {
     }
   };
 
+  // "Subscribe Now" CTA — salon admins go to their dashboard; otherwise login.
+  const handleSubscribe = (cycle = 'monthly') => {
+    try {
+      const auth = JSON.parse(localStorage.getItem('salon_user_auth') || 'null');
+      // Persist desired billing cycle for the dashboard to pick up after login.
+      localStorage.setItem('preferred_billing_cycle', cycle);
+      if (auth?.token && auth?.salonId) {
+        navigate(`/salon/dashboard?tab=subscription&cycle=${cycle}`);
+      } else {
+        navigate('/salon/login', { state: { next: `/salon/dashboard?tab=subscription&cycle=${cycle}` } });
+      }
+    } catch (_e) {
+      navigate('/salon/login');
+    }
+  };
+
+  // "Start Free Trial" CTA — same routing; dashboard surfaces the trial banner.
+  const handleStartTrial = () => {
+    try {
+      const auth = JSON.parse(localStorage.getItem('salon_user_auth') || 'null');
+      localStorage.setItem('start_trial_intent', 'true');
+      if (auth?.token && auth?.salonId) {
+        navigate(`/salon/dashboard?tab=subscription&trial=1`);
+      } else {
+        navigate('/salon/login', { state: { next: `/salon/dashboard?tab=subscription&trial=1` } });
+      }
+    } catch (_e) {
+      navigate('/salon/login');
+    }
+  };
+
+  const pricingPlans = [
+    {
+      id: 'monthly',
+      name: 'Monthly',
+      price: '₹999',
+      cycle: '/month/branch',
+      tagline: 'Billed monthly. Cancel anytime.',
+      highlight: false,
+      features: [
+        'Unlimited staff & customers',
+        'Multi-branch dashboard',
+        'Staff attendance & payroll',
+        'Loyalty, wallet, incentives',
+        'WhatsApp booking confirmations',
+        'Analytics & reports',
+      ],
+      cta: 'Subscribe Monthly',
+    },
+    {
+      id: 'yearly',
+      name: 'Yearly',
+      price: '₹9,999',
+      cycle: '/year/branch',
+      tagline: 'Save ~17% (2 months free).',
+      highlight: true,
+      features: [
+        'Everything in Monthly',
+        '2 months free vs monthly',
+        'Priority WhatsApp support',
+        'Branded booking QR codes',
+        'Customer marketplace access',
+        'Lock in this rate for a full year',
+      ],
+      cta: 'Subscribe Yearly',
+    },
+  ];
+
   const features = [
     { icon: Clock,         eyebrow: '01 · LIVE QUEUE',     title: 'Real-time queue, no waiting room',         description: 'Track your token with live position, ETA, and "now serving" status — from anywhere.' },
     { icon: Bell,          eyebrow: '02 · NOTIFICATIONS',  title: 'Whispered when it\'s your turn',           description: 'Browser push and WhatsApp confirmations the moment your stylist calls you in.' },
@@ -75,6 +143,7 @@ export default function LandingPage() {
           <nav className="hidden md:flex items-center gap-8 text-sm text-muted-foreground">
             <a href="#features" className="hover:text-foreground transition-colors">Experience</a>
             <a href="#how" className="hover:text-foreground transition-colors">How it works</a>
+            <a href="#pricing" className="hover:text-foreground transition-colors" data-testid="nav-pricing-link">Pricing</a>
             <a href="#stats" className="hover:text-foreground transition-colors">House notes</a>
           </nav>
 
@@ -87,6 +156,13 @@ export default function LandingPage() {
               data-testid="landing-salon-login-btn"
             >
               For Salons
+            </Button>
+            <Button
+              onClick={() => handleSubscribe('monthly')}
+              className="hidden lg:inline-flex bg-transparent border border-brass text-brass hover:bg-brass-soft font-semibold rounded-full px-5 h-9"
+              data-testid="header-subscribe-btn"
+            >
+              Subscribe Now
             </Button>
             <Button
               onClick={() => navigate('/login')}
@@ -295,6 +371,110 @@ export default function LandingPage() {
               );
             })}
           </div>
+        </div>
+      </section>
+
+      {/* Pricing — Salon SaaS plans */}
+      <section id="pricing" className="border-t border-border/60">
+        <div className="max-w-7xl mx-auto px-6 lg:px-10 py-24">
+          <div className="text-center mb-14">
+            <span className="eyebrow-brass">For salons</span>
+            <h2 className="font-fraunces text-4xl sm:text-5xl mt-4 font-light">
+              Simple, <span className="serif-italic font-medium brass-text">per-branch</span> pricing.
+            </h2>
+            <p className="text-muted-foreground mt-4 max-w-xl mx-auto leading-relaxed">
+              Run unlimited staff, customers, and bookings on every branch.
+              Start free for 30 days &mdash; no card required.
+            </p>
+          </div>
+
+          {/* Trial banner */}
+          <motion.div
+            initial={{ opacity: 0, y: 18 }}
+            whileInView={{ opacity: 1, y: 0 }}
+            viewport={{ once: true }}
+            transition={{ duration: 0.55 }}
+            className="lux-card rounded-2xl p-6 mb-10 flex flex-col sm:flex-row items-start sm:items-center gap-4 sm:justify-between"
+            data-testid="trial-banner"
+          >
+            <div className="flex items-start gap-4">
+              <div className="w-12 h-12 rounded-full bg-brass-soft flex items-center justify-center text-brass shrink-0">
+                <Gift className="w-5 h-5" strokeWidth={1.6} />
+              </div>
+              <div>
+                <span className="eyebrow-brass">30-day free trial</span>
+                <h3 className="font-fraunces text-xl font-medium mt-1">
+                  Try every feature on the house.
+                </h3>
+                <p className="text-sm text-muted-foreground mt-1">
+                  Unlock multi-branch, payroll, loyalty &amp; analytics free for 1 month. Pay only if you continue.
+                </p>
+              </div>
+            </div>
+            <Button
+              onClick={handleStartTrial}
+              className="bg-brass hover:bg-brass-hover text-espresso font-semibold rounded-full px-6 h-11 shadow-brass shrink-0"
+              data-testid="start-free-trial-btn"
+            >
+              <Gift className="mr-2 w-4 h-4" />
+              Start free trial
+            </Button>
+          </motion.div>
+
+          <div className="grid md:grid-cols-2 gap-6">
+            {pricingPlans.map((p, idx) => (
+              <motion.div
+                key={p.id}
+                initial={{ opacity: 0, y: 20 }}
+                whileInView={{ opacity: 1, y: 0 }}
+                viewport={{ once: true }}
+                transition={{ duration: 0.55, delay: idx * 0.1 }}
+                className={`relative rounded-2xl p-8 transition-all ${
+                  p.highlight
+                    ? 'lux-card bg-card border-2 border-brass shadow-brass'
+                    : 'lux-card bg-card border border-border'
+                }`}
+                data-testid={`pricing-card-${p.id}`}
+              >
+                {p.highlight && (
+                  <span className="absolute -top-3 left-8 inline-flex items-center gap-1 px-3 py-1 rounded-full text-[10px] font-semibold tracking-wider uppercase bg-brass text-espresso">
+                    <Sparkles className="w-3 h-3" /> Best value
+                  </span>
+                )}
+                <span className="eyebrow">{p.name}</span>
+                <div className="mt-3 flex items-baseline gap-1.5">
+                  <span className="font-fraunces text-5xl font-light brass-text">{p.price}</span>
+                  <span className="text-muted-foreground text-sm">{p.cycle}</span>
+                </div>
+                <p className="text-xs text-muted-foreground mt-2">{p.tagline}</p>
+
+                <ul className="mt-6 space-y-3">
+                  {p.features.map((f) => (
+                    <li key={f} className="flex items-start gap-2 text-sm">
+                      <Check className="w-4 h-4 text-brass mt-0.5 shrink-0" strokeWidth={2} />
+                      <span className="text-foreground/80">{f}</span>
+                    </li>
+                  ))}
+                </ul>
+
+                <Button
+                  onClick={() => handleSubscribe(p.id)}
+                  className={`mt-8 w-full font-semibold rounded-full h-11 ${
+                    p.highlight
+                      ? 'bg-brass hover:bg-brass-hover text-espresso shadow-brass'
+                      : 'bg-transparent border border-brass text-brass hover:bg-brass-soft'
+                  }`}
+                  data-testid={`subscribe-${p.id}-btn`}
+                >
+                  {p.cta}
+                </Button>
+              </motion.div>
+            ))}
+          </div>
+
+          <p className="text-center text-xs text-muted-foreground mt-10">
+            Prices are per active branch. GST extra where applicable. Cancel anytime &mdash; no lock-in.
+          </p>
         </div>
       </section>
 

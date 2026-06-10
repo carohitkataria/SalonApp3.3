@@ -46,6 +46,30 @@ export default function SubscriptionPanel({ salonId }) {
   } = useSubscription();
   const [transactions, setTransactions] = useState([]);
   const [txLoading, setTxLoading] = useState(false);
+  const [trialLoading, setTrialLoading] = useState(false);
+
+  // Trial eligibility: not premium AND backend says trial has never been used.
+  const trialUsed = Boolean(status?.trial_used);
+  const isTrial = Boolean(status?.is_trial);
+  const canStartTrial = !isPremium && !trialUsed;
+
+  const handleStartTrial = async () => {
+    if (!salonId) return;
+    setTrialLoading(true);
+    try {
+      await axios.post(
+        `${API}/salons/${salonId}/subscription/start-trial`,
+        {},
+        { headers: getAuthHeaders() }
+      );
+      toast.success('30-day free trial activated!');
+      await refresh();
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || 'Could not start trial');
+    } finally {
+      setTrialLoading(false);
+    }
+  };
 
   // Discount code preview state (Phase 3 wires the UI; Phase 4 validates; Phase 7 carries to checkout)
   const [codeInput, setCodeInput] = useState(appliedDiscountCode || '');
@@ -143,6 +167,41 @@ export default function SubscriptionPanel({ salonId }) {
           <p className="text-sm text-muted-foreground">Per-branch SalonHub Pro pricing</p>
         </div>
       </div>
+
+      {/* Active-trial banner */}
+      {isTrial && (
+        <div className="rounded-xl border border-amber-500/40 bg-amber-500/10 p-4 flex items-start gap-3" data-testid="trial-active-banner">
+          <Crown className="w-5 h-5 text-amber-400 mt-0.5 shrink-0" />
+          <p className="text-sm text-foreground">
+            You&apos;re on the <span className="font-semibold">30-day free trial</span>.
+            {typeof status?.days_remaining === 'number' && (
+              <> {status.days_remaining} day{status.days_remaining === 1 ? '' : 's'} remaining — subscribe before it ends to keep premium features.</>
+            )}
+          </p>
+        </div>
+      )}
+
+      {/* Start-free-trial CTA */}
+      {canStartTrial && (
+        <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/5 p-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3" data-testid="start-trial-card">
+          <div className="flex items-start gap-3">
+            <Crown className="w-5 h-5 text-emerald-400 mt-0.5 shrink-0" />
+            <div>
+              <p className="font-semibold text-foreground">Start your 30-day free trial</p>
+              <p className="text-xs text-muted-foreground mt-0.5">Unlock multi-branch, payroll, loyalty & analytics free for 1 month.</p>
+            </div>
+          </div>
+          <Button
+            onClick={handleStartTrial}
+            disabled={trialLoading}
+            className="bg-emerald-500 hover:bg-emerald-600 text-white shrink-0"
+            data-testid="panel-start-trial-btn"
+          >
+            {trialLoading ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : null}
+            Activate free trial
+          </Button>
+        </div>
+      )}
 
       {/* Status card */}
       <div
