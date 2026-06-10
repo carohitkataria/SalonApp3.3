@@ -1572,7 +1572,7 @@ async def pick_fastest_barber(
         # If ALL are zero (no data today), fall to priority 2.
         if min_today > 0 or any(c > 0 for c, _ in today_counts):
             tied = [b for c, b in today_counts if c == min_today]
-            return random.choice(tied)
+            return secrets.choice(tied)
 
     # Priority 2: fewest bookings YESTERDAY
     try:
@@ -1593,10 +1593,10 @@ async def pick_fastest_barber(
     if yest_counts and any(c > 0 for c, _ in yest_counts):
         min_yest = min(c for c, _ in yest_counts)
         tied = [b for c, b in yest_counts if c == min_yest]
-        return random.choice(tied)
+        return secrets.choice(tied)
 
     # Priority 3: random active barber
-    return random.choice(eligible)
+    return secrets.choice(eligible)
 
 
 async def compute_barber_queue_snapshot(salon_id: str, barber_id: str, date: str) -> Dict[str, Any]:

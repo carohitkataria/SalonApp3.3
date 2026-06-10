@@ -24,6 +24,26 @@ A multi-tenant salon management SaaS (React + FastAPI + MongoDB). Most recent fe
 
 ## Implemented (CHANGELOG)
 
+### Feb 10, 2026 — Code Quality Pass: Round 2 ✅
+- ✅ **`random` → `secrets` in `server.py`** (lines 1575/1596/1599) — barber load-balancing now uses `secrets.choice`. Functionally identical, eliminates lint noise.
+- ✅ **`random` → `secrets` in `tests/test_module4_crossmod_gaps.py:119`** (`secrets.randbelow(27) + 1`).
+- ✅ **Empty catch blocks** in the additional cited salon pages now emit `console.debug`:
+  - `SalonOrdersPage.js:47`, `SalonOrderDetailPage.js:40`, `SalonInventoryPage.js:86`,
+    `SalonCustomerOrdersPage.js:73`, `CheckoutPage.js:74` (all the auth-token JSON parse fallbacks).
+- ✅ **Array-index → stable keys** in cited files:
+  - `SalonCustomerOrdersPage.js:294` (items list — `${product_id || name}-${i}`)
+  - `SalonCustomerOrdersPage.js:314` (status history — `${timestamp}-${i}`)
+  - `SalonSelectionPage.js:423` (image carousel dots — `${img}-${index}`)
+  - `CustomerMaster.js:1042` (bulk-upload errors — `${row}-${i}`)
+  - `CustomerMaster.js:1087` (customer list — falls back to `id` or `phone`)
+  - `CustomerLayout.js:259, 336` (sidebar menu — uses `item.label`)
+  - `CustomerLayout.js:312` (salon menu — `salon-menu-${label}-${idx}`)
+
+### Deferred / Pushback (round 2)
+- 🚫 **`twilio_service.py:52,91,143,164,187,199,282` `is "active"` flag**: All cited lines are actually `is None` checks, which is the **correct** Python idiom (PEP-8 mandates `is None` over `== None`). Reviewer appears to have misread the pattern. No change made.
+- 🚫 **Hardcoded credentials in test files** (8 files): All credentials point to the **seeded test salon** (`+917503070727`/`salon123`) created by `startup_event`. These are fixtures, not secrets. Moving them to env vars would only add an indirection without security benefit since the seed itself is in code. Recommend keeping as-is; documented in `/app/memory/test_credentials.md`.
+- 🚫 **206 hook-deps + 100 localStorage instances + 6 large-component splits + Python complexity refactors**: Same rationale as round 1 — these are multi-session refactors requiring dedicated regression testing, not blind sweeps.
+
 ### Feb 10, 2026 — Code Quality Pass: Quick Wins ✅
 - ✅ **Hardcoded credential leaked in logs** (`server.py:2818`) — removed `password='salon123'` from `logger.info()`; now only logs the login_id with a "from seed config" note.
 - ✅ **Mutable default argument** (`server.py:confirm_membership_payment`) — `body: dict = {}` → `body: dict = None` with explicit `if body is None: body = {}` guard.

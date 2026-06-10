@@ -115,8 +115,8 @@ class TestLeaveTypeSnapshot:
         assert adj.status_code in (200, 201), adj.text
 
         # 3. Create a leave record for a future month (uniquify date by day).
-        import random
-        day = random.randint(1, 27)
+        import secrets
+        day = secrets.randbelow(27) + 1  # 1..27
         leave_date = f"2070-06-{day:02d}"
         # FY for 2070-06-15 is 2070-71
         adj_fy = "2070-71"

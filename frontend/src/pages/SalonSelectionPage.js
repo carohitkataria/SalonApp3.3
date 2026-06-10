@@ -418,9 +418,9 @@ export default function SalonSelectionPage() {
                 <ChevronRight className="w-3 h-3" />
               </button>
               <div className="absolute bottom-1.5 left-1/2 -translate-x-1/2 flex gap-1">
-                {images.map((_, index) => (
+                {images.map((img, index) => (
                   <button
-                    key={index}
+                    key={`${img}-${index}`}
                     onClick={(e) => goToImage(e, index)}
                     className={`h-1 rounded-full transition-all ${
                       index === currentImageIndex ? 'w-3 bg-cream' : 'w-1 bg-cream/50'

@@ -1039,7 +1039,7 @@ export default function CustomerMaster({ salonId, getAuthHeaders }) {
                     <summary className="cursor-pointer text-xs text-amber-700">View {bulkUploadResult.errors.length} errors</summary>
                     <ul className="text-[11px] mt-1 max-h-32 overflow-auto pr-2">
                       {bulkUploadResult.errors.map((er, i) => (
-                        <li key={i}>Row {er.row}: {er.reason}</li>
+                        <li key={`${er.row}-${i}`}>Row {er.row}: {er.reason}</li>
                       ))}
                     </ul>
                   </details>
@@ -1084,7 +1084,7 @@ export default function CustomerMaster({ salonId, getAuthHeaders }) {
           <div className="divide-y divide-border">
             {filteredCustomers.map((customer, index) => (
               <div
-                key={index}
+                key={customer.id || customer.phone || `cust-${index}`}
                 onClick={() => setSelectedCustomer(customer)}
                 className="p-4 hover:bg-muted cursor-pointer transition-colors"
               >

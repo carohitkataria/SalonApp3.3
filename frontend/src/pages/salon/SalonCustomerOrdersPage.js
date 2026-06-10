@@ -70,7 +70,7 @@ export default function SalonCustomerOrdersPage() {
     const raw = localStorage.getItem('salon_user_auth');
     let token = localStorage.getItem('salon_admin_token') || localStorage.getItem('access_token');
     if (!token && raw) {
-      try { token = JSON.parse(raw).token; } catch { /* noop */ }
+      try { token = JSON.parse(raw).token; } catch (e) { console.debug("Bad salon_user_auth JSON:", e); }
     }
     return token ? { Authorization: `Bearer ${token}` } : {};
   }, []);
@@ -291,7 +291,7 @@ export default function SalonCustomerOrdersPage() {
                 <div className="border-t border-border pt-2">
                   <div className="font-semibold mb-1">Items</div>
                   {(active.items || []).map((l, i) => (
-                    <div key={i} className="flex justify-between text-sm py-1 border-b border-border/50 last:border-0">
+                    <div key={`${l.product_id || l.name}-${i}`} className="flex justify-between text-sm py-1 border-b border-border/50 last:border-0">
                       <div>
                         <div>{l.name} × {l.qty}</div>
                         {l.qty_final !== undefined && l.qty_final !== l.qty && (
@@ -311,7 +311,7 @@ export default function SalonCustomerOrdersPage() {
                     <div className="font-semibold mb-1">History</div>
                     <div className="text-xs space-y-0.5 max-h-32 overflow-y-auto">
                       {active.status_history.map((h, i) => (
-                        <div key={i}>
+                        <div key={`${h.timestamp || ''}-${i}`}>
                           <span className="text-muted-foreground">{new Date(h.timestamp).toLocaleString()}:</span> {h.status} {h.note ? `· ${h.note}` : ''}
                         </div>
                       ))}

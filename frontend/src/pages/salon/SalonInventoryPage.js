@@ -83,7 +83,7 @@ export function InventoryView({ embedded = false }) {
   const authHeaders = useMemo(() => {
     const raw = localStorage.getItem('salon_user_auth');
     let token = localStorage.getItem('salon_admin_token') || localStorage.getItem('access_token');
-    if (!token && raw) { try { token = JSON.parse(raw).token; } catch { /* noop */ } }
+    if (!token && raw) { try { token = JSON.parse(raw).token; } catch (e) { console.debug('Bad salon_user_auth JSON:', e); } }
     return token ? { Authorization: `Bearer ${token}` } : {};
   }, []);
 

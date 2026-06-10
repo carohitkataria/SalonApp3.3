@@ -256,7 +256,7 @@ export default function CustomerLayout({ children }) {
                   const active = isActive(item.path);
                   return (
                     <button
-                      key={idx}
+                      key={item.label}
                       onClick={() => { item.action(); closeSidebar(); }}
                       className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-left transition-colors ${
                         active ? 'bg-brass-soft text-brass' : 'text-foreground hover:bg-muted'
@@ -309,7 +309,7 @@ export default function CustomerLayout({ children }) {
                               const Icon = item.icon;
                               return (
                                 <button
-                                  key={idx}
+                                  key={`salon-menu-${item.label}-${idx}`}
                                   onClick={() => { item.action(); closeSidebar(); }}
                                   className="w-full flex items-center gap-3 px-3 py-2 rounded-md hover:bg-muted text-left transition-colors group"
                                   data-testid={`sidebar-salon-${item.label.toLowerCase().replace(/ /g, '-')}-btn`}
@@ -333,7 +333,7 @@ export default function CustomerLayout({ children }) {
                   const active = isActive(item.path);
                   return (
                     <button
-                      key={idx}
+                      key={item.label}
                       onClick={() => { item.action(); closeSidebar(); }}
                       className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-left transition-colors ${
                         active ? 'bg-brass-soft text-brass' : 'text-foreground hover:bg-muted'
