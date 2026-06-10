@@ -13,6 +13,7 @@ import { Input } from '@/components/ui/input';
 import CustomerWalletCard from '@/components/CustomerWalletCard';
 import WalletDisplay from '@/components/WalletDisplay';
 import CustomerOtpVerification from '@/components/CustomerOtpVerification';
+import CustomerAuthModal from '@/components/CustomerAuthModal';
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
 const API = `${BACKEND_URL}/api`;
@@ -304,6 +305,10 @@ export default function SinglePageBooking() {
   const [guestName, setGuestName] = useState('');
   const [guestPhone, setGuestPhone] = useState('');
   const [guestGender, setGuestGender] = useState('');
+  // Guest vs Login choice for unauthenticated customers at the payment step.
+  // null → show chooser, 'guest' → show identity form, 'login' → open auth modal.
+  const [bookingMode, setBookingMode] = useState(null);
+  const [showAuthModal, setShowAuthModal] = useState(false);
   const [fastestAvailable, setFastestAvailable] = useState(!preselectedBarber);
   const [searchQuery, setSearchQuery] = useState('');
   const [openCategories, setOpenCategories] = useState({});
@@ -889,7 +894,8 @@ export default function SinglePageBooking() {
         source: source,
         booking_type: formData.bookingType,
         booking_for_self: bookingForSelf,
-        customer_gender: bookingForSelf ? (customer.gender || 'Men') : otherPersonGender,
+        customer_gender: bookingForSelf ? (customer.gender || guestGender || 'Men') : otherPersonGender,
+        is_guest: !isUserLoggedIn && bookingMode === 'guest',
         payment_mode: paymentMode
       };
 
@@ -897,6 +903,12 @@ export default function SinglePageBooking() {
       setBookedToken(response.data);
       setBookingStep('success');
       clearIntent();
+
+      // Save phone in localStorage for smart routing on the customer's next visit.
+      try {
+        const phoneToStore = customer?.phone || (guestPhone ? `+91${guestPhone}` : '');
+        if (phoneToStore) localStorage.setItem('customer_phone', phoneToStore);
+      } catch (_) { /* noop */ }
       
       // Refresh membership data if wallet was used
       if (paymentMode === 'wallet') {
@@ -966,7 +978,8 @@ export default function SinglePageBooking() {
         source: source,
         booking_type: formData.bookingType,
         booking_for_self: bookingForSelf,
-        customer_gender: bookingForSelf ? (customer.gender || 'Men') : otherPersonGender,
+        customer_gender: bookingForSelf ? (customer.gender || guestGender || 'Men') : otherPersonGender,
+        is_guest: !isUserLoggedIn && bookingMode === 'guest',
         payment_mode: 'upi'
       };
 
@@ -1139,23 +1152,63 @@ export default function SinglePageBooking() {
             </div>
           </div>
 
-          {/* Frictionless Identity — show only when NOT signed in. We capture
-              Name + Mobile + Gender without sending an OTP. The booking will
-              be tagged as "not OTP-verified" until the customer verifies. */}
-          {!isUserLoggedIn && (
+          {/* Guest vs Login choice — shown only when NOT signed in.
+              - 'guest': show name/mobile/gender form (no OTP). The booking is
+                tagged is_otp_verified_at_booking=false.
+              - 'login': open CustomerAuthModal (Password / OTP / Sign up).
+              Once `isUserLoggedIn` becomes true, this section disappears. */}
+          {!isUserLoggedIn && !bookingMode && (
+            <div className="bg-card border border-border rounded-xl p-4 space-y-3" data-testid="booking-mode-chooser">
+              <h3 className="text-sm font-semibold text-foreground">How would you like to book?</h3>
+              <motion.button
+                whileHover={{ scale: 1.01 }}
+                whileTap={{ scale: 0.99 }}
+                onClick={() => setBookingMode('guest')}
+                className="w-full p-4 rounded-xl border-2 border-border hover:border-gold bg-background text-left transition-all"
+                data-testid="book-as-guest-btn"
+              >
+                <div className="flex items-start gap-3">
+                  <div className="p-2.5 bg-purple-500/10 rounded-full">
+                    <Smartphone className="w-5 h-5 text-purple-600" />
+                  </div>
+                  <div className="flex-1">
+                    <p className="font-bold text-foreground">Book as Guest</p>
+                    <p className="text-xs text-muted-foreground mt-0.5">Quick booking with mobile, name & gender. No OTP needed.</p>
+                  </div>
+                </div>
+              </motion.button>
+              <motion.button
+                whileHover={{ scale: 1.01 }}
+                whileTap={{ scale: 0.99 }}
+                onClick={() => { setBookingMode('login'); setShowAuthModal(true); }}
+                className="w-full p-4 rounded-xl border-2 border-border hover:border-gold bg-background text-left transition-all"
+                data-testid="login-to-book-btn"
+              >
+                <div className="flex items-start gap-3">
+                  <div className="p-2.5 bg-gold/10 rounded-full">
+                    <User className="w-5 h-5 text-gold" />
+                  </div>
+                  <div className="flex-1">
+                    <p className="font-bold text-foreground">Login to Book</p>
+                    <p className="text-xs text-muted-foreground mt-0.5">Access booking history, wallet & member benefits.</p>
+                  </div>
+                </div>
+              </motion.button>
+            </div>
+          )}
+
+          {/* Guest identity form — only when 'guest' mode is selected. */}
+          {!isUserLoggedIn && bookingMode === 'guest' && (
             <div className="bg-card border border-border rounded-xl p-4 space-y-3" data-testid="guest-identity-card">
               <div className="flex items-center justify-between flex-wrap gap-2">
                 <h3 className="text-sm font-medium text-foreground">Your details</h3>
                 <button
                   type="button"
-                  onClick={() => {
-                    persistIntent();
-                    navigate('/login', { state: { from: `/book/${salonId}${branchId ? `?branch=${branchId}` : ''}` } });
-                  }}
+                  onClick={() => setBookingMode(null)}
                   className="text-xs text-gold hover:underline"
-                  data-testid="signin-for-faster-btn"
+                  data-testid="guest-change-mode-btn"
                 >
-                  Sign in for faster bookings →
+                  Change
                 </button>
               </div>
               <p className="text-xs text-muted-foreground -mt-1">
@@ -1195,6 +1248,24 @@ export default function SinglePageBooking() {
                     {g}
                   </button>
                 ))}
+              </div>
+            </div>
+          )}
+
+          {/* Login modal trigger — when 'login' mode but modal closed. */}
+          {!isUserLoggedIn && bookingMode === 'login' && !showAuthModal && (
+            <div className="bg-card border border-border rounded-xl p-4 flex items-center justify-between gap-3" data-testid="login-pending-card">
+              <div>
+                <p className="text-sm font-medium text-foreground">Login required to continue</p>
+                <p className="text-xs text-muted-foreground mt-0.5">Reopen the login window or switch to guest checkout.</p>
+              </div>
+              <div className="flex gap-2 flex-shrink-0">
+                <Button size="sm" variant="outline" onClick={() => setBookingMode(null)} data-testid="login-switch-to-guest-btn">
+                  Use guest
+                </Button>
+                <Button size="sm" onClick={() => setShowAuthModal(true)} data-testid="login-reopen-btn">
+                  Open login
+                </Button>
               </div>
             </div>
           )}
@@ -1444,14 +1515,25 @@ export default function SinglePageBooking() {
               <Button
                 type="button"
                 onClick={handleSubmit}
-                disabled={loading || !paymentMode || (paymentMode === 'wallet' && !walletSufficient)}
+                disabled={loading || !paymentMode || (paymentMode === 'wallet' && !walletSufficient) || (!isUserLoggedIn && bookingMode !== 'guest')}
                 className="w-full bg-gold text-black hover:bg-gold/90 py-5 text-base font-bold rounded-xl disabled:opacity-50"
+                data-testid="confirm-booking-btn"
               >
                 {loading ? 'Booking...' : paymentMode === 'wallet' ? `Pay ₹${totalAmount} from Wallet` : 'Confirm Booking'}
               </Button>
             )}
           </div>
         </div>
+
+        {/* Customer Auth Modal — opened when user picks "Login to Book". */}
+        <CustomerAuthModal
+          open={showAuthModal}
+          onClose={() => setShowAuthModal(false)}
+          onSuccess={() => {
+            setShowAuthModal(false);
+            setBookingMode(null); // user is now logged in; hide chooser
+          }}
+        />
       </div>
     );
   }

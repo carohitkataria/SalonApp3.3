@@ -24,6 +24,28 @@ A multi-tenant salon management SaaS (React + FastAPI + MongoDB). Most recent fe
 
 ## Implemented (CHANGELOG)
 
+### Feb 10, 2026 — Guest vs Login Checkout Flow + Customer Auth Modal ✅
+- ✅ **New component `CustomerAuthModal`** at `/app/frontend/src/components/CustomerAuthModal.js` — combined Login (Password + OTP sub-tabs) and Sign Up tabs. Uses `useAuth()` helpers: `customerLoginPassword`, `customerSendOtp`, `customerVerifyOtp`, `updateCustomerProfile`. All interactive elements carry `data-testid` (`auth-tab-login`, `auth-tab-signup`, `login-method-password-btn`, `login-method-otp-btn`, `auth-phone-input`, `auth-password-input`, `auth-send-otp-btn`, `auth-otp-input`, `auth-verify-otp-btn`, `signup-name-input`, `signup-phone-input`, `signup-gender-{m/w/o}`, `signup-send-otp-btn`, `signup-verify-otp-btn`). Forgot-password link auto-switches to OTP login.
+- ✅ **Mode chooser at payment step** in `/app/frontend/src/pages/SinglePageBooking.js` — when the customer is not signed in, the payment step now shows a `booking-mode-chooser` card with two options:
+  - **Book as Guest** → reveals the existing identity form (Name + Mobile + Gender, no OTP). Booking is tagged `is_guest=true` so the backend marks the auto-created user as unverified.
+  - **Login to Book** → opens `CustomerAuthModal`. On successful auth the chooser disappears and the booking proceeds with the authenticated customer.
+- ✅ **Pending-login fallback** — if the user closes the modal without logging in, a `login-pending-card` lets them reopen the modal or switch to guest checkout (no dead-ends).
+- ✅ **`is_guest` flag wired** in both `handleSubmit` (cash/wallet/pay-later/etc.) and `handleUpiConfirm` POST bodies, plus a guest-gender fallback so the payload never sends an empty gender for guests.
+- ✅ **Smart-routing storage** — after a successful booking (any path), the customer phone is persisted to `localStorage.customer_phone` so the Landing Page's smart routing recognises returning guests on their next visit.
+- ✅ **Confirm Booking button** now disabled until either the user is signed in OR they've explicitly picked the guest path (prevents accidental submissions while the chooser is still up).
+- ✅ Existing inline guest-identity card preserved verbatim, just gated behind `bookingMode === 'guest'`.
+
+### Feb 9, 2026 — Deployment health-check fixes + Twilio Verify production + Cashfree config ✅
+- ✅ Fixed Pydantic `ResponseValidationError` on `Barber.leave_dates` returning null (added `normalize_barber_data`).
+- ✅ Resolved Socket.io ASGI recursion error; added `/health` endpoint for Kubernetes probes.
+- ✅ Switched Twilio to production Verify service `VAa8d04bc855f3f5820370fddc5f17d8cb` + Content Template booking confirmations.
+- ✅ Cashfree App ID + Secret Key configured in backend `.env`.
+- ✅ Smart Routing on Landing Page "Get Started" — returning customers are sent to their last visited salon.
+- ✅ Backend booking endpoint accepts `is_guest` + `customer_gender` for guest bookings.
+- ✅ Code-quality fixes: removed hardcoded secrets, replaced `random` with `secrets`, fixed empty catch blocks, fixed `is` string identity comparisons.
+
+
+
 ### Feb 1, 2026 — Module 8: Unified Admin Attendance Cell Editor + Leave Types (CL/SL/PL/UL) ✅
 - ✅ **New popup** `AttendanceCellDialog` at `/app/frontend/src/components/attendance/AttendanceCellDialog.js`. Opens on any calendar cell click in `StaffAttendanceTab`. Single dialog handles: check-in/check-out time inputs, status (auto / present / half_day / absent / holiday / on_leave), and — when On Leave — leave type dropdown (CL / SL / PL / UL) + half-day checkbox + note.
 - ✅ **Routing logic**: times + auto → `PUT /api/salons/{salon_id}/staff-attendance/check-edit/{barber_id}/{date}` (backend recomputes status from times using salon geo rules); manual status without times → `PUT /staff-attendance/override`; on_leave → `POST /leave-records` with `leave_type_code` (cancels prior active record first); Clear button → DELETE override + cancel active leave-record.
