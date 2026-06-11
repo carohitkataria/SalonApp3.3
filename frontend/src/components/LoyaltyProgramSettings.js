@@ -184,7 +184,7 @@ export default function LoyaltyProgramSettings({ salonId, getAuthHeaders }) {
               <div className="space-y-3">
                 {settings.tiers.map((tier, index) => (
                   <motion.div
-                    key={index}
+                    key={`${tier.name || ''}-${index}`}
                     initial={{ opacity: 0, y: -10 }}
                     animate={{ opacity: 1, y: 0 }}
                     className="grid grid-cols-2 md:grid-cols-5 gap-3 p-4 bg-muted/50 rounded-lg border border-border"
@@ -268,7 +268,7 @@ export default function LoyaltyProgramSettings({ salonId, getAuthHeaders }) {
                     .slice()
                     .sort((a, b) => a.spend_amount - b.spend_amount)
                     .map((tier, i) => (
-                      <li key={i}>
+                      <li key={`${tier.name || ''}-${i}`}>
                         <span className="font-semibold text-gold">{tier.name}:</span> Spend ₹
                         {tier.spend_amount} in {tier.period_months} month{tier.period_months === 1 ? '' : 's'} → Get ₹
                         {((tier.spend_amount * tier.topup_percentage) / 100).toFixed(2)} wallet credit

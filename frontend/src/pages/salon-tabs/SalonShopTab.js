@@ -279,7 +279,7 @@ export default function SalonShopTab({ salonId }) {
                 </div>
                 <div className="mt-2 text-sm space-y-0.5">
                   {(o.items || []).map((l, i) => (
-                    <div key={i} className="flex justify-between text-muted-foreground">
+                    <div key={`${l.product_id || l.name}-${i}`} className="flex justify-between text-muted-foreground">
                       <span>{l.name} × {l.qty}{l.qty_final !== undefined && l.qty_final !== l.qty ? ` (fulfilled ${l.qty_final})` : ''}</span>
                       <span>{fmt(l.line_total)}</span>
                     </div>

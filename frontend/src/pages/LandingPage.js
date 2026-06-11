@@ -273,8 +273,8 @@ export default function LandingPage() {
             transition={{ duration: 0.6, delay: 0.4 }}
             className="mt-20 pt-10 border-t border-border/60 grid grid-cols-2 md:grid-cols-4 gap-y-8 gap-x-6"
           >
-            {stats.map((stat, idx) => (
-              <div key={idx} className="flex flex-col">
+            {stats.map((stat) => (
+              <div key={stat.label} className="flex flex-col">
                 <span className="font-bebas text-[44px] leading-none text-foreground">
                   {stat.value}
                   {stat.label === 'Average rating' && <span className="text-brass">★</span>}
@@ -310,7 +310,7 @@ export default function LandingPage() {
               const Icon = feature.icon;
               return (
                 <motion.div
-                  key={idx}
+                  key={feature.eyebrow}
                   initial={{ opacity: 0, y: 20 }}
                   whileInView={{ opacity: 1, y: 0 }}
                   viewport={{ once: true, margin: '-60px' }}
@@ -352,7 +352,7 @@ export default function LandingPage() {
               const Icon = item.icon;
               return (
                 <motion.div
-                  key={idx}
+                  key={item.step}
                   initial={{ opacity: 0, y: 18 }}
                   whileInView={{ opacity: 1, y: 0 }}
                   viewport={{ once: true }}

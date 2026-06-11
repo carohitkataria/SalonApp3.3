@@ -397,7 +397,7 @@ export default function MyProfile({ salon, onUpdate, getAuthHeaders, onDeleteSal
                     {editData.photo_gallery.map((url, index) => {
                       const isVideo = typeof url === 'string' && (url.startsWith('data:video') || /\.(mp4|webm|mov|ogg)(\?|$)/i.test(url));
                       return (
-                        <div key={index} className="relative group">
+                        <div key={`${url}-${index}`} className="relative group">
                           {isVideo ? (
                             <video
                               src={url}

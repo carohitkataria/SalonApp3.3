@@ -281,7 +281,7 @@ export default function EmployeeRewardPlan({ salonId, getAuthHeaders, isAdmin = 
           </div>
           <div className="space-y-2">
             {(plan.slabs || []).map((slab, idx) => (
-              <div key={idx} className="grid grid-cols-12 gap-2 p-3 bg-muted/40 rounded border border-border">
+              <div key={`slab-${slab.from_pct ?? 0}-${idx}`} className="grid grid-cols-12 gap-2 p-3 bg-muted/40 rounded border border-border">
                 <div className="col-span-12 sm:col-span-2">
                   <Label className="text-[10px]">From %</Label>
                   <Input type="number" min="0" value={slab.from_pct ?? 0} onChange={(e) => onSlabChange(idx, { from_pct: parseFloat(e.target.value) || 0 })} className="h-8" />

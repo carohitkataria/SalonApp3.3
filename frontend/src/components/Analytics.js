@@ -375,7 +375,7 @@ function PerformanceSection({
             </thead>
             <tbody>
               {detailedReport.map((row, idx) => (
-                <tr key={idx} className="border-b border-border hover:bg-gold/5">
+                <tr key={`${row.token_number || ''}-${row.date || ''}-${idx}`} className="border-b border-border hover:bg-gold/5">
                   <td className="p-3 text-muted-foreground">{row.date}</td>
                   <td className="p-3 text-gold font-bold">{row.token_number}</td>
                   <td className="p-3 text-foreground">{row.customer_name}</td>

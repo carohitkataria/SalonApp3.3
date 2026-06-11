@@ -2101,7 +2101,7 @@ export default function EnhancedSalonDashboard() {
                     const isVideo = typeof url === 'string' && (url.startsWith('data:video') || /\.(mp4|webm|mov|ogg)(\?|$)/i.test(url));
                     return (
                     <motion.div
-                      key={index}
+                      key={`${url}-${index}`}
                       initial={{ opacity: 0, scale: 0.9 }}
                       animate={{ opacity: 1, scale: 1 }}
                       transition={{ delay: index * 0.05 }}

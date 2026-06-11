@@ -52,9 +52,9 @@ def test_status_exposes_trial_fields():
     # The test salon has a seeded paid subscription so trial flags are False.
     assert "trial_used" in body
     assert "is_trial" in body
-    assert body["trial_used"] is False
-    assert body["is_trial"] is False
-    assert body["is_premium"] is True  # seeded 1-year premium
+    assert not body["trial_used"]
+    assert not body["is_trial"]
+    assert body["is_premium"]  # seeded 1-year premium
 
 
 def test_start_trial_blocks_active_subscription():

@@ -24,7 +24,7 @@ export default function SalonGalleryTab({ salon }) {
             const video = isVideo(item);
             return (
               <div
-                key={index}
+                key={`${item}-${index}`}
                 onClick={() => setSelected(item)}
                 className="aspect-square rounded-xl overflow-hidden cursor-pointer group relative bg-black"
               >

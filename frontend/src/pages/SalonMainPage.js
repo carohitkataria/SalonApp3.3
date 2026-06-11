@@ -534,7 +534,7 @@ export default function SalonMainPage() {
               {thumbs.length > 0 && (
                 <div className="col-span-1 grid grid-rows-2 gap-3 h-full">
                   {thumbs.map((src, i) => (
-                    <div key={i} className="relative rounded-3xl overflow-hidden bg-muted shadow-lux">
+                    <div key={`${src}-${i}`} className="relative rounded-3xl overflow-hidden bg-muted shadow-lux">
                       <img src={src} alt={`${salon.salon_name} ${i + 2}`} className="w-full h-full object-cover" />
                     </div>
                   ))}
