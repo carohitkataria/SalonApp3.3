@@ -85,7 +85,7 @@ export default function UserLoginPage() {
     if (res.success) {
       setOtpSent(true);
       setCountdown(RESEND_SECONDS);
-      toast.success(res.note || 'OTP sent to your WhatsApp');
+      toast.success(res.note || 'OTP sent to your mobile');
     } else {
       toast.error(res.error);
     }
@@ -138,7 +138,7 @@ export default function UserLoginPage() {
     setConfirmPassword('');
     setCountdown(RESEND_SECONDS);
     setView('pwReset');
-    toast.success(res.note || 'OTP sent to your WhatsApp');
+    toast.success(res.note || 'OTP sent to your mobile');
   };
 
   const handleVerifyResetOtp = async () => {
@@ -273,7 +273,7 @@ export default function UserLoginPage() {
                       >
                         {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : (
                           <span className="inline-flex items-center">
-                            Send OTP on WhatsApp <ArrowRight className="ml-2 w-4 h-4" />
+                            Send OTP <ArrowRight className="ml-2 w-4 h-4" />
                           </span>
                         )}
                       </Button>

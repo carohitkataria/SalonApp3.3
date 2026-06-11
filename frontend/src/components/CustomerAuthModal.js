@@ -98,7 +98,7 @@ export default function CustomerAuthModal({ open, onClose, onSuccess, defaultTab
     setLoading(false);
     if (result.success) {
       setOtpSent(true);
-      toast.success(result.note || 'OTP sent to your WhatsApp');
+      toast.success(result.note || 'OTP sent to your mobile');
     } else {
       toast.error(result.error || 'Failed to send OTP');
     }
@@ -223,7 +223,7 @@ export default function CustomerAuthModal({ open, onClose, onSuccess, defaultTab
                     data-testid="auth-send-otp-btn"
                   >
                     {loading ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : null}
-                    Send OTP via WhatsApp
+                    Send OTP
                   </Button>
                 ) : (
                   <>
@@ -322,7 +322,7 @@ export default function CustomerAuthModal({ open, onClose, onSuccess, defaultTab
                 data-testid="signup-send-otp-btn"
               >
                 {loading ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <UserIcon className="w-4 h-4 mr-2" />}
-                Send OTP via WhatsApp
+                Send OTP
               </Button>
             ) : (
               <>

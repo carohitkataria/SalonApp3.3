@@ -24,6 +24,15 @@ A multi-tenant salon management SaaS (React + FastAPI + MongoDB). Most recent fe
 
 ## Implemented (CHANGELOG)
 
+### Feb 10, 2026 — Production Configuration Fix: Twilio + Cashfree + OTP UI ✅
+- 🔴 **Root cause of "Messaging not configured"**: `backend/.env` was missing `TWILIO_VERIFY_SERVICE_SID`, `TWILIO_API_KEY_SID/SECRET`, and `TWILIO_BOOKING_CONFIRMATION_TEMPLATE_SID` — they had been removed at some point. Restored from git history (`VAa8d04bc855f3f5820370fddc5f17d8cb`, `HX4ec6d831674ce97cc1dc209327445b81`).
+- 🔴 **Root cause of "Cashfree authentication Failed"**: `backend/.env` had `CASHFREE_ENVIRONMENT="production"` but `cashfree_service.py` actually reads `CASHFREE_ENV` (defaulting to `TEST`). Result: prod credentials were being sent to the **sandbox URL** → 401. Fix: added `CASHFREE_ENV=PROD`. Cashfree now correctly targets `https://api.cashfree.com/pg` and `create_order` returns ACTIVE + valid `payment_session_id`.
+- ✅ **End-to-end verified via curl + python**: `POST /api/auth/customer/send-otp` returns `{"success": true, "delivery_status": "sent"}`. Cashfree `create_order` smoke test returns `ACTIVE` order with session token.
+- ✅ **OTP button + UI copy** — removed "WhatsApp" mentions across the customer OTP flow per user request:
+  - `UserLoginPage.js`: button "Send OTP on WhatsApp" → **"Send OTP"**, toast "OTP sent to your WhatsApp" → "OTP sent to your mobile".
+  - `CustomerOtpVerification.js`: button "Send OTP to WhatsApp" → **"Send OTP"**, helper "Authenticate via OTP (WhatsApp)" → "Authenticate via OTP", "OTP sent to X via WhatsApp" → "OTP sent to X", error toast cleaned up.
+  - `CustomerAuthModal.js`: buttons "Send OTP via WhatsApp" (login + signup) → **"Send OTP"** (both spots), toast updated.
+
 ### Feb 10, 2026 — Code Quality Pass: Round 3 ✅
 - ✅ **Truthy/falsy idiom** in `tests/test_subscription_trial.py` (lines 55–57) — `body["trial_used"] is False` → `not body["trial_used"]` etc. PEP-8 compliant.
 - ✅ **Array-index → stable keys** in all 13 cited frontend files:

@@ -43,7 +43,7 @@ export default function CustomerOtpVerification({ onVerified, showAs = 'banner' 
       
       // If backend reports a failed delivery_status, treat it as an error
       if (response.data?.delivery_status === 'failed') {
-        toast.error(response.data?.note || 'WhatsApp delivery failed. Please try again.');
+        toast.error(response.data?.note || 'OTP delivery failed. Please try again.');
         return;
       }
       
@@ -51,7 +51,7 @@ export default function CustomerOtpVerification({ onVerified, showAs = 'banner' 
       setCountdown(60);
       
       // SECURITY: Never display OTP in toast/UI even if backend echoes it back
-      toast.success(response.data?.note || 'OTP sent to your WhatsApp!');
+      toast.success(response.data?.note || 'OTP sent to your mobile!');
     } catch (error) {
       console.error('[CUSTOMER SEND OTP] Failed:', error?.response?.status, error?.response?.data || error?.message);
       const detail = error?.response?.data?.detail
@@ -116,7 +116,7 @@ export default function CustomerOtpVerification({ onVerified, showAs = 'banner' 
                 <div>
                   <p className="font-semibold text-foreground text-sm">Verify Your Phone</p>
                   <p className="text-xs text-muted-foreground">
-                    Authenticate via OTP (WhatsApp) to access Wallet, History & Profile
+                    Authenticate via OTP to access Wallet, History & Profile
                   </p>
                 </div>
               </div>
@@ -149,7 +149,7 @@ export default function CustomerOtpVerification({ onVerified, showAs = 'banner' 
                 <div>
                   <p className="font-semibold text-foreground text-sm">Enter OTP</p>
                   <p className="text-xs text-muted-foreground">
-                    OTP sent to {user?.phone} via WhatsApp
+                    OTP sent to {user?.phone}
                   </p>
                 </div>
               </div>
@@ -231,7 +231,7 @@ export default function CustomerOtpVerification({ onVerified, showAs = 'banner' 
             ) : (
               <>
                 <Send className="w-4 h-4 mr-2" />
-                Send OTP to WhatsApp
+                Send OTP
               </>
             )}
           </Button>
