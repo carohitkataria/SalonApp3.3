@@ -43,6 +43,7 @@ export default function StaffAttendanceTab({ salonId, barberId, barberName, comp
   const [loading, setLoading] = useState(false);
   const [bulkLoading, setBulkLoading] = useState(false);
   const [showPayDialog, setShowPayDialog] = useState(false);
+  const [earlyPayConfirm, setEarlyPayConfirm] = useState(false); // Item 3a — pre-month-end confirm
   const [paymentMethod, setPaymentMethod] = useState('cash');
   const [paymentNote, setPaymentNote] = useState('');
   // Per-cell edit dialog
@@ -137,24 +138,36 @@ export default function StaffAttendanceTab({ salonId, barberId, barberName, comp
   }, [fetchAttendanceData, fetchSalaryData, fetchLeaveInfo, fetchLeaveRecords]);
 
   const handleCalculateAttendance = async () => {
-    // Calculate for all days up to today in the current month
+    // Item 3b — Auto-Calculate: run all days in parallel, surface API errors,
+    // and refetch attendance + salary after completion.
     const endDay = currentMonth === todayStr.slice(0, 7) ? today.getDate() : daysInMonth;
-    
     setLoading(true);
     try {
+      const calls = [];
       for (let day = 1; day <= endDay; day++) {
         const dateStr = `${currentMonth}-${String(day).padStart(2, '0')}`;
-        await axios.post(
-          `${API}/salons/${salonId}/staff-attendance/calculate/${dateStr}`,
-          {},
-          { headers: { Authorization: `Bearer ${token}` } }
+        calls.push(
+          axios.post(
+            `${API}/salons/${salonId}/staff-attendance/calculate/${dateStr}`,
+            {},
+            { headers: { Authorization: `Bearer ${token}` } }
+          )
         );
       }
-      toast.success('Attendance calculated based on completed bookings');
-      fetchAttendanceData();
-      fetchSalaryData();
+      const results = await Promise.allSettled(calls);
+      const failed = results.filter(r => r.status === 'rejected');
+      // Refresh both views even on partial failure so the UI reflects what landed.
+      await Promise.all([fetchAttendanceData(), fetchSalaryData()]);
+      if (failed.length === 0) {
+        toast.success(`Auto-calculated ${endDay} day${endDay === 1 ? '' : 's'} from completed bookings`);
+      } else if (failed.length < results.length) {
+        toast.warning(`Calculated ${results.length - failed.length}/${results.length} days. ${failed.length} failed.`);
+      } else {
+        const detail = failed[0]?.reason?.response?.data?.detail || 'Failed to calculate attendance';
+        toast.error(typeof detail === 'string' ? detail : 'Failed to calculate attendance');
+      }
     } catch (error) {
-      toast.error('Failed to calculate attendance');
+      toast.error(error.response?.data?.detail || 'Failed to calculate attendance');
     } finally {
       setLoading(false);
     }
@@ -214,10 +227,25 @@ export default function StaffAttendanceTab({ salonId, barberId, barberName, comp
       );
       toast.success('Salary marked as paid and financial transaction created');
       setShowPayDialog(false);
+      setEarlyPayConfirm(false);
       setPaymentNote('');
       fetchSalaryData();
     } catch (error) {
       toast.error(error.response?.data?.detail || 'Failed to process payment');
+    }
+  };
+
+  // Item 3a — confirm before marking salary paid pre-month-end
+  const handleMarkPaidClick = () => {
+    const now = new Date();
+    const [y, m] = currentMonth.split('-').map(Number);
+    const lastDay = new Date(y, m, 0).getDate(); // day-0 of next month = last day of current
+    const isBeforeMonthEnd =
+      now.getFullYear() === y && (now.getMonth() + 1) === m && now.getDate() < lastDay;
+    if (isBeforeMonthEnd) {
+      setEarlyPayConfirm(true);
+    } else {
+      setShowPayDialog(true);
     }
   };
 
@@ -465,8 +493,9 @@ export default function StaffAttendanceTab({ salonId, barberId, barberName, comp
           </h3>
           {salary && !salary.is_paid && (
             <Button
-              onClick={() => setShowPayDialog(true)}
+              onClick={handleMarkPaidClick}
               className="bg-gold text-black hover:bg-gold/90"
+              data-testid="mark-salary-paid-btn"
             >
               <Banknote className="w-4 h-4 mr-2" />
               Mark as Paid
@@ -478,6 +507,17 @@ export default function StaffAttendanceTab({ salonId, barberId, barberName, comp
             </span>
           )}
         </div>
+
+        {/* Item 3d — non-blocking inline notice when compensation is missing */}
+        {!(compensation > 0) && (
+          <div
+            className="mb-4 text-xs px-3 py-2 rounded-lg bg-amber-500/10 border border-amber-500/30 text-amber-700 dark:text-amber-300 inline-flex items-center gap-2"
+            data-testid="compensation-missing-chip"
+          >
+            <DollarSign className="w-3.5 h-3.5" strokeWidth={1.8} />
+            Set monthly compensation in Staff settings to calculate salary. Attendance can still be marked.
+          </div>
+        )}
 
         {salary ? (
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
@@ -569,6 +609,35 @@ export default function StaffAttendanceTab({ salonId, barberId, barberName, comp
           </div>
         )}
       </div>
+
+      {/* Item 3a — Pre-month-end confirm dialog */}
+      <Dialog open={earlyPayConfirm} onOpenChange={setEarlyPayConfirm}>
+        <DialogContent data-testid="early-pay-confirm-dialog">
+          <DialogHeader>
+            <DialogTitle>Pay salary before month-end?</DialogTitle>
+          </DialogHeader>
+          <div className="py-3 text-sm text-muted-foreground space-y-2">
+            <p>
+              This month isn&apos;t over yet. Do you want to mark <strong className="text-foreground">{barberName}&apos;s</strong> salary as paid for <strong className="text-foreground">{monthName}</strong>?
+            </p>
+            <p className="text-xs">
+              The current amount is based on attendance recorded so far. Any additional days worked this month will not auto-adjust.
+            </p>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setEarlyPayConfirm(false)} data-testid="early-pay-confirm-cancel">
+              Cancel
+            </Button>
+            <Button
+              onClick={() => { setEarlyPayConfirm(false); setShowPayDialog(true); }}
+              className="bg-gold text-black hover:bg-gold/90"
+              data-testid="early-pay-confirm-proceed"
+            >
+              Proceed
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Payment Dialog */}
       <Dialog open={showPayDialog} onOpenChange={setShowPayDialog}>

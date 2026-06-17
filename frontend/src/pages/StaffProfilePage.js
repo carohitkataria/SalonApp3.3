@@ -786,6 +786,29 @@ export default function StaffProfilePage() {
     }
   };
 
+  // Update the per-barber price for a single service (PRD: per-barber pricing).
+  const handleServicePriceSave = async (serviceId, newPrice) => {
+    const priceNum = Number(newPrice);
+    if (!Number.isFinite(priceNum) || priceNum < 0) {
+      toast.error('Enter a valid price');
+      return;
+    }
+    try {
+      const token = getAuthToken();
+      await axios.put(
+        `${API}/barbers/${staffId}/services/${serviceId}/price?price=${priceNum}`,
+        null,
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      setServices(prev => prev.map(s =>
+        s.id === serviceId ? { ...s, barber_price: priceNum } : s
+      ));
+      toast.success(`Price set to ₹${priceNum}`);
+    } catch (e) {
+      toast.error(e.response?.data?.detail || 'Failed to update price');
+    }
+  };
+
   const handleUpdatePermissions = async () => {
     if (!staffUser) {
       toast.error('No user account linked to this staff member');
@@ -1269,13 +1292,27 @@ export default function StaffProfilePage() {
                           {categoryServices.map(service => (
                             <div
                               key={service.id}
-                              className="flex items-center justify-between p-3 border border-border rounded-lg hover:border-gold/50 transition-all"
+                              className="flex items-center justify-between p-3 border border-border rounded-lg hover:border-gold/50 transition-all gap-3"
                             >
-                              <div className="flex-1">
-                                <h4 className="font-semibold text-sm">{service.service_name}</h4>
-                                <p className="text-xs text-muted-foreground">
-                                  ₹{service.barber_price || service.base_price}
-                                </p>
+                              <div className="flex-1 min-w-0">
+                                <h4 className="font-semibold text-sm truncate">{service.service_name}</h4>
+                                <p className="text-[10px] text-muted-foreground">Base ₹{service.base_price}</p>
+                              </div>
+                              <div className="flex items-center gap-1 flex-shrink-0">
+                                <span className="text-xs text-muted-foreground">₹</span>
+                                <Input
+                                  type="number"
+                                  min="0"
+                                  defaultValue={service.barber_price ?? service.base_price ?? 0}
+                                  disabled={!service.is_available}
+                                  onBlur={(e) => {
+                                    const newVal = Number(e.target.value);
+                                    const current = Number(service.barber_price ?? service.base_price ?? 0);
+                                    if (newVal !== current) handleServicePriceSave(service.id, newVal);
+                                  }}
+                                  className="w-20 h-8 text-sm"
+                                  data-testid={`barber-service-price-${service.id}`}
+                                />
                               </div>
                               <Checkbox
                                 checked={service.is_available || false}

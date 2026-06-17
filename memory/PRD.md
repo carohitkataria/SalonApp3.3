@@ -24,6 +24,28 @@ A multi-tenant salon management SaaS (React + FastAPI + MongoDB). Most recent fe
 
 ## Implemented (CHANGELOG)
 
+### Feb 17, 2026 — Codebase Swap to SalonApp3.0 ✅
+- ✅ **Code synced** from `https://github.com/carohitkataria/SalonApp3.0.git` (branch `main`, head `9bc1a1a`):
+  - `backend/server.py`: 14,142 → **14,705 lines** (+563 lines of new features).
+  - `frontend/src`: 164 → **167 JS files** (3 new components/pages from the new repo).
+  - `cashfree_service.py` already reads `CASHFREE_ENV` (the fix from previous round is now natively in the repo).
+  - All of yesterday's preview-only fixes are now in the repo (Subscribe Now, 30-day trial, CustomerAuthModal, Guest checkout, "Send OTP" copy).
+- ✅ **Preserved**: `backend/.env`, `frontend/.env`, `memory/test_credentials.md`, `memory/PRD.md`, MongoDB (`test_database`) — credentials & DB untouched.
+- ✅ **3 new Twilio Content Template SIDs added to `backend/.env`**:
+  - `TWILIO_BOOKING_COMPLETED_TEMPLATE_SID=HXa417403d8b7ff32ce17fcadc6fe1c19a`
+  - `TWILIO_YOUR_TURN_NOW_TEMPLATE_SID=HXce2a0648ccfc5d259615714b7f49457b`
+  - `TWILIO_TOKEN_APPROACHING_TEMPLATE_SID=HX5cf990aaa6d32eb99a58ddd799c6fab2`
+  (Existing `TWILIO_BOOKING_CONFIRMATION_TEMPLATE_SID` retained.)
+- ✅ **Fixed leftover "WhatsApp" in backend OTP response note** (`server.py:5888`): "OTP sent to your WhatsApp" → "OTP sent to your mobile".
+- ✅ **Dependencies installed**: `yarn install` (frontend) + `pip install -r requirements.txt` (backend) — both clean.
+- ✅ **Verified end-to-end**:
+  - Backend supervisor: RUNNING.
+  - `GET /api/subscription-plans` → 2 plans (Monthly ₹999, Yearly ₹9999).
+  - `POST /api/auth/customer/send-otp` → `delivery_status: sent`, new note: "OTP sent to your mobile".
+  - `cashfree_service.create_order` (production URL) → ACTIVE order + valid `payment_session_id`.
+  - `pytest tests/test_subscription_trial.py` → 4/4 green.
+  - Frontend landing page → HTTP 200, Pricing section + Subscribe Now CTA + trial banner all render correctly (smoke screenshot taken).
+
 ### Feb 10, 2026 — Production Configuration Fix: Twilio + Cashfree + OTP UI ✅
 - 🔴 **Root cause of "Messaging not configured"**: `backend/.env` was missing `TWILIO_VERIFY_SERVICE_SID`, `TWILIO_API_KEY_SID/SECRET`, and `TWILIO_BOOKING_CONFIRMATION_TEMPLATE_SID` — they had been removed at some point. Restored from git history (`VAa8d04bc855f3f5820370fddc5f17d8cb`, `HX4ec6d831674ce97cc1dc209327445b81`).
 - 🔴 **Root cause of "Cashfree authentication Failed"**: `backend/.env` had `CASHFREE_ENVIRONMENT="production"` but `cashfree_service.py` actually reads `CASHFREE_ENV` (defaulting to `TEST`). Result: prod credentials were being sent to the **sandbox URL** → 401. Fix: added `CASHFREE_ENV=PROD`. Cashfree now correctly targets `https://api.cashfree.com/pg` and `create_order` returns ACTIVE + valid `payment_session_id`.

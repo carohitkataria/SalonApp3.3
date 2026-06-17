@@ -170,11 +170,14 @@ export default function EnhancedSalonDashboard() {
   const [selectedBarber, setSelectedBarber] = useState('all');
   const [filter, setFilter] = useState('all');
   // Today/Tomorrow date state — used for queue + home dashboard
+  // Reliable IST via Intl API (Asia/Kolkata) — works regardless of browser TZ.
   const getISTDateOffset = (daysOffset = 0) => {
-    const now = new Date();
-    const istMs = now.getTime() + now.getTimezoneOffset() * 60000 + 5.5 * 3600000;
-    const ist = new Date(istMs + daysOffset * 86400000);
-    return ist.toISOString().split('T')[0];
+    const fmt = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata', year: 'numeric', month: '2-digit', day: '2-digit' });
+    const today = fmt.format(new Date());
+    if (daysOffset === 0) return today;
+    const [y, m, d] = today.split('-').map(Number);
+    const shifted = new Date(Date.UTC(y, m - 1, d + daysOffset));
+    return fmt.format(shifted);
   };
   const [dateMode, setDateMode] = useState('today'); // 'today' | 'tomorrow'
   const date = dateMode === 'today' ? getISTDateOffset(0) : getISTDateOffset(1);

@@ -16,6 +16,7 @@ import LandingPage from '@/pages/LandingPage';
 
 // User Pages
 import UserLoginPage from '@/pages/UserLoginPage';
+import AuthCallback from '@/pages/AuthCallback';
 import SalonSelectionPage from '@/pages/SalonSelectionPage';
 import SalonMainPage from '@/pages/SalonMainPage';
 import SinglePageBooking from '@/pages/SinglePageBooking';
@@ -78,6 +79,7 @@ function App() {
                   {/* User Routes */}
                   <Route path="/login" element={<UserLoginPage />} />
                   <Route path="/user/login" element={<Navigate to="/login" replace />} />
+                  <Route path="/auth/callback" element={<AuthCallback />} />
                   
                   {/* Customer Routes with Layout */}
                   <Route path="/salons" element={<CustomerLayout><SalonSelectionPage /></CustomerLayout>} />

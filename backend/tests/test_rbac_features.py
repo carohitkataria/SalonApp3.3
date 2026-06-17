@@ -11,8 +11,8 @@ import time
 BASE_URL = os.environ.get('REACT_APP_BACKEND_URL', '').rstrip('/')
 
 # Test credentials
-SALON_PHONE = "7503070727"
-SALON_PASSWORD = "salon123"
+SALON_PHONE = os.environ.get("TEST_SALON_PHONE", "7503070727")
+SALON_PASSWORD = os.environ.get("TEST_SALON_PASSWORD", "salon123")
 TEST_CUSTOMER_PHONE = "+919999999999"
 SALON_ID = None
 AUTH_TOKEN = None

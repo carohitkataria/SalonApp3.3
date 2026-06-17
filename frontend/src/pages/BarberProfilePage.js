@@ -1,7 +1,7 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import axios from 'axios';
-import { Star, User, MessageSquare, ArrowLeft, Camera, Send, Calendar, Clock } from 'lucide-react';
+import { Star, User, MessageSquare, ArrowLeft, Camera, Send, Calendar, Clock, Scissors } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Button } from '@/components/ui/button';
 import { toast } from 'sonner';
@@ -9,6 +9,83 @@ import { useAuth } from '@/contexts/AuthContext';
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
 const API = `${BACKEND_URL}/api`;
+
+// Auto-scrolling hero image carousel for the barber profile.
+// • Cycles through `images` every 3.5s.
+// • Pauses while the user is touching / hovering the strip.
+// • Shows dot indicators + lets the user tap a dot to jump.
+function BarberPhotoCarousel({ images, alt, overlay }) {
+  const [index, setIndex] = useState(0);
+  const pausedRef = useRef(false);
+
+  useEffect(() => {
+    if (images.length <= 1) return;
+    const id = setInterval(() => {
+      if (pausedRef.current) return;
+      setIndex((i) => (i + 1) % images.length);
+    }, 3500);
+    return () => clearInterval(id);
+  }, [images.length]);
+
+  return (
+    <div
+      className="relative h-72 sm:h-80 bg-gradient-to-br from-gold/30 to-gold/5 overflow-hidden"
+      onMouseEnter={() => { pausedRef.current = true; }}
+      onMouseLeave={() => { pausedRef.current = false; }}
+      onTouchStart={() => { pausedRef.current = true; }}
+      onTouchEnd={() => { pausedRef.current = false; }}
+      data-testid="barber-photo-carousel"
+    >
+      <AnimatePresence initial={false} mode="wait">
+        <motion.img
+          key={images[index]}
+          src={images[index]}
+          alt={`${alt} ${index + 1}`}
+          initial={{ opacity: 0, scale: 1.02 }}
+          animate={{ opacity: 1, scale: 1 }}
+          exit={{ opacity: 0 }}
+          transition={{ duration: 0.6 }}
+          className="absolute inset-0 w-full h-full object-cover"
+        />
+      </AnimatePresence>
+
+      {overlay}
+
+      {images.length > 1 && (
+        <div className="absolute bottom-3 left-1/2 -translate-x-1/2 flex gap-1.5 z-10" data-testid="barber-photo-dots">
+          {images.map((_, i) => (
+            <button
+              key={i}
+              onClick={() => setIndex(i)}
+              aria-label={`Go to photo ${i + 1}`}
+              className={`h-1.5 rounded-full transition-all ${i === index ? 'w-6 bg-gold' : 'w-1.5 bg-white/70 hover:bg-white'}`}
+            />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function HeroOverlay({ barber, barberProfile }) {
+  return (
+    <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/80 to-transparent p-6 z-[5] pointer-events-none">
+      <h2 className="text-3xl font-bold text-white">{barber.name}</h2>
+      <p className="text-gold text-lg">{barber.specialization || 'Master Stylist'}</p>
+      <div className="flex items-center gap-4 mt-3">
+        <div className="flex items-center gap-1 bg-black/50 px-3 py-1 rounded-full">
+          <Star className="w-4 h-4 text-yellow-500 fill-yellow-500" />
+          <span className="text-white font-bold">
+            {barberProfile?.average_rating || barber.rating || '4.5'}
+          </span>
+        </div>
+        <span className="text-white/70">{barberProfile?.total_reviews || 0} reviews</span>
+        <span className="text-white/70">•</span>
+        <span className="text-white/70">{barber.experience || 0}+ years exp</span>
+      </div>
+    </div>
+  );
+}
 
 export default function BarberProfilePage() {
   const { salonId, barberId } = useParams();
@@ -164,39 +241,40 @@ export default function BarberProfilePage() {
       </div>
 
       <div className="max-w-2xl mx-auto">
-        {/* Hero Section */}
-        <div className="relative h-64 bg-gradient-to-br from-gold/30 to-gold/5">
-          {barber.photo_url ? (
-            <img 
-              src={barber.photo_url} 
-              alt={barber.name}
-              className="w-full h-full object-cover"
-            />
-          ) : (
-            <div className="w-full h-full flex items-center justify-center">
-              <User className="w-32 h-32 text-gold/40" />
-            </div>
-          )}
-          
-          {/* Overlay Info */}
-          <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/80 to-transparent p-6">
-            <h2 className="text-3xl font-bold text-white">{barber.name}</h2>
-            <p className="text-gold text-lg">{barber.specialization || 'Master Stylist'}</p>
-            <div className="flex items-center gap-4 mt-3">
-              <div className="flex items-center gap-1 bg-black/50 px-3 py-1 rounded-full">
-                <Star className="w-4 h-4 text-yellow-500 fill-yellow-500" />
-                <span className="text-white font-bold">
-                  {barberProfile?.average_rating || barber.rating || '4.5'}
-                </span>
+        {/* Hero — auto-scrolling image carousel */}
+        {(() => {
+          // Build the unified image list. The barber doc may carry the primary
+          // image under any of these fields depending on when it was uploaded:
+          //   profile_image (current admin form), photo_url (older), image_url
+          // Plus gallery[] entries (string or {url, caption}).
+          const galleryUrls = (barber.gallery || [])
+            .map((g) => (typeof g === 'string' ? g : g?.url))
+            .filter(Boolean);
+          const heroImages = [];
+          const primary = barber.profile_image || barber.photo_url || barber.image_url;
+          if (primary) heroImages.push(primary);
+          galleryUrls.forEach((u) => {
+            if (!heroImages.includes(u)) heroImages.push(u);
+          });
+
+          if (heroImages.length === 0) {
+            return (
+              <div className="relative h-64 bg-gradient-to-br from-gold/30 to-gold/5">
+                <div className="w-full h-full flex items-center justify-center">
+                  <User className="w-32 h-32 text-gold/40" />
+                </div>
+                <HeroOverlay barber={barber} barberProfile={barberProfile} />
               </div>
-              <span className="text-white/70">
-                {barberProfile?.total_reviews || 0} reviews
-              </span>
-              <span className="text-white/70">•</span>
-              <span className="text-white/70">{barber.experience || 0}+ years exp</span>
-            </div>
-          </div>
-        </div>
+            );
+          }
+          return (
+            <BarberPhotoCarousel
+              images={heroImages}
+              alt={barber.name}
+              overlay={<HeroOverlay barber={barber} barberProfile={barberProfile} />}
+            />
+          );
+        })()}
 
         {/* Content */}
         <div className="p-6 space-y-6">
@@ -232,6 +310,44 @@ export default function BarberProfilePage() {
             </div>
           )}
 
+          {/* Services & Pricing — per-barber prices */}
+          {barberProfile?.services && barberProfile.services.length > 0 && (
+            <div className="bg-card rounded-xl p-5 border border-border" data-testid="barber-services-section">
+              <h3 className="text-lg font-bold text-foreground mb-3 flex items-center">
+                <Scissors className="w-5 h-5 mr-2 text-gold" />
+                Services & Pricing
+              </h3>
+              <p className="text-xs text-muted-foreground mb-3">
+                Prices listed are what {barber.name.split(' ')[0]} charges for each service.
+              </p>
+              <div className="divide-y divide-border">
+                {barberProfile.services.map((service) => (
+                  <div
+                    key={service.id}
+                    className="flex items-center justify-between py-3"
+                    data-testid={`barber-service-row-${service.id}`}
+                  >
+                    <div className="min-w-0 pr-3">
+                      <p className="text-sm font-medium text-foreground truncate">{service.service_name}</p>
+                      {service.category && (
+                        <p className="text-xs text-muted-foreground">{service.category}</p>
+                      )}
+                    </div>
+                    <div className="text-right flex-shrink-0">
+                      <p className="text-base font-bold text-gold">₹{service.barber_price || service.base_price || 0}</p>
+                      {service.duration && (
+                        <p className="text-[10px] text-muted-foreground flex items-center justify-end gap-1">
+                          <Clock className="w-3 h-3" />
+                          {service.duration} min
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
           {/* Portfolio */}
           {barber.gallery && barber.gallery.length > 0 && (
             <div className="bg-card rounded-xl p-5 border border-border">
@@ -240,15 +356,19 @@ export default function BarberProfilePage() {
                 Portfolio
               </h3>
               <div className="grid grid-cols-3 gap-2">
-                {barber.gallery.map((photo, idx) => (
-                  <div key={idx} className="aspect-square rounded-lg overflow-hidden">
-                    <img 
-                      src={photo} 
-                      alt={`Work ${idx + 1}`}
-                      className="w-full h-full object-cover hover:scale-110 transition-transform duration-300"
-                    />
-                  </div>
-                ))}
+                {barber.gallery.map((photo, idx) => {
+                  const src = typeof photo === 'string' ? photo : photo?.url;
+                  if (!src) return null;
+                  return (
+                    <div key={idx} className="aspect-square rounded-lg overflow-hidden">
+                      <img
+                        src={src}
+                        alt={`Work ${idx + 1}`}
+                        className="w-full h-full object-cover hover:scale-110 transition-transform duration-300"
+                      />
+                    </div>
+                  );
+                })}
               </div>
             </div>
           )}

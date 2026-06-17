@@ -31,7 +31,8 @@ const API = `${BACKEND_URL}/api`;
 
 const readAuth = () => {
   try {
-    const raw = localStorage.getItem('platform_admin_auth');
+    const raw = localStorage.getItem('platform_admin_auth')
+      || sessionStorage.getItem('platform_admin_auth');
     return raw ? JSON.parse(raw) : null;
   } catch { return null; }
 };
@@ -101,6 +102,7 @@ export default function PlatformDashboardPage() {
 
   const logout = useCallback(() => {
     localStorage.removeItem('platform_admin_auth');
+    sessionStorage.removeItem('platform_admin_auth');
     navigate('/platform/login', { replace: true });
   }, [navigate]);
 

@@ -25,10 +25,10 @@ sys.path.insert(0, "/app/backend")
 from motor.motor_asyncio import AsyncIOMotorClient  # noqa: E402
 
 BASE_URL = os.environ.get("REACT_APP_BACKEND_URL").rstrip("/")
-SALON_ID = "2dad5cd9-5dda-4398-bbb5-a4d12aae7915"
-PHONE = "+917503070727"
-PASSWORD = "salon123"
-BARBER_ID = "5d7d3064-2580-4a43-ae3e-73cdcaefd9de"  # Imran
+SALON_ID = os.environ.get("TEST_SALON_ID", "2dad5cd9-5dda-4398-bbb5-a4d12aae7915")
+PHONE = os.environ.get("TEST_SALON_PHONE", "+917503070727")
+PASSWORD = os.environ.get("TEST_SALON_PASSWORD", "salon123")
+BARBER_ID = os.environ.get("TEST_BARBER_ID", "5d7d3064-2580-4a43-ae3e-73cdcaefd9de")  # Imran
 SEED_AMOUNT = 41250  # ach=110% (assuming salary=37500); within 100-120% slab → earned > 0
 MONTH = datetime.now(timezone.utc).strftime("%Y-%m")
 BOOKING_DATE = f"{MONTH}-15"

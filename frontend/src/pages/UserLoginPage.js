@@ -12,6 +12,7 @@ import {
 import { motion, AnimatePresence } from 'framer-motion';
 import SalonHubLogo from '@/components/SalonHubLogo';
 import ThemePicker from '@/components/ThemePicker';
+import GoogleLoginButton from '@/components/GoogleLoginButton';
 
 const RESEND_SECONDS = 45;
 
@@ -235,12 +236,49 @@ export default function UserLoginPage() {
           </h1>
         </motion.div>
 
+        {/* Item 6 — Quick exits: main site + guest browsing */}
+        <motion.div
+          initial={{ opacity: 0, y: 12 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.08, duration: 0.45 }}
+          className="flex items-center justify-center gap-2 mb-5"
+        >
+          <Button
+            type="button"
+            variant="outline"
+            onClick={() => navigate('/')}
+            className="rounded-full text-sm border-brass/40 hover:bg-brass-soft"
+            data-testid="user-login-explore-btn"
+          >
+            Explore Salonhub
+          </Button>
+          <Button
+            type="button"
+            variant="ghost"
+            onClick={() => navigate('/salons')}
+            className="rounded-full text-sm text-muted-foreground hover:text-foreground"
+            data-testid="user-login-guest-btn"
+          >
+            Continue as guest →
+          </Button>
+        </motion.div>
+
         <motion.div
           initial={{ opacity: 0, y: 18 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.1, duration: 0.5 }}
           className="lux-card rounded-2xl p-7 sm:p-8 bg-card"
         >
+          {/* Google sign-in (Item 9) */}
+          <div className="mb-5">
+            <GoogleLoginButton audience="customer" />
+            <div className="flex items-center gap-3 my-4">
+              <div className="flex-1 h-px bg-border" />
+              <span className="text-xs text-muted-foreground">or</span>
+              <div className="flex-1 h-px bg-border" />
+            </div>
+          </div>
+
           <AnimatePresence mode="wait">
             {/* ───────── MAIN LOGIN (tabbed) ───────── */}
             {view === 'login' && (

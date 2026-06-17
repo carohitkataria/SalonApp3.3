@@ -34,10 +34,10 @@ def _load_backend_url():
 
 
 BASE_URL = _load_backend_url()
-SALON_ID = "f3cb8e07-ba03-4d5f-aa02-17790108604a"
-BARBER_ID = "cadba382-4ca9-4c6e-823b-25a1f37f2792"
-LOGIN_PHONE = "+917503070727"
-LOGIN_PASSWORD = "Test@1234"
+SALON_ID = os.environ.get("TEST_SALON_ID", "f3cb8e07-ba03-4d5f-aa02-17790108604a")
+BARBER_ID = os.environ.get("TEST_BARBER_ID", "cadba382-4ca9-4c6e-823b-25a1f37f2792")
+LOGIN_PHONE = os.environ.get("TEST_SALON_PHONE", "+917503070727")
+LOGIN_PASSWORD = os.environ.get("TEST_SALON_PASSWORD", "Test@1234")
 
 
 @pytest.fixture(scope="module")

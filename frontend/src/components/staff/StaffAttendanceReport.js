@@ -212,14 +212,15 @@ export default function StaffAttendanceReport({ salonId, getAuthHeaders }) {
               <th className="text-left px-3 py-2">Check-in</th>
               <th className="text-left px-3 py-2">Check-out</th>
               <th className="text-left px-3 py-2">Worked</th>
+              <th className="text-left px-3 py-2">Marked By</th>
               <th className="text-left px-3 py-2">Mode</th>
             </tr>
           </thead>
           <tbody>
             {loading ? (
-              <tr><td colSpan={9} className="text-center py-8"><Loader2 className="w-5 h-5 animate-spin inline" /></td></tr>
+              <tr><td colSpan={10} className="text-center py-8"><Loader2 className="w-5 h-5 animate-spin inline" /></td></tr>
             ) : !rows.length ? (
-              <tr><td colSpan={9} className="text-center py-8 text-muted-foreground">No data in this range.</td></tr>
+              <tr><td colSpan={10} className="text-center py-8 text-muted-foreground">No data in this range.</td></tr>
             ) : (
               rows.map((r, i) => (
                 <tr key={`${r.staff_id}-${r.date}-${i}`} className="border-t border-border">
@@ -244,6 +245,19 @@ export default function StaffAttendanceReport({ salonId, getAuthHeaders }) {
                     {r.worked_minutes != null
                       ? `${Math.floor(r.worked_minutes / 60)}h ${r.worked_minutes % 60}m`
                       : '—'}
+                  </td>
+                  <td className="px-3 py-2" title={r.marked_by_name || ''} data-testid={`marked-by-${r.staff_id}-${r.date}`}>
+                    {(() => {
+                      const lbl = r.marked_by_label || '—';
+                      const tone =
+                        lbl === 'Admin' ? 'bg-blue-500/10 text-blue-600 border-blue-500/30'
+                        : lbl === 'Staff' ? 'bg-violet-500/10 text-violet-600 border-violet-500/30'
+                        : lbl === 'Auto' ? 'bg-emerald-500/10 text-emerald-600 border-emerald-500/30'
+                        : 'text-muted-foreground';
+                      return lbl === '—'
+                        ? <span className="text-muted-foreground">—</span>
+                        : <span className={`px-2 py-0.5 rounded border text-[10px] ${tone}`}>{lbl}</span>;
+                    })()}
                   </td>
                   <td className="px-3 py-2 text-[10px] text-muted-foreground">
                     {r.mode === 'geo_checkin' ? 'Geo' : r.mode === 'service_completion' ? 'Service' : '—'}

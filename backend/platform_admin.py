@@ -25,6 +25,7 @@ from typing import Optional
 import jwt
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from passlib.context import CryptContext
 from pydantic import BaseModel, Field
 
 logger = logging.getLogger(__name__)
@@ -35,6 +36,40 @@ _send_whatsapp_otp = None  # async callable(phone, otp) -> dict
 _otp_is_valid = None       # async callable(phone, code, db_collection) -> bool
 _secret_key: str = "change-me"
 _algorithm: str = "HS256"
+
+# Password hashing — bcrypt, matches the pattern in supplier_auth.py & server.py
+_pwd = CryptContext(schemes=["bcrypt"], deprecated="auto")
+
+# Brute force protection (in-memory; resets on backend restart, which is OK for
+# admin login since attempts are rare).  After MAX_FAILS within WINDOW_SEC, the
+# mobile is locked out for LOCKOUT_SEC.
+_FAIL_BUCKET: dict = {}
+_FAIL_MAX = 5
+_FAIL_WINDOW_SEC = 15 * 60
+_LOCKOUT_SEC = 15 * 60
+
+def _record_fail(mobile: str):
+    now = datetime.now(timezone.utc).timestamp()
+    bucket = _FAIL_BUCKET.setdefault(mobile, {"count": 0, "first": now, "locked_until": 0})
+    if now - bucket["first"] > _FAIL_WINDOW_SEC:
+        bucket["count"] = 0
+        bucket["first"] = now
+    bucket["count"] += 1
+    if bucket["count"] >= _FAIL_MAX:
+        bucket["locked_until"] = now + _LOCKOUT_SEC
+
+def _check_lockout(mobile: str):
+    now = datetime.now(timezone.utc).timestamp()
+    bucket = _FAIL_BUCKET.get(mobile)
+    if bucket and bucket.get("locked_until", 0) > now:
+        wait_sec = int(bucket["locked_until"] - now)
+        raise HTTPException(
+            status_code=429,
+            detail=f"Too many failed attempts. Try again in {wait_sec // 60 + 1} minute(s).",
+        )
+
+def _clear_fails(mobile: str):
+    _FAIL_BUCKET.pop(mobile, None)
 
 platform_router = APIRouter(prefix="/api/platform", tags=["platform-admin"])
 _security = HTTPBearer()
@@ -63,6 +98,17 @@ class OTPRequest(BaseModel):
 class OTPVerify(BaseModel):
     mobile: str
     otp: str
+
+
+class PlatformPasswordLogin(BaseModel):
+    mobile: str
+    password: str
+
+
+class PlatformSetPassword(BaseModel):
+    mobile: str
+    otp: str
+    new_password: str
 
 
 # ---------- Helpers ----------
@@ -192,26 +238,40 @@ def init_platform_admin_router(*, db, send_whatsapp_otp, otp_is_valid, secret_ke
 @platform_router.post("/auth/request-otp")
 async def platform_request_otp(payload: OTPRequest):
     """
-    Send a 6-digit OTP to the platform admin's WhatsApp.
+    Send a 6-digit OTP via SMS.
 
-    Security: We do NOT reveal whether the mobile is registered.
-    The response is identical whether or not the number maps to a platform admin.
+    Security: We do NOT reveal whether the mobile is registered as a platform
+    admin. The response is identical whether or not the number maps to one.
+
+    Self-heal: the configured PLATFORM_OWNER_MOBILE auto-seeds itself the first
+    time it requests an OTP, in case the startup bootstrap was skipped.
     """
     mobile = _normalize_mobile(payload.mobile)
     admin = await _db.platform_admins.find_one(
         {"mobile": mobile, "status": "active"}, {"_id": 0}
     )
 
+    # Self-heal the configured owner if startup bootstrap didn't run.
+    if not admin:
+        owner_env = os.environ.get("PLATFORM_OWNER_MOBILE")
+        if owner_env:
+            try:
+                if _normalize_mobile(owner_env) == mobile:
+                    await bootstrap_platform_owner()
+                    admin = await _db.platform_admins.find_one(
+                        {"mobile": mobile, "status": "active"}, {"_id": 0}
+                    )
+            except HTTPException:
+                pass
+
     otp = _generate_otp()
     expires_at = datetime.now(timezone.utc) + timedelta(minutes=10)
 
-    # We always store the OTP keyed by (mobile, scope='platform_admin'). If the
-    # number isn't an admin, the verify endpoint will still fail since no admin
-    # row exists — so storing the OTP is harmless.
     await _db.platform_otp.delete_many({"mobile": mobile})
     await _db.platform_otp.insert_one(
         {
             "mobile": mobile,
+            "phone": mobile,  # so the shared dev OTP validator fallback works
             "otp": otp,
             "expires_at": expires_at.isoformat(),
             "verified": False,
@@ -220,27 +280,96 @@ async def platform_request_otp(payload: OTPRequest):
     )
 
     response: dict = {
-        "message": "If this number is registered as a platform admin, an OTP has been sent to WhatsApp.",
+        "message": "If this number is registered as a platform admin, an OTP has been sent via SMS.",
         "delivery_status": "sent",
     }
 
     if admin:
-        whatsapp_result = await _send_whatsapp_otp(mobile, otp)
-        response["delivery_status"] = whatsapp_result.get("status", "sent")
-        if whatsapp_result.get("status") in ("mock", "failed"):
+        sms_result = await _send_whatsapp_otp(mobile, otp)
+        response["delivery_status"] = sms_result.get("status", "sent")
+        if sms_result.get("status") in ("mock", "failed"):
             # OTP is never returned in the response. It is logged server-side
             # for support/debugging only.
-            logger.warning(f"[Platform Admin] OTP for {mobile} (status={whatsapp_result.get('status')}): {otp}")
+            logger.warning(f"[Platform Admin] OTP for {mobile} (status={sms_result.get('status')}): {otp}")
             response["note"] = (
                 "Messaging not configured. Please contact support."
-                if whatsapp_result.get("status") == "mock"
-                else "OTP delivery failed. Please try again."
+                if sms_result.get("status") == "mock"
+                else "SMS delivery failed. Please try again."
             )
     else:
-        # Do not actually send WhatsApp for unknown numbers, but keep timing similar.
+        # Do not actually send SMS for unknown numbers, but keep timing similar.
         logger.info(f"[Platform Admin] OTP request for unknown mobile {mobile}")
 
     return response
+
+
+@platform_router.post("/auth/set-password")
+async def platform_set_password(payload: PlatformSetPassword):
+    """First-time or forgot-password flow.  Requires a valid OTP for the mobile."""
+    mobile = _normalize_mobile(payload.mobile)
+    pw = (payload.new_password or "").strip()
+    if len(pw) < 6:
+        raise HTTPException(status_code=400, detail="Password must be at least 6 characters")
+    ok = await _otp_is_valid(mobile, (payload.otp or "").strip(), _db.platform_otp)
+    if not ok:
+        raise HTTPException(status_code=401, detail="Invalid or expired OTP")
+    admin = await _db.platform_admins.find_one(
+        {"mobile": mobile, "status": "active"}, {"_id": 0}
+    )
+    if not admin:
+        raise HTTPException(status_code=401, detail="Not a platform admin")
+    await _db.platform_otp.delete_many({"mobile": mobile})
+    now_iso = datetime.now(timezone.utc).isoformat()
+    await _db.platform_admins.update_one(
+        {"id": admin["id"]},
+        {"$set": {
+            "password_hash": _pwd.hash(pw),
+            "password_set_at": now_iso,
+            "updated_at": now_iso,
+        }},
+    )
+    _clear_fails(mobile)
+    return {"success": True}
+
+
+@platform_router.post("/auth/login-password")
+async def platform_login_password(payload: PlatformPasswordLogin):
+    """Mobile + password login.  Returns a JWT (30-day expiry) just like OTP login."""
+    mobile = _normalize_mobile(payload.mobile)
+    _check_lockout(mobile)
+    invalid = HTTPException(status_code=401, detail="Invalid mobile or password")
+
+    admin = await _db.platform_admins.find_one(
+        {"mobile": mobile, "status": "active"}, {"_id": 0}
+    )
+    if not admin or not admin.get("password_hash"):
+        _record_fail(mobile)
+        raise invalid
+    try:
+        if not _pwd.verify((payload.password or "").strip(), admin["password_hash"]):
+            _record_fail(mobile)
+            raise invalid
+    except Exception:
+        _record_fail(mobile)
+        raise invalid
+
+    _clear_fails(mobile)
+    now_iso = datetime.now(timezone.utc).isoformat()
+    await _db.platform_admins.update_one(
+        {"id": admin["id"]},
+        {"$set": {"last_login_at": now_iso, "updated_at": now_iso}},
+    )
+    return {
+        "access_token": _make_access_token(admin),
+        "token_type": "bearer",
+        "admin": {
+            "id": admin["id"],
+            "mobile": admin["mobile"],
+            "name": admin.get("name"),
+            "email": admin.get("email"),
+            "is_owner": bool(admin.get("is_owner")),
+        },
+    }
 
 
 @platform_router.post("/auth/verify-otp")

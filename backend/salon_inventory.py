@@ -475,7 +475,8 @@ async def update_inventory(item_id: str, payload: InventoryUpdate, user: dict = 
 @salon_inventory_router.delete("/api/salon/inventory/{item_id}")
 async def delete_inventory(item_id: str, user: dict = Depends(_salon_auth)):
     salon_id = user.get("salon_id") or user.get("sub")
-    existing = await _get_item_or_404(item_id, salon_id)
+    # Raises 404 when the item doesn't belong to this salon.
+    await _get_item_or_404(item_id, salon_id)
     await _db.salon_inventory.update_one(
         {"id": item_id},
         {"$set": {"is_deleted": True, "updated_at": _now_iso()}},

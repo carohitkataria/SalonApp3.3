@@ -36,6 +36,9 @@ API_KEY_SECRET = os.environ.get('TWILIO_API_KEY_SECRET')
 WHATSAPP_NUMBER = os.environ.get('TWILIO_WHATSAPP_NUMBER', 'whatsapp:+14155238886')
 VERIFY_SERVICE_SID = os.environ.get('TWILIO_VERIFY_SERVICE_SID')
 BOOKING_CONFIRMATION_TEMPLATE_SID = os.environ.get('TWILIO_BOOKING_CONFIRMATION_TEMPLATE_SID')
+BOOKING_COMPLETED_TEMPLATE_SID = os.environ.get('TWILIO_BOOKING_COMPLETED_TEMPLATE_SID')
+YOUR_TURN_NOW_TEMPLATE_SID = os.environ.get('TWILIO_YOUR_TURN_NOW_TEMPLATE_SID')
+TOKEN_APPROACHING_TEMPLATE_SID = os.environ.get('TWILIO_TOKEN_APPROACHING_TEMPLATE_SID')
 
 # Initialize Twilio client
 twilio_client = None
@@ -262,6 +265,145 @@ async def send_booking_confirmation_template(
             "6": barber_name,
         },
         template_name="booking_confirmation",
+    )
+
+
+async def send_booking_completed_template(
+    phone_number: str,
+    customer_name: str,
+    salon_name: str,
+    token_number,
+    barber_name: str = "",
+    amount: str = "",
+) -> dict:
+    """
+    Send the approved 'booking_completed' WhatsApp Content template
+    (default SID: HXa417403d8b7ff32ce17fcadc6fe1c19a).
+
+    Template body:
+        ✅ All done!
+        Thank you for visiting {{1}}, {{2}}.
+        🎫 Token: #{{3}}
+        💈 Served by: {{4}}
+        💰 Amount: {{5}}
+        ...
+
+    Variables:
+        {{1}} salon_name
+        {{2}} customer_name
+        {{3}} token_number
+        {{4}} barber_name
+        {{5}} amount
+    """
+    if not BOOKING_COMPLETED_TEMPLATE_SID:
+        logger.warning(
+            "TWILIO_BOOKING_COMPLETED_TEMPLATE_SID not configured — skipping booking_completed WhatsApp."
+        )
+        return {"status": "skipped", "reason": "template_not_configured"}
+
+    return await send_whatsapp_template(
+        phone_number=phone_number,
+        content_sid=BOOKING_COMPLETED_TEMPLATE_SID,
+        content_variables={
+            "1": salon_name,
+            "2": customer_name,
+            "3": str(token_number),
+            "4": barber_name or "our stylist",
+            "5": str(amount) if amount else "0",
+        },
+        template_name="booking_completed",
+    )
+
+
+async def send_your_turn_now_template(
+    phone_number: str,
+    customer_name: str,
+    salon_name: str,
+    barber_name: str,
+    token_number,
+) -> dict:
+    """
+    Send the approved 'your_turn_now' WhatsApp Content template
+    (default SID: HXce2a0648ccfc5d259615714b7f49457b).
+
+    Template body:
+        💈 It's your turn!
+        Hi {{1}}, token #{{2}} is being called now at {{3}}.
+        Please head to {{4}}'s chair.
+
+    Variables:
+        {{1}} customer_name
+        {{2}} token_number
+        {{3}} salon_name
+        {{4}} barber_name
+    """
+    if not YOUR_TURN_NOW_TEMPLATE_SID:
+        logger.warning(
+            "TWILIO_YOUR_TURN_NOW_TEMPLATE_SID not configured — skipping your_turn_now WhatsApp."
+        )
+        return {"status": "skipped", "reason": "template_not_configured"}
+
+    return await send_whatsapp_template(
+        phone_number=phone_number,
+        content_sid=YOUR_TURN_NOW_TEMPLATE_SID,
+        content_variables={
+            "1": customer_name,
+            "2": str(token_number),
+            "3": salon_name,
+            "4": barber_name or "your stylist",
+        },
+        template_name="your_turn_now",
+    )
+
+
+async def send_token_approaching_template(
+    phone_number: str,
+    customer_name: str,
+    token_number,
+    tokens_away,
+    salon_name: str = "",
+    barber_name: str = "",
+    current_serving: str = "",
+) -> dict:
+    """
+    Send the approved 'token_approaching' WhatsApp Content template
+    (default SID: HX5cf990aaa6d32eb99a58ddd799c6fab2).
+
+    Template body:
+        ⏳ Your turn is approaching!
+        Hi {{1}}, you are {{2}} away at {{3}}.
+        🎫 Your token: #{{4}}
+        💈 With: {{5}}
+        ⏱ Now serving: #{{6}}
+        Please start heading over so you don't miss your turn.
+
+    Variables:
+        {{1}} customer_name
+        {{2}} tokens_away         (e.g. "1 token", "2 tokens")
+        {{3}} salon_name
+        {{4}} token_number
+        {{5}} barber_name
+        {{6}} current_serving     (currently-being-served token number)
+    """
+    if not TOKEN_APPROACHING_TEMPLATE_SID:
+        logger.warning(
+            "TWILIO_TOKEN_APPROACHING_TEMPLATE_SID not configured — skipping token_approaching WhatsApp."
+        )
+        return {"status": "skipped", "reason": "template_not_configured"}
+
+    tokens_away_str = f"{tokens_away} token" if str(tokens_away) == "1" else f"{tokens_away} tokens"
+    return await send_whatsapp_template(
+        phone_number=phone_number,
+        content_sid=TOKEN_APPROACHING_TEMPLATE_SID,
+        content_variables={
+            "1": customer_name,
+            "2": tokens_away_str,
+            "3": salon_name or "the salon",
+            "4": str(token_number),
+            "5": barber_name or "your stylist",
+            "6": str(current_serving) if current_serving else "—",
+        },
+        template_name="token_approaching",
     )
 
 

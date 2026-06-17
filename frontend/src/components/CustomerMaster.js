@@ -50,6 +50,24 @@ export default function CustomerMaster({ salonId, getAuthHeaders }) {
   const [bulkUploading, setBulkUploading] = useState(false);
   const [bulkUploadResult, setBulkUploadResult] = useState(null);
 
+  // Item 5b — inline edit of customer master fields
+  const [editingCustomer, setEditingCustomer] = useState(false);
+  const [editCustomerForm, setEditCustomerForm] = useState({ name: '', phone: '', date_of_birth: '' });
+  const [savingEdit, setSavingEdit] = useState(false);
+
+  // Item 5a — delete confirm
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+
+  // Item 5c — service search inside custom package
+  const [packageServiceSearch, setPackageServiceSearch] = useState('');
+
+  // Item 5d — rebook in place
+  const [rebookData, setRebookData] = useState(null);
+  const [showRebookModal, setShowRebookModal] = useState(false);
+  const [barbers, setBarbers] = useState([]);
+  const [rebookForm, setRebookForm] = useState({ barber_id: '', date: '', time_slot: 'Morning' });
+  const [submittingRebook, setSubmittingRebook] = useState(false);
+
   const handleDownloadTemplate = async () => {
     try {
       const response = await axios.get(
@@ -224,19 +242,114 @@ export default function CustomerMaster({ salonId, getAuthHeaders }) {
   };
 
   const handleRebook = async (booking) => {
-    // Navigate to booking page with pre-filled data
-    const bookingData = {
-      barber_id: booking.barber_id,
-      services: booking.selected_services,
-      customer_name: booking.customer_name,
-      phone: booking.phone
-    };
-    
-    localStorage.setItem('rebooking_data', JSON.stringify(bookingData));
-    toast.success('Booking data loaded! Redirecting to booking page...');
-    setTimeout(() => {
-      window.location.href = `/book/${salonId}`;
-    }, 1000);
+    // Item 5d — Rebook in place (no navigation).
+    // Pre-fill barber + services + today's date; admin picks the shift.
+    const todayIST = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata' }).format(new Date());
+    setRebookData(booking);
+    setRebookForm({
+      barber_id: booking.barber_id || '',
+      date: todayIST,
+      time_slot: 'Morning',
+    });
+    // Load barbers list (idempotent — cached after first call)
+    if (!barbers.length) {
+      try {
+        const res = await axios.get(`${API}/salons/${salonId}/barbers`, { headers: getAuthHeaders() });
+        setBarbers(res.data || []);
+      } catch (e) {
+        console.error('Failed to load barbers for rebook', e);
+      }
+    }
+    setShowRebookModal(true);
+  };
+
+  const handleSubmitRebook = async () => {
+    if (!rebookData) return;
+    if (!rebookForm.barber_id) {
+      toast.error('Please select a stylist');
+      return;
+    }
+    if (!rebookForm.date) {
+      toast.error('Please pick a date');
+      return;
+    }
+    setSubmittingRebook(true);
+    try {
+      const selectedServices = (rebookData.selected_services || []).map((s) =>
+        typeof s === 'string' ? s : (s.service_id || s.id),
+      ).filter(Boolean);
+      const payload = {
+        salon_id: salonId,
+        customer_name: selectedCustomer.name,
+        phone: selectedCustomer.phone,
+        barber_id: rebookForm.barber_id,
+        selected_services: selectedServices,
+        date: rebookForm.date,
+        time_slot: rebookForm.time_slot,
+        payment_mode: 'pay_later',
+        is_rebook: true,
+      };
+      await axios.post(`${API}/bookings`, payload, { headers: getAuthHeaders() });
+      toast.success('Rebooking placed — visible in Queue');
+      setShowRebookModal(false);
+      setRebookData(null);
+      // Refresh customer's history so the new booking shows up
+      fetchCustomerBookings(selectedCustomer.phone);
+      fetchCombinedHistory(selectedCustomer.phone);
+    } catch (error) {
+      toast.error(error.response?.data?.detail || 'Failed to create rebooking');
+    } finally {
+      setSubmittingRebook(false);
+    }
+  };
+
+  const handleStartEditCustomer = () => {
+    setEditCustomerForm({
+      name: selectedCustomer.name || '',
+      phone: (selectedCustomer.phone || '').replace(/^\+91/, ''),
+      date_of_birth: selectedCustomer.date_of_birth || '',
+    });
+    setEditingCustomer(true);
+  };
+
+  const handleSaveEditCustomer = async () => {
+    const name = editCustomerForm.name.trim();
+    const phone = editCustomerForm.phone.replace(/\D/g, '');
+    const dob = editCustomerForm.date_of_birth;
+    if (!name) { toast.error('Name is required'); return; }
+    if (phone && phone.length !== 10) { toast.error('Enter a valid 10-digit mobile'); return; }
+    setSavingEdit(true);
+    try {
+      const res = await axios.put(
+        `${API}/salons/${salonId}/customers/${encodeURIComponent(selectedCustomer.phone)}`,
+        { name, phone: phone, date_of_birth: dob || null },
+        { headers: getAuthHeaders() },
+      );
+      toast.success('Customer details updated');
+      const updated = res.data?.customer || {};
+      setSelectedCustomer((prev) => ({ ...prev, ...updated }));
+      setEditingCustomer(false);
+      fetchCustomers();
+    } catch (error) {
+      toast.error(error.response?.data?.detail || 'Failed to update customer');
+    } finally {
+      setSavingEdit(false);
+    }
+  };
+
+  const handleDeleteCustomer = async () => {
+    try {
+      await axios.delete(
+        `${API}/salons/${salonId}/customers/${encodeURIComponent(selectedCustomer.phone)}`,
+        { headers: getAuthHeaders() },
+      );
+      toast.success('Customer deleted');
+      setShowDeleteConfirm(false);
+      setSelectedCustomer(null);
+      fetchCustomers();
+    } catch (error) {
+      toast.error(error.response?.data?.detail || 'Failed to delete customer');
+    }
   };
 
   const toggleServiceSelection = (serviceId) => {
@@ -426,10 +539,73 @@ export default function CustomerMaster({ salonId, getAuthHeaders }) {
               <ArrowLeft className="w-4 h-4 md:mr-2" />
               <span className="hidden md:inline">Back</span>
             </Button>
-            <div className="min-w-0">
-              <h2 className="text-lg md:text-2xl font-bold truncate">{selectedCustomer.name}</h2>
-              <p className="text-muted-foreground text-xs md:text-sm">{selectedCustomer.phone}</p>
+            <div className="min-w-0 flex-1">
+              {editingCustomer ? (
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-2" data-testid="customer-edit-row">
+                  <Input
+                    value={editCustomerForm.name}
+                    onChange={(e) => setEditCustomerForm((p) => ({ ...p, name: e.target.value }))}
+                    placeholder="Name"
+                    className="h-9"
+                    data-testid="customer-edit-name"
+                  />
+                  <div className="flex items-center gap-1">
+                    <span className="text-xs text-muted-foreground">+91</span>
+                    <Input
+                      value={editCustomerForm.phone}
+                      onChange={(e) => setEditCustomerForm((p) => ({ ...p, phone: e.target.value.replace(/\D/g, '').slice(0, 10) }))}
+                      placeholder="10-digit mobile"
+                      inputMode="numeric"
+                      className="h-9"
+                      data-testid="customer-edit-phone"
+                    />
+                  </div>
+                  <Input
+                    type="date"
+                    value={editCustomerForm.date_of_birth || ''}
+                    onChange={(e) => setEditCustomerForm((p) => ({ ...p, date_of_birth: e.target.value }))}
+                    className="h-9"
+                    data-testid="customer-edit-dob"
+                  />
+                </div>
+              ) : (
+                <>
+                  <h2 className="text-lg md:text-2xl font-bold truncate">{selectedCustomer.name}</h2>
+                  <p className="text-muted-foreground text-xs md:text-sm">
+                    {selectedCustomer.phone}
+                    {selectedCustomer.date_of_birth && (
+                      <span className="ml-2 text-muted-foreground">· DOB {selectedCustomer.date_of_birth}</span>
+                    )}
+                  </p>
+                </>
+              )}
             </div>
+            {editingCustomer ? (
+              <div className="flex gap-1 flex-shrink-0">
+                <Button size="sm" onClick={handleSaveEditCustomer} disabled={savingEdit} className="bg-green-600 text-white hover:bg-green-700" data-testid="customer-edit-save">
+                  <Check className="w-4 h-4" />
+                </Button>
+                <Button size="sm" variant="outline" onClick={() => setEditingCustomer(false)} data-testid="customer-edit-cancel">
+                  <X className="w-4 h-4" />
+                </Button>
+              </div>
+            ) : (
+              <div className="flex gap-1 flex-shrink-0">
+                <Button size="sm" variant="outline" onClick={handleStartEditCustomer} title="Edit details" data-testid="customer-edit-start">
+                  <Edit2 className="w-4 h-4" />
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => setShowDeleteConfirm(true)}
+                  className="text-red-500 border-red-500 hover:bg-red-50 dark:hover:bg-red-950"
+                  title="Delete customer"
+                  data-testid="customer-delete-btn"
+                >
+                  <X className="w-4 h-4" />
+                </Button>
+              </div>
+            )}
           </div>
           <div className="flex flex-wrap gap-2">
             <Button
@@ -581,8 +757,33 @@ export default function CustomerMaster({ salonId, getAuthHeaders }) {
 
               <div>
                 <Label className="mb-3 block">Select Services *</Label>
+                <div className="relative mb-2">
+                  <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+                  <Input
+                    value={packageServiceSearch}
+                    onChange={(e) => setPackageServiceSearch(e.target.value)}
+                    placeholder="Search services by name or category…"
+                    className="pl-8 h-9"
+                    data-testid="package-service-search"
+                  />
+                </div>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-2 max-h-60 overflow-y-auto">
-                  {services.map(service => (
+                  {(() => {
+                    const q = packageServiceSearch.trim().toLowerCase();
+                    const matches = (s) => {
+                      if (!q) return true;
+                      return (
+                        (s.service_name || '').toLowerCase().includes(q) ||
+                        (s.category || '').toLowerCase().includes(q)
+                      );
+                    };
+                    // Keep selected services pinned to the top
+                    const selectedFirst = [...services].sort((a, b) => {
+                      const sa = packageForm.services.includes(a.id) ? -1 : 0;
+                      const sb = packageForm.services.includes(b.id) ? -1 : 0;
+                      return sa - sb;
+                    });
+                    return selectedFirst.filter(matches).map((service) => (
                     <div
                       key={service.id}
                       className="flex items-center space-x-2 p-2 border rounded hover:bg-muted cursor-pointer"
@@ -598,7 +799,8 @@ export default function CustomerMaster({ salonId, getAuthHeaders }) {
                         <p className="text-xs text-muted-foreground">₹{service.price || service.base_price}</p>
                       </div>
                     </div>
-                  ))}
+                  ));
+                  })()}
                 </div>
               </div>
 
@@ -862,6 +1064,101 @@ export default function CustomerMaster({ salonId, getAuthHeaders }) {
             )}
           </div>
         </div>
+
+        {/* Delete confirm dialog — Item 5a */}
+        <Dialog open={showDeleteConfirm} onOpenChange={setShowDeleteConfirm}>
+          <DialogContent className="max-w-md" data-testid="customer-delete-confirm">
+            <DialogHeader>
+              <DialogTitle>Delete this customer?</DialogTitle>
+            </DialogHeader>
+            <div className="space-y-3 mt-2">
+              <p className="text-sm text-muted-foreground">
+                <span className="font-semibold text-foreground">{selectedCustomer?.name}</span> ({selectedCustomer?.phone}) will be removed from your Customer Master. Past booking history is preserved.
+              </p>
+              <div className="flex gap-2 justify-end pt-2">
+                <Button variant="outline" onClick={() => setShowDeleteConfirm(false)} data-testid="customer-delete-cancel">Cancel</Button>
+                <Button
+                  onClick={handleDeleteCustomer}
+                  className="bg-red-600 hover:bg-red-700 text-white"
+                  data-testid="customer-delete-confirm-btn"
+                >
+                  Delete customer
+                </Button>
+              </div>
+            </div>
+          </DialogContent>
+        </Dialog>
+
+        {/* Rebook modal — Item 5d (in-place) */}
+        <Dialog open={showRebookModal} onOpenChange={(open) => { if (!open) { setShowRebookModal(false); setRebookData(null); } }}>
+          <DialogContent className="max-w-md" data-testid="rebook-modal">
+            <DialogHeader>
+              <DialogTitle>Rebook for {selectedCustomer?.name}</DialogTitle>
+            </DialogHeader>
+            <div className="space-y-3 mt-2">
+              <p className="text-xs text-muted-foreground">
+                Services and stylist are pre-filled from the past booking. Pick a date and shift to drop the new booking straight into the Queue.
+              </p>
+              <div>
+                <Label className="text-sm">Stylist</Label>
+                <select
+                  className="w-full mt-1 h-9 rounded-md border border-border bg-background text-sm px-2"
+                  value={rebookForm.barber_id}
+                  onChange={(e) => setRebookForm((p) => ({ ...p, barber_id: e.target.value }))}
+                  data-testid="rebook-barber-select"
+                >
+                  <option value="">Select stylist…</option>
+                  {barbers.map((b) => (
+                    <option key={b.id} value={b.id}>{b.name}</option>
+                  ))}
+                </select>
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <Label className="text-sm">Date</Label>
+                  <Input
+                    type="date"
+                    value={rebookForm.date}
+                    min={new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata' }).format(new Date())}
+                    onChange={(e) => setRebookForm((p) => ({ ...p, date: e.target.value }))}
+                    className="h-9"
+                    data-testid="rebook-date-input"
+                  />
+                </div>
+                <div>
+                  <Label className="text-sm">Shift</Label>
+                  <select
+                    className="w-full mt-1 h-9 rounded-md border border-border bg-background text-sm px-2"
+                    value={rebookForm.time_slot}
+                    onChange={(e) => setRebookForm((p) => ({ ...p, time_slot: e.target.value }))}
+                    data-testid="rebook-shift-select"
+                  >
+                    <option value="Morning">Morning</option>
+                    <option value="Afternoon">Afternoon</option>
+                    <option value="Evening">Evening</option>
+                  </select>
+                </div>
+              </div>
+              <div className="bg-muted/50 rounded-md p-3 text-xs">
+                <p className="font-semibold mb-1">Services from last booking:</p>
+                <p className="text-muted-foreground">
+                  {(rebookData?.selected_services || []).length} service(s) · ₹{rebookData?.total_amount || 0}
+                </p>
+              </div>
+              <div className="flex gap-2 justify-end pt-2">
+                <Button variant="outline" onClick={() => { setShowRebookModal(false); setRebookData(null); }} data-testid="rebook-cancel">Cancel</Button>
+                <Button
+                  onClick={handleSubmitRebook}
+                  disabled={submittingRebook}
+                  className="bg-gold text-black hover:bg-gold/90"
+                  data-testid="rebook-confirm"
+                >
+                  {submittingRebook ? 'Booking…' : 'Confirm rebook'}
+                </Button>
+              </div>
+            </div>
+          </DialogContent>
+        </Dialog>
       </div>
     );
   }

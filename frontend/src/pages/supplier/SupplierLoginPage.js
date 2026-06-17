@@ -10,6 +10,7 @@ import { useSupplierAuth } from '@/contexts/SupplierAuthContext';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { toast } from 'sonner';
+import GoogleLoginButton from '@/components/GoogleLoginButton';
 
 export default function SupplierLoginPage() {
   const navigate = useNavigate();
@@ -89,6 +90,15 @@ export default function SupplierLoginPage() {
         </div>
 
         <div className="bg-card/60 border border-border rounded-2xl p-6">
+          {/* Google sign-in (Item 9) */}
+          <div className="mb-4">
+            <GoogleLoginButton audience="supplier" />
+            <div className="flex items-center gap-3 mt-4 mb-1">
+              <div className="flex-1 h-px bg-border" />
+              <span className="text-xs text-muted-foreground">or</span>
+              <div className="flex-1 h-px bg-border" />
+            </div>
+          </div>
           <div className="flex border border-border rounded-lg overflow-hidden mb-5 text-xs font-bold">
             <button
               onClick={() => setMode('password')}

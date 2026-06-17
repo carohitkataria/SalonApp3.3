@@ -39,10 +39,10 @@ BASE_URL = os.environ["REACT_APP_BACKEND_URL"].rstrip("/")
 MONGO_URL = os.environ["MONGO_URL"]
 DB_NAME = os.environ.get("DB_NAME", "test_database")
 
-SALON_ID = "2dad5cd9-5dda-4398-bbb5-a4d12aae7915"
-BARBER_ID = "5d7d3064-2580-4a43-ae3e-73cdcaefd9de"  # Imran
-PHONE = "+917503070727"
-PASSWORD = "salon123"
+SALON_ID = os.environ.get("TEST_SALON_ID", "2dad5cd9-5dda-4398-bbb5-a4d12aae7915")
+BARBER_ID = os.environ.get("TEST_BARBER_ID", "5d7d3064-2580-4a43-ae3e-73cdcaefd9de")  # Imran
+PHONE = os.environ.get("TEST_SALON_PHONE", "+917503070727")
+PASSWORD = os.environ.get("TEST_SALON_PASSWORD", "salon123")
 
 
 # ----------------------------------------------------------------------- helpers

@@ -24,12 +24,16 @@ import random
 import secrets  # Secure random number generation
 import math
 import json
+import httpx
 
 # Import Twilio service
 from twilio_service import (
     send_whatsapp_otp, 
     send_whatsapp_notification,
     send_booking_confirmation_template,
+    send_booking_completed_template,
+    send_your_turn_now_template,
+    send_token_approaching_template,
     verify_whatsapp_otp,
     is_verify_configured,
     format_booking_confirmation,
@@ -210,6 +214,12 @@ class ServiceCreate(BaseModel):
     is_favorite: bool = False
     is_enabled: bool = True  # Salon can enable/disable
     available_at_home: bool = False  # Can be delivered at home
+    # Item 4 — At-home settings (effective only when available_at_home=True)
+    home_price: Optional[float] = None         # ₹ when delivered at home (else falls back to base_price)
+    home_min_order_value: Optional[float] = None  # ₹ MOQ on the cart before at-home checkout is allowed
+    home_min_items: Optional[int] = None       # Minimum number of services for at-home
+    home_travel_fee: Optional[float] = None    # ₹ flat travel fee added at checkout
+    home_service_radius_km: Optional[float] = None  # Service area radius
 
 class ServiceUpdate(BaseModel):
     service_name: Optional[str] = None
@@ -225,6 +235,11 @@ class ServiceUpdate(BaseModel):
     favorite_order: Optional[int] = None
     is_enabled: Optional[bool] = None
     available_at_home: Optional[bool] = None
+    home_price: Optional[float] = None
+    home_min_order_value: Optional[float] = None
+    home_min_items: Optional[int] = None
+    home_travel_fee: Optional[float] = None
+    home_service_radius_km: Optional[float] = None
 
 class Service(BaseModel):
     model_config = ConfigDict(extra="ignore")
@@ -237,12 +252,17 @@ class Service(BaseModel):
     base_price: float
     price_type: str = "fixed"
     images: List[str] = []
-    thumbnail_url: Optional[str] = None  # Circular thumbnail for category display
+    thumbnail_url: Optional[str] = None
     is_favorite: bool = False
     favorite_order: Optional[int] = None
     is_active: bool = True
     is_enabled: bool = True
     available_at_home: bool = False
+    home_price: Optional[float] = None
+    home_min_order_value: Optional[float] = None
+    home_min_items: Optional[int] = None
+    home_travel_fee: Optional[float] = None
+    home_service_radius_km: Optional[float] = None
 
 # Package Models
 class PackageService(BaseModel):
@@ -830,14 +850,20 @@ def verify_token(token: str):
         return None
 
 async def get_current_salon(credentials: HTTPAuthorizationCredentials = Depends(security)):
-    """Legacy salon auth - for backward compatibility"""
+    """Legacy salon auth — accepts both the original `role=salon` JWT (single-user)
+    AND the multi-user `salon_admin` / `salon_branch_manager` JWTs issued by
+    `/api/salon/users/login`. Staff role is intentionally excluded — they are not
+    allowed to mutate catalog data."""
     token = credentials.credentials
     payload = verify_token(token)
-    if not payload or payload.get("role") != "salon":
+    if not payload or payload.get("role") not in ("salon", "salon_admin", "salon_branch_manager"):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid authentication credentials"
         )
+    # Normalise `sub` so downstream handlers can keep treating it as the salon id.
+    if payload.get("role") != "salon" and payload.get("salon_id"):
+        payload["sub"] = payload["salon_id"]
     return payload
 
 async def get_current_salon_user(credentials: HTTPAuthorizationCredentials = Depends(security)):
@@ -2027,6 +2053,16 @@ DEFAULT_SALON_NOTIFICATION_SETTINGS = {
     "booking_change": True,
     "membership_purchase": True,
     "review_added": True,
+    # ---- WhatsApp event toggles (controlled by the salon, applied to OUTBOUND
+    # ---- customer WhatsApp messages from this salon) ----
+    "whatsapp_enabled": True,  # Master switch
+    "whatsapp_booking_confirmation": True,
+    "whatsapp_booking_completed": True,
+    "whatsapp_booking_cancelled": True,
+    "whatsapp_booking_rescheduled": True,
+    "whatsapp_your_turn_now": True,
+    "whatsapp_token_approaching": True,
+    "whatsapp_salon_calling": True,
 }
 
 DEFAULT_CUSTOMER_NOTIFICATION_SETTINGS = {
@@ -2132,6 +2168,20 @@ async def should_send_customer_whatsapp(phone: str, setting_key: str) -> bool:
     return bool(settings.get(setting_key, True))
 
 
+async def should_send_salon_whatsapp(salon_id: str, event_key: str) -> bool:
+    """Check if the salon has the given WhatsApp event enabled.
+
+    Respects both the master `whatsapp_enabled` switch and the per-event
+    `whatsapp_<event>` flag. Defaults to True when the setting is missing.
+    """
+    if not salon_id:
+        return True
+    settings = await get_salon_notification_settings(salon_id)
+    if not settings.get("whatsapp_enabled", True):
+        return False
+    return bool(settings.get(event_key, True))
+
+
 def build_action_links(token_id: str, salon_id: str) -> str:
     """Build clickable Reschedule and Cancel action links for WhatsApp messages."""
     base = os.getenv("FRONTEND_BASE_URL") or os.getenv("REACT_APP_BACKEND_URL", "")
@@ -2171,6 +2221,11 @@ async def send_booking_notification(token_data: dict, notification_type: str):
             # (HX4ec6d831674ce97cc1dc209327445b81).  This is required for any
             # business-initiated message outside the 24h reply window.
             whatsapp_setting_key = 'whatsapp_booking_confirmation'
+            if not await should_send_salon_whatsapp(token_data.get('salon_id', ''), whatsapp_setting_key):
+                logger.info(
+                    f"WhatsApp suppressed by salon settings for {phone} (salon {token_data.get('salon_id')} - {whatsapp_setting_key})"
+                )
+                return
             if whatsapp_setting_key and not await should_send_customer_whatsapp(phone, whatsapp_setting_key):
                 logger.info(
                     f"WhatsApp notification suppressed for {phone} (setting {whatsapp_setting_key} is OFF)"
@@ -2189,16 +2244,58 @@ async def send_booking_notification(token_data: dict, notification_type: str):
                 f"Notification sent: booking_confirmation to {phone}, status: {result.get('status')}"
             )
             return
-        elif notification_type == 'token_called':
-            message = format_token_called(
-                customer_name=customer_name,
-                token_number=token_data.get('token_number'),
-                barber_name=token_data.get('barber_name')
+        elif notification_type == 'booking_completed':
+            # Approved 'booking_completed' Content template
+            # (default SID: HXa417403d8b7ff32ce17fcadc6fe1c19a)
+            whatsapp_setting_key = 'whatsapp_booking_completed'
+            if not await should_send_salon_whatsapp(token_data.get('salon_id', ''), whatsapp_setting_key):
+                logger.info(
+                    f"WhatsApp suppressed by salon settings for {phone} (salon {token_data.get('salon_id')} - {whatsapp_setting_key})"
+                )
+                return
+            if not await should_send_customer_whatsapp(phone, 'whatsapp_booking_status_change'):
+                logger.info(
+                    f"WhatsApp suppressed by customer settings for {phone} (whatsapp_booking_status_change OFF)"
+                )
+                return
+            result = await send_booking_completed_template(
+                phone_number=phone,
+                customer_name=customer_name or 'Customer',
+                salon_name=salon_name,
+                token_number=token_data.get('token_number', 0),
+                barber_name=token_data.get('barber_name') or '',
+                amount=token_data.get('total_amount') or token_data.get('amount') or 0,
             )
-            whatsapp_setting_key = 'whatsapp_turn_approaching'
-            # Reschedule / Cancel action links on every "your turn" ping
-            if token_id and salon_id_for_links:
-                action_links = build_action_links(token_id, salon_id_for_links)
+            logger.info(
+                f"Notification sent: booking_completed to {phone}, status: {result.get('status')}"
+            )
+            return
+        elif notification_type == 'token_called':
+            # 'your_turn_now' — customer must come to the chair immediately.
+            # Use the approved Content template
+            # (default SID: HXce2a0648ccfc5d259615714b7f49457b).
+            whatsapp_setting_key = 'whatsapp_your_turn_now'
+            if not await should_send_salon_whatsapp(token_data.get('salon_id', ''), whatsapp_setting_key):
+                logger.info(
+                    f"WhatsApp suppressed by salon settings for {phone} (salon {token_data.get('salon_id')} - {whatsapp_setting_key})"
+                )
+                return
+            if not await should_send_customer_whatsapp(phone, 'whatsapp_turn_approaching'):
+                logger.info(
+                    f"WhatsApp suppressed by customer settings for {phone} (whatsapp_turn_approaching OFF)"
+                )
+                return
+            result = await send_your_turn_now_template(
+                phone_number=phone,
+                customer_name=customer_name or 'Customer',
+                salon_name=salon_name,
+                barber_name=token_data.get('barber_name') or 'your stylist',
+                token_number=token_data.get('token_number', 0),
+            )
+            logger.info(
+                f"Notification sent: your_turn_now to {phone}, status: {result.get('status')}"
+            )
+            return
         elif notification_type == 'salon_calling':
             # Triggered by the salon's "Send Notification to Customer" button on the token row.
             message = format_salon_calling(
@@ -2206,7 +2303,7 @@ async def send_booking_notification(token_data: dict, notification_type: str):
                 salon_name=salon_name,
                 barber_name=token_data.get('barber_name')
             )
-            whatsapp_setting_key = 'whatsapp_turn_approaching'
+            whatsapp_setting_key = 'whatsapp_salon_calling'
             if token_id and salon_id_for_links:
                 action_links = build_action_links(token_id, salon_id_for_links)
         elif notification_type == 'token_cancelled':
@@ -2234,14 +2331,28 @@ async def send_booking_notification(token_data: dict, notification_type: str):
                 token_number=token_data.get('token_number'),
                 reason="Skipped"
             )
-            whatsapp_setting_key = 'whatsapp_booking_status_change'
+            whatsapp_setting_key = 'whatsapp_booking_cancelled'
             if token_id and salon_id_for_links:
                 action_links = build_action_links(token_id, salon_id_for_links)
         
         if message:
-            # Check customer WhatsApp preference (default ON)
-            if whatsapp_setting_key and not await should_send_customer_whatsapp(phone, whatsapp_setting_key):
-                logger.info(f"WhatsApp notification suppressed for {phone} (setting {whatsapp_setting_key} is OFF)")
+            # Check salon-side master + per-event toggle first (Item 8).
+            if whatsapp_setting_key and not await should_send_salon_whatsapp(token_data.get('salon_id', ''), whatsapp_setting_key):
+                logger.info(
+                    f"WhatsApp suppressed by salon settings for {phone} (salon {token_data.get('salon_id')} - {whatsapp_setting_key})"
+                )
+                return
+            # Then check customer WhatsApp preference (default ON).
+            # Customer settings use the legacy 'whatsapp_booking_status_change' bucket
+            # for events not covered by their per-event toggle.
+            customer_key_map = {
+                'whatsapp_salon_calling': 'whatsapp_turn_approaching',
+                'whatsapp_booking_cancelled': 'whatsapp_booking_cancelled',
+                'whatsapp_booking_rescheduled': 'whatsapp_booking_rescheduled',
+            }
+            customer_key = customer_key_map.get(whatsapp_setting_key, whatsapp_setting_key)
+            if customer_key and not await should_send_customer_whatsapp(phone, customer_key):
+                logger.info(f"WhatsApp notification suppressed for {phone} (customer setting {customer_key} is OFF)")
                 return
             full_message = message + action_links if action_links else message
             result = await send_whatsapp_notification(phone, full_message, notification_type)
@@ -2269,6 +2380,8 @@ async def check_and_notify_nearby_tokens(salon_id: str, barber_id: str, date: st
             phone = token.get('phone')
             token_number = token.get('token_number')
 
+            # User spec (Item 8): only send WhatsApp 'token_approaching' for
+            # tokens_away of 1 or 2. In-app notifications still go for 1/2/3.
             if tokens_away not in (3, 2, 1) or not phone:
                 continue
 
@@ -2298,16 +2411,35 @@ async def check_and_notify_nearby_tokens(salon_id: str, barber_id: str, date: st
                 related_id=token.get('id', ''),
             )
 
-            if await should_send_customer_whatsapp(phone, 'whatsapp_turn_approaching'):
-                message = format_token_near(
-                    customer_name=token.get('customer_name'),
-                    user_token=token_number,
-                    tokens_away=tokens_away
-                )
-                # Reschedule / Cancel links on every queue-status ping (until booking is completed/cancelled)
-                action_links = build_action_links(token.get('id', ''), salon_id)
-                full_message = (message + action_links) if action_links else message
-                await send_whatsapp_notification(phone, full_message, f'token_{tokens_away}_away')
+            # WhatsApp 'token_approaching' template — only for 1 or 2 away.
+            if tokens_away in (1, 2):
+                salon_ok = await should_send_salon_whatsapp(salon_id, 'whatsapp_token_approaching')
+                customer_ok = await should_send_customer_whatsapp(phone, 'whatsapp_turn_approaching')
+                if salon_ok and customer_ok:
+                    # Figure out the currently-being-served token at this barber.
+                    serving_doc = await db.tokens.find_one(
+                        {
+                            "salon_id": salon_id,
+                            "barber_id": barber_id,
+                            "date": date,
+                            "status": "in_progress",
+                        },
+                        {"_id": 0, "token_number": 1},
+                    )
+                    current_serving = str(serving_doc.get("token_number")) if serving_doc else "—"
+
+                    salon_doc = await db.salons.find_one({"id": salon_id}, {"_id": 0, "name": 1})
+                    salon_name_for_msg = (salon_doc or {}).get("name") or "the salon"
+
+                    await send_token_approaching_template(
+                        phone_number=phone,
+                        customer_name=token.get('customer_name') or 'Customer',
+                        token_number=token_number,
+                        tokens_away=tokens_away,
+                        salon_name=salon_name_for_msg,
+                        barber_name=token.get('barber_name') or 'your stylist',
+                        current_serving=current_serving,
+                    )
 
             await db.tokens.update_one(
                 {"id": token.get('id')},
@@ -5753,7 +5885,7 @@ async def auth_customer_send_otp(body: CustomerSendOtpV2In):
         resp["note"] = "OTP delivery failed. Please try again."
         resp["error"] = whatsapp_result.get("error")
     else:
-        resp["note"] = "OTP sent to your WhatsApp. Please check your messages."
+        resp["note"] = "OTP sent to your mobile. Please check your messages."
     return resp
 
 
@@ -5874,6 +6006,198 @@ async def auth_customer_login_password(body: CustomerLoginPasswordIn):
     }
 
 
+# ============================================================================
+# GOOGLE LOGIN — Emergent-managed Google OAuth (Item 9).
+# ----------------------------------------------------------------------------
+# The frontend redirects to `https://auth.emergentagent.com/?redirect=<callback>`
+# After Google sign-in, the user lands at <callback>#session_id=<id>. The
+# frontend POSTs the session_id (plus an `audience`) to this endpoint. We
+# exchange it with Emergent's identity service to get the user's email/name,
+# find-or-create the corresponding user record in the per-audience collection,
+# and return the audience's existing JWT so the rest of the app keeps working
+# without any cookie / session changes.
+# ============================================================================
+
+EMERGENT_AUTH_BASE = os.environ.get(
+    "EMERGENT_AUTH_BASE",
+    "https://demobackend.emergentagent.com/auth/v1/env/oauth/session-data",
+)
+
+
+async def _exchange_emergent_session(session_id: str) -> dict:
+    """Call Emergent's auth backend to exchange a session_id for user data."""
+    if not session_id:
+        raise HTTPException(status_code=400, detail="session_id is required")
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as http:
+            res = await http.get(
+                EMERGENT_AUTH_BASE,
+                headers={"X-Session-ID": session_id},
+            )
+        if res.status_code != 200:
+            logger.warning(
+                f"[google] Emergent session exchange failed status={res.status_code} body={res.text[:200]}"
+            )
+            raise HTTPException(status_code=401, detail="Google sign-in could not be completed. Please try again.")
+        data = res.json()
+        if not data.get("email"):
+            raise HTTPException(status_code=401, detail="Google sign-in returned no email")
+        return data
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"[google] Emergent exchange error: {e}")
+        raise HTTPException(status_code=502, detail="Google sign-in service is temporarily unavailable")
+
+
+class GoogleAuthIn(BaseModel):
+    session_id: str
+    audience: str  # one of: customer | salon | platform | supplier
+
+
+@api_router.post("/auth/google")
+async def auth_google(payload: GoogleAuthIn):
+    """Unified Google sign-in for all four audiences (Item 9).
+
+    Returns the SAME shape each audience's existing login endpoint returns, so
+    the frontend stores the token in its existing auth context.
+    """
+    audience = (payload.audience or "").strip().lower()
+    if audience not in ("customer", "salon", "platform", "supplier"):
+        raise HTTPException(status_code=400, detail="audience must be customer | salon | platform | supplier")
+
+    data = await _exchange_emergent_session(payload.session_id)
+    email = (data.get("email") or "").strip().lower()
+    name = (data.get("name") or "").strip() or email.split("@")[0]
+    picture = data.get("picture")
+    google_sub = data.get("id")
+    now_iso = datetime.now(timezone.utc).isoformat()
+
+    # --- CUSTOMER ----------------------------------------------------------
+    if audience == "customer":
+        user = await db.users.find_one({"email": email}, {"_id": 0})
+        if not user:
+            user = {
+                "id": str(uuid.uuid4()),
+                "name": name,
+                "email": email,
+                "phone": None,
+                "picture": picture,
+                "google_sub": google_sub,
+                "is_otp_verified": True,
+                "auth_provider": "google",
+                "created_at": now_iso,
+            }
+            await db.users.insert_one(user)
+        else:
+            await db.users.update_one(
+                {"id": user["id"]},
+                {"$set": {
+                    "google_sub": google_sub,
+                    "picture": picture or user.get("picture"),
+                    "is_otp_verified": True,
+                    "last_login_at": now_iso,
+                }},
+            )
+            user["is_otp_verified"] = True
+        token = _issue_customer_session_token(user)
+        return {
+            "success": True,
+            "access_token": token,
+            "token_type": "bearer",
+            "user": _user_to_public(user),
+        }
+
+    # --- SALON ADMIN (multi-user) -----------------------------------------
+    if audience == "salon":
+        # Salon users authenticate via `salon_users`. Match on email; deny if
+        # this email isn't linked to any salon user.
+        salon_user = await db.salon_users.find_one({"email": email}, {"_id": 0})
+        if not salon_user:
+            raise HTTPException(
+                status_code=403,
+                detail="No salon account is linked to this Google email. Ask your salon admin to add you.",
+            )
+        await db.salon_users.update_one(
+            {"id": salon_user["id"]},
+            {"$set": {"last_login_at": now_iso, "google_sub": google_sub}},
+        )
+        # Mirror the existing salon-user login response.
+        token = create_access_token({
+            "sub": salon_user.get("salon_id"),
+            "salon_user_id": salon_user.get("id"),
+            "role": salon_user.get("role"),
+            "login_id": salon_user.get("login_id"),
+        })
+        return {
+            "access_token": token,
+            "token_type": "bearer",
+            "salon_id": salon_user.get("salon_id"),
+            "user": {
+                "id": salon_user.get("id"),
+                "name": salon_user.get("name"),
+                "email": salon_user.get("email"),
+                "role": salon_user.get("role"),
+                "assigned_branch_ids": salon_user.get("assigned_branch_ids", []),
+            },
+        }
+
+    # --- PLATFORM ADMIN ----------------------------------------------------
+    if audience == "platform":
+        admin = await db.platform_admins.find_one({"email": email, "status": "active"}, {"_id": 0})
+        if not admin:
+            raise HTTPException(
+                status_code=403,
+                detail="This Google account is not authorised as a platform admin.",
+            )
+        await db.platform_admins.update_one(
+            {"id": admin["id"]},
+            {"$set": {"last_login_at": now_iso, "google_sub": google_sub, "updated_at": now_iso}},
+        )
+        token = platform_admin_mod._make_access_token(admin)
+        return {
+            "access_token": token,
+            "token_type": "bearer",
+            "admin": {
+                "id": admin["id"],
+                "mobile": admin.get("mobile"),
+                "name": admin.get("name"),
+                "email": admin.get("email"),
+                "is_owner": bool(admin.get("is_owner")),
+            },
+        }
+
+    # --- SUPPLIER ----------------------------------------------------------
+    # audience == "supplier"
+    supplier = await db.suppliers.find_one({"email": email}, {"_id": 0})
+    if not supplier:
+        raise HTTPException(
+            status_code=403,
+            detail="No supplier account is linked to this Google email. Please sign up first.",
+        )
+    if supplier.get("status") != "active":
+        raise HTTPException(
+            status_code=403,
+            detail=f"Supplier account is {supplier.get('status', 'pending')}. Please contact support.",
+        )
+    await db.suppliers.update_one(
+        {"id": supplier["id"]},
+        {"$set": {"last_login_at": now_iso, "google_sub": google_sub}},
+    )
+    token = supplier_auth_mod._make_access_token(supplier)
+    return {
+        "access_token": token,
+        "token_type": "bearer",
+        "supplier": {
+            "id": supplier["id"],
+            "name": supplier.get("name"),
+            "email": supplier.get("email"),
+            "business_name": supplier.get("business_name"),
+            "status": supplier.get("status"),
+        },
+    }
+
+
 async def get_current_customer(
     credentials: HTTPAuthorizationCredentials = Depends(security),
 ) -> dict:
@@ -5916,7 +6240,7 @@ async def get_salon_customers(salon_id: str, branch_id: Optional[str] = None, cu
     if is_branch_manager(current_user):
         branch_id = enforce_branch_for_manager(current_user, branch_id)
     # Get unique customers from tokens
-    tokens_query = {"salon_id": salon_id}
+    tokens_query = {"salon_id": salon_id, "customer_status": {"$ne": "deleted"}}
     if branch_id:
         tokens_query["branch_id"] = branch_id
     tokens = await db.tokens.find(
@@ -5938,11 +6262,12 @@ async def get_salon_customers(salon_id: str, branch_id: Optional[str] = None, cu
                 "phone": phone,
                 "name": token.get('customer_name'),
                 "user_id": token.get('user_id'),
-                "gender": user_data.get('gender') if user_data else None
+                "gender": user_data.get('gender') if user_data else None,
+                "date_of_birth": user_data.get('date_of_birth') if user_data else None,
             }
     
     # Also include manually added customers
-    manual_query = {"salon_id": salon_id}
+    manual_query = {"salon_id": salon_id, "status": {"$ne": "deleted"}}
     if branch_id:
         manual_query["branch_id"] = branch_id
     manual_customers = await db.salon_customers.find(
@@ -5957,12 +6282,15 @@ async def get_salon_customers(salon_id: str, branch_id: Optional[str] = None, cu
                 "name": mc.get('name'),
                 "user_id": None,
                 "gender": mc.get('gender', 'Men'),
+                "date_of_birth": mc.get('date_of_birth'),
                 "source": "manual"
             }
         elif phone and phone in customers_map:
-            # Update gender if not set from booking
+            # Update gender / DOB if not already set
             if not customers_map[phone].get('gender'):
                 customers_map[phone]['gender'] = mc.get('gender', 'Men')
+            if not customers_map[phone].get('date_of_birth') and mc.get('date_of_birth'):
+                customers_map[phone]['date_of_birth'] = mc.get('date_of_birth')
     
     # Attach active wallet balance for each customer (if any active membership)
     if customers_map:
@@ -6032,6 +6360,143 @@ async def add_salon_customer(salon_id: str, body: dict, current_user=Depends(get
     customer.pop("_id", None)
     
     return {"message": "Customer added", "customer": customer}
+
+
+@api_router.put("/salons/{salon_id}/customers/{phone}")
+async def update_salon_customer(
+    salon_id: str,
+    phone: str,
+    body: dict,
+    current_user=Depends(get_current_salon_user),
+):
+    """Update a customer's master details (name, phone, gender, date_of_birth).
+
+    Item 5b — Customer Master CRUD. Identified by their current phone in URL.
+    Soft-blocks phone collisions inside the same salon. When phone changes,
+    salon_customers and downstream tokens.phone are updated together.
+    """
+    # Normalise the lookup phone
+    lookup_phone = (phone or "").strip()
+    if not lookup_phone.startswith("+91"):
+        lookup_phone = f"+91{lookup_phone}"
+
+    new_name = (body.get("name") or "").strip()
+    new_phone_raw = (body.get("phone") or "").replace(" ", "").replace("-", "").strip()
+    new_phone = new_phone_raw
+    if new_phone and not new_phone.startswith("+91"):
+        new_phone = f"+91{new_phone}"
+    new_gender = body.get("gender")
+    new_dob = body.get("date_of_birth")
+
+    updates = {}
+    if new_name:
+        updates["name"] = new_name
+    if new_gender:
+        updates["gender"] = new_gender
+    if new_dob is not None:
+        updates["date_of_birth"] = new_dob
+
+    # If phone is being changed, validate no collision
+    phone_changed = bool(new_phone) and new_phone != lookup_phone
+    if phone_changed:
+        collision = await db.salon_customers.find_one({
+            "salon_id": salon_id,
+            "phone": new_phone,
+            "status": {"$ne": "deleted"},
+        })
+        if collision:
+            raise HTTPException(status_code=409, detail="Another customer in this salon already uses that phone.")
+        updates["phone"] = new_phone
+
+    if not updates:
+        raise HTTPException(status_code=400, detail="Nothing to update")
+
+    updates["updated_at"] = datetime.now(timezone.utc).isoformat()
+
+    # Update or upsert the salon_customers master row
+    existing = await db.salon_customers.find_one({"salon_id": salon_id, "phone": lookup_phone})
+    if existing:
+        await db.salon_customers.update_one(
+            {"id": existing["id"]},
+            {"$set": updates},
+        )
+    else:
+        # The phone might only exist on tokens — create a master row so future edits work.
+        await db.salon_customers.insert_one({
+            "id": str(uuid.uuid4()),
+            "salon_id": salon_id,
+            "branch_id": await resolve_branch_id(salon_id, None),
+            "name": new_name or "Customer",
+            "phone": new_phone or lookup_phone,
+            "gender": new_gender or "Men",
+            "date_of_birth": new_dob,
+            "created_at": updates["updated_at"],
+            "updated_at": updates["updated_at"],
+            "source": "edited",
+        })
+
+    # Mirror phone changes onto existing tokens of this salon
+    if phone_changed:
+        await db.tokens.update_many(
+            {"salon_id": salon_id, "phone": lookup_phone},
+            {"$set": {"phone": new_phone}},
+        )
+
+    # Mirror name changes onto recent tokens (snapshot) when the customer renames
+    if new_name:
+        await db.tokens.update_many(
+            {"salon_id": salon_id, "phone": new_phone or lookup_phone},
+            {"$set": {"customer_name": new_name}},
+        )
+
+    return {
+        "message": "Customer updated",
+        "customer": {
+            "phone": new_phone or lookup_phone,
+            "name": new_name or (existing.get("name") if existing else None),
+            "gender": new_gender or (existing.get("gender") if existing else None),
+            "date_of_birth": new_dob if new_dob is not None else (existing.get("date_of_birth") if existing else None),
+        },
+    }
+
+
+@api_router.delete("/salons/{salon_id}/customers/{phone}")
+async def delete_salon_customer(
+    salon_id: str,
+    phone: str,
+    current_user=Depends(get_current_salon_user),
+):
+    """Soft-delete a customer from the salon master (Item 5a).
+
+    Marks status='deleted' on salon_customers AND tags tokens with
+    customer_status='deleted' so the customer list query can exclude them.
+    The booking history rows themselves are preserved.
+    """
+    role = (current_user.get("role") or "").lower()
+    if role not in ("admin", "salon_admin", "salon"):
+        raise HTTPException(status_code=403, detail="Only salon admins can delete customers")
+
+    lookup_phone = (phone or "").strip()
+    if not lookup_phone.startswith("+91"):
+        lookup_phone = f"+91{lookup_phone}"
+
+    now_iso = datetime.now(timezone.utc).isoformat()
+    res = await db.salon_customers.update_many(
+        {"salon_id": salon_id, "phone": lookup_phone},
+        {"$set": {"status": "deleted", "deleted_at": now_iso}},
+    )
+
+    # Even if no master row exists, mark all booking tokens so listing hides them.
+    await db.tokens.update_many(
+        {"salon_id": salon_id, "phone": lookup_phone},
+        {"$set": {"customer_status": "deleted"}},
+    )
+
+    if res.matched_count == 0:
+        # Customer only existed via tokens; the tokens-update above is enough.
+        return {"message": "Customer removed from master (booking history preserved)"}
+
+    return {"message": "Customer deleted"}
 
 
 # ============================================================================
@@ -8434,6 +8899,62 @@ async def complete_token(token_id: str, current_salon=Depends(get_current_salon)
         {"$set": {"status": "completed", "completed_at": datetime.now(timezone.utc).isoformat()}}
     )
 
+    # --- Auto-attendance (service_completion mode) ---------------------------
+    # When the salon's attendance mode is "service_completion", marking a token
+    # complete should also mark the barber present for that IST day (unless an
+    # admin override already exists or the month is locked). This is the
+    # behaviour the UI advertises in the "By service completion" radio option.
+    try:
+        barber_id = token.get("barber_id")
+        salon_id_for_attn = token.get("salon_id")
+        if barber_id and salon_id_for_attn:
+            salon_doc = await db.salons.find_one(
+                {"id": salon_id_for_attn},
+                {"_id": 0, "attendance_mode": 1},
+            ) or {}
+            mode_now = salon_doc.get("attendance_mode") or "service_completion"
+            if mode_now == "service_completion":
+                # IST date of the booking (use the booking's own date when set,
+                # else "today" in IST). This matches what calculate_daily_attendance
+                # would compute.
+                ist_today = attendance_mode_mod.current_ist_date()
+                date_str = token.get("date") or ist_today
+                locked = await attendance_mode_mod.is_attendance_locked(
+                    db, salon_id_for_attn, barber_id, date_str
+                )
+                if not locked:
+                    record_id = f"{salon_id_for_attn}_{barber_id}_{date_str}"
+                    existing_override = await db.attendance.find_one({
+                        "id": record_id,
+                        "auto_calculated": False,
+                    }, {"_id": 0})
+                    if not existing_override:
+                        calc = await calculate_barber_attendance_for_date(
+                            salon_id_for_attn, barber_id, date_str
+                        )
+                        now_iso = datetime.now(timezone.utc).isoformat()
+                        await db.attendance.update_one(
+                            {"id": record_id},
+                            {"$set": {
+                                "id": record_id,
+                                "salon_id": salon_id_for_attn,
+                                "barber_id": barber_id,
+                                "date": date_str,
+                                "status": calc["status"],
+                                "auto_calculated": True,
+                                "morning_shift_completed": calc.get("morning_shift_completed", False),
+                                "noon_evening_shift_completed": calc.get("noon_evening_shift_completed", False),
+                                "bookings_count": calc.get("bookings_count", 0),
+                                "computed_under_mode": calc.get("computed_under_mode"),
+                                "updated_at": now_iso,
+                            },
+                             "$setOnInsert": {"created_at": now_iso}},
+                            upsert=True,
+                        )
+    except Exception as auto_attn_err:
+        # Auto-attendance must never block completing the booking. Log + continue.
+        logger.warning(f"Auto-attendance upsert failed for token {token_id}: {auto_attn_err}")
+
     # Notify customer of status change (in-app)
     if token.get("phone"):
         await create_in_app_notification(
@@ -8445,6 +8966,11 @@ async def complete_token(token_id: str, current_salon=Depends(get_current_salon)
             setting_key="booking_status_change",
             salon_id=token.get("salon_id", ""),
             related_id=token_id,
+        )
+        # Send approved WhatsApp 'booking_completed' template (Item 8).
+        await send_booking_notification(
+            {**token, "status": "completed", "completed_at": datetime.now(timezone.utc).isoformat()},
+            'booking_completed',
         )
     
     # Check and apply loyalty reward (only for non-wallet payments)
@@ -9992,7 +10518,7 @@ async def download_financial_report_csv(
             try:
                 dt = datetime.fromisoformat(created_at.replace('Z', '+00:00'))
                 time_str = dt.strftime("%H:%M:%S")
-            except:
+            except (ValueError, AttributeError):
                 time_str = ""
         
         writer.writerow([
@@ -12052,13 +12578,14 @@ async def calculate_barber_attendance_for_date(salon_id: str, barber_id: str, da
         }
 
     # ---- Mode A — service_completion (existing logic, unchanged) -------------
-    start_of_day = f"{date_str}T00:00:00"
-    end_of_day = f"{date_str}T23:59:59"
+    # Match by the booking's IST `date` field directly — comparing the UTC
+    # `completed_at` ISO-string against an IST-boundary range fails on
+    # early-morning IST completions where UTC is still on the previous day.
     completed_bookings = await db.tokens.find({
         "salon_id": salon_id,
         "barber_id": barber_id,
         "status": "completed",
-        "completed_at": {"$gte": start_of_day, "$lte": end_of_day}
+        "date": date_str,
     }, {"_id": 0, "shift": 1, "token_number": 1}).to_list(100)
 
     bookings_count = len(completed_bookings)
@@ -12098,7 +12625,7 @@ async def get_monthly_attendance(
     try:
         year, mon = month.split("-")
         year, mon = int(year), int(mon)
-    except:
+    except (ValueError, AttributeError):
         raise HTTPException(status_code=400, detail="Invalid month format. Use YYYY-MM")
     
     # Get all barbers for this salon if no specific barber requested
@@ -12283,6 +12810,8 @@ async def override_attendance(
                 "status": body.status,
                 "auto_calculated": False,
                 "override_by": current_user.get("id"),
+                "marked_by_role": current_user.get("role"),
+                "marked_by_name": current_user.get("name") or current_user.get("identifier"),
                 "override_note": body.note,
                 "updated_at": now
             }}
@@ -12300,6 +12829,8 @@ async def override_attendance(
             "noon_evening_shift_completed": False,
             "bookings_count": 0,
             "override_by": current_user.get("id"),
+            "marked_by_role": current_user.get("role"),
+            "marked_by_name": current_user.get("name") or current_user.get("identifier"),
             "override_note": body.note,
             "created_at": now,
             "updated_at": now
@@ -12631,6 +13162,23 @@ async def staff_attendance_report(
             else:
                 status_code = ""
                 leave_label = None
+            # Item 2 — Marked By label: "Auto" (auto_calculated true), "Admin"
+            # (admin/salon role override), "Staff" (any other override role), "—" if blank.
+            mb_role = (att.get("marked_by_role") or "").lower()
+            mb_name = att.get("marked_by_name")
+            if not att:
+                marked_by_label = "—"
+            elif att.get("auto_calculated") is True:
+                marked_by_label = "Auto"
+            elif mb_role in ("admin", "salon_admin", "salon"):
+                marked_by_label = "Admin"
+            elif mb_role:
+                marked_by_label = "Staff"
+            elif att.get("override_by"):
+                marked_by_label = "Staff"
+            else:
+                marked_by_label = "—"
+
             rows.append({
                 "branch": branches_map.get(b.get("branch_id"), "—"),
                 "branch_id": b.get("branch_id"),
@@ -12646,24 +13194,28 @@ async def staff_attendance_report(
                 "override_by": att.get("override_by"),
                 "override_note": att.get("override_note"),
                 "mode": att.get("computed_under_mode"),
+                "marked_by_label": marked_by_label,
+                "marked_by_name": mb_name,
             })
         cur += one_day
 
     if format.lower() == "csv":
-        import io, csv
+        import io
+        import csv
         output = io.StringIO()
         writer = csv.writer(output)
         writer.writerow([
             "Branch", "Date", "Staff ID", "Staff Name", "Status",
             "Leave Type", "Check-in", "Check-out", "Worked (min)",
-            "Half-day Reason", "Override By", "Override Note", "Mode",
+            "Half-day Reason", "Marked By", "Marked By Name", "Override Note", "Mode",
         ])
         for r in rows:
             writer.writerow([
                 r["branch"], r["date"], r["staff_id"], r["staff_name"], r["status"],
                 r["leave_type"] or "", r["check_in"] or "", r["check_out"] or "",
                 r["worked_minutes"] if r["worked_minutes"] is not None else "",
-                r["half_day_reason"] or "", r["override_by"] or "", r["override_note"] or "",
+                r["half_day_reason"] or "", r.get("marked_by_label") or "—",
+                r.get("marked_by_name") or "", r["override_note"] or "",
                 r["mode"] or "",
             ])
         output.seek(0)
@@ -12820,10 +13372,17 @@ async def get_monthly_salary(
             else:
                 unpaid_leave_days += qty
 
-        # ---- Salary math ----
+        # ---- Salary math (prorated to actual attendance) ----
         base_compensation = float(barber.get("compensation") or 0)
         per_day_rate = base_compensation / working_days_in_month if working_days_in_month > 0 else 0
-        lop_deduction = round(per_day_rate * unpaid_leave_days, 2)
+        lop_deduction = round(per_day_rate * unpaid_leave_days, 2)  # informational
+
+        # Days the staff "earned" pay for. Policy:
+        #   present_days + half_days * 0.5 + paid_leave_days
+        # (weekly offs and holidays are excluded from working_days_in_month, so
+        #  per_day_rate already accounts for them being paid implicitly.)
+        earned_days = max(0.0, present_days + (half_days * 0.5) + paid_leave_days)
+        earned_salary = round(per_day_rate * earned_days, 2)
 
         # Legacy "calculated_salary" — keep computing the way it used to so
         # existing readers don't regress.  Effective working days = present + 0.5*half.
@@ -12841,8 +13400,12 @@ async def get_monthly_salary(
         }, {"_id": 0, "incentive_earned": 1})
         incentive_amount = float(incentive.get("incentive_earned", 0)) if incentive else 0.0
 
-        # ---- New canonical total (Module 4): base − LoP + incentive ----
-        final_payable = round(max(0.0, base_compensation - lop_deduction) + incentive_amount, 2)
+        # ---- Canonical total: prorated earnings + incentive ----
+        # Previously this was `base − lop_deduction` which only deducted unpaid
+        # leave; absent days were silently paid. Now it scales linearly with
+        # earned_days so 10 present days in a 26-working-day month pays
+        # base × 10/26 + incentive.
+        final_payable = round(earned_salary + incentive_amount, 2)
         total_payable = final_payable  # keep total_payable in lock-step with final_payable
 
         attendance_mode_snapshot = salon.get("attendance_mode") or "service_completion"
@@ -12997,7 +13560,7 @@ async def check_salon_holiday(salon_id: str, date: str):
                     "reason": f"Closed on {weekday.capitalize()}s",
                     "type": "weekly_off"
                 }
-        except:
+        except (ValueError, AttributeError, KeyError):
             pass
     
     return {

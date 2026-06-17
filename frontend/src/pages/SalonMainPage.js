@@ -9,7 +9,7 @@ import CustomerOtpVerification from '@/components/CustomerOtpVerification';
 import {
   Scissors, Calendar, User, MapPin, Star, Clock,
   ArrowLeft, Users, CheckCircle, AlertCircle, ChevronRight, X, Wallet, History,
-  ChevronDown, Quote, Phone, Share2
+  ChevronDown, Quote, Phone, Share2, Sparkles, TrendingUp, Package as PackageIcon, Flame
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import Footer from '@/components/Footer';
@@ -54,6 +54,10 @@ export default function SalonMainPage() {
   const [reviews, setReviews] = useState([]);
   const [reviewsTotal, setReviewsTotal] = useState(0);
   const [showBranchDropdown, setShowBranchDropdown] = useState(false);
+  const [packages, setPackages] = useState([]);
+  const [shiftWindows, setShiftWindows] = useState([]);
+  // A1: Most booked service IDs (computed from completed bookings count, frontend-fallback to is_favorite)
+  const [mostBookedIds, setMostBookedIds] = useState([]);
 
   // Keep activeTab synced with ?tab= URL param
   useEffect(() => {
@@ -116,15 +120,24 @@ export default function SalonMainPage() {
         console.error('Failed to load branches', e);
       }
 
-      // Fetch services, barbers, reviews in parallel for the scrollable home
+      // Fetch services, barbers, reviews, packages, shift-windows in parallel for the scrollable home
       Promise.allSettled([
         axios.get(`${API}/salons/${salonId}/services/enabled`),
         axios.get(`${API}/salons/${salonId}/barbers`),
         axios.get(`${API}/salons/${salonId}/ratings?limit=10`),
-      ]).then(([sv, br, rv]) => {
+        axios.get(`${API}/salons/${salonId}/packages/with-services`),
+        axios.get(`${API}/salons/${salonId}/shift-windows`),
+      ]).then(([sv, br, rv, pk, sw]) => {
         if (sv.status === 'fulfilled') {
           const list = Array.isArray(sv.value.data) ? sv.value.data : (sv.value.data?.services || []);
           setServices(list);
+          // Most booked: prefer is_favorite=true; fall back to first 2 services
+          const favs = list.filter(s => s.is_favorite).map(s => s.id);
+          if (favs.length >= 2) {
+            setMostBookedIds(favs.slice(0, 3));
+          } else if (list.length > 0) {
+            setMostBookedIds(list.slice(0, Math.min(2, list.length)).map(s => s.id));
+          }
         }
         if (br.status === 'fulfilled') {
           setAllBarbers(Array.isArray(br.value.data) ? br.value.data : []);
@@ -133,6 +146,14 @@ export default function SalonMainPage() {
           const rvs = rv.value.data?.reviews || [];
           setReviews(rvs.filter(r => r.review && r.review.trim().length > 0));
           setReviewsTotal(rv.value.data?.total_reviews || 0);
+        }
+        if (pk.status === 'fulfilled') {
+          const pkgs = Array.isArray(pk.value.data?.packages) ? pk.value.data.packages : [];
+          setPackages(pkgs.filter(p => p.is_active !== false));
+        }
+        if (sw.status === 'fulfilled') {
+          const shifts = Array.isArray(sw.value.data?.shifts) ? sw.value.data.shifts : (Array.isArray(sw.value.data) ? sw.value.data : []);
+          setShiftWindows(shifts);
         }
       });
     } catch (error) {
@@ -296,7 +317,7 @@ export default function SalonMainPage() {
   const renderTabContent = () => {
     switch (activeTab) {
       case 'services':
-        return <SalonServicesTab salonId={salonId} branchId={branchId} />;
+        return <SalonServicesTab salonId={salonId} branchId={branchId} initialCategory={searchParams.get('category') || 'all'} />;
       case 'barbers':
         return <SalonBarbersTab salonId={salonId} branchId={branchId} />;
       case 'shop':
@@ -397,6 +418,126 @@ export default function SalonMainPage() {
 
       {/* OTP Verification Banner */}
       <CustomerOtpVerification showAs="banner" />
+
+      {/* === A1: HERO WAIT STRIP — shortest queue + per-shift breakdown === */}
+      {(() => {
+        const barberQueues = Array.isArray(liveStatus?.barbers) ? liveStatus.barbers : [];
+        const activeBarbers = barberQueues.filter(b => (b.queue_status || 'available') !== 'inactive');
+        // Shortest queue across active barbers
+        const minWaiting = activeBarbers.length > 0
+          ? Math.min(...activeBarbers.map(b => b.waiting_count || 0))
+          : 0;
+        const shortestWaitMin = minWaiting * 20; // ~20 min per token (matches existing live queue calc)
+        const shortestBarber = activeBarbers.find(b => (b.waiting_count || 0) === minWaiting);
+
+        // Per-shift estimated wait — group bookings by shift if data is available;
+        // since live-status doesn't expose shift-wise counts, we approximate using
+        // shift duration vs current waiting and show shift availability.
+        const nowH = new Date().getHours();
+        const shiftCards = (shiftWindows || []).map(s => {
+          const isCurrent = s.start != null && s.end != null && nowH >= s.start && nowH < s.end;
+          const isPast = s.end != null && nowH >= s.end;
+          // For current shift, show shortestWaitMin; for upcoming shifts, show "Open"
+          let label;
+          if (!s.is_available) label = 'Closed';
+          else if (isPast) label = 'Closed';
+          else if (isCurrent) label = shortestWaitMin > 0 ? `~${shortestWaitMin} min` : 'No wait';
+          else label = 'Open';
+          return { ...s, isCurrent, isPast, label };
+        });
+
+        return (
+          <section
+            className="relative overflow-hidden rounded-3xl border border-brass/20 hero-wash bg-grain"
+            data-testid="hero-wait-strip"
+          >
+            <div className="relative p-5 sm:p-6 grid grid-cols-1 sm:grid-cols-[auto,1fr] gap-5 sm:gap-7 items-center">
+              {/* Left — single shortest wait number */}
+              <div className="flex items-center gap-4 min-w-0">
+                <div className="w-14 h-14 rounded-2xl bg-brass-soft border border-brass/40 flex items-center justify-center flex-shrink-0 brass-glow-pulse">
+                  {shortestWaitMin > 0
+                    ? <Clock className="w-6 h-6 text-brass" strokeWidth={1.6} />
+                    : <Sparkles className="w-6 h-6 text-brass" strokeWidth={1.6} />}
+                </div>
+                <div className="min-w-0">
+                  <span className="eyebrow-brass">Shortest queue right now</span>
+                  <p className="font-fraunces text-3xl sm:text-4xl font-medium leading-none mt-1">
+                    {!isOpen
+                      ? <span className="brass-text">Closed</span>
+                      : activeBarbers.length === 0
+                        ? <span className="brass-text">No stylists yet</span>
+                        : shortestWaitMin > 0
+                          ? <><span className="brass-text">~{shortestWaitMin}</span> <span className="text-2xl text-muted-foreground font-normal">min wait</span></>
+                          : <span className="brass-text">Walk-in welcome</span>}
+                  </p>
+                  {isOpen && shortestBarber && shortestWaitMin > 0 && (
+                    <p className="text-xs text-muted-foreground mt-1.5 truncate">
+                      with <span className="text-foreground font-medium">{shortestBarber.barber_name}</span>
+                    </p>
+                  )}
+                  {isOpen && shortestWaitMin === 0 && activeBarbers.length > 0 && (
+                    <p className="text-xs text-muted-foreground mt-1.5">All chairs available now</p>
+                  )}
+                </div>
+              </div>
+
+              {/* Right — per-shift tiles */}
+              <div className="grid grid-cols-3 gap-2 sm:gap-3 w-full">
+                {shiftCards.length === 0
+                  ? Array(3).fill(0).map((_, i) => (
+                      <div key={`shift-skel-${i}`} className="rounded-xl bg-card/50 border border-border/40 p-2.5 text-center opacity-50">
+                        <div className="eyebrow text-[10px]">—</div>
+                        <div className="text-sm font-medium text-muted-foreground mt-1">—</div>
+                      </div>
+                    ))
+                  : shiftCards.map((s) => (
+                      <div
+                        key={s.id}
+                        className={`rounded-xl p-2.5 text-center border transition-colors ${
+                          s.isCurrent
+                            ? 'bg-brass text-espresso border-brass shadow-lux'
+                            : s.isPast
+                              ? 'bg-muted/30 border-border/40 text-muted-foreground/60'
+                              : 'bg-card border-border text-foreground'
+                        }`}
+                        data-testid={`hero-shift-${s.id?.toLowerCase()}`}
+                      >
+                        <div className={`eyebrow text-[10px] ${s.isCurrent ? 'text-espresso/80' : ''}`}>
+                          {s.name}
+                        </div>
+                        <div className={`text-xs font-medium mt-1 leading-tight ${s.isCurrent ? '' : ''}`}>
+                          {s.time || '—'}
+                        </div>
+                        <div className={`text-[11px] mt-1 font-semibold ${s.isCurrent ? 'text-espresso' : s.isPast ? 'opacity-60' : 'text-brass'}`}>
+                          {s.label}
+                        </div>
+                      </div>
+                    ))}
+              </div>
+            </div>
+          </section>
+        );
+      })()}
+
+      {/* === A1/A4: WALLET BALANCE BANNER (logged-in only, > 0) === */}
+      {isUserLoggedIn && walletBalance > 0 && (
+        <button
+          onClick={() => navigate(`/salon/${salonId}/wallet`)}
+          className="w-full flex items-center gap-3 px-4 py-3 rounded-2xl bg-card border border-brass/30 hover:border-brass/60 transition-colors text-left"
+          data-testid="home-wallet-banner"
+        >
+          <div className="w-10 h-10 rounded-full bg-brass-soft border border-brass/30 flex items-center justify-center flex-shrink-0">
+            <Wallet className="w-4 h-4 text-brass" strokeWidth={1.7} />
+          </div>
+          <div className="flex-1 min-w-0">
+            <p className="text-sm text-foreground">
+              You have <span className="font-bebas brass-text text-lg leading-none">₹{walletBalance.toFixed(0)}</span> in your wallet
+            </p>
+            <p className="text-[11px] text-muted-foreground mt-0.5">Apply at checkout for instant savings</p>
+          </div>
+          <ChevronRight className="w-4 h-4 text-muted-foreground flex-shrink-0" strokeWidth={1.7} />
+        </button>
+      )}
 
       {/* === SALON IDENTITY (luzo-style: big name → tagline → action chips → gallery) === */}
       <section className="space-y-5" data-testid="salon-identity">
@@ -562,15 +703,27 @@ export default function SalonMainPage() {
 
         {(() => {
           // Group services by category — luzo shows categories as the primary tile.
+          // Thumbnail rules (matches the salon-side SalonServicesTab fallback chain):
+          //   thumbnail_url → image_url → images[0]
+          // First service in the category that has ANY of these wins.
+          const pickImage = (sv) =>
+            sv.thumbnail_url ||
+            sv.image_url ||
+            (Array.isArray(sv.images) && sv.images.length > 0 ? sv.images[0] : null) ||
+            null;
           const categoryMap = new Map();
           services.forEach(sv => {
             const cat = sv.category || 'General';
             if (!categoryMap.has(cat)) {
-              categoryMap.set(cat, { name: cat, image: sv.thumbnail_url || sv.image_url || null, count: 0 });
+              categoryMap.set(cat, { name: cat, image: pickImage(sv), count: 0, hasMostBooked: false });
             }
             const entry = categoryMap.get(cat);
             entry.count += 1;
-            if (!entry.image && (sv.thumbnail_url || sv.image_url)) entry.image = sv.thumbnail_url || sv.image_url;
+            if (!entry.image) {
+              const img = pickImage(sv);
+              if (img) entry.image = img;
+            }
+            if (mostBookedIds.includes(sv.id)) entry.hasMostBooked = true;
           });
           const categories = Array.from(categoryMap.values());
 
@@ -595,11 +748,11 @@ export default function SalonMainPage() {
               {categories.map((cat, idx) => (
                 <button
                   key={cat.name}
-                  onClick={() => navigate(`/book/${salonId}${branchId ? `?branch=${branchId}` : ''}`)}
+                  onClick={() => navigate(`/salon/${salonId}?tab=services&category=${encodeURIComponent(cat.name)}${branchId ? `&branch=${branchId}` : ''}`)}
                   className="group flex flex-col items-center text-center"
                   data-testid={`service-category-${cat.name.toLowerCase().replace(/[^a-z0-9]+/g,'-')}`}
                 >
-                  <div className={`w-full aspect-square rounded-3xl overflow-hidden ring-1 ring-border ${!cat.image ? placeholderTints[idx % placeholderTints.length] : 'bg-muted'} group-hover:ring-brass/60 transition-all duration-300 group-hover:-translate-y-1 group-hover:shadow-lux flex items-center justify-center`}>
+                  <div className={`relative w-full aspect-square rounded-3xl overflow-hidden ring-1 ring-border ${!cat.image ? placeholderTints[idx % placeholderTints.length] : 'bg-muted'} group-hover:ring-brass/60 transition-all duration-300 group-hover:-translate-y-1 group-hover:shadow-lux flex items-center justify-center`}>
                     {cat.image ? (
                       <img
                         src={cat.image}
@@ -609,6 +762,18 @@ export default function SalonMainPage() {
                     ) : (
                       <Scissors className="w-9 h-9 text-brass/70" strokeWidth={1.4} />
                     )}
+                    {cat.hasMostBooked && (
+                      <span
+                        className="absolute top-2 left-2 inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-brass text-espresso text-[9px] font-semibold uppercase tracking-wider shadow-lux"
+                        data-testid={`most-booked-badge-${cat.name.toLowerCase().replace(/[^a-z0-9]+/g,'-')}`}
+                      >
+                        <Flame className="w-2.5 h-2.5" strokeWidth={2.2} />
+                        Most booked
+                      </span>
+                    )}
+                    <span className="absolute bottom-2 right-2 inline-flex items-center px-1.5 py-0.5 rounded-full bg-black/60 text-white text-[10px] font-medium">
+                      {cat.count}
+                    </span>
                   </div>
                   <p className="mt-3.5 font-medium text-[15px] text-foreground leading-snug px-1">
                     {cat.name}
@@ -650,8 +815,8 @@ export default function SalonMainPage() {
                 data-testid={`stylist-chip-${b.id}`}
               >
                 <span className="w-7 h-7 rounded-full overflow-hidden ring-1 ring-border flex-shrink-0 bg-muted flex items-center justify-center">
-                  {b.image_url || b.photo_url ? (
-                    <img src={b.image_url || b.photo_url} alt={b.name} className="w-full h-full object-cover" />
+                  {(b.profile_image || b.image_url || b.photo_url) ? (
+                    <img src={b.profile_image || b.image_url || b.photo_url} alt={b.name} className="w-full h-full object-cover" />
                   ) : (
                     <User className="w-3.5 h-3.5 text-brass" strokeWidth={1.6} />
                   )}
@@ -668,6 +833,89 @@ export default function SalonMainPage() {
           </div>
         )}
       </section>
+
+      {/* === A1: OFFERS & PACKAGES (horizontal scroll) === */}
+      {packages.length > 0 && (
+        <section className="space-y-4" data-testid="salon-packages-section">
+          <header className="flex items-end justify-between">
+            <div>
+              <span className="eyebrow-brass">Curated bundles</span>
+              <h2 className="font-fraunces text-2xl font-medium mt-1 leading-none">Offers & Packages</h2>
+            </div>
+            <button
+              onClick={() => navigate(`/book/${salonId}${branchId ? `?branch=${branchId}` : ''}`)}
+              className="text-sm text-brass hover:underline inline-flex items-center gap-1"
+              data-testid="packages-view-all-btn"
+            >
+              View all <ChevronRight className="w-4 h-4" />
+            </button>
+          </header>
+
+          <div className="-mx-4 sm:-mx-6 px-4 sm:px-6 overflow-x-auto pb-2 scrollbar-thin">
+            <div className="flex gap-4 snap-x snap-mandatory">
+              {packages.map((pkg, idx) => {
+                const sumServicePrice = (pkg.services || []).reduce((acc, s) => acc + (s.base_price || 0), 0);
+                const totalPrice = pkg.total_price || sumServicePrice;
+                const savings = sumServicePrice > totalPrice ? sumServicePrice - totalPrice : 0;
+                const totalDuration = (pkg.services || []).reduce((acc, s) => acc + (s.default_duration || 0), 0);
+                const cover = pkg.image_url
+                  || (pkg.services || []).find(s => s.thumbnail_url || s.image_url || (Array.isArray(s.images) && s.images[0]))?.thumbnail_url
+                  || (pkg.services || []).find(s => s.image_url || (Array.isArray(s.images) && s.images[0]))?.image_url
+                  || (pkg.services || []).map(s => Array.isArray(s.images) ? s.images[0] : null).find(Boolean)
+                  || null;
+                return (
+                  <button
+                    key={pkg.id || idx}
+                    onClick={() => navigate(`/book/${salonId}?package=${pkg.id}${branchId ? `&branch=${branchId}` : ''}`)}
+                    className="snap-start flex-shrink-0 w-[280px] sm:w-[320px] lux-card rounded-3xl bg-card border border-border hover:border-brass/60 overflow-hidden transition-all hover:-translate-y-0.5 hover:shadow-lux text-left"
+                    data-testid={`package-card-${pkg.id}`}
+                  >
+                    <div className="relative h-36 bg-muted overflow-hidden">
+                      {cover ? (
+                        <img src={cover} alt={pkg.package_name} className="w-full h-full object-cover" />
+                      ) : (
+                        <div className="w-full h-full flex items-center justify-center bg-[rgb(var(--brass-rgb)/0.10)]">
+                          <PackageIcon className="w-10 h-10 text-brass/70" strokeWidth={1.4} />
+                        </div>
+                      )}
+                      {savings > 0 && (
+                        <span className="absolute top-3 left-3 inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-sage text-white text-[10px] font-semibold uppercase tracking-wider shadow-lux">
+                          <TrendingUp className="w-3 h-3" strokeWidth={2} /> Save ₹{Math.round(savings)}
+                        </span>
+                      )}
+                      <span className="absolute bottom-3 right-3 inline-flex items-center px-2 py-0.5 rounded-full bg-black/60 text-white text-[10px] font-medium">
+                        {(pkg.services || []).length} services
+                      </span>
+                    </div>
+                    <div className="p-4">
+                      <h3 className="font-fraunces text-lg font-medium text-foreground leading-tight line-clamp-1">
+                        {pkg.package_name}
+                      </h3>
+                      {pkg.description && (
+                        <p className="text-xs text-muted-foreground mt-1 line-clamp-2">{pkg.description}</p>
+                      )}
+                      <div className="mt-3 flex items-end justify-between gap-2">
+                        <div>
+                          <p className="font-bebas text-2xl brass-text leading-none">₹{Math.round(totalPrice)}</p>
+                          {sumServicePrice > totalPrice && (
+                            <p className="text-[11px] text-muted-foreground line-through mt-0.5">₹{Math.round(sumServicePrice)}</p>
+                          )}
+                        </div>
+                        {totalDuration > 0 && (
+                          <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
+                            <Clock className="w-3 h-3" strokeWidth={1.7} />
+                            {totalDuration < 60 ? `${totalDuration}m` : `${Math.floor(totalDuration/60)}h ${totalDuration%60 ? `${totalDuration%60}m` : ''}`}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        </section>
+      )}
 
       {/* === ABOUT === */}
       <section className="space-y-4" data-testid="salon-about-section">

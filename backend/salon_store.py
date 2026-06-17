@@ -1034,7 +1034,8 @@ async def supplier_confirm_order(order_id: str, supplier=Depends(_supplier_auth)
     primarily useful for explicit acknowledgement and to push a status_history
     entry. For COD orders nothing changes either.
     """
-    doc = await _supplier_transition(order_id, supplier, ["confirmed"], "confirmed", "Acknowledged by supplier")
+    # Validates ownership / state transition and raises 4xx on failure.
+    await _supplier_transition(order_id, supplier, ["confirmed"], "confirmed", "Acknowledged by supplier")
     await _db.salon_orders.update_one(
         {"id": order_id},
         {"$set": {"updated_at": _now_iso()},

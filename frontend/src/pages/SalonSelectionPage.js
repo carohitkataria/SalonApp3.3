@@ -167,7 +167,7 @@ export default function SalonSelectionPage() {
       // Use a timeout to prevent long waits for location
       const timeoutId = setTimeout(() => {
         // If location takes too long, just keep showing all salons
-        console.log('Location request timed out, showing all salons');
+        // Location request timed out — fall through to showing all salons.
       }, 5000);
 
       navigator.geolocation.getCurrentPosition(

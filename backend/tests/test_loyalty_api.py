@@ -5,12 +5,12 @@ import pytest
 import requests
 import os
 
-BASE_URL = os.environ.get('REACT_APP_BACKEND_URL', 'https://leave-manager-120.preview.emergentagent.com').rstrip('/')
+BASE_URL = os.environ.get('REACT_APP_BACKEND_URL', 'https://twilio-messaging-2.preview.emergentagent.com').rstrip('/')
 
-# Test salon credentials
-TEST_PHONE = "7503070727"
-TEST_PASSWORD = "salon123"
-SALON_ID = "a9b1b6e7-482c-4dc0-904a-9fa50cc283d3"
+# Test salon credentials (override via env in CI)
+TEST_PHONE = os.environ.get("TEST_SALON_PHONE", "7503070727")
+TEST_PASSWORD = os.environ.get("TEST_SALON_PASSWORD", "salon123")
+SALON_ID = os.environ.get("TEST_SALON_ID", "a9b1b6e7-482c-4dc0-904a-9fa50cc283d3")
 
 
 class TestLoyaltyProgramAPI:

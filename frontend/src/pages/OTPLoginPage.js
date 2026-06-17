@@ -9,6 +9,7 @@ import { toast } from 'sonner';
 import { Scissors, Lock, Smartphone, Eye, EyeOff } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { saveSession, getSession, isSessionValid, clearSession } from '@/utils/sessionManager';
+import GoogleLoginButton from '@/components/GoogleLoginButton';
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
 const API = `${BACKEND_URL}/api`;
@@ -63,29 +64,23 @@ export default function OTPLoginPage() {
 
   const handlePasswordLogin = async (e) => {
     e.preventDefault();
-    console.log('[LOGIN] Password login handler triggered', { phone, password: '***' });
-    
+
     if (!phone) {
-      console.log('[LOGIN] Validation failed: No phone');
       toast.error('Please enter your Mobile Number or Login ID');
       return;
     }
 
     if (!password) {
-      console.log('[LOGIN] Validation failed: No password');
       toast.error('Please enter your password');
       return;
     }
 
-    console.log('[LOGIN] Validation passed, calling API...');
     setLoading(true);
     try {
-      console.log('[LOGIN] Sending request to:', `${API}/salon/users/login`);
       const response = await axios.post(`${API}/salon/users/login`, {
         identifier: phone,  // Can be mobile number or login_id
         password
       });
-      console.log('[LOGIN] API response received:', response.status);
 
       // SECURITY: Purge any stale auth data from previous session before storing new
       purgeAllSalonAuthData();
@@ -115,11 +110,9 @@ export default function OTPLoginPage() {
       // Notify AuthContext to re-read localStorage so dashboard updates immediately
       broadcastAuthChange();
 
-      console.log('[LOGIN] Navigating to dashboard...');
       toast.success('Login successful!');
       navigate('/salon/dashboard');
     } catch (error) {
-      console.error('[LOGIN] Error during login:', error.response?.data || error.message);
       // Normalise the error shape so we never render an object as a React child.
       // FastAPI can return detail as a string OR as a structured object like
       // { code, message, reason } (e.g. SALON_SUSPENDED). Both must be handled.
@@ -197,10 +190,10 @@ export default function OTPLoginPage() {
       // (some dev/mock modes echo OTP back). Show only the generic confirmation.
       // If backend reports a failed delivery_status, surface a friendly retry message.
       if (response.data?.delivery_status === 'failed') {
-        toast.error(response.data?.note || 'WhatsApp delivery failed. Please try again.');
+        toast.error(response.data?.note || 'SMS delivery failed. Please try again.');
         return;
       }
-      toast.success(response.data?.note || 'OTP sent to your WhatsApp! Please check your messages.');
+      toast.success(response.data?.note || 'OTP sent to your mobile via SMS!');
       
       setStep(2);
       setCountdown(30);
@@ -224,10 +217,10 @@ export default function OTPLoginPage() {
       
       // SECURITY: Never display OTP in toast/UI
       if (response.data?.delivery_status === 'failed') {
-        toast.error(response.data?.note || 'WhatsApp delivery failed. Please try again.');
+        toast.error(response.data?.note || 'SMS delivery failed. Please try again.');
         return;
       }
-      toast.success(response.data?.note || 'OTP resent to your WhatsApp!');
+      toast.success(response.data?.note || 'OTP resent to your mobile via SMS!');
       
       setCountdown(30);
       setCanResend(false);
@@ -331,6 +324,15 @@ export default function OTPLoginPage() {
           </div>
 
           <div className="p-8">
+            {/* Google sign-in (Item 9) */}
+            <div className="mb-5">
+              <GoogleLoginButton audience="salon" />
+              <div className="flex items-center gap-3 my-4">
+                <div className="flex-1 h-px bg-border" />
+                <span className="text-xs text-muted-foreground">or</span>
+                <div className="flex-1 h-px bg-border" />
+              </div>
+            </div>
             {loginMethod === 'password' ? (
               /* Password Login Form */
               <form onSubmit={handlePasswordLogin} className="space-y-6">
@@ -376,10 +378,7 @@ export default function OTPLoginPage() {
 
                 <Button 
                   type="submit" 
-                  onClick={(e) => {
-                    console.log('[BUTTON] Button clicked!');
-                    handlePasswordLogin(e);
-                  }}
+                  onClick={handlePasswordLogin}
                   className="w-full bg-gold text-black hover:bg-gold/90 h-12"
                   disabled={loading}
                 >
@@ -410,7 +409,7 @@ export default function OTPLoginPage() {
                         />
                       </div>
                       <p className="text-xs text-muted-foreground mt-2">
-                        OTP will be sent to your WhatsApp
+                        OTP will be sent to your mobile via SMS
                       </p>
                     </div>
 
@@ -437,7 +436,7 @@ export default function OTPLoginPage() {
                         maxLength={6}
                       />
                       <p className="text-sm text-muted-foreground mt-2 text-center">
-                        OTP sent to +91{phone} via WhatsApp
+                        OTP sent to +91{phone} via SMS
                       </p>
                     </div>
 

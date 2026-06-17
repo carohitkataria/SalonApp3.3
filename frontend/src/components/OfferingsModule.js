@@ -179,13 +179,12 @@ export default function OfferingsModule({ salonId, token }) {
         {},
         { headers: { Authorization: `Bearer ${token}` } }
       );
-      console.log('Initialization result:', response.data);
       if (response.data.new_services_added > 0) {
         toast.success(`Added ${response.data.new_services_added} new services!`);
       }
       setInitialized(true);
     } catch (error) {
-      console.log('Initialization error:', error.response?.data || error.message);
+      // Initialization error — fetchAllData below will re-read the current state.
     } finally {
       fetchAllData();
     }
@@ -1056,7 +1055,7 @@ function PackageCard({ package: pkg, services, onEdit, onDelete }) {
 
 // Service Modal Component
 function ServiceModal({ service, open, onClose, onSave, token }) {
-  const [formData, setFormData] = useState({
+  const _defaultFormData = {
     service_name: '',
     description: '',
     category: 'General',
@@ -1066,27 +1065,24 @@ function ServiceModal({ service, open, onClose, onSave, token }) {
     price_type: 'fixed',
     images: [],
     available_at_home: false,
+    home_price: null,
+    home_min_order_value: null,
+    home_min_items: null,
+    home_travel_fee: null,
+    home_service_radius_km: null,
     is_enabled: true
-  });
+  };
+  const [formData, setFormData] = useState(_defaultFormData);
   const [uploadingImage, setUploadingImage] = useState(false);
 
   useEffect(() => {
     if (service) {
-      setFormData(service);
+      // Merge with defaults so old services without at-home fields don't crash inputs.
+      setFormData({ ..._defaultFormData, ...service });
     } else {
-      setFormData({
-        service_name: '',
-        description: '',
-        category: 'General',
-        gender_tag: 'Unisex',
-        default_duration: 30,
-        base_price: 0,
-        price_type: 'fixed',
-        images: [],
-        available_at_home: false,
-        is_enabled: true
-      });
+      setFormData(_defaultFormData);
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [service]);
 
   const handleImageUpload = (e) => {
@@ -1272,6 +1268,7 @@ function ServiceModal({ service, open, onClose, onSave, token }) {
               <Checkbox
                 checked={formData.available_at_home}
                 onCheckedChange={(checked) => setFormData({...formData, available_at_home: checked})}
+                data-testid="service-form-at-home-toggle"
               />
               <Home className="w-4 h-4" />
               <span className="text-sm">Available at Home</span>
@@ -1285,6 +1282,70 @@ function ServiceModal({ service, open, onClose, onSave, token }) {
               <span className="text-sm">Service Enabled</span>
             </label>
           </div>
+
+          {/* Item 4 — At-home pricing sub-panel (visible only when At Home is on) */}
+          {formData.available_at_home && (
+            <div className="rounded-lg border border-dashed border-gold/40 bg-gold/5 p-4 space-y-3" data-testid="service-form-at-home-panel">
+              <p className="text-sm font-semibold text-foreground flex items-center gap-2">
+                <Home className="w-4 h-4 text-gold" /> At-home settings
+              </p>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <Label className="text-xs">Home price (₹)</Label>
+                  <Input
+                    type="number" min="0" step="0.01"
+                    placeholder={`Defaults to ₹${formData.base_price || 0}`}
+                    value={formData.home_price ?? ''}
+                    onChange={(e) => setFormData({...formData, home_price: e.target.value === '' ? null : parseFloat(e.target.value)})}
+                    data-testid="service-form-home-price"
+                  />
+                </div>
+                <div>
+                  <Label className="text-xs">Travel fee (₹)</Label>
+                  <Input
+                    type="number" min="0" step="0.01"
+                    placeholder="Optional flat fee"
+                    value={formData.home_travel_fee ?? ''}
+                    onChange={(e) => setFormData({...formData, home_travel_fee: e.target.value === '' ? null : parseFloat(e.target.value)})}
+                    data-testid="service-form-home-travel-fee"
+                  />
+                </div>
+                <div>
+                  <Label className="text-xs">Minimum order value (₹)</Label>
+                  <Input
+                    type="number" min="0" step="0.01"
+                    placeholder="MOQ on cart"
+                    value={formData.home_min_order_value ?? ''}
+                    onChange={(e) => setFormData({...formData, home_min_order_value: e.target.value === '' ? null : parseFloat(e.target.value)})}
+                    data-testid="service-form-home-moq"
+                  />
+                </div>
+                <div>
+                  <Label className="text-xs">Minimum items</Label>
+                  <Input
+                    type="number" min="1" step="1"
+                    placeholder="e.g. 2"
+                    value={formData.home_min_items ?? ''}
+                    onChange={(e) => setFormData({...formData, home_min_items: e.target.value === '' ? null : parseInt(e.target.value, 10)})}
+                    data-testid="service-form-home-min-items"
+                  />
+                </div>
+                <div className="sm:col-span-2">
+                  <Label className="text-xs">Service radius (km)</Label>
+                  <Input
+                    type="number" min="0" step="0.5"
+                    placeholder="e.g. 5"
+                    value={formData.home_service_radius_km ?? ''}
+                    onChange={(e) => setFormData({...formData, home_service_radius_km: e.target.value === '' ? null : parseFloat(e.target.value)})}
+                    data-testid="service-form-home-radius"
+                  />
+                </div>
+              </div>
+              <p className="text-[11px] text-muted-foreground leading-relaxed">
+                Customers booking this service at home will see the home price and must meet the MOQ + min-items before checkout. All fields are optional.
+              </p>
+            </div>
+          )}
 
           <DialogFooter>
             <Button type="button" variant="outline" onClick={onClose}>

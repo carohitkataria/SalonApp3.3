@@ -17,11 +17,11 @@ import requests
 BASE_URL = os.environ.get("REACT_APP_BACKEND_URL", "").rstrip("/")
 assert BASE_URL, "REACT_APP_BACKEND_URL must be set"
 
-SALON_ID = "459ff694-c246-4891-a535-fc8f23b58ac3"
-SALON_IDENTIFIER = "admin"
-SALON_PASSWORD = "salon123"
-SUPPLIER_GLOW_MOBILE = "+919000000001"
-SUPPLIER_PASSWORD = "supplier123"
+SALON_ID = os.environ.get("TEST_SALON_ID", "459ff694-c246-4891-a535-fc8f23b58ac3")
+SALON_IDENTIFIER = os.environ.get("TEST_SALON_IDENTIFIER", "admin")
+SALON_PASSWORD = os.environ.get("TEST_SALON_PASSWORD", "salon123")
+SUPPLIER_GLOW_MOBILE = os.environ.get("TEST_SUPPLIER_MOBILE", "+919000000001")
+SUPPLIER_PASSWORD = os.environ.get("TEST_SUPPLIER_PASSWORD", "supplier123")
 
 
 # ===================== Fixtures =====================

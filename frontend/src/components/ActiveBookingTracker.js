@@ -60,19 +60,13 @@ export default function ActiveBookingTracker({ userPhone, userName }) {
     return mm ? `${h}h ${mm}m` : `${h}h`;
   };
 
-  console.log('[ActiveBookingTracker] Render state:', { loading, activeBookings: activeBookings.length, userPhone });
-
   if (loading) {
-    console.log('[ActiveBookingTracker] Still loading...');
-    return null;
-  }
-  
-  if (activeBookings.length === 0) {
-    console.log('[ActiveBookingTracker] No active bookings, hiding component');
     return null;
   }
 
-  console.log('[ActiveBookingTracker] Rendering with', activeBookings.length, 'booking(s)');
+  if (activeBookings.length === 0) {
+    return null;
+  }
 
   return (
     <div className="w-full bg-gradient-to-br from-amber-600 via-yellow-600 to-amber-700 p-6 rounded-b-3xl shadow-2xl" data-testid="active-booking-tracker">

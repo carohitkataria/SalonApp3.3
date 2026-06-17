@@ -7,34 +7,44 @@ import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { toast } from 'sonner';
 import GenderBadge from '@/components/GenderBadge';
-import { Scissors, Calendar, User, CheckCircle, Star, Clock, ArrowLeft, Home, Zap, Check, ChevronDown, ChevronRight, Search, Package, Crown, History, Wallet, Banknote, Smartphone, Shield, Edit } from 'lucide-react';
+import { Scissors, Calendar, User, CheckCircle, Star, Clock, ArrowLeft, Home, Zap, Check, ChevronDown, ChevronRight, Search, Package, Crown, History, Wallet, Banknote, Smartphone, Shield, Edit, Sparkles } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Input } from '@/components/ui/input';
 import CustomerWalletCard from '@/components/CustomerWalletCard';
 import WalletDisplay from '@/components/WalletDisplay';
 import CustomerOtpVerification from '@/components/CustomerOtpVerification';
 import CustomerAuthModal from '@/components/CustomerAuthModal';
+import BookingIdentitySheet from '@/components/BookingIdentitySheet';
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
 const API = `${BACKEND_URL}/api`;
 
-// Helper functions for IST time
-const getISTDate = () => {
-  const now = new Date();
-  const istOffset = 5.5 * 60 * 60 * 1000;
-  const utc = now.getTime() + (now.getTimezoneOffset() * 60000);
-  return new Date(utc + istOffset);
-};
+// Helper functions for IST time (Asia/Kolkata) — reliable regardless of browser timezone
+const _istDateFmt = new Intl.DateTimeFormat('en-CA', {
+  timeZone: 'Asia/Kolkata', year: 'numeric', month: '2-digit', day: '2-digit',
+});
+const _istHourFmt = new Intl.DateTimeFormat('en-GB', {
+  timeZone: 'Asia/Kolkata', hour: '2-digit', hour12: false,
+});
 
-const getTodayIST = () => getISTDate().toISOString().split('T')[0];
+const getTodayIST = () => _istDateFmt.format(new Date()); // "YYYY-MM-DD"
 
 const getTomorrowIST = () => {
-  const ist = getISTDate();
-  ist.setDate(ist.getDate() + 1);
-  return ist.toISOString().split('T')[0];
+  const today = getTodayIST();
+  // Build a Date at midnight IST then add one day, format back
+  const [y, m, d] = today.split('-').map(Number);
+  const tomorrow = new Date(Date.UTC(y, m - 1, d + 1));
+  return _istDateFmt.format(tomorrow);
 };
 
-const getCurrentHourIST = () => getISTDate().getHours();
+const getCurrentHourIST = () => parseInt(_istHourFmt.format(new Date()), 10);
+
+// Legacy alias (kept for any code path still calling getISTDate)
+const getISTDate = () => {
+  const parts = _istDateFmt.formatToParts(new Date()).reduce((a, p) => (a[p.type] = p.value, a), {});
+  const hour = getCurrentHourIST();
+  return new Date(Date.UTC(parseInt(parts.year, 10), parseInt(parts.month, 10) - 1, parseInt(parts.day, 10), hour));
+};
 
 // Chip Component for selections
 const SelectChip = ({ selected, onClick, children, icon: Icon, disabled = false }) => (
@@ -144,8 +154,8 @@ const BarberChip = ({ barber, selected, onSelect, liveStatus, slotAvailability }
     >
       <div className="flex items-center gap-3">
         <div className={`w-10 h-10 rounded-full overflow-hidden bg-muted flex-shrink-0 border-2 ${onLeave ? 'border-border/40' : 'border-gold/30'}`}>
-          {barber.photo_url ? (
-            <img src={barber.photo_url} alt={barber.name} className="w-full h-full object-cover" />
+          {(barber.profile_image || barber.photo_url || barber.image_url) ? (
+            <img src={barber.profile_image || barber.photo_url || barber.image_url} alt={barber.name} className="w-full h-full object-cover" />
           ) : (
             <div className="w-full h-full flex items-center justify-center bg-gradient-to-br from-gold/20 to-gold/40">
               <User className="w-5 h-5 text-gold" />
@@ -262,6 +272,7 @@ export default function SinglePageBooking() {
   const whenParam = searchParams.get('when');
   const preselectedBarber = searchParams.get('barber');
   const preselectedServices = searchParams.get('services');
+  const preselectedPackage = searchParams.get('package'); // Task 4: direct package booking
   const modifyTokenId = searchParams.get('modify'); // WhatsApp reschedule flow
   const branchIdFromUrl = searchParams.get('branch') || ''; // Phase 3: customer-selected branch
   const [rescheduleBooking, setRescheduleBooking] = useState(null);
@@ -309,6 +320,9 @@ export default function SinglePageBooking() {
   // null → show chooser, 'guest' → show identity form, 'login' → open auth modal.
   const [bookingMode, setBookingMode] = useState(null);
   const [showAuthModal, setShowAuthModal] = useState(false);
+  // Item 10 — Post-confirm identity sheet
+  const [showIdentitySheet, setShowIdentitySheet] = useState(false);
+  const [autoSubmitAfterLogin, setAutoSubmitAfterLogin] = useState(false);
   const [fastestAvailable, setFastestAvailable] = useState(!preselectedBarber);
   const [searchQuery, setSearchQuery] = useState('');
   const [openCategories, setOpenCategories] = useState({});
@@ -415,13 +429,15 @@ export default function SinglePageBooking() {
       rescheduleHydratedRef.current = true;
       return;
     }
+    // Task 4: Don't wipe selected services if a package is active (services come from the package).
+    if (selectedPackage) return;
     setFormData(prev => ({ ...prev, selectedServices: [] }));
-  }, [formData.barberId, salonServices, fastestAvailable]);
+  }, [formData.barberId, salonServices, fastestAvailable, selectedPackage]);
 
   // Calculate total when services change
   useEffect(() => {
     calculateTotal();
-  }, [formData.selectedServices, barberServices, salonServices]);
+  }, [formData.selectedServices, barberServices, salonServices, selectedPackage]);
 
   // Initialize open categories
   useEffect(() => {
@@ -607,7 +623,7 @@ export default function SinglePageBooking() {
             is_custom: true  // Mark as custom for display
           }));
         } catch (error) {
-          console.log('No customer packages found');
+          // No customer packages — handled gracefully below.
         }
       }
       
@@ -630,7 +646,7 @@ export default function SinglePageBooking() {
       const response = await axios.get(`${API}/salons/${salonId}/customers/${phone}/bookings`);
       setCustomerBookings(response.data.bookings || []);
     } catch (error) {
-      console.log('No booking history found');
+      // No booking history for this customer — leave list empty.
     }
   };
 
@@ -647,7 +663,6 @@ export default function SinglePageBooking() {
         setServiceTab('services');
       }
     } catch (error) {
-      console.log('No recent services found');
       setServiceTab('services');
     }
   };
@@ -687,6 +702,21 @@ export default function SinglePageBooking() {
       toast.success(`Package "${pkg.package_name}" selected`);
     }
   };
+
+  // Task 4: Auto-select package from ?package=<id> URL param once packages load
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    if (!preselectedPackage || packages.length === 0 || selectedPackage) return;
+    const pkg = packages.find(p => p.id === preselectedPackage);
+    if (pkg) {
+      setSelectedPackage(pkg);
+      const serviceIds = pkg.services?.map(s => s.id || s.service_id) || [];
+      setFormData(prev => ({ ...prev, selectedServices: serviceIds }));
+      // Switch to packages category in service tab for visibility
+      setSelectedCategory('Packages');
+    }
+  }, [packages, preselectedPackage]);
+
 
   // Get available shifts for a date
   const getShiftAvailability = (shiftId) => {
@@ -732,6 +762,14 @@ export default function SinglePageBooking() {
   }, [shifts, formData.date]);
 
   const calculateTotal = () => {
+    // Task 4: For package bookings, use the package's total price directly
+    if (selectedPackage) {
+      const pkgPrice = selectedPackage.total_price || selectedPackage.total_discounted || selectedPackage.package_price || 0;
+      if (pkgPrice > 0) {
+        setTotalAmount(pkgPrice);
+        return;
+      }
+    }
     if (formData.selectedServices.length === 0) {
       setTotalAmount(0);
       return;
@@ -1002,8 +1040,70 @@ export default function SinglePageBooking() {
     }
   };
 
+  // Task 4: Direct package booking — bypasses payment step, defaults to pay_at_salon
+  const handlePackageBookingDirect = async () => {
+    if (!selectedPackage) return;
+    if (formData.selectedServices.length === 0) {
+      toast.error('Please select a package');
+      return;
+    }
+    if (!formData.date) {
+      toast.error('Please pick a date');
+      return;
+    }
+    // If user isn't logged in AND guest details not filled, route through payment step
+    // so the existing guest-details UI can capture name + phone first.
+    if (!isUserLoggedIn && bookingMode !== 'guest') {
+      // Pre-set pay_later as the chosen mode for package bookings
+      setPaymentMode('pay_later');
+      setBookingStep('payment');
+      return;
+    }
+    if (!isUserLoggedIn && bookingMode === 'guest' && (!guestPhone || !guestName)) {
+      setPaymentMode('pay_later');
+      setBookingStep('payment');
+      return;
+    }
+    setLoading(true);
+    try {
+      const customer = await ensureCustomer();
+      if (!customer) { setLoading(false); return; }
+
+      const bookingData = {
+        salon_id: salonId,
+        branch_id: branchId || undefined,
+        user_id: customer.id,
+        customer_name: bookingForSelf ? customer.name : otherPersonName,
+        phone: bookingForSelf ? customer.phone : otherPersonPhone,
+        date: formData.date,
+        shift: formData.shift || shifts[0]?.id || 'morning',
+        barber_id: fastestAvailable ? 'any' : (formData.barberId || 'any'),
+        selected_services: formData.selectedServices,
+        source: source,
+        booking_type: formData.bookingType || 'future',
+        booking_for_self: bookingForSelf,
+        customer_gender: bookingForSelf ? (customer.gender || guestGender || 'Men') : otherPersonGender,
+        is_guest: !isUserLoggedIn && bookingMode === 'guest',
+        payment_mode: 'pay_later',
+      };
+      const response = await axios.post(`${API}/bookings`, bookingData);
+      setBookedToken({ ...response.data, _is_package_booking: true });
+      setBookingStep('success');
+      clearIntent();
+    } catch (error) {
+      toast.error(error.response?.data?.detail || 'Failed to book package');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   // Proceed to payment step
   const goToPayment = () => {
+    // Task 4: If a package is selected, skip payment step and book directly
+    if (selectedPackage) {
+      handlePackageBookingDirect();
+      return;
+    }
     if (!formData.shift) {
       toast.error('Please select a time slot');
       return;
@@ -1027,6 +1127,7 @@ export default function SinglePageBooking() {
 
   // Success Screen
   if (bookingStep === 'success' && bookedToken) {
+    const isPkgBooking = bookedToken._is_package_booking || !!selectedPackage;
     return (
       <div className="min-h-screen bg-background flex items-center justify-center p-4">
         <motion.div
@@ -1040,43 +1141,64 @@ export default function SinglePageBooking() {
               animate={{ scale: 1 }}
               transition={{ type: "spring", delay: 0.2 }}
             >
-              <CheckCircle className="w-20 h-20 text-gold mx-auto mb-4" />
+              <CheckCircle className="w-20 h-20 text-brass mx-auto mb-4" />
             </motion.div>
-            <h2 className="text-3xl font-playfair font-bold text-foreground">You're All Set!</h2>
+            <h2 className="text-3xl font-fraunces font-medium text-foreground">
+              {isPkgBooking ? 'Thanks for booking!' : "You're All Set!"}
+            </h2>
+            {isPkgBooking && (
+              <p className="text-muted-foreground text-sm mt-2 leading-relaxed" data-testid="package-thanks-message">
+                The salon will call you soon to confirm your slot.
+              </p>
+            )}
           </div>
 
-          <div className="bg-card border border-border rounded-2xl p-6 shadow-xl">
-            <div className="text-center mb-6">
-              <p className="text-muted-foreground text-sm mb-1">Your Token</p>
-              <div className="text-6xl font-bebas text-gold">{bookedToken.token_number}</div>
-            </div>
-            
+          <div className="lux-card bg-card border border-border rounded-2xl p-6 shadow-xl">
+            {!isPkgBooking && (
+              <div className="text-center mb-6">
+                <p className="text-muted-foreground text-sm mb-1">Your Token</p>
+                <div className="text-6xl font-bebas brass-text">{bookedToken.token_number}</div>
+              </div>
+            )}
+
             <div className="space-y-3 text-sm border-t border-border pt-4">
+              {isPkgBooking && selectedPackage && (
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">Package</span>
+                  <span className="font-bold text-foreground">{selectedPackage.package_name}</span>
+                </div>
+              )}
               <div className="flex justify-between">
                 <span className="text-muted-foreground">Date</span>
                 <span className="font-bold text-foreground">{formData.date}</span>
               </div>
-              <div className="flex justify-between">
-                <span className="text-muted-foreground">Shift</span>
-                <span className="font-bold text-foreground">{bookedToken.shift}</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-muted-foreground">Barber</span>
-                <span className="font-bold text-foreground">{bookedToken.barber_name}</span>
-              </div>
+              {!isPkgBooking && (
+                <>
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">Shift</span>
+                    <span className="font-bold text-foreground">{bookedToken.shift}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">Barber</span>
+                    <span className="font-bold text-foreground">{bookedToken.barber_name}</span>
+                  </div>
+                </>
+              )}
               <div className="flex justify-between border-t border-border pt-3">
                 <span className="text-muted-foreground">Payment</span>
-                <span className="font-bold text-foreground capitalize">{paymentMode || 'Pending'}</span>
+                <span className="font-bold text-foreground capitalize">
+                  {isPkgBooking ? 'At salon' : (paymentMode || 'Pending')}
+                </span>
               </div>
               <div className="flex justify-between">
                 <span className="text-muted-foreground">Total</span>
-                <span className="text-xl font-bold text-gold">₹{bookedToken.total_amount}</span>
+                <span className="text-xl font-bold brass-text">₹{bookedToken.total_amount}</span>
               </div>
             </div>
           </div>
 
           <div className="flex gap-3 mt-6">
-            <Button onClick={() => navigate(`/salon/${salonId}`)} className="flex-1 bg-gold text-black hover:bg-gold/90">
+            <Button onClick={() => navigate(`/salon/${salonId}`)} className="flex-1 bg-brass text-espresso hover:bg-brass-hover">
               Back to Salon
             </Button>
             <Button onClick={() => navigate('/history')} variant="outline" className="flex-1">
@@ -1091,12 +1213,16 @@ export default function SinglePageBooking() {
   const services = (fastestAvailable || formData.barberId === 'any') ? salonServices : barberServices;
   
   // Gender filter: show services matching customer gender + Unisex
-  const customerGender = user?.gender || '';
+  // gender_tag stored as 'Men'/'Women'/'Unisex'; user.gender may be 'male'/'female'/'Men'/'Women'.
+  const customerGender = (user?.gender || '').toLowerCase();
+  const normalizedGender = (customerGender === 'male' || customerGender === 'men' || customerGender === 'm') ? 'men'
+                         : (customerGender === 'female' || customerGender === 'women' || customerGender === 'w' || customerGender === 'f') ? 'women'
+                         : '';
   const genderFilteredServices = services.filter(s => {
     const tag = (s.gender_tag || 'Unisex').toLowerCase();
     if (tag === 'unisex') return true;
-    if (!customerGender) return true; // Show all if gender not set
-    return tag.toLowerCase() === customerGender.toLowerCase();
+    if (!normalizedGender) return true; // Show all if gender not set
+    return tag === normalizedGender;
   });
 
   // Filter and group services
@@ -1514,12 +1640,26 @@ export default function SinglePageBooking() {
             ) : (
               <Button
                 type="button"
-                onClick={handleSubmit}
-                disabled={loading || !paymentMode || (paymentMode === 'wallet' && !walletSufficient) || (!isUserLoggedIn && bookingMode !== 'guest')}
+                onClick={() => {
+                  // Item 10 — When user isn't logged in and hasn't completed guest details,
+                  // open the polished bottom sheet instead of relying on the inline cards.
+                  const guestReady =
+                    (guestName || '').trim().length >= 2 &&
+                    (guestPhone || '').length === 10 &&
+                    !!guestGender;
+                  if (isUserLoggedIn) { handleSubmit(); return; }
+                  if (bookingMode === 'guest' && guestReady) { handleSubmit(); return; }
+                  setShowIdentitySheet(true);
+                }}
+                disabled={loading || !paymentMode || (paymentMode === 'wallet' && !walletSufficient)}
                 className="w-full bg-gold text-black hover:bg-gold/90 py-5 text-base font-bold rounded-xl disabled:opacity-50"
                 data-testid="confirm-booking-btn"
               >
-                {loading ? 'Booking...' : paymentMode === 'wallet' ? `Pay ₹${totalAmount} from Wallet` : 'Confirm Booking'}
+                {(() => {
+                  if (loading) return 'Booking...';
+                  if (paymentMode === 'wallet') return `Pay ₹${totalAmount} from Wallet`;
+                  return 'Confirm Booking';
+                })()}
               </Button>
             )}
           </div>
@@ -1531,8 +1671,35 @@ export default function SinglePageBooking() {
           onClose={() => setShowAuthModal(false)}
           onSuccess={() => {
             setShowAuthModal(false);
-            setBookingMode(null); // user is now logged in; hide chooser
+            setBookingMode(null);
+            // Item 10 — If the user logged in *from the sheet*, auto-continue to confirm.
+            if (autoSubmitAfterLogin) {
+              setAutoSubmitAfterLogin(false);
+              setTimeout(() => handleSubmit(), 0);
+            }
           }}
+        />
+
+        {/* Item 10 — Post-confirm identity sheet */}
+        <BookingIdentitySheet
+          open={showIdentitySheet}
+          onClose={() => setShowIdentitySheet(false)}
+          totalAmount={totalAmount}
+          guestName={guestName} setGuestName={setGuestName}
+          guestPhone={guestPhone} setGuestPhone={setGuestPhone}
+          guestGender={guestGender} setGuestGender={setGuestGender}
+          onChooseLogin={() => {
+            setShowIdentitySheet(false);
+            setBookingMode('login');
+            setAutoSubmitAfterLogin(true);
+            setShowAuthModal(true);
+          }}
+          onConfirmGuest={() => {
+            setBookingMode('guest');
+            setShowIdentitySheet(false);
+            setTimeout(() => handleSubmit(), 0);
+          }}
+          loading={loading}
         />
       </div>
     );
@@ -1595,8 +1762,8 @@ export default function SinglePageBooking() {
         </div>
       )}
 
-      <form onSubmit={(e) => { e.preventDefault(); goToPayment(); }} className="max-w-2xl mx-auto p-4 space-y-5">
-        
+      <form onSubmit={(e) => { e.preventDefault(); goToPayment(); }} className="max-w-2xl mx-auto p-4 space-y-5 pb-32">
+
         {/* Reschedule banner — shown only when this page was opened via a
             WhatsApp reschedule link (?modify=<token_id>) */}
         {modifyTokenId && rescheduleBooking && (
@@ -1616,8 +1783,21 @@ export default function SinglePageBooking() {
           </div>
         )}
 
-        {/* Section 1: Who & When */}
-        <div className="space-y-4">
+        {/* === A3: SECTION 1 — WHEN (date + shift) === */}
+        <div className="lux-card rounded-2xl bg-card border border-border p-4 space-y-4" data-testid="booking-section-when">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2.5">
+              <span className={`w-7 h-7 rounded-full inline-flex items-center justify-center text-[11px] font-bold ${
+                (formData.date && formData.shift) ? 'bg-sage text-white' : 'bg-brass text-espresso'
+              }`}>
+                {(formData.date && formData.shift) ? <Check className="w-3.5 h-3.5" strokeWidth={2.5} /> : '1'}
+              </span>
+              <h3 className="font-fraunces text-lg font-medium text-foreground">When</h3>
+            </div>
+            {formData.date && formData.shift && (
+              <span className="text-[11px] text-sage font-semibold uppercase tracking-wider">Set</span>
+            )}
+          </div>
           {/* Booking For — only shown when signed in (guest checkout = self only) */}
           {isUserLoggedIn && (
           <div>
@@ -1677,7 +1857,6 @@ export default function SinglePageBooking() {
 
           {/* Date Chips */}
           <div>
-            <p className="text-sm font-medium text-muted-foreground mb-2">When</p>
             <div className="grid grid-cols-2 gap-2 sm:flex sm:flex-wrap">
               {(() => {
                 const today = getTodayIST();
@@ -1728,8 +1907,42 @@ export default function SinglePageBooking() {
             </div>
           </div>
 
-          {/* Time Slot Chips - Always visible, greyed if unavailable */}
-          <div>
+          {/* === Task 4: Calendar (future dates) when a Package is being booked === */}
+          {selectedPackage ? (
+            <div>
+              <p className="text-sm font-medium text-muted-foreground mb-2">Pick a date</p>
+              <div className="lux-card rounded-xl bg-card border border-brass/30 p-3 flex items-center gap-3" data-testid="package-date-picker">
+                <Calendar className="w-5 h-5 text-brass flex-shrink-0" strokeWidth={1.7} />
+                <input
+                  type="date"
+                  min={getTodayIST()}
+                  value={formData.date || getTodayIST()}
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    if (!v) return;
+                    setFormData(prev => ({
+                      ...prev,
+                      date: v,
+                      // Set shift to first available so the booking goes through;
+                      // salon will call to confirm exact timing.
+                      shift: shifts[0]?.id || 'morning',
+                      bookingType: v === getTodayIST() ? 'instant' : 'future',
+                    }));
+                  }}
+                  className="flex-1 bg-transparent text-foreground text-sm font-medium focus:outline-none"
+                  data-testid="package-date-input"
+                />
+              </div>
+              <p className="text-[11px] text-muted-foreground mt-2 leading-relaxed">
+                <span className="inline-flex items-center gap-1 text-brass font-semibold">
+                  <Sparkles className="w-3 h-3" strokeWidth={2} /> Package booking
+                </span>{' '}
+                · The salon will call you to confirm a convenient time. No slot needed.
+              </p>
+            </div>
+          ) : (
+            /* Time Slot Chips - Always visible, greyed if unavailable */
+            <div>
             <p className="text-sm font-medium text-muted-foreground mb-2">Time Slot</p>
             <div className="grid grid-cols-3 gap-2 sm:flex sm:flex-wrap">
               {shifts.map(shift => {
@@ -1773,24 +1986,33 @@ export default function SinglePageBooking() {
               <p className="text-xs text-orange-500 mt-2">All slots passed for today. Select tomorrow.</p>
             )}
           </div>
+          )}
         </div>
 
-        {/* Section 2: Barber Selection */}
-        <div className="space-y-3">
+        {/* === A3: SECTION 2 — BARBER === */}
+        <div className="lux-card rounded-2xl bg-card border border-border p-4 space-y-3" data-testid="booking-section-barber">
           <div className="flex items-center justify-between">
-            <p className="text-sm font-medium text-muted-foreground">Barber</p>
+            <div className="flex items-center gap-2.5">
+              <span className={`w-7 h-7 rounded-full inline-flex items-center justify-center text-[11px] font-bold ${
+                (formData.barberId || fastestAvailable) ? 'bg-sage text-white' : 'bg-muted text-muted-foreground'
+              }`}>
+                {(formData.barberId || fastestAvailable) ? <Check className="w-3.5 h-3.5" strokeWidth={2.5} /> : '2'}
+              </span>
+              <h3 className="font-fraunces text-lg font-medium text-foreground">Barber</h3>
+            </div>
             <button
               type="button"
               onClick={handleFastestAvailable}
-              className={`flex items-center gap-2 px-3 py-1.5 rounded-full text-sm font-medium transition-all ${
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium transition-all ${
                 fastestAvailable 
-                  ? 'bg-gold/20 text-gold border border-gold' 
-                  : 'bg-muted text-muted-foreground border border-transparent hover:border-gold/30'
+                  ? 'bg-brass text-espresso border border-brass' 
+                  : 'bg-muted text-muted-foreground border border-transparent hover:border-brass/40'
               }`}
+              data-testid="fastest-available-btn"
             >
-              <Zap className="w-4 h-4" />
-              Fastest Available
-              {fastestAvailable && <span className="w-2 h-2 bg-gold rounded-full animate-pulse"></span>}
+              <Zap className="w-3.5 h-3.5" />
+              Fastest
+              {fastestAvailable && <span className="w-1.5 h-1.5 bg-espresso rounded-full animate-pulse"></span>}
             </button>
           </div>
 
@@ -1817,13 +2039,20 @@ export default function SinglePageBooking() {
           )}
         </div>
 
-        {/* Section 3: Services with Horizontal Category Filter */}
-        <div className="space-y-4">
+        {/* === A3: SECTION 3 — SERVICES === */}
+        <div className="lux-card rounded-2xl bg-card border border-border p-4 space-y-4" data-testid="booking-section-services">
           <div className="flex items-center justify-between">
-            <p className="text-lg font-bold text-foreground">Select Services</p>
+            <div className="flex items-center gap-2.5">
+              <span className={`w-7 h-7 rounded-full inline-flex items-center justify-center text-[11px] font-bold ${
+                formData.selectedServices.length > 0 ? 'bg-sage text-white' : 'bg-muted text-muted-foreground'
+              }`}>
+                {formData.selectedServices.length > 0 ? <Check className="w-3.5 h-3.5" strokeWidth={2.5} /> : '3'}
+              </span>
+              <h3 className="font-fraunces text-lg font-medium text-foreground">Services</h3>
+            </div>
             {formData.selectedServices.length > 0 && (
-              <span className="text-xs bg-gold/20 text-gold px-2 py-1 rounded-full">
-                {formData.selectedServices.length} selected
+              <span className="text-[11px] bg-brass-soft text-foreground border border-brass/40 px-2 py-1 rounded-full font-medium">
+                {formData.selectedServices.length} added · ₹{totalAmount}
               </span>
             )}
           </div>
@@ -2061,22 +2290,42 @@ export default function SinglePageBooking() {
         {/* Section 4: Payment Mode - REMOVED, moved to separate step */}
       </form>
 
-      {/* Sticky Footer - Proceed to Payment */}
-      <div className="fixed bottom-0 left-0 right-0 bg-background border-t border-border p-4 z-30">
+      {/* === A3: STICKY PERSISTENT TOTAL + CONFIRM BAR === */}
+      <div className="fixed bottom-0 left-0 right-0 bg-card/95 backdrop-blur-lg border-t border-brass/30 p-4 z-30 shadow-lux" data-testid="booking-persistent-total">
         <div className="max-w-2xl mx-auto">
-          {formData.selectedServices.length > 0 && (
-            <div className="flex items-center justify-between mb-3">
-              <span className="text-muted-foreground text-sm">{formData.selectedServices.length} service(s)</span>
-              <span className="text-2xl font-bold text-gold">₹{totalAmount}</span>
+          <div className="flex items-center justify-between mb-3 gap-3">
+            <div className="min-w-0">
+              <span className="eyebrow">{selectedPackage ? 'Package booking' : 'Your booking'}</span>
+              <p className="text-sm text-foreground mt-0.5 leading-tight truncate">
+                {selectedPackage
+                  ? <>{selectedPackage.package_name}{formData.date ? ` · ${formData.date}` : ''}</>
+                  : formData.selectedServices.length > 0
+                    ? <>{formData.selectedServices.length} service{formData.selectedServices.length === 1 ? '' : 's'}{formData.shift ? ` · ${formData.shift}` : ''}</>
+                    : 'Pick services to continue'}
+              </p>
             </div>
-          )}
+            <div className="text-right flex-shrink-0">
+              <span className="eyebrow">Total</span>
+              <p className="font-bebas text-3xl brass-text leading-none mt-0.5">₹{totalAmount}</p>
+            </div>
+          </div>
           <Button
             type="button"
             onClick={goToPayment}
-            disabled={_bookingBlocked || formData.selectedServices.length === 0 || !formData.shift}
-            className="w-full bg-gold text-black hover:bg-gold/90 py-5 text-base font-bold rounded-xl disabled:opacity-50"
+            disabled={_bookingBlocked || formData.selectedServices.length === 0 || (!selectedPackage && !formData.shift)}
+            className="w-full bg-brass text-espresso hover:bg-brass-hover py-5 text-base font-bold rounded-2xl disabled:opacity-50 transition-all"
+            data-testid="proceed-to-payment-btn"
           >
-            {_closedFull ? 'Salon Closed' : _closedOnline ? 'Online Booking Disabled' : 'Proceed to Payment'}
+            {(() => {
+              if (_closedFull) return 'Salon Closed';
+              if (_closedOnline) return 'Online Booking Disabled';
+              return (
+                <>
+                  {selectedPackage ? 'Book Package' : 'Proceed to Confirm'}
+                  <ChevronRight className="w-5 h-5 ml-1" strokeWidth={2} />
+                </>
+              );
+            })()}
           </Button>
         </div>
       </div>

@@ -60,7 +60,7 @@ export default function ServicesBrowser() {
             const recentRes = await axios.get(`${API}/users/${user.id}/recent-services`);
             setRecentServices(recentRes.data.services || []);
           } catch (err) {
-            console.log('No recent services found');
+            // No recent services — leave list empty.
           }
         }
       }

@@ -18,10 +18,17 @@ import requests
 
 BASE_URL = os.environ.get("REACT_APP_BACKEND_URL", "").rstrip("/")
 API = f"{BASE_URL}/api"
-ADMIN_LOGIN = {"identifier": "admin", "password": "salon123"}
+ADMIN_LOGIN = {
+    "identifier": os.environ.get("TEST_SALON_IDENTIFIER", "admin"),
+    "password": os.environ.get("TEST_SALON_PASSWORD", "salon123"),
+}
 
 
-def _login(login_id="admin", password="salon123"):
+def _login(login_id=None, password=None):
+    if login_id is None:
+        login_id = ADMIN_LOGIN["identifier"]
+    if password is None:
+        password = ADMIN_LOGIN["password"]
     r = requests.post(f"{API}/salon/users/login", json={"identifier": login_id, "password": password}, timeout=10)
     if r.status_code != 200:
         return None

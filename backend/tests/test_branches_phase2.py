@@ -20,7 +20,10 @@ import requests
 BASE_URL = os.environ.get("REACT_APP_BACKEND_URL", "").rstrip("/")
 API = f"{BASE_URL}/api"
 
-ADMIN_LOGIN = {"identifier": "admin", "password": "salon123"}
+ADMIN_LOGIN = {
+    "identifier": os.environ.get("TEST_SALON_IDENTIFIER", "admin"),
+    "password": os.environ.get("TEST_SALON_PASSWORD", "salon123"),
+}
 
 
 def _admin_auth():
@@ -79,7 +82,7 @@ def branch_manager(admin, branches):
     """Create a branch_manager user restricted to Main branch, yield login info, and cleanup."""
     login_id = _unique_login_id("bm")
     mobile = _unique_mobile()
-    password = "bmpass123"
+    password = os.environ.get("TEST_BRANCH_MANAGER_PASSWORD", "bmpass123")
 
     r = requests.post(
         f"{API}/salon/users",
