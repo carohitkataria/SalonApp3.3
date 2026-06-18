@@ -417,6 +417,11 @@ export default function SinglePageBooking() {
 
   // Fetch barber services when barber changes
   const rescheduleHydratedRef = useRef(false);
+  // Track the previous barberId so we only wipe selectedServices when the
+  // user actually CHANGES barber (vs the effect firing on mount or because
+  // salonServices arrived). This preserves URL-preselected services brought
+  // over from the services page (`?services=id1,id2`).
+  const prevBarberIdRef = useRef(null);
   useEffect(() => {
     if (formData.barberId !== 'any' && !fastestAvailable) {
       fetchBarberServices(formData.barberId);
@@ -427,11 +432,22 @@ export default function SinglePageBooking() {
     // the services the customer just clicked through from WhatsApp.
     if (modifyTokenId && !rescheduleHydratedRef.current && formData.selectedServices.length) {
       rescheduleHydratedRef.current = true;
+      prevBarberIdRef.current = formData.barberId;
       return;
     }
     // Task 4: Don't wipe selected services if a package is active (services come from the package).
-    if (selectedPackage) return;
-    setFormData(prev => ({ ...prev, selectedServices: [] }));
+    if (selectedPackage) {
+      prevBarberIdRef.current = formData.barberId;
+      return;
+    }
+    // Only wipe selectedServices when the barber ACTUALLY changes. This avoids
+    // wiping (a) URL-preselected services on initial mount, (b) services when
+    // salonServices/fastestAvailable change but barberId stayed put.
+    const prev = prevBarberIdRef.current;
+    if (prev !== null && prev !== formData.barberId) {
+      setFormData(p => ({ ...p, selectedServices: [] }));
+    }
+    prevBarberIdRef.current = formData.barberId;
   }, [formData.barberId, salonServices, fastestAvailable, selectedPackage]);
 
   // Calculate total when services change
