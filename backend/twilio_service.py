@@ -194,13 +194,18 @@ async def send_whatsapp_template(
         return {"status": "mock", "template": template_name, "variables": content_variables}
 
     try:
+        # Twilio rejects Content Templates when any content variable is an
+        # empty string — coerce None/blank → "-" so all placeholders render.
+        safe_vars = {}
+        for k, v in content_variables.items():
+            s = "" if v is None else str(v)
+            safe_vars[str(k)] = s if s.strip() else "-"
+
         message = client.messages.create(
             from_=WHATSAPP_NUMBER,
             to=f"whatsapp:{phone_number}",
             content_sid=content_sid,
-            content_variables=json.dumps(
-                {str(k): ("" if v is None else str(v)) for k, v in content_variables.items()}
-            ),
+            content_variables=json.dumps(safe_vars),
         )
         logger.info(
             f"WhatsApp template '{template_name}' sent to {phone_number}. SID: {message.sid}"

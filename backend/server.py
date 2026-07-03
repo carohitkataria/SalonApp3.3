@@ -2233,12 +2233,15 @@ async def send_booking_notification(token_data: dict, notification_type: str):
                 return
             result = await send_booking_confirmation_template(
                 phone_number=phone,
-                customer_name=customer_name,
+                customer_name=customer_name or 'Customer',
                 salon_name=salon_name,
                 token_number=token_data.get('token_number', 0),
-                date=token_data.get('date'),
-                time_slot=token_data.get('time_slot'),
-                barber_name=token_data.get('barber_name'),
+                date=token_data.get('date') or '',
+                # `time_slot` may be None on bookings that only picked a shift.
+                # Twilio Content Templates reject empty variables → fall back to
+                # the shift name (e.g. "Morning") so the template always renders.
+                time_slot=(token_data.get('time_slot') or token_data.get('shift') or 'TBD'),
+                barber_name=(token_data.get('barber_name') or 'Any available'),
             )
             logger.info(
                 f"Notification sent: booking_confirmation to {phone}, status: {result.get('status')}"
