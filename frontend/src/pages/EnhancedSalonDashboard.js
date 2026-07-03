@@ -1729,7 +1729,22 @@ export default function EnhancedSalonDashboard() {
                       </p>
                     </div>
                     {/* Status Badge - always visible */}
-                    <div className={`flex items-center space-x-1 px-2 md:px-3 py-1 rounded-full flex-shrink-0 ${
+                    <div className="flex items-center gap-1.5 flex-shrink-0">
+                      {/* Direct-dial call button (#4a) — opens the phone
+                          dialer with the customer's number pre-filled so the
+                          salon can call them from the dashboard in one tap. */}
+                      {token.phone && (
+                        <a
+                          href={`tel:${token.phone}`}
+                          onClick={(e) => e.stopPropagation()}
+                          className="inline-flex items-center justify-center w-8 h-8 rounded-full bg-green-500/15 border border-green-500/40 text-green-600 hover:bg-green-500 hover:text-white transition-colors"
+                          title={`Call ${token.customer_name || 'customer'} — ${token.phone}`}
+                          data-testid={`token-call-customer-${token.id}`}
+                        >
+                          <Phone className="w-4 h-4" />
+                        </a>
+                      )}
+                      <div className={`flex items-center space-x-1 px-2 md:px-3 py-1 rounded-full ${
                       token.status === 'called' ? 'bg-blue-500/20 border border-blue-500' :
                       token.status === 'completed' ? 'bg-green-500/20 border border-green-500' :
                       token.status === 'skipped' ? 'bg-red-500/20 border border-red-500' :
@@ -1747,6 +1762,7 @@ export default function EnhancedSalonDashboard() {
                           ({token.recall_count}x)
                         </span>
                       )}
+                      </div>
                     </div>
                   </div>
                     

@@ -589,9 +589,19 @@ export default function StaffProfilePage() {
   const [allLoginIds, setAllLoginIds] = useState([]);
 
   useEffect(() => {
+    // Access guard (#1a): a `staff` role user may ONLY view their own profile.
+    // If they hit /staff/<other-staff-id> directly, redirect back to dashboard.
+    try {
+      const auth = JSON.parse(localStorage.getItem('salon_user_auth') || 'null');
+      if (auth?.role === 'staff' && auth?.staffId && auth.staffId !== staffId) {
+        toast.error('You can only view your own profile');
+        navigate('/salon/dashboard', { replace: true });
+        return;
+      }
+    } catch (_e) { /* ignore malformed auth */ }
     fetchStaffData();
     fetchServices();
-  }, [staffId]);
+  }, [staffId, navigate]);
 
   const fetchStaffData = async () => {
     try {
@@ -623,18 +633,29 @@ export default function StaffProfilePage() {
           is_barber: staffMember.is_barber !== false,
           profile_image: staffMember.profile_image || '',
         });
+      } else {
+        toast.error('Staff not found');
+        return;
       }
 
-      // Fetch staff user (for access control)
-      const usersResponse = await axios.get(`${API}/salon/users`, {
-        headers: { Authorization: `Bearer ${token}` }
-      });
-      const allUsers = usersResponse.data.users || [];
-      setAllLoginIds(allUsers.map((u) => u.login_id).filter(Boolean));
-      const linkedUser = allUsers.find(u => u.staff_id === staffId);
-      if (linkedUser) {
-        setStaffUser(linkedUser);
-        setPermissions((prev) => ({ ...prev, ...(linkedUser.permissions || {}) }));
+      // Fetch staff user (for access control). This endpoint requires admin
+      // permission — a `staff` role user gets 403. That's expected and should
+      // NOT show "Failed to load staff data" (#1b). Wrap in its own try/catch.
+      try {
+        const usersResponse = await axios.get(`${API}/salon/users`, {
+          headers: { Authorization: `Bearer ${token}` }
+        });
+        const allUsers = usersResponse.data.users || [];
+        setAllLoginIds(allUsers.map((u) => u.login_id).filter(Boolean));
+        const linkedUser = allUsers.find(u => u.staff_id === staffId);
+        if (linkedUser) {
+          setStaffUser(linkedUser);
+          setPermissions((prev) => ({ ...prev, ...(linkedUser.permissions || {}) }));
+        }
+      } catch (userErr) {
+        // Staff-role tokens cannot list all salon users — that's fine, they
+        // don't need the access-management UI. Silently skip.
+        console.debug('Staff user list not accessible (expected for staff role):', userErr?.response?.status);
       }
     } catch (error) {
       console.error('Error fetching staff data:', error);

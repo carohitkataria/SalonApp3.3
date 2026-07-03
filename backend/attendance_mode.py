@@ -182,10 +182,24 @@ def compute_mode_b_status(salon: dict, attendance_doc: dict, *, day_has_passed: 
     else:
         min_day_minutes = int(geo.get("min_daily_minutes") or DEFAULT_GEO_SETTINGS["min_daily_minutes"])
 
+    # --- Sessions-aware total minutes (multi check-in/out per day) ---
+    # If `sessions` array is present, sum durations across ALL closed sessions
+    # plus any currently-open one (up to "now" for in-progress days).
+    # Falls back to legacy single check_in_at / check_out_at pair.
     ci = attendance_doc.get("check_in_at")
     co = attendance_doc.get("check_out_at")
+    sessions = attendance_doc.get("sessions") or []
 
-    if not ci:
+    def _iso_to_dt(iso_str):
+        try:
+            dt = datetime.fromisoformat(iso_str)
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+            return dt
+        except Exception:
+            return None
+
+    if not ci and not sessions:
         # No check-in at all.
         if day_has_passed:
             return {"status": "absent", "half_day_reason": None, "total_minutes": 0}
@@ -193,9 +207,13 @@ def compute_mode_b_status(salon: dict, attendance_doc: dict, *, day_has_passed: 
         # so the calendar can render a red cell; it'll flip on check-in.
         return {"status": "absent", "half_day_reason": None, "total_minutes": 0}
 
-    # Late check-in test.
+    # Late check-in test — use the FIRST check-in (either sessions[0].ci or
+    # legacy check_in_at).
+    first_ci = ci
+    if sessions:
+        first_ci = sessions[0].get("ci") or ci
     try:
-        ci_dt = datetime.fromisoformat(ci)
+        ci_dt = datetime.fromisoformat(first_ci)
         if ci_dt.tzinfo is None:
             ci_dt = ci_dt.replace(tzinfo=timezone.utc)
         ci_ist = ci_dt.astimezone(IST)
@@ -203,23 +221,49 @@ def compute_mode_b_status(salon: dict, attendance_doc: dict, *, day_has_passed: 
     except Exception:
         ci_minutes_into_day = max_in_min  # benign default → not "late"
 
-    # If still open and the day has passed, mark absent (no check-out logged).
-    if not co:
-        if day_has_passed:
-            return {"status": "absent", "half_day_reason": None, "total_minutes": 0}
-        # Day in progress: if late, half-day already known; else present-pending.
-        if ci_minutes_into_day > max_in_min:
-            return {"status": "half_day", "half_day_reason": "late_checkin", "total_minutes": 0}
-        return {"status": "present", "half_day_reason": None, "total_minutes": 0}
+    # Compute total_minutes across all sessions (or legacy pair).
+    def _sum_session_minutes(day_passed):
+        total = 0
+        for s in sessions:
+            s_ci = _iso_to_dt(s.get("ci"))
+            if not s_ci:
+                continue
+            s_co = _iso_to_dt(s.get("co")) or (
+                None if day_passed else datetime.now(timezone.utc)
+            )
+            if not s_co:
+                continue
+            total += max(0, int((s_co - s_ci).total_seconds() // 60))
+        return total
 
-    # Both check-in and check-out present.
-    try:
-        co_dt = datetime.fromisoformat(co)
-        if co_dt.tzinfo is None:
-            co_dt = co_dt.replace(tzinfo=timezone.utc)
-        total_minutes = max(0, int((co_dt - ci_dt).total_seconds() // 60))
-    except Exception:
-        total_minutes = 0
+    # If day still in progress AND no check-out logged AND no closed sessions
+    # → pending status.
+    day_over = day_has_passed
+    has_open_session = any((s.get("ci") and not s.get("co")) for s in sessions)
+    has_closed_session = any((s.get("ci") and s.get("co")) for s in sessions)
+
+    # No check-out logged yet (legacy `co` empty AND no closed sessions)
+    if not co and not has_closed_session:
+        if day_over and not has_open_session:
+            return {"status": "absent", "half_day_reason": None, "total_minutes": 0}
+        # Day in progress OR still-open session: partial minutes if we have sessions
+        partial = _sum_session_minutes(day_over) if sessions else 0
+        if ci_minutes_into_day > max_in_min:
+            return {"status": "half_day", "half_day_reason": "late_checkin", "total_minutes": partial}
+        return {"status": "present", "half_day_reason": None, "total_minutes": partial}
+
+    # Compute total minutes.
+    if sessions:
+        total_minutes = _sum_session_minutes(day_over)
+    else:
+        # Legacy single-pair path
+        try:
+            co_dt = datetime.fromisoformat(co)
+            if co_dt.tzinfo is None:
+                co_dt = co_dt.replace(tzinfo=timezone.utc)
+            total_minutes = max(0, int((co_dt - ci_dt).total_seconds() // 60))
+        except Exception:
+            total_minutes = 0
 
     if ci_minutes_into_day > max_in_min:
         return {"status": "half_day", "half_day_reason": "late_checkin", "total_minutes": total_minutes}
@@ -443,31 +487,77 @@ async def _check_in_impl(salon_id: str, payload: CheckInPayload, user: dict):
     now_iso = current_ist_iso()
     record_id = f"{salon_id}_{payload.barber_id}_{today}"
     existing = await _db.attendance.find_one({"id": record_id}, {"_id": 0})
-    if existing and existing.get("check_in_at"):
-        raise HTTPException(status_code=409, detail="Already checked in today")
+
+    # Multi-session support (#1c): permit check-in again ONLY when the last
+    # session has been checked-out. If a session is currently open, block.
+    existing_sessions = list((existing or {}).get("sessions") or [])
+    has_open_session = any((s.get("ci") and not s.get("co")) for s in existing_sessions)
+    # Legacy fallback: if only `check_in_at` exists (no sessions yet) and no
+    # `check_out_at`, treat that as an open session too.
+    legacy_open = (
+        existing
+        and existing.get("check_in_at")
+        and not existing.get("check_out_at")
+        and not existing_sessions
+    )
+    if has_open_session or legacy_open:
+        raise HTTPException(status_code=409, detail="Please check out first before checking in again")
 
     on_leave = bool(await _db.leave_records.find_one({
         "salon_id": salon_id, "barber_id": payload.barber_id, "date": today,
         "status": {"$ne": "cancelled"},
     }, {"_id": 0, "id": 1}))
 
+    # Build a new session entry for THIS check-in.
+    new_session = {
+        "ci": now_iso,
+        "ci_lat": payload.latitude,
+        "ci_lng": payload.longitude,
+        "ci_distance_meters": int(distance),
+        "ci_method": method,
+    }
+    if payload.self_override_reason:
+        new_session["ci_override_reason"] = payload.self_override_reason
+
+    # If legacy pair exists without sessions, migrate it into sessions first.
+    if existing and existing.get("check_in_at") and not existing_sessions:
+        legacy_session = {
+            "ci": existing.get("check_in_at"),
+            "co": existing.get("check_out_at"),
+            "ci_lat": existing.get("check_in_lat"),
+            "ci_lng": existing.get("check_in_lng"),
+            "ci_distance_meters": existing.get("check_in_distance_meters"),
+            "ci_method": existing.get("check_in_method"),
+            "co_lat": existing.get("check_out_lat"),
+            "co_lng": existing.get("check_out_lng"),
+            "co_method": existing.get("check_out_method"),
+        }
+        existing_sessions.append(legacy_session)
+    existing_sessions.append(new_session)
+
+    # First-of-day check-in fields stay pinned to the very first ci.
+    first_ci_iso = existing.get("check_in_at") if (existing and existing.get("check_in_at")) else now_iso
+    first_ci_lat = existing.get("check_in_lat") if (existing and existing.get("check_in_at")) else payload.latitude
+    first_ci_lng = existing.get("check_in_lng") if (existing and existing.get("check_in_at")) else payload.longitude
+
     doc = {
         "id": record_id,
         "salon_id": salon_id,
         "barber_id": payload.barber_id,
         "date": today,
-        "check_in_at": now_iso,
-        "check_in_lat": payload.latitude,
-        "check_in_lng": payload.longitude,
-        "check_in_distance_meters": int(distance),
-        "check_in_method": method,
+        "check_in_at": first_ci_iso,      # first check-in of the day (for legacy readers)
+        "check_in_lat": first_ci_lat,
+        "check_in_lng": first_ci_lng,
+        "check_in_distance_meters": (existing.get("check_in_distance_meters") if existing and existing.get("check_in_at") else int(distance)),
+        "check_in_method": (existing.get("check_in_method") if existing and existing.get("check_in_at") else method),
+        # Clear check-out on re-check-in — day is active again.
+        "check_out_at": None,
+        "sessions": existing_sessions,
         "computed_under_mode": "geo_checkin",
         "auto_calculated": True,
-        "created_at": now_iso,
+        "created_at": (existing or {}).get("created_at") or now_iso,
         "updated_at": now_iso,
     }
-    if payload.self_override_reason:
-        doc["check_in_override_reason"] = payload.self_override_reason
 
     # Compute provisional status.
     computed = compute_mode_b_status(
@@ -498,8 +588,22 @@ async def _check_out_impl(salon_id: str, payload: CheckOutPayload, user: dict):
     existing = await _db.attendance.find_one({"id": record_id}, {"_id": 0})
     if not existing or not existing.get("check_in_at"):
         raise HTTPException(status_code=409, detail="No active check-in found for today")
-    if existing.get("check_out_at"):
-        raise HTTPException(status_code=409, detail="Already checked out today")
+
+    # Multi-session support (#1c): the "open" session is the LAST one whose
+    # `co` is missing. If no such session exists, already checked out.
+    existing_sessions = list((existing or {}).get("sessions") or [])
+    open_idx = -1
+    for i, s in enumerate(existing_sessions):
+        if s.get("ci") and not s.get("co"):
+            open_idx = i
+    # Legacy fallback: no sessions array yet but check_in_at set + no check_out_at.
+    legacy_open = (
+        existing.get("check_in_at")
+        and not existing.get("check_out_at")
+        and not existing_sessions
+    )
+    if open_idx < 0 and not legacy_open:
+        raise HTTPException(status_code=409, detail="No active check-in — please check in first")
 
     now_iso = current_ist_iso()
     on_leave = bool(await _db.leave_records.find_one({
@@ -507,7 +611,30 @@ async def _check_out_impl(salon_id: str, payload: CheckOutPayload, user: dict):
         "status": {"$ne": "cancelled"},
     }, {"_id": 0, "id": 1}))
 
-    merged = {**existing, "check_out_at": now_iso}
+    # Close the open session (either the last open in `sessions`, or migrate
+    # the legacy pair into a first session).
+    if open_idx >= 0:
+        existing_sessions[open_idx]["co"] = now_iso
+        if payload.latitude is not None:
+            existing_sessions[open_idx]["co_lat"] = payload.latitude
+        if payload.longitude is not None:
+            existing_sessions[open_idx]["co_lng"] = payload.longitude
+        existing_sessions[open_idx]["co_method"] = payload.method or "self"
+    else:
+        # Migrate legacy pair → sessions.
+        existing_sessions = [{
+            "ci": existing.get("check_in_at"),
+            "co": now_iso,
+            "ci_lat": existing.get("check_in_lat"),
+            "ci_lng": existing.get("check_in_lng"),
+            "ci_distance_meters": existing.get("check_in_distance_meters"),
+            "ci_method": existing.get("check_in_method"),
+            "co_lat": payload.latitude,
+            "co_lng": payload.longitude,
+            "co_method": payload.method or "self",
+        }]
+
+    merged = {**existing, "check_out_at": now_iso, "sessions": existing_sessions}
     if payload.latitude is not None and payload.longitude is not None:
         merged["check_out_lat"] = payload.latitude
         merged["check_out_lng"] = payload.longitude
@@ -517,6 +644,7 @@ async def _check_out_impl(salon_id: str, payload: CheckOutPayload, user: dict):
     set_doc = {
         "check_out_at": merged["check_out_at"],
         "check_out_method": merged["check_out_method"],
+        "sessions": existing_sessions,
         "status": computed["status"],
         "half_day_reason": computed["half_day_reason"],
         "total_minutes": computed["total_minutes"],

@@ -75,8 +75,20 @@ export default function StaffCheckInWidget({ salonId, staffId, staffName, getAut
 
   useEffect(() => { fetchState(); }, [fetchState]);
 
-  // Running clock (only matters while checked-in).
-  const isCheckedIn = !!record?.check_in_at && !record?.check_out_at;
+  // Multi-session support (#1c): a staff can check in multiple times per day.
+  // The "open session" is the last one whose `co` (check-out) is missing.
+  // If no open session exists, the staff CAN check in again — even after a
+  // previous check-out today.
+  const sessions = Array.isArray(record?.sessions) ? record.sessions : [];
+  const openSession = sessions.length ? sessions[sessions.length - 1] : null;
+  const hasOpenSession = !!(openSession && openSession.ci && !openSession.co);
+  // Legacy fallback: pre-migration docs used check_in_at / check_out_at only.
+  const legacyOpen =
+    sessions.length === 0 && !!record?.check_in_at && !record?.check_out_at;
+  const isCheckedIn = hasOpenSession || legacyOpen;
+  // Any completed sessions today mean we're mid-day (post first check-out).
+  const hasClosedSessionToday =
+    sessions.some((s) => s.ci && s.co) || (!!record?.check_in_at && !!record?.check_out_at && sessions.length === 0);
   useEffect(() => {
     if (isCheckedIn) {
       timerRef.current = setInterval(() => setNow(Date.now()), 1000);
@@ -136,15 +148,32 @@ export default function StaffCheckInWidget({ salonId, staffId, staffName, getAut
   if (!staffId) return null;
   if (mode !== 'geo_checkin') return null;
 
-  const checkedOut = !!record?.check_out_at;
-  const checkInMs = record?.check_in_at ? new Date(record.check_in_at).getTime() : null;
-  const checkOutMs = record?.check_out_at ? new Date(record.check_out_at).getTime() : null;
+  const checkedOut = !isCheckedIn && (hasClosedSessionToday || !!record?.check_out_at);
 
-  const elapsed =
-    checkInMs != null ? (checkedOut ? checkOutMs - checkInMs : now - checkInMs) : 0;
+  // Cumulative worked time across ALL sessions today. When a session is open,
+  // its elapsed portion counts against `now`.
+  const sumClosedMinutes = sessions
+    .filter((s) => s.ci && s.co)
+    .reduce((acc, s) => {
+      const ci = new Date(s.ci).getTime();
+      const co = new Date(s.co).getTime();
+      return acc + Math.max(0, co - ci);
+    }, 0);
+  const openElapsed = isCheckedIn && openSession?.ci ? (now - new Date(openSession.ci).getTime()) : 0;
+  // Legacy fallback for pre-migration records.
+  const legacyElapsed = sessions.length === 0 && record?.check_in_at
+    ? (record.check_out_at ? new Date(record.check_out_at).getTime() : now) - new Date(record.check_in_at).getTime()
+    : 0;
+  const elapsed = sumClosedMinutes + openElapsed + (sessions.length === 0 ? legacyElapsed : 0);
 
   const fmtTime = (iso) =>
     iso ? new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '—';
+
+  // Determine which action button to show:
+  //  • no open session → "Check In" (or "Check In Again" if we already worked today)
+  //  • open session   → "Check Out"
+  const showCheckInButton = !isCheckedIn;
+  const isReCheckIn = showCheckInButton && hasClosedSessionToday;
 
   return (
     <div
@@ -161,25 +190,25 @@ export default function StaffCheckInWidget({ salonId, staffId, staffName, getAut
               Attendance Check-in{staffName ? ` · ${staffName}` : ''}
             </p>
             <p className="text-xs text-muted-foreground">
-              {checkedOut
-                ? 'Your attendance is recorded for today'
-                : isCheckedIn
+              {isCheckedIn
                 ? 'You are checked in — remember to check out'
+                : hasClosedSessionToday
+                ? 'You can check in again — total time will accumulate'
                 : 'Tap below to mark your attendance for today'}
             </p>
           </div>
         </div>
 
         {/* Action area */}
-        {!record?.check_in_at && (
+        {showCheckInButton && (
           <Button
             onClick={() => doAction('in')}
             disabled={acting}
-            data-testid="staff-checkin-btn"
+            data-testid={isReCheckIn ? 'staff-recheckin-btn' : 'staff-checkin-btn'}
             className="bg-gold text-black hover:bg-gold/90"
           >
             {acting ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <LogIn className="w-4 h-4 mr-2" />}
-            Check In
+            {isReCheckIn ? 'Check In Again' : 'Check In'}
           </Button>
         )}
 
@@ -207,7 +236,7 @@ export default function StaffCheckInWidget({ salonId, staffId, staffName, getAut
           </div>
         )}
 
-        {checkedOut && (
+        {checkedOut && showCheckInButton === false && (
           <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-muted">
             <CheckCircle2 className="w-4 h-4 text-green-600" />
             <span className="text-sm font-medium text-foreground">
@@ -217,16 +246,34 @@ export default function StaffCheckInWidget({ salonId, staffId, staffName, getAut
         )}
       </div>
 
-      {/* Timestamps row */}
-      {record?.check_in_at && (
-        <div className="mt-3 flex items-center gap-4 text-xs text-muted-foreground border-t border-border pt-2">
-          <span>In: <strong className="text-foreground">{fmtTime(record.check_in_at)}</strong></span>
-          <span>Out: <strong className="text-foreground">{fmtTime(record.check_out_at)}</strong></span>
-          {record?.status && (
-            <span className="ml-auto capitalize">
-              Status: <strong className="text-foreground">{String(record.status).replace('_', ' ')}</strong>
-            </span>
-          )}
+      {/* Session history — every ci/co pair for today */}
+      {(sessions.length > 0 || record?.check_in_at) && (
+        <div className="mt-3 border-t border-border pt-2 space-y-1.5">
+          {(sessions.length > 0 ? sessions : [{
+            ci: record?.check_in_at, co: record?.check_out_at
+          }]).map((s, i) => (
+            <div key={`${s.ci || i}-${i}`} className="flex items-center gap-4 text-xs text-muted-foreground" data-testid={`staff-session-row-${i}`}>
+              <span className="font-mono text-[10px] uppercase text-muted-foreground/70">#{i + 1}</span>
+              <span>In: <strong className="text-foreground">{fmtTime(s.ci)}</strong></span>
+              <span>Out: <strong className="text-foreground">{fmtTime(s.co)}</strong></span>
+              {s.ci && (
+                <span className="ml-auto text-[11px]">
+                  {s.co
+                    ? formatElapsed(new Date(s.co).getTime() - new Date(s.ci).getTime())
+                    : (isCheckedIn && i === sessions.length - 1 ? 'active' : '')}
+                </span>
+              )}
+            </div>
+          ))}
+          {/* Cumulative worked & status */}
+          <div className="flex items-center gap-4 text-xs pt-1">
+            <span>Total worked: <strong className="text-foreground">{formatElapsed(elapsed)}</strong></span>
+            {record?.status && (
+              <span className="ml-auto capitalize">
+                Status: <strong className="text-foreground">{String(record.status).replace('_', ' ')}</strong>
+              </span>
+            )}
+          </div>
         </div>
       )}
     </div>

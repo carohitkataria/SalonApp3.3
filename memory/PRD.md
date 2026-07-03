@@ -24,6 +24,28 @@ A multi-tenant salon management SaaS (React + FastAPI + MongoDB). Most recent fe
 
 ## Implemented (CHANGELOG)
 
+### Feb 18, 2026 — 8 bug/feature fixes batch ✅
+- 🔒 **#1a — Staff can no longer view other staff profiles by URL paste**  
+  `StaffProfilePage.js` now reads `salon_user_auth` and if `role === 'staff'` and the URL `staffId` ≠ their own `staffId`, redirects to `/salon/dashboard` with an error toast. Backend already blocks *modifications* so this closes the browser-URL-paste read hole client-side.
+- 🐛 **#1b — "Failed to load staff data" false-alarm toast**  
+  The secondary `GET /api/salon/users` call (403 for staff-role tokens) was clobbering the primary staff-details fetch's success. Wrapped the users-list call in its own try/catch that silently skips on 403.
+- 🆕 **#1c — Multiple check-in/check-out per day + cumulative time**  
+  Backend `attendance_mode.py::_check_in_impl` + `_check_out_impl` now maintain a `sessions: [{ci, co, ci_lat, ci_lng, ci_method, co_lat, co_lng, co_method}]` array. A staff can Check In → Check Out → Check In Again as many times as needed. `compute_mode_b_status` sums minutes across all sessions (with legacy single-pair fallback). The frontend `StaffCheckInWidget` now shows a **"Check In Again"** button after check-out, a full **session history list**, and a **cumulative "Total worked" counter**.
+- 🆕 **#2a — Booked-token cards on customer home are clickable**  
+  `ActiveBookingTracker.js` — whole card is now a `role="button"` that navigates to `/salon/<id>/queue` (live queue). "View Salon" inner button stopPropagation'd so it still goes to salon page.
+- 🐛 **#2b — Services page filter chips now horizontally-scrollable on phone**  
+  `SalonServicesTab.js` swapped `flex-wrap` → `flex-nowrap overflow-x-auto` on mobile (falls back to `flex-wrap` on ≥sm). Added `flex-shrink-0` to gender/sort/at-home/category pills so they don't compress. Added `WebkitOverflowScrolling: 'touch'` for iOS Safari momentum.
+- 🏷️ **#2c — "Boutique" → "Shop"** in `CustomerLayout.js` sidebar menu.
+- 🎨 **#3a — "I run a salon" hover text no longer disappears**  
+  `LandingPage.js` — removed the outline-variant default `hover:text-accent-foreground`; now explicitly sets `hover:text-foreground hover:bg-brass-soft/40` so the espresso text stays visible on a soft-brass hover tint. Verified via computed style: text `rgb(29, 26, 22)` on `rgba(168, 132, 56, 0.4)`.
+- 🆕 **#4a — Direct-dial Call button on salon dashboard token card**  
+  `EnhancedSalonDashboard.js` — each token card now has a small green phone button (`token-call-customer-<id>`) that opens the OS phone dialer with the customer's number pre-filled (`tel:${phone}`). Sits next to the status badge; stopPropagation'd so it doesn't trigger the row's own click handler.
+
+**Tests:**
+- `backend/tests/test_multi_session_attendance.py` — 4/4 pytest green (2-session, 3-session, single-legacy, half-day short-hours cases).
+- `backend/tests/test_subscription_trial.py` — 4/4 still green (no regressions).
+- All modified JS files lint-clean.
+
 ### Feb 17, 2026 — Codebase Swap to SalonApp3.0 ✅
 - ✅ **Code synced** from `https://github.com/carohitkataria/SalonApp3.0.git` (branch `main`, head `9bc1a1a`):
   - `backend/server.py`: 14,142 → **14,705 lines** (+563 lines of new features).

@@ -218,7 +218,7 @@ export default function LandingPage() {
                 <Button
                   onClick={() => navigate('/salon/login')}
                   variant="outline"
-                  className="bg-transparent border-border hover:border-brass/60 text-foreground hover:bg-transparent px-7 h-12 rounded-full"
+                  className="bg-transparent border-border hover:border-brass/60 text-foreground hover:text-foreground hover:bg-brass-soft/40 px-7 h-12 rounded-full"
                   data-testid="hero-salon-login-btn"
                 >
                   <Scissors className="mr-2 w-4 h-4" strokeWidth={1.6} />

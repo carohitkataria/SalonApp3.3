@@ -93,7 +93,12 @@ export default function ActiveBookingTracker({ userPhone, userName }) {
               initial={{ opacity: 0, scale: 0.95 }}
               animate={{ opacity: 1, scale: 1 }}
               transition={{ delay: idx * 0.1 }}
-              className="bg-white/10 backdrop-blur-md rounded-2xl p-5 border border-white/20"
+              onClick={() => navigate(`/salon/${booking.salon_id}/queue${booking.branch_id ? `?branch=${booking.branch_id}` : ''}`)}
+              role="button"
+              tabIndex={0}
+              onKeyDown={(e) => { if (e.key === 'Enter') navigate(`/salon/${booking.salon_id}/queue${booking.branch_id ? `?branch=${booking.branch_id}` : ''}`); }}
+              className="bg-white/10 backdrop-blur-md rounded-2xl p-5 border border-white/20 cursor-pointer hover:bg-white/15 transition-colors"
+              data-testid={`active-booking-card-${booking.id}`}
             >
               {/* Salon Info Header */}
               {booking.salon_details && (
@@ -192,7 +197,7 @@ export default function ActiveBookingTracker({ userPhone, userName }) {
 
                 {/* View Salon Button */}
                 <Button
-                  onClick={() => navigate(`/salon/${booking.salon_id}${booking.branch_id ? `?branch=${booking.branch_id}` : ''}`)}
+                  onClick={(e) => { e.stopPropagation(); navigate(`/salon/${booking.salon_id}${booking.branch_id ? `?branch=${booking.branch_id}` : ''}`); }}
                   className="w-full bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-600 hover:to-amber-700 text-white font-bold py-3 rounded-xl shadow-lg hover:shadow-xl transition-all duration-300 flex items-center justify-center gap-2"
                   data-testid="view-salon-btn"
                 >

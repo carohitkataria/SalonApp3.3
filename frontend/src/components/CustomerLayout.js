@@ -189,7 +189,7 @@ export default function CustomerLayout({ children }) {
     { icon: Wallet, label: 'My Wallet', action: () => navigate(`/salon/${currentSalonId}/wallet`) },
     { icon: Scissors, label: 'Services', action: () => { navigate(`/salon/${currentSalonId}`); setTimeout(() => window.dispatchEvent(new CustomEvent('setTab', { detail: 'services' })), 100); } },
     { icon: User, label: 'Our Stylists', action: () => { navigate(`/salon/${currentSalonId}`); setTimeout(() => window.dispatchEvent(new CustomEvent('setTab', { detail: 'barbers' })), 100); } },
-    { icon: ShoppingBag, label: 'Boutique', action: () => { navigate(`/salon/${currentSalonId}`); setTimeout(() => window.dispatchEvent(new CustomEvent('setTab', { detail: 'shop' })), 100); } },
+    { icon: ShoppingBag, label: 'Shop', action: () => { navigate(`/salon/${currentSalonId}`); setTimeout(() => window.dispatchEvent(new CustomEvent('setTab', { detail: 'shop' })), 100); } },
     { icon: ImageIcon, label: 'Gallery', action: () => { navigate(`/salon/${currentSalonId}`); setTimeout(() => window.dispatchEvent(new CustomEvent('setTab', { detail: 'gallery' })), 100); } },
     { icon: MapPin, label: 'About', action: () => { navigate(`/salon/${currentSalonId}`); setTimeout(() => window.dispatchEvent(new CustomEvent('setTab', { detail: 'profile' })), 100); } },
   ] : [];

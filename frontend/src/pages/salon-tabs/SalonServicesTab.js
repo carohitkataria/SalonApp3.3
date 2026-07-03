@@ -174,9 +174,12 @@ export default function SalonServicesTab({ salonId, branchId, initialCategory = 
 
       {/* === A2: PINNED FILTER BAR (sticky, glass) === */}
       <div className="sticky top-[60px] sm:top-[64px] z-20 -mx-4 sm:-mx-6 px-4 sm:px-6 py-3 bg-background/85 backdrop-blur-md border-y border-border/60" data-testid="services-pinned-filter-bar">
-        <div className="flex items-center gap-2 flex-wrap">
+        {/* On mobile, the filter row is horizontally-scrollable so ALL chips
+            (gender, sort, at-home, categories) are reachable via touch swipe.
+            On sm+ we wrap normally. */}
+        <div className="flex items-center gap-2 flex-nowrap overflow-x-auto sm:flex-wrap sm:overflow-visible scrollbar-thin -mx-4 px-4 sm:mx-0 sm:px-0" style={{ WebkitOverflowScrolling: 'touch' }}>
           {/* Gender pill group */}
-          <div className="inline-flex items-center bg-card border border-border rounded-full p-0.5" data-testid="gender-filter-group">
+          <div className="inline-flex items-center bg-card border border-border rounded-full p-0.5 flex-shrink-0" data-testid="gender-filter-group">
             {GENDER_OPTIONS.map(opt => (
               <button
                 key={opt.id}
@@ -196,7 +199,7 @@ export default function SalonServicesTab({ salonId, branchId, initialCategory = 
           {/* Sort by price */}
           <button
             onClick={cycleSort}
-            className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full border text-xs font-medium transition-colors ${
+            className={`inline-flex flex-shrink-0 items-center gap-1.5 px-3 py-1.5 rounded-full border text-xs font-medium transition-colors ${
               sortByPrice !== 'default'
                 ? 'bg-brass-soft border-brass/50 text-foreground'
                 : 'bg-card border-border text-muted-foreground hover:border-brass/40'
@@ -210,7 +213,7 @@ export default function SalonServicesTab({ salonId, branchId, initialCategory = 
           {/* At-home toggle */}
           <button
             onClick={() => setAtHomeOnly(v => !v)}
-            className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full border text-xs font-medium transition-colors ${
+            className={`inline-flex flex-shrink-0 items-center gap-1.5 px-3 py-1.5 rounded-full border text-xs font-medium transition-colors ${
               atHomeOnly
                 ? 'bg-sage/15 border-sage/50 text-foreground'
                 : 'bg-card border-border text-muted-foreground hover:border-brass/40'
@@ -222,7 +225,7 @@ export default function SalonServicesTab({ salonId, branchId, initialCategory = 
           </button>
 
           {/* Category chips (scrollable) */}
-          <div className="flex gap-1.5 overflow-x-auto scrollbar-thin flex-1 min-w-0">
+          <div className="flex gap-1.5 flex-shrink-0">
             {categories.map((category) => (
               <button
                 key={category}
