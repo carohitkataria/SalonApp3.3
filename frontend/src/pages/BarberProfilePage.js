@@ -53,9 +53,9 @@ function BarberPhotoCarousel({ images, alt, overlay }) {
 
       {images.length > 1 && (
         <div className="absolute bottom-3 left-1/2 -translate-x-1/2 flex gap-1.5 z-10" data-testid="barber-photo-dots">
-          {images.map((_, i) => (
+          {images.map((imgSrc, i) => (
             <button
-              key={i}
+              key={`${imgSrc}-${i}`}
               onClick={() => setIndex(i)}
               aria-label={`Go to photo ${i + 1}`}
               className={`h-1.5 rounded-full transition-all ${i === index ? 'w-6 bg-gold' : 'w-1.5 bg-white/70 hover:bg-white'}`}
@@ -360,7 +360,7 @@ export default function BarberProfilePage() {
                   const src = typeof photo === 'string' ? photo : photo?.url;
                   if (!src) return null;
                   return (
-                    <div key={idx} className="aspect-square rounded-lg overflow-hidden">
+                    <div key={`${src}-${idx}`} className="aspect-square rounded-lg overflow-hidden">
                       <img
                         src={src}
                         alt={`Work ${idx + 1}`}
