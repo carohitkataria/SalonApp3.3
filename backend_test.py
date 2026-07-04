@@ -11,7 +11,7 @@ import string
 from datetime import datetime
 
 # Configuration
-BASE_URL = "https://leave-manager-120.preview.emergentagent.com/api"
+BASE_URL = "https://salon-wallet-booking.preview.emergentagent.com/api"
 SALON_ID = "07415cce-f887-4555-a2e2-3f43da54e1aa"
 SALON_LAT = 12.9716
 SALON_LNG = 77.5946
