@@ -1,5 +1,5 @@
-import { useState, useEffect, useCallback } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useState, useEffect, useCallback, useRef } from 'react';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import axios from 'axios';
 import { Scissors, Calendar, Clock, User, CheckCircle, XCircle, AlertCircle, Star, Edit, Trash2, ArrowLeft } from 'lucide-react';

@@ -93,10 +93,10 @@ export default function ActiveBookingTracker({ userPhone, userName }) {
               initial={{ opacity: 0, scale: 0.95 }}
               animate={{ opacity: 1, scale: 1 }}
               transition={{ delay: idx * 0.1 }}
-              onClick={() => navigate(`/salon/${booking.salon_id}/queue${booking.branch_id ? `?branch=${booking.branch_id}` : ''}`)}
+              onClick={() => navigate(`/history?highlight=${booking.id}`)}
               role="button"
               tabIndex={0}
-              onKeyDown={(e) => { if (e.key === 'Enter') navigate(`/salon/${booking.salon_id}/queue${booking.branch_id ? `?branch=${booking.branch_id}` : ''}`); }}
+              onKeyDown={(e) => { if (e.key === 'Enter') navigate(`/history?highlight=${booking.id}`); }}
               className="bg-white/10 backdrop-blur-md rounded-2xl p-5 border border-white/20 cursor-pointer hover:bg-white/15 transition-colors"
               data-testid={`active-booking-card-${booking.id}`}
             >
