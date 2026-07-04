@@ -3593,15 +3593,21 @@ metadata:
   run_ui: false
 
 test_plan:
-  current_focus:
-    - "Salon manual booking: wallet payment_mode"
-    - "Bulk delete salon services endpoint"
-    - "New salon signup auto-creates Main Branch (customer search visibility)"
-    - "Inventory manual add — auto financial purchase entry"
-    - "Inventory sell — optional customer_name/phone persistence"
+  current_focus: []
   stuck_tasks: []
   test_all: false
   test_priority: "high_first"
+
+# July 5, 2026 — Continuation session
+# .env files were missing at session start; restored from git (Twilio sandbox creds).
+# python-socketio dep re-installed. Backend healthy.
+# All 5 pending July-4 backend tasks were re-tested and verified PASSING:
+#   1) Salon manual booking wallet payment_mode  ✅
+#   2) Bulk delete salon services endpoint       ✅
+#   3) New salon signup auto Main Branch         ✅
+#   4) Inventory manual add auto financial entry ✅
+#   5) Inventory sell customer_name/phone persist ✅
+# Admin creds: identifier='admin' / password='salon123', salon_id=f78671f8-621a-42d9-a055-097ba21c0bbf
 
 # =================================================================
 # Module 2 — Leave Tracker & Leave Settings (May 30, 2026)
