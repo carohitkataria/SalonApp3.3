@@ -1378,7 +1378,7 @@ agent_communication:
       message: "✅ PHASE 1.5 FRONTEND UI TESTING COMPLETED (2026-04-30): Successfully tested salon admin login and all Phase 1.5 UI features. LOGIN: Working perfectly with credentials (identifier='admin', password='salon123'), redirects to /salon/dashboard. DASHBOARD: Quick Actions section present with all cards (Token Queue, Customers, Services, Staff, Financials, Analytics, Gallery, Settings). STAFF MANAGEMENT: Clicking Staff Quick Action navigates to staff list showing 2 staff members (Imran, Abdul) with 'View Profile' buttons. STAFF PROFILE PAGE: ✅ Tabs verified - Profile, Attendance, Services, Access tabs present. ✅ NO Rewards tab (correctly removed as per Phase 1 Task 2c). LAST WORKING DAY FIELD: ✅ Present in Profile tab edit mode (Phase 1.5 feature), successfully saves and persists value (verified by page reload showing '2026-12-31'). ATTENDANCE TAB: ✅ All required buttons present and working: 'Mark All Present', 'Leave Mode: OFF/ON' (toggles correctly), 'Auto Calculate'. ✅ Leave Mode functionality tested: turned ON, clicked future date (25), leave marked with toast notification, clicked again to remove leave, turned Leave Mode back OFF. ✅ Calendar displays with proper legend (P=Present, H=Half Day, A=Absent, Holiday, L=On Leave). ✅ Salary Summary section visible with all fields. All Phase 1.5 frontend features are working correctly and ready for production."
 
     - agent: "testing"
-      message: "❌ CRITICAL BLOCKER - PHASE 1 + 1.5 FRONTEND TESTING FAILED: Unable to complete frontend testing due to login failure. ISSUE: Salon admin login with credentials (identifier='admin', password='salon123') is NOT WORKING on the production URL (https://salon-wallet-booking.preview.emergentagent.com/salon/login). SYMPTOMS: (1) Login form accepts credentials and button is clickable, (2) After clicking 'Login with Password' button, page stays on /salon/login URL, (3) Form fields are cleared but no navigation occurs, (4) No POST request to login API detected in network logs, (5) No error messages displayed on UI, (6) No Quick Actions dashboard elements appear. EVIDENCE: Multiple test attempts with proper wait times all resulted in staying on login page. Backend logs show salon ID b742cd5f-e3f8-4b63-872b-b83d84841d2c is active with API calls, suggesting the backend is working but frontend login flow is broken. IMPACT: Cannot test ANY of the requested Phase 1/1.5 features: (A) Manual booking dialog with customer search, (B) Skipped tokens Cancel button, (C) Gallery limits, (D) Staff clickable cards + Rewards tab removal + Last Working Day field, (E) Attendance tab Mark All Present + Leave Mode, (F) Customer booking All services + auto-latest-slot. ROOT CAUSE HYPOTHESIS: Login form submission is not triggering the API call - possible JavaScript error, form validation issue, or event handler not attached. URGENT ACTION REQUIRED: Main agent must investigate and fix the salon login flow before frontend testing can proceed."
+      message: "❌ CRITICAL BLOCKER - PHASE 1 + 1.5 FRONTEND TESTING FAILED: Unable to complete frontend testing due to login failure. ISSUE: Salon admin login with credentials (identifier='admin', password='salon123') is NOT WORKING on the production URL (https://task-completion-sync.preview.emergentagent.com/salon/login). SYMPTOMS: (1) Login form accepts credentials and button is clickable, (2) After clicking 'Login with Password' button, page stays on /salon/login URL, (3) Form fields are cleared but no navigation occurs, (4) No POST request to login API detected in network logs, (5) No error messages displayed on UI, (6) No Quick Actions dashboard elements appear. EVIDENCE: Multiple test attempts with proper wait times all resulted in staying on login page. Backend logs show salon ID b742cd5f-e3f8-4b63-872b-b83d84841d2c is active with API calls, suggesting the backend is working but frontend login flow is broken. IMPACT: Cannot test ANY of the requested Phase 1/1.5 features: (A) Manual booking dialog with customer search, (B) Skipped tokens Cancel button, (C) Gallery limits, (D) Staff clickable cards + Rewards tab removal + Last Working Day field, (E) Attendance tab Mark All Present + Leave Mode, (F) Customer booking All services + auto-latest-slot. ROOT CAUSE HYPOTHESIS: Login form submission is not triggering the API call - possible JavaScript error, form validation issue, or event handler not attached. URGENT ACTION REQUIRED: Main agent must investigate and fix the salon login flow before frontend testing can proceed."
 
     - agent: "main"
       message: "Bug-fix + enhancement round (post Phase 1.5):
@@ -4315,7 +4315,7 @@ agent_communication:
         ═══════════════════════════════════════════════════════════════════
         
         TESTED: Staff Access / Access Control UI on Staff Profile page (per-staff, under "Access" tab)
-        URL: https://salon-wallet-booking.preview.emergentagent.com/salon/staff/e580d816-f0aa-4ce6-a12d-0cdf2de45d0f
+        URL: https://task-completion-sync.preview.emergentagent.com/salon/staff/e580d816-f0aa-4ce6-a12d-0cdf2de45d0f
         Staff: Imran (master)
         
         ✅ PASSED TESTS (8):
@@ -4602,3 +4602,223 @@ agent_communication:
            compensation:'') and all error toasts stringify Pydantic arrays — tested PASS.
         NOTE: StaffAccessManagement.js is an orphan component (not routed); the live UI
         is StaffProfilePage Access tab. Both were updated for consistency.
+
+# =================================================================
+# July 4, 2026 Session - 5 Pending Backend Tasks Retest
+# =================================================================
+
+backend:
+  - task: "Salon manual booking: wallet payment_mode"
+    implemented: true
+    working: true
+    file: "/app/backend/server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+        - working: true
+          agent: "testing"
+          comment: |
+            ✅ SALON MANUAL BOOKING WALLET PAYMENT FULLY TESTED AND WORKING (8/8 PASS - 100%)
+            
+            COMPREHENSIVE TESTING COMPLETED:
+            
+            BASELINE PAYMENT MODES (3/3 PASS):
+            ✅ Cash payment mode: Token M2 created successfully
+            ✅ UPI payment mode: Token M3 created successfully
+            ✅ Card payment mode: Token M4 created successfully
+            
+            WALLET PAYMENT VALIDATION (2/2 PASS):
+            ✅ Wallet without membership correctly rejected with error: "No active wallet/membership found for this customer."
+            ✅ Customer phone + membership required validation working
+            
+            WALLET PAYMENT WITH MEMBERSHIP (3/3 PASS):
+            ✅ Membership plan created (credit: ₹1200)
+            ✅ Membership purchased and confirmed (wallet balance: ₹1200)
+            ✅ Wallet payment successful:
+               - Token M5 created
+               - Payment status: paid
+               - Payment confirmed: True
+               - Wallet transaction created: ₹200 debited
+               - Balance after: ₹1000
+            
+            ALL CRITICAL FEATURES WORKING:
+            - Cash/UPI/Card payment modes working
+            - Wallet payment requires active membership
+            - Wallet balance debited correctly
+            - Wallet transaction created with correct amount
+            - Payment status and confirmation flags set correctly
+
+  - task: "Bulk delete salon services endpoint"
+    implemented: true
+    working: true
+    file: "/app/backend/server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+        - working: true
+          agent: "testing"
+          comment: |
+            ✅ BULK DELETE SALON SERVICES FULLY TESTED AND WORKING (5/5 PASS - 100%)
+            
+            COMPREHENSIVE TESTING COMPLETED:
+            
+            AUTHENTICATION (1/1 PASS):
+            ✅ Endpoint requires authentication: Returns 403 without Bearer token
+            
+            HARD DELETE FOR SALON-OWNED SERVICES (1/1 PASS):
+            ✅ Salon-owned services are hard deleted from database
+            ✅ Services removed from enabled list after deletion
+            
+            GLOBAL SERVICE HANDLING (1/1 PASS):
+            ✅ Global services (without salon_id) are disabled for salon only
+            ✅ Global services remain in catalog for other salons
+            
+            IDEMPOTENCY (1/1 PASS):
+            ✅ Re-calling with same service IDs returns 0 deleted without error
+            ✅ Endpoint is idempotent and safe to retry
+            
+            BARBER LINKS CLEANUP (1/1 PASS):
+            ✅ Barber service links removed for deleted services
+            
+            ALL CRITICAL FEATURES WORKING:
+            - Authentication protection working
+            - Hard delete for salon-owned services
+            - Disable (not delete) for global services
+            - Idempotent behavior
+            - Barber links cleanup
+
+  - task: "New salon signup auto-creates Main Branch (customer search visibility)"
+    implemented: true
+    working: true
+    file: "/app/backend/server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+        - working: true
+          agent: "testing"
+          comment: |
+            ✅ MAIN BRANCH AUTO-CREATION FULLY TESTED AND WORKING (3/3 PASS - 100%)
+            
+            COMPREHENSIVE TESTING COMPLETED:
+            
+            SALON REGISTRATION (1/1 PASS):
+            ✅ New salon registered successfully via POST /api/salon/register
+            ✅ Salon ID returned in response
+            
+            MAIN BRANCH AUTO-CREATION (1/1 PASS):
+            ✅ Main Branch automatically created for new salon
+            ✅ Branch has name "Main Branch" or is_main flag set
+            ✅ Branch ID returned and accessible via GET /api/salons/{salon_id}/branches
+            
+            PUBLIC VISIBILITY (1/1 PASS):
+            ✅ New salon immediately visible in GET /api/public/salon-locations
+            ✅ Main Branch row appears in public locations list
+            ✅ Customer search can find new salon right after signup
+            
+            ALL CRITICAL FEATURES WORKING:
+            - Salon registration creates Main Branch automatically
+            - Main Branch visible in branches endpoint
+            - Public locations endpoint includes new salon immediately
+            - Customer-facing salon search works for new salons
+
+  - task: "Inventory manual add — auto financial purchase entry"
+    implemented: true
+    working: true
+    file: "/app/backend/salon_inventory.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+        - working: true
+          agent: "testing"
+          comment: |
+            ✅ INVENTORY FINANCIAL ENTRY FULLY TESTED AND WORKING (5/5 PASS - 100%)
+            
+            COMPREHENSIVE TESTING COMPLETED:
+            
+            NO FINANCIAL ENTRY WHEN payment_mode='none' (1/1 PASS):
+            ✅ Item created with purchase_payment_mode='none'
+            ✅ financial_transaction_id is None in response
+            ✅ No financial transaction created in database
+            
+            FINANCIAL ENTRY WHEN payment_mode='cash' (2/2 PASS):
+            ✅ Item created with purchase_payment_mode='cash', cost_price=75, qty_total=20
+            ✅ financial_transaction_id returned in response
+            ✅ Financial transaction created in database:
+               - Type: outflow
+               - Category: inventory_purchase
+               - Amount: ₹1500 (75 × 20)
+               - Payment mode: cash
+            
+            FINANCIAL ENTRY FOR OTHER PAYMENT MODES (2/2 PASS):
+            ✅ payment_mode='upi': Financial transaction created
+            ✅ payment_mode='bank': Financial transaction created
+            
+            ALL CRITICAL FEATURES WORKING:
+            - No financial entry when purchase_payment_mode='none'
+            - Financial entry created for cash/upi/bank payment modes
+            - Amount calculated correctly: cost_price × qty_total
+            - Transaction type: outflow
+            - Transaction category: inventory_purchase
+            - Payment mode persisted correctly
+
+  - task: "Inventory sell — optional customer_name/phone persistence"
+    implemented: true
+    working: true
+    file: "/app/backend/salon_inventory.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+        - working: true
+          agent: "testing"
+          comment: |
+            ✅ INVENTORY SELL CUSTOMER INFO FULLY TESTED AND WORKING (4/4 PASS - 100%)
+            
+            COMPREHENSIVE TESTING COMPLETED:
+            
+            SELL WITHOUT CUSTOMER INFO (1/1 PASS):
+            ✅ Sale successful without customer_name and customer_phone
+            ✅ Financial transaction created
+            ✅ customer_name: null
+            ✅ customer_phone: null
+            
+            SELL WITH CUSTOMER INFO (2/2 PASS):
+            ✅ Sale successful with customer_name="Test Customer" and customer_phone="9876543210"
+            ✅ Financial transaction created
+            ✅ customer_name persisted: "Test Customer"
+            ✅ customer_phone normalized to +91 format: "+919876543210"
+            
+            PHONE NORMALIZATION (1/1 PASS):
+            ✅ 10-digit phone (9876543210) normalized to +91 format (+919876543210)
+            ✅ Already normalized phone (+919988776655) preserved correctly
+            
+            ALL CRITICAL FEATURES WORKING:
+            - Sale works without customer info (fields are null)
+            - Sale works with customer info (fields persisted)
+            - customer_name persisted exactly as provided
+            - customer_phone normalized to +91 format for 10-digit Indian numbers
+            - Already normalized phones preserved
+            - Financial transaction includes customer info
+
+agent_communication:
+    - agent: "testing"
+      message: |
+        JULY 4, 2026 SESSION — 5 PENDING BACKEND TASKS RETESTED (5/5 PASS - 100%)
+        
+        All 5 tasks from the previous session have been comprehensively retested after .env file recreation and service restart. All tasks are working correctly.
+        
+        SUMMARY:
+        ✅ Task 1: Salon manual booking - wallet payment mode (8/8 tests passed)
+        ✅ Task 2: Bulk delete salon services endpoint (5/5 tests passed)
+        ✅ Task 3: New salon signup auto-creates Main Branch (3/3 tests passed)
+        ✅ Task 4: Inventory manual add - auto financial purchase entry (5/5 tests passed)
+        ✅ Task 5: Inventory sell - optional customer_name/phone persistence (4/4 tests passed)
+        
+        OVERALL: 25/25 tests passed (100%)
+        
+        All endpoints are working as specified. The .env file recreation and service restart did not affect functionality. All features are production-ready.
+
