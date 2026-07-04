@@ -8,7 +8,8 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, Dialog
 import { toast } from 'sonner';
 import {
   Megaphone, BarChart3, Ticket, Gift, Award, Sparkles, Image as ImageIcon,
-  Settings as SettingsIcon, Users as UsersIcon, Send, Plus, Trash2, Eye, EyeOff, RefreshCw
+  Settings as SettingsIcon, Users as UsersIcon, Send, Plus, Trash2, Eye, EyeOff, RefreshCw,
+  Zap, Play, Pause, Square, MessageCircle
 } from 'lucide-react';
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
@@ -17,6 +18,7 @@ const API = `${BACKEND_URL}/api`;
 const SUB_TABS = [
   { id: 'overview', label: 'Overview', icon: BarChart3 },
   { id: 'campaigns', label: 'Campaigns', icon: Send },
+  { id: 'automations', label: 'Automations', icon: Zap },
   { id: 'coupons', label: 'Coupons', icon: Ticket },
   { id: 'rewards', label: 'Rewards', icon: Gift },
   { id: 'loyalty', label: 'Loyalty', icon: Award },
@@ -47,7 +49,8 @@ export default function MarketingTab({ salonId, getAuthHeaders, children, onOpen
     if (activeSub === 'overview') return <OverviewPanel salonId={salonId} getAuthHeaders={getAuthHeaders} />;
     if (activeSub === 'campaigns') return <CampaignsPanel salonId={salonId} getAuthHeaders={getAuthHeaders} />;
     if (activeSub === 'coupons') return <CouponsPanel salonId={salonId} getAuthHeaders={getAuthHeaders} />;
-    if (activeSub === 'rewards') return <PlaceholderPanel title="Rewards" note="Scratch Card & Spin Wheel — coming in the next slice (M7)." icon={Gift} />;
+    if (activeSub === 'rewards') return <RewardsPanel salonId={salonId} getAuthHeaders={getAuthHeaders} />;
+    if (activeSub === 'automations') return <AutomationsPanel salonId={salonId} getAuthHeaders={getAuthHeaders} />;
     if (activeSub === 'loyalty') return <LoyaltyPanel />;
     if (activeSub === 'memberships') return <MembershipsPanel />;
     if (activeSub === 'gallery') return children /* Gallery legacy panel rendered by parent */;
@@ -157,17 +160,27 @@ function OverviewPanel({ salonId, getAuthHeaders }) {
 
 function CampaignsPanel({ salonId, getAuthHeaders }) {
   const [segments, setSegments] = useState([]);
+  const [campaigns, setCampaigns] = useState([]);
+  const [coupons, setCoupons] = useState([]);
   const [loading, setLoading] = useState(true);
   const [openBuilder, setOpenBuilder] = useState(false);
   const [editing, setEditing] = useState(null);
+  const [openComposer, setOpenComposer] = useState(false);
+  const [openMessages, setOpenMessages] = useState(null);
 
   const load = async () => {
     try {
       setLoading(true);
-      const res = await axios.get(`${API}/salons/${salonId}/marketing/segments`, { headers: getAuthHeaders() });
-      setSegments(res.data.segments || []);
+      const [s, c, cp] = await Promise.all([
+        axios.get(`${API}/salons/${salonId}/marketing/segments`, { headers: getAuthHeaders() }),
+        axios.get(`${API}/salons/${salonId}/marketing/campaigns`, { headers: getAuthHeaders() }),
+        axios.get(`${API}/salons/${salonId}/coupons`, { headers: getAuthHeaders() }),
+      ]);
+      setSegments(s.data.segments || []);
+      setCampaigns(c.data.campaigns || []);
+      setCoupons(cp.data.coupons || []);
     } catch (e) {
-      toast.error('Failed to load segments');
+      toast.error('Failed to load campaigns');
     } finally {
       setLoading(false);
     }
@@ -191,6 +204,40 @@ function CampaignsPanel({ salonId, getAuthHeaders }) {
     } catch (e) { toast.error('Delete failed'); }
   };
 
+  const launchCampaign = async (c) => {
+    if (!window.confirm(`Launch campaign "${c.name}" now?`)) return;
+    try {
+      await axios.post(`${API}/salons/${salonId}/marketing/campaigns/${c.id}/launch`, {}, { headers: getAuthHeaders() });
+      toast.success('Campaign launched — messages sending in background');
+      setTimeout(load, 1200);
+    } catch (e) { toast.error(e.response?.data?.detail || 'Launch failed'); }
+  };
+  const controlCampaign = async (c, action) => {
+    try {
+      await axios.post(`${API}/salons/${salonId}/marketing/campaigns/${c.id}/${action}`, {}, { headers: getAuthHeaders() });
+      toast.success(`Campaign ${action}d`);
+      load();
+    } catch (e) { toast.error(e.response?.data?.detail || `${action} failed`); }
+  };
+  const deleteCampaign = async (c) => {
+    if (!window.confirm(`Delete campaign "${c.name}"?`)) return;
+    try {
+      await axios.delete(`${API}/salons/${salonId}/marketing/campaigns/${c.id}`, { headers: getAuthHeaders() });
+      toast.success('Campaign deleted');
+      load();
+    } catch (e) { toast.error(e.response?.data?.detail || 'Delete failed'); }
+  };
+
+  const statusColor = (s) => ({
+    draft: 'border-slate-500/50 text-slate-500',
+    scheduled: 'border-blue-500/50 text-blue-500',
+    running: 'border-emerald-500/50 text-emerald-500',
+    completed: 'border-emerald-500/50 text-emerald-500',
+    paused: 'border-amber-500/50 text-amber-500',
+    stopped: 'border-red-500/50 text-red-500',
+    failed: 'border-red-500/50 text-red-500',
+  }[s] || 'border-slate-500/50 text-slate-500');
+
   return (
     <div className="space-y-4">
       <Card>
@@ -198,17 +245,69 @@ function CampaignsPanel({ salonId, getAuthHeaders }) {
           <CardTitle className="text-base flex items-center gap-2">
             <Send className="w-4 h-4 text-gold" /> Campaigns
           </CardTitle>
+          <Button size="sm" className="bg-gold text-black hover:bg-gold/90" onClick={() => setOpenComposer(true)}>
+            <Plus className="w-3.5 h-3.5 mr-1" /> New campaign
+          </Button>
         </CardHeader>
         <CardContent>
-          <p className="text-sm text-muted-foreground">
-            One-time or scheduled WhatsApp campaigns will be sent to a chosen segment via
-            the active WhatsApp provider (currently: <b>Twilio</b>; Meta can be enabled via
-            the <code>WHATSAPP_PROVIDER</code> env flag once the Meta credentials are added).
-          </p>
-          <p className="text-xs text-muted-foreground mt-2">
-            Campaign scheduling and template composer will ship in the next slice (M5). For now,
-            you can start by building the audience segments below.
-          </p>
+          {loading ? (
+            <p className="text-sm text-muted-foreground">Loading…</p>
+          ) : campaigns.length === 0 ? (
+            <p className="text-sm text-muted-foreground">
+              No campaigns yet. Send a one-time WhatsApp blast to a segment or to specific phone numbers,
+              or schedule it for later. The active provider is <b>{'Twilio'}</b> (change in Settings).
+            </p>
+          ) : (
+            <div className="divide-y divide-border">
+              {campaigns.map(c => (
+                <div key={c.id} className="py-3 flex items-center justify-between gap-2 flex-wrap">
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-2">
+                      <p className="text-sm font-semibold truncate">{c.name}</p>
+                      <span className={`text-[10px] px-1.5 py-0.5 rounded-full border ${statusColor(c.status)}`}>
+                        {c.status}
+                      </span>
+                    </div>
+                    <p className="text-[11px] text-muted-foreground truncate">
+                      {c.segment_id ? 'To segment' : `To ${(c.ad_hoc_phones || []).length} phone(s)`} ·
+                      sent {c.stats?.sent || 0} · failed {c.stats?.failed || 0}
+                      {c.schedule_at ? ` · scheduled ${new Date(c.schedule_at).toLocaleString()}` : ''}
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Button variant="outline" size="sm" onClick={() => setOpenMessages(c)}>
+                      <MessageCircle className="w-3.5 h-3.5 mr-1" /> Messages
+                    </Button>
+                    {['draft', 'scheduled'].includes(c.status) && (
+                      <Button variant="outline" size="sm" onClick={() => launchCampaign(c)}>
+                        <Play className="w-3.5 h-3.5 mr-1" /> Launch
+                      </Button>
+                    )}
+                    {c.status === 'running' && (
+                      <>
+                        <Button variant="outline" size="sm" onClick={() => controlCampaign(c, 'pause')}>
+                          <Pause className="w-3.5 h-3.5 mr-1" /> Pause
+                        </Button>
+                        <Button variant="outline" size="sm" onClick={() => controlCampaign(c, 'stop')}>
+                          <Square className="w-3.5 h-3.5 mr-1" /> Stop
+                        </Button>
+                      </>
+                    )}
+                    {c.status === 'paused' && (
+                      <Button variant="outline" size="sm" onClick={() => controlCampaign(c, 'resume')}>
+                        <Play className="w-3.5 h-3.5 mr-1" /> Resume
+                      </Button>
+                    )}
+                    {['draft', 'completed', 'stopped', 'failed'].includes(c.status) && (
+                      <Button variant="ghost" size="sm" onClick={() => deleteCampaign(c)}>
+                        <Trash2 className="w-3.5 h-3.5 text-red-500" />
+                      </Button>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
         </CardContent>
       </Card>
 
@@ -222,9 +321,7 @@ function CampaignsPanel({ salonId, getAuthHeaders }) {
           </Button>
         </CardHeader>
         <CardContent>
-          {loading ? (
-            <p className="text-sm text-muted-foreground">Loading…</p>
-          ) : segments.length === 0 ? (
+          {segments.length === 0 ? (
             <p className="text-sm text-muted-foreground">
               No segments yet. Segments let you target customers by birthday/anniversary,
               last-visit-days, spend, gender and more.
@@ -259,7 +356,207 @@ function CampaignsPanel({ salonId, getAuthHeaders }) {
           onSaved={() => { setOpenBuilder(false); load(); }}
         />
       )}
+
+      {openComposer && (
+        <CampaignComposerDialog
+          salonId={salonId}
+          getAuthHeaders={getAuthHeaders}
+          segments={segments}
+          coupons={coupons}
+          onClose={() => setOpenComposer(false)}
+          onSaved={() => { setOpenComposer(false); load(); }}
+        />
+      )}
+
+      {openMessages && (
+        <CampaignMessagesDialog
+          salonId={salonId}
+          getAuthHeaders={getAuthHeaders}
+          campaign={openMessages}
+          onClose={() => setOpenMessages(null)}
+        />
+      )}
     </div>
+  );
+}
+
+function CampaignComposerDialog({ salonId, getAuthHeaders, segments, coupons, onClose, onSaved }) {
+  const [form, setForm] = useState({
+    name: '',
+    segment_id: '',
+    ad_hoc_phones: '',
+    template_body: 'Hi {{name}}! Enjoy {{coupon_title}} — use code {{coupon_code}} at our salon.',
+    coupon_id: '',
+    schedule_at: '',
+  });
+  const [preview, setPreview] = useState(null);
+  const [saving, setSaving] = useState(false);
+
+  const previewAudience = async () => {
+    try {
+      const body = {
+        segment_id: form.segment_id || null,
+        ad_hoc_phones: form.ad_hoc_phones ? form.ad_hoc_phones.split(/[\s,]+/).filter(Boolean) : null,
+      };
+      const res = await axios.post(`${API}/salons/${salonId}/marketing/campaigns/preview-audience`, body, { headers: getAuthHeaders() });
+      setPreview(res.data);
+    } catch (e) { toast.error('Preview failed'); }
+  };
+
+  const save = async ({ launch }) => {
+    if (!form.name.trim()) return toast.error('Campaign name is required');
+    if (!form.template_body.trim()) return toast.error('Message body is required');
+    if (!form.segment_id && !form.ad_hoc_phones.trim()) return toast.error('Pick a segment or enter phone numbers');
+    try {
+      setSaving(true);
+      const body = {
+        name: form.name.trim(),
+        segment_id: form.segment_id || null,
+        ad_hoc_phones: form.ad_hoc_phones ? form.ad_hoc_phones.split(/[\s,]+/).filter(Boolean) : null,
+        template_body: form.template_body,
+        coupon_id: form.coupon_id || null,
+        schedule_at: form.schedule_at ? new Date(form.schedule_at).toISOString() : null,
+      };
+      const res = await axios.post(`${API}/salons/${salonId}/marketing/campaigns`, body, { headers: getAuthHeaders() });
+      if (launch) {
+        await axios.post(`${API}/salons/${salonId}/marketing/campaigns/${res.data.id}/launch`, {}, { headers: getAuthHeaders() });
+        toast.success('Campaign launched');
+      } else {
+        toast.success(form.schedule_at ? 'Campaign scheduled' : 'Campaign saved as draft');
+      }
+      onSaved();
+    } catch (e) {
+      toast.error(e.response?.data?.detail || 'Save failed');
+    } finally { setSaving(false); }
+  };
+
+  return (
+    <Dialog open onOpenChange={onClose}>
+      <DialogContent className="max-w-2xl">
+        <DialogHeader><DialogTitle>New WhatsApp campaign</DialogTitle></DialogHeader>
+        <div className="space-y-3 max-h-[70vh] overflow-y-auto">
+          <div>
+            <Label>Campaign name</Label>
+            <Input value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} placeholder="e.g. Diwali offers" />
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            <div>
+              <Label>Segment (optional)</Label>
+              <select value={form.segment_id} onChange={e => setForm({ ...form, segment_id: e.target.value })} className="h-10 w-full rounded-md border border-input bg-background px-2 text-sm">
+                <option value="">— none —</option>
+                {segments.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+              </select>
+            </div>
+            <div>
+              <Label>Attach coupon (optional)</Label>
+              <select value={form.coupon_id} onChange={e => setForm({ ...form, coupon_id: e.target.value })} className="h-10 w-full rounded-md border border-input bg-background px-2 text-sm">
+                <option value="">— none —</option>
+                {coupons.map(c => <option key={c.id} value={c.id}>{c.code} — {c.title}</option>)}
+              </select>
+            </div>
+          </div>
+          <div>
+            <Label>Or send to specific phones (comma or space separated)</Label>
+            <Input value={form.ad_hoc_phones} onChange={e => setForm({ ...form, ad_hoc_phones: e.target.value })} placeholder="9999900011, 9899900012" />
+          </div>
+          <div>
+            <Label>Message body — supports {'{{name}}'} / {'{{coupon_code}}'} / {'{{coupon_title}}'} / {'{{coupon_value}}'}</Label>
+            <textarea
+              value={form.template_body}
+              onChange={e => setForm({ ...form, template_body: e.target.value })}
+              rows={4}
+              className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+            />
+            <p className="text-[11px] text-muted-foreground mt-1">
+              For Meta production sends, only pre-approved WhatsApp templates can be used outside the 24-hour service window. Twilio (currently active) uses your approved sender.
+            </p>
+          </div>
+          <div>
+            <Label>Schedule (optional, in your local time)</Label>
+            <Input type="datetime-local" value={form.schedule_at} onChange={e => setForm({ ...form, schedule_at: e.target.value })} />
+            <p className="text-[11px] text-muted-foreground mt-1">Leave blank to send immediately when you click Launch. Scheduled campaigns are picked up every 5 minutes.</p>
+          </div>
+
+          <div className="p-3 rounded-lg bg-background/50 border border-border">
+            <div className="flex items-center justify-between mb-1">
+              <p className="text-sm font-semibold">Audience preview</p>
+              <Button variant="outline" size="sm" onClick={previewAudience}>
+                <RefreshCw className="w-3.5 h-3.5 mr-1" /> Preview
+              </Button>
+            </div>
+            {preview ? (
+              <p className="text-sm">
+                <b className="text-gold text-lg">{preview.count}</b> customer(s) will receive this message.
+                Estimated spend: <b>₹{preview.estimated_spend_inr}</b>
+              </p>
+            ) : <p className="text-xs text-muted-foreground">Click Preview to compute the audience and estimated cost.</p>}
+          </div>
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={onClose}>Cancel</Button>
+          <Button variant="outline" onClick={() => save({ launch: false })} disabled={saving}>
+            {form.schedule_at ? 'Schedule' : 'Save draft'}
+          </Button>
+          <Button className="bg-gold text-black hover:bg-gold/90" onClick={() => save({ launch: true })} disabled={saving}>
+            <Send className="w-3.5 h-3.5 mr-1" /> Save & Launch
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function CampaignMessagesDialog({ salonId, getAuthHeaders, campaign, onClose }) {
+  const [messages, setMessages] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  const load = async () => {
+    try {
+      setLoading(true);
+      const res = await axios.get(`${API}/salons/${salonId}/marketing/campaigns/${campaign.id}/messages`, { headers: getAuthHeaders() });
+      setMessages(res.data.messages || []);
+    } catch (e) { toast.error('Failed to load messages'); }
+    finally { setLoading(false); }
+  };
+  useEffect(() => { load(); /* eslint-disable-next-line */ }, [campaign.id]);
+
+  return (
+    <Dialog open onOpenChange={onClose}>
+      <DialogContent className="max-w-2xl">
+        <DialogHeader><DialogTitle>{campaign.name} — Messages ({messages.length})</DialogTitle></DialogHeader>
+        <div className="max-h-[70vh] overflow-y-auto">
+          {loading ? <p className="text-sm text-muted-foreground">Loading…</p> :
+            messages.length === 0 ? <p className="text-sm text-muted-foreground">No messages yet.</p> :
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="text-left text-xs text-muted-foreground border-b border-border">
+                  <th className="py-2">Phone</th>
+                  <th>Status</th>
+                  <th>Provider</th>
+                  <th>Sent</th>
+                  <th>Read</th>
+                </tr>
+              </thead>
+              <tbody>
+                {messages.map(m => (
+                  <tr key={m.id} className="border-b border-border/60">
+                    <td className="py-1.5">{m.to_phone}</td>
+                    <td className={`py-1.5 ${m.status === 'sent' || m.status === 'delivered' || m.status === 'read' ? 'text-emerald-500' : m.status === 'failed' ? 'text-red-500' : 'text-muted-foreground'}`}>{m.status}</td>
+                    <td className="py-1.5">{m.provider}</td>
+                    <td className="py-1.5 text-xs">{m.sent_at ? new Date(m.sent_at).toLocaleTimeString() : '—'}</td>
+                    <td className="py-1.5 text-xs">{m.read_at ? new Date(m.read_at).toLocaleTimeString() : '—'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          }
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={load}><RefreshCw className="w-3.5 h-3.5 mr-1" /> Refresh</Button>
+          <Button onClick={onClose}>Close</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
 
@@ -842,3 +1139,473 @@ function MarketingSettingsPanel({ salonId, getAuthHeaders }) {
     </div>
   );
 }
+
+
+// ============ Automations (M6) ============
+
+const AUTOMATION_META = {
+  birthday: { label: 'Birthday', desc: "Sent on the customer's birthday.", icon: '🎂' },
+  wedding_anniversary: { label: 'Wedding anniversary', desc: 'Sent on the customer\'s wedding anniversary.', icon: '💍' },
+  spouse_birthday: { label: "Spouse's birthday", desc: "Sent on the spouse's birthday.", icon: '🎁' },
+  win_back: { label: 'Win-back', desc: 'Sent to customers who have not visited for N days.', icon: '🔁' },
+  reminder: { label: 'Booking reminder', desc: 'Sent for tomorrow\'s bookings (offset_days=1) or today (0).', icon: '⏰' },
+};
+
+function AutomationsPanel({ salonId, getAuthHeaders }) {
+  const [automations, setAutomations] = useState([]);
+  const [coupons, setCoupons] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [editing, setEditing] = useState(null);
+
+  const load = async () => {
+    try {
+      setLoading(true);
+      const [a, c] = await Promise.all([
+        axios.get(`${API}/salons/${salonId}/marketing/automations`, { headers: getAuthHeaders() }),
+        axios.get(`${API}/salons/${salonId}/coupons`, { headers: getAuthHeaders() }),
+      ]);
+      setAutomations(a.data.automations || []);
+      setCoupons(c.data.coupons || []);
+    } catch (e) { toast.error('Failed to load automations'); }
+    finally { setLoading(false); }
+  };
+  useEffect(() => { load(); /* eslint-disable-next-line */ }, [salonId]);
+
+  const toggle = async (a) => {
+    try {
+      await axios.put(`${API}/salons/${salonId}/marketing/automations/${a.id}`,
+        { ...a, active: !a.active }, { headers: getAuthHeaders() });
+      toast.success(a.active ? 'Automation paused' : 'Automation activated');
+      load();
+    } catch (e) { toast.error('Update failed'); }
+  };
+  const remove = async (a) => {
+    if (!window.confirm(`Delete this automation?`)) return;
+    try {
+      await axios.delete(`${API}/salons/${salonId}/marketing/automations/${a.id}`, { headers: getAuthHeaders() });
+      toast.success('Deleted');
+      load();
+    } catch (e) { toast.error('Delete failed'); }
+  };
+  const runNow = async (a) => {
+    try {
+      const res = await axios.post(`${API}/salons/${salonId}/marketing/automations/${a.id}/run-now`, {}, { headers: getAuthHeaders() });
+      toast.success(`Sent ${res.data.sent} message(s)`);
+      load();
+    } catch (e) { toast.error(e.response?.data?.detail || 'Run failed'); }
+  };
+
+  return (
+    <Card>
+      <CardHeader className="flex flex-row items-center justify-between">
+        <CardTitle className="text-base flex items-center gap-2">
+          <Zap className="w-4 h-4 text-gold" /> Always-on Automations
+        </CardTitle>
+        <Button size="sm" className="bg-gold text-black hover:bg-gold/90" onClick={() => setEditing({})}>
+          <Plus className="w-3.5 h-3.5 mr-1" /> New automation
+        </Button>
+      </CardHeader>
+      <CardContent>
+        <p className="text-xs text-muted-foreground mb-3">
+          Automations run daily at 09:00 UTC and can also be triggered manually. They de-duplicate per customer per 20 hours.
+        </p>
+        {loading ? <p className="text-sm text-muted-foreground">Loading…</p> :
+          automations.length === 0 ? (
+            <p className="text-sm text-muted-foreground">No automations yet.</p>
+          ) : (
+            <div className="divide-y divide-border">
+              {automations.map(a => {
+                const meta = AUTOMATION_META[a.type] || { label: a.type, desc: '', icon: '⚡' };
+                return (
+                  <div key={a.id} className="py-3 flex items-center justify-between gap-2 flex-wrap">
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-2">
+                        <span className="text-lg">{meta.icon}</span>
+                        <p className="text-sm font-semibold">{meta.label}</p>
+                        <span className={`text-[10px] px-1.5 py-0.5 rounded-full border ${a.active ? 'border-emerald-500/50 text-emerald-600' : 'border-slate-500/50 text-slate-500'}`}>
+                          {a.active ? 'Active' : 'Paused'}
+                        </span>
+                      </div>
+                      <p className="text-[11px] text-muted-foreground line-clamp-2">{a.template_body}</p>
+                      <p className="text-[10px] text-muted-foreground">
+                        Last run: {a.last_run_at ? new Date(a.last_run_at).toLocaleString() : '—'}
+                        {typeof a.last_run_sent === 'number' ? ` · sent ${a.last_run_sent}` : ''}
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <Button variant="outline" size="sm" onClick={() => runNow(a)}>Run now</Button>
+                      <Button variant="outline" size="sm" onClick={() => toggle(a)}>
+                        {a.active ? 'Pause' : 'Activate'}
+                      </Button>
+                      <Button variant="outline" size="sm" onClick={() => setEditing(a)}>Edit</Button>
+                      <Button variant="ghost" size="sm" onClick={() => remove(a)}>
+                        <Trash2 className="w-3.5 h-3.5 text-red-500" />
+                      </Button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )
+        }
+      </CardContent>
+
+      {editing !== null && (
+        <AutomationEditorDialog
+          salonId={salonId}
+          getAuthHeaders={getAuthHeaders}
+          coupons={coupons}
+          initial={editing}
+          onClose={() => setEditing(null)}
+          onSaved={() => { setEditing(null); load(); }}
+        />
+      )}
+    </Card>
+  );
+}
+
+function AutomationEditorDialog({ salonId, getAuthHeaders, coupons, initial, onClose, onSaved }) {
+  const isEdit = !!initial?.id;
+  const [form, setForm] = useState({
+    type: initial?.type || 'birthday',
+    active: initial?.active !== false,
+    template_body: initial?.template_body || 'Happy {{automation_type}} {{name}}! Enjoy our special offer with code {{coupon_code}}.',
+    coupon_id: initial?.coupon_id || '',
+    threshold_days: initial?.threshold_days ?? 90,
+    offset_days: initial?.offset_days ?? 0,
+  });
+  const [saving, setSaving] = useState(false);
+
+  const save = async () => {
+    if (!form.template_body?.trim()) return toast.error('Message body is required');
+    try {
+      setSaving(true);
+      const body = { ...form, coupon_id: form.coupon_id || null };
+      if (isEdit) {
+        await axios.put(`${API}/salons/${salonId}/marketing/automations/${initial.id}`, body, { headers: getAuthHeaders() });
+      } else {
+        await axios.post(`${API}/salons/${salonId}/marketing/automations`, body, { headers: getAuthHeaders() });
+      }
+      toast.success(isEdit ? 'Automation updated' : 'Automation created');
+      onSaved();
+    } catch (e) { toast.error(e.response?.data?.detail || 'Save failed'); }
+    finally { setSaving(false); }
+  };
+
+  return (
+    <Dialog open onOpenChange={onClose}>
+      <DialogContent className="max-w-xl">
+        <DialogHeader><DialogTitle>{isEdit ? 'Edit automation' : 'New automation'}</DialogTitle></DialogHeader>
+        <div className="space-y-3 max-h-[70vh] overflow-y-auto">
+          <div>
+            <Label>Type</Label>
+            <select value={form.type} onChange={e => setForm({ ...form, type: e.target.value })} className="h-10 w-full rounded-md border border-input bg-background px-2 text-sm">
+              {Object.entries(AUTOMATION_META).map(([k, v]) => <option key={k} value={k}>{v.icon} {v.label}</option>)}
+            </select>
+            <p className="text-[11px] text-muted-foreground mt-1">{AUTOMATION_META[form.type]?.desc}</p>
+          </div>
+          <div>
+            <Label>Message body</Label>
+            <textarea value={form.template_body} onChange={e => setForm({ ...form, template_body: e.target.value })} rows={4} className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm" />
+            <p className="text-[10px] text-muted-foreground mt-1">Vars: {'{{name}}'} {'{{spouse_name}}'} {'{{coupon_code}}'} {'{{coupon_title}}'}</p>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <Label>Coupon (optional)</Label>
+              <select value={form.coupon_id} onChange={e => setForm({ ...form, coupon_id: e.target.value })} className="h-10 w-full rounded-md border border-input bg-background px-2 text-sm">
+                <option value="">— none —</option>
+                {coupons.map(c => <option key={c.id} value={c.id}>{c.code} — {c.title}</option>)}
+              </select>
+            </div>
+            {form.type === 'win_back' && (
+              <div>
+                <Label>Not visited in ≥ (days)</Label>
+                <Input type="number" value={form.threshold_days} onChange={e => setForm({ ...form, threshold_days: Number(e.target.value) })} />
+              </div>
+            )}
+            {form.type === 'reminder' && (
+              <div>
+                <Label>Offset days (0=today, 1=tomorrow)</Label>
+                <Input type="number" value={form.offset_days} onChange={e => setForm({ ...form, offset_days: Number(e.target.value) })} />
+              </div>
+            )}
+            <div className="flex items-center gap-2">
+              <input id="active" type="checkbox" checked={form.active} onChange={e => setForm({ ...form, active: e.target.checked })} />
+              <Label htmlFor="active">Active</Label>
+            </div>
+          </div>
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={onClose}>Cancel</Button>
+          <Button className="bg-gold text-black hover:bg-gold/90" onClick={save} disabled={saving}>
+            {saving ? 'Saving…' : (isEdit ? 'Save changes' : 'Create automation')}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+
+// ============ Rewards (M7) ============
+
+const PRIZE_TYPES = [
+  { value: 'wallet_credit', label: 'Wallet credit (₹)' },
+  { value: 'loyalty_points', label: 'Loyalty points' },
+  { value: 'coupon', label: 'Coupon code' },
+  { value: 'free_addon', label: 'Free add-on service' },
+  { value: 'better_luck', label: 'Better luck next time' },
+];
+
+function RewardsPanel({ salonId, getAuthHeaders }) {
+  const [rewards, setRewards] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [editing, setEditing] = useState(null);
+  const [issueFor, setIssueFor] = useState(null);
+
+  const load = async () => {
+    try {
+      setLoading(true);
+      const res = await axios.get(`${API}/salons/${salonId}/marketing/rewards`, { headers: getAuthHeaders() });
+      setRewards(res.data.rewards || []);
+    } catch (e) { toast.error('Failed to load rewards'); }
+    finally { setLoading(false); }
+  };
+  useEffect(() => { load(); /* eslint-disable-next-line */ }, [salonId]);
+
+  const remove = async (r) => {
+    if (!window.confirm(`Delete reward "${r.name}"?`)) return;
+    try {
+      await axios.delete(`${API}/salons/${salonId}/marketing/rewards/${r.id}`, { headers: getAuthHeaders() });
+      toast.success('Deleted');
+      load();
+    } catch (e) { toast.error('Delete failed'); }
+  };
+
+  return (
+    <Card>
+      <CardHeader className="flex flex-row items-center justify-between">
+        <CardTitle className="text-base flex items-center gap-2">
+          <Gift className="w-4 h-4 text-gold" /> Rewards — Scratch Card & Spin Wheel
+        </CardTitle>
+        <Button size="sm" className="bg-gold text-black hover:bg-gold/90" onClick={() => setEditing({})}>
+          <Plus className="w-3.5 h-3.5 mr-1" /> New reward
+        </Button>
+      </CardHeader>
+      <CardContent>
+        <p className="text-xs text-muted-foreground mb-3">
+          Configure a prize table with weighted probabilities. When a customer redeems an invoice,
+          issue a one-time signed play link (attach it to the WhatsApp receipt). The customer plays
+          on a public page; wins are applied instantly (wallet credit / loyalty points / coupon).
+        </p>
+        {loading ? <p className="text-sm text-muted-foreground">Loading…</p> :
+          rewards.length === 0 ? <p className="text-sm text-muted-foreground">No rewards yet.</p> :
+          <div className="divide-y divide-border">
+            {rewards.map(r => (
+              <div key={r.id} className="py-3 flex items-center justify-between gap-2 flex-wrap">
+                <div className="min-w-0">
+                  <div className="flex items-center gap-2">
+                    <p className="text-sm font-semibold">{r.name}</p>
+                    <span className="text-[10px] px-1.5 py-0.5 rounded-full border border-gold/50 text-gold">
+                      {r.type === 'scratch' ? 'Scratch card' : 'Spin wheel'}
+                    </span>
+                    <span className={`text-[10px] px-1.5 py-0.5 rounded-full border ${r.active ? 'border-emerald-500/50 text-emerald-600' : 'border-slate-500/50 text-slate-500'}`}>
+                      {r.active ? 'Active' : 'Paused'}
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-muted-foreground">
+                    {(r.prize_table || []).length} prize(s) · {r.max_plays_per_day_per_customer || 1} play/day/customer
+                  </p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Button variant="outline" size="sm" onClick={() => setIssueFor(r)}>Issue play link</Button>
+                  <Button variant="outline" size="sm" onClick={() => setEditing(r)}>Edit</Button>
+                  <Button variant="ghost" size="sm" onClick={() => remove(r)}>
+                    <Trash2 className="w-3.5 h-3.5 text-red-500" />
+                  </Button>
+                </div>
+              </div>
+            ))}
+          </div>
+        }
+      </CardContent>
+
+      {editing !== null && (
+        <RewardEditorDialog
+          salonId={salonId}
+          getAuthHeaders={getAuthHeaders}
+          initial={editing}
+          onClose={() => setEditing(null)}
+          onSaved={() => { setEditing(null); load(); }}
+        />
+      )}
+      {issueFor && (
+        <IssueRewardDialog
+          salonId={salonId}
+          getAuthHeaders={getAuthHeaders}
+          reward={issueFor}
+          onClose={() => setIssueFor(null)}
+        />
+      )}
+    </Card>
+  );
+}
+
+function RewardEditorDialog({ salonId, getAuthHeaders, initial, onClose, onSaved }) {
+  const isEdit = !!initial?.id;
+  const [form, setForm] = useState({
+    type: initial?.type || 'scratch',
+    name: initial?.name || '',
+    active: initial?.active !== false,
+    max_plays_per_day_per_customer: initial?.max_plays_per_day_per_customer ?? 1,
+    valid_from: (initial?.valid_from || '').slice(0, 10) || '',
+    valid_to: (initial?.valid_to || '').slice(0, 10) || '',
+    prize_table: initial?.prize_table || [
+      { label: '₹50 off', weight: 2, prize_type: 'wallet_credit', prize_value: 50 },
+      { label: 'Better luck', weight: 8, prize_type: 'better_luck' },
+    ],
+  });
+  const [saving, setSaving] = useState(false);
+  const totalWeight = useMemo(() => form.prize_table.reduce((s, p) => s + (Number(p.weight) || 0), 0), [form.prize_table]);
+
+  const updatePrize = (i, patch) => {
+    const arr = [...form.prize_table];
+    arr[i] = { ...arr[i], ...patch };
+    setForm({ ...form, prize_table: arr });
+  };
+  const addPrize = () => setForm({ ...form, prize_table: [...form.prize_table, { label: '', weight: 1, prize_type: 'better_luck' }] });
+  const removePrize = (i) => setForm({ ...form, prize_table: form.prize_table.filter((_, idx) => idx !== i) });
+
+  const save = async () => {
+    if (!form.name.trim()) return toast.error('Name is required');
+    if (form.prize_table.length === 0) return toast.error('Add at least one prize');
+    try {
+      setSaving(true);
+      const body = {
+        ...form,
+        valid_from: form.valid_from ? new Date(form.valid_from).toISOString() : null,
+        valid_to: form.valid_to ? new Date(form.valid_to + 'T23:59:59').toISOString() : null,
+      };
+      if (isEdit) {
+        await axios.put(`${API}/salons/${salonId}/marketing/rewards/${initial.id}`, body, { headers: getAuthHeaders() });
+      } else {
+        await axios.post(`${API}/salons/${salonId}/marketing/rewards`, body, { headers: getAuthHeaders() });
+      }
+      toast.success(isEdit ? 'Reward updated' : 'Reward created');
+      onSaved();
+    } catch (e) { toast.error(e.response?.data?.detail || 'Save failed'); }
+    finally { setSaving(false); }
+  };
+
+  return (
+    <Dialog open onOpenChange={onClose}>
+      <DialogContent className="max-w-2xl">
+        <DialogHeader><DialogTitle>{isEdit ? 'Edit reward' : 'New reward'}</DialogTitle></DialogHeader>
+        <div className="space-y-3 max-h-[70vh] overflow-y-auto">
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <Label>Type</Label>
+              <select value={form.type} onChange={e => setForm({ ...form, type: e.target.value })} className="h-10 w-full rounded-md border border-input bg-background px-2 text-sm">
+                <option value="scratch">Scratch card</option>
+                <option value="spin">Spin wheel</option>
+              </select>
+            </div>
+            <div>
+              <Label>Name</Label>
+              <Input value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} placeholder="e.g. Diwali Scratch" />
+            </div>
+            <div>
+              <Label>Max plays / day / customer</Label>
+              <Input type="number" value={form.max_plays_per_day_per_customer} onChange={e => setForm({ ...form, max_plays_per_day_per_customer: Number(e.target.value) })} />
+            </div>
+            <div className="flex items-center gap-2 mt-6">
+              <input id="rw-active" type="checkbox" checked={form.active} onChange={e => setForm({ ...form, active: e.target.checked })} />
+              <Label htmlFor="rw-active">Active</Label>
+            </div>
+            <div>
+              <Label>Valid from</Label>
+              <Input type="date" value={form.valid_from} onChange={e => setForm({ ...form, valid_from: e.target.value })} />
+            </div>
+            <div>
+              <Label>Valid to</Label>
+              <Input type="date" value={form.valid_to} onChange={e => setForm({ ...form, valid_to: e.target.value })} />
+            </div>
+          </div>
+
+          <div>
+            <div className="flex items-center justify-between mb-2">
+              <Label>Prize table (total weight {totalWeight})</Label>
+              <Button variant="outline" size="sm" onClick={addPrize}><Plus className="w-3.5 h-3.5 mr-1" /> Add prize</Button>
+            </div>
+            {form.prize_table.map((p, i) => (
+              <div key={i} className="grid grid-cols-12 gap-2 mb-2 items-center">
+                <Input className="col-span-4" placeholder="Prize label" value={p.label} onChange={e => updatePrize(i, { label: e.target.value })} />
+                <select className="col-span-3 h-10 rounded-md border border-input bg-background px-2 text-sm" value={p.prize_type} onChange={e => updatePrize(i, { prize_type: e.target.value })}>
+                  {PRIZE_TYPES.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
+                </select>
+                <Input className="col-span-2" type="number" placeholder="Value" value={p.prize_value ?? ''} onChange={e => updatePrize(i, { prize_value: e.target.value === '' ? null : Number(e.target.value) })} disabled={p.prize_type === 'better_luck'} />
+                <Input className="col-span-2" type="number" placeholder="Weight" value={p.weight} onChange={e => updatePrize(i, { weight: Number(e.target.value) })} />
+                <Button className="col-span-1" variant="ghost" size="sm" onClick={() => removePrize(i)}>
+                  <Trash2 className="w-3.5 h-3.5 text-red-500" />
+                </Button>
+                <p className="col-span-12 text-[10px] text-muted-foreground -mt-1 ml-1">
+                  Odds: {totalWeight ? ((Number(p.weight) / totalWeight) * 100).toFixed(1) : 0}%
+                </p>
+              </div>
+            ))}
+          </div>
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={onClose}>Cancel</Button>
+          <Button className="bg-gold text-black hover:bg-gold/90" onClick={save} disabled={saving}>
+            {saving ? 'Saving…' : (isEdit ? 'Save changes' : 'Create reward')}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function IssueRewardDialog({ salonId, getAuthHeaders, reward, onClose }) {
+  const [phone, setPhone] = useState('');
+  const [url, setUrl] = useState(null);
+  const [busy, setBusy] = useState(false);
+
+  const issue = async () => {
+    if (!phone) return toast.error('Enter a customer phone');
+    try {
+      setBusy(true);
+      const res = await axios.post(`${API}/salons/${salonId}/marketing/rewards/${reward.id}/issue`, { customer_phone: phone }, { headers: getAuthHeaders() });
+      setUrl(res.data.play_url);
+      toast.success('Play link issued');
+    } catch (e) { toast.error(e.response?.data?.detail || 'Issue failed'); }
+    finally { setBusy(false); }
+  };
+
+  return (
+    <Dialog open onOpenChange={onClose}>
+      <DialogContent className="max-w-md">
+        <DialogHeader><DialogTitle>Issue play link — {reward.name}</DialogTitle></DialogHeader>
+        <div className="space-y-3">
+          <div>
+            <Label>Customer phone</Label>
+            <Input value={phone} onChange={e => setPhone(e.target.value)} placeholder="10-digit or +91… phone" />
+          </div>
+          {url && (
+            <div className="p-3 rounded-lg border border-emerald-500/50 bg-emerald-500/5">
+              <p className="text-xs text-muted-foreground mb-1">One-time play link (share via WhatsApp):</p>
+              <a href={url} target="_blank" rel="noreferrer" className="text-xs break-all text-emerald-600 underline">{url}</a>
+            </div>
+          )}
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={onClose}>Close</Button>
+          <Button className="bg-gold text-black hover:bg-gold/90" onClick={issue} disabled={busy}>
+            {busy ? 'Issuing…' : 'Issue play link'}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+

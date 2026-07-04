@@ -3594,14 +3594,142 @@ metadata:
 
 test_plan:
   current_focus:
-    - "Marketing M0 — Meta WhatsApp scaffolding + channels + webhook"
-    - "Marketing M1 — Customer master fields (wedding_anniversary/spouse/important_dates)"
-    - "Marketing M2 — Segments CRUD + preview"
-    - "Marketing M3 — Salon Coupons CRUD + publish + validate + public list"
-    - "SalonUserPermissions.can_access_marketing default & persistence"
+    - "Marketing M4 — Overview real spend/campaign metrics"
+    - "Marketing M5 — Campaigns compose/launch/pause/resume/stop + messages"
+    - "Marketing M6 — Automations CRUD + run-now + daily scheduler wiring"
+    - "Marketing M7 — Rewards CRUD + issue play-link + public play/spin + prize side-effects"
   stuck_tasks: []
   test_all: false
   test_priority: "high_first"
+
+# =================================================================
+# Marketing Module — M4 to M7 (July 5, 2026 — added on top of M0-M3)
+# =================================================================
+
+  - task: "Marketing M4 — Overview real spend/campaign metrics"
+    implemented: true
+    working: "NA"
+    file: "/app/backend/marketing.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: true
+    status_history:
+        - working: "NA"
+          agent: "main"
+          comment: |
+            Overview now sums provider_cost from marketing_messages within the range,
+            counts failed messages, includes campaigns_run and automations_active.
+            Test:
+              GET /api/salons/{id}/marketing/overview
+                → 200 body includes: messaging.sent, delivered, read, failed, spend_inr;
+                   conversion.coupon_redemptions & coupon_discount_amount;
+                   campaigns_run (int), automations_active (int); range.from/to.
+              Query params date_from/date_to (ISO datetime) narrow the window;
+              default is last 30 days.
+
+  - task: "Marketing M5 — Campaigns compose/launch/pause/resume/stop + messages"
+    implemented: true
+    working: "NA"
+    file: "/app/backend/marketing.py, /app/backend/whatsapp_service.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: true
+    status_history:
+        - working: "NA"
+          agent: "main"
+          comment: |
+            Sending path uses whatsapp_service.send_whatsapp_message which calls
+            twilio_service.send_whatsapp_notification for the twilio provider.
+            Test flow as salon admin:
+              1) POST /api/salons/{id}/marketing/campaigns
+                 body {"name":"Blast","ad_hoc_phones":["9999900011"],
+                       "template_body":"Hi {{name}}, use {{coupon_code}}"}
+                 → 200, status='draft', id present, stats={sent:0,failed:0,...}
+              2) POST .../marketing/campaigns/preview-audience with same segment_id/phones
+                 → {count, estimated_spend_inr, sample:[...]}
+              3) POST .../marketing/campaigns/{cid}/launch → status='running'
+                 - After ~3s, GET .../marketing/campaigns/{cid}/messages returns rows
+                   with provider='twilio', status='sent' (or 'failed' with error text
+                   if Twilio auth fails — that IS a functional pass for the routing test)
+                 - Campaign stats.sent should increment
+              4) POST .../marketing/campaigns/{cid}/pause on running → 400
+                 (or 200 if still running; the send loop respects paused status)
+              5) POST .../marketing/campaigns/{cid}/stop on running or paused → 200
+              6) DELETE completed campaign → 200; DELETE running → 400
+              7) Scheduled campaign: create with schedule_at=<past ISO> → status='scheduled';
+                 the 5-minute scheduler job (_run_scheduled_campaigns) should pick it up.
+                 For test speed, main agent will manually launch instead.
+              8) Auth: all endpoints 403 without token; validate/public-list endpoints unchanged.
+
+  - task: "Marketing M6 — Automations CRUD + run-now + daily scheduler wiring"
+    implemented: true
+    working: "NA"
+    file: "/app/backend/marketing.py, /app/backend/server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: true
+    status_history:
+        - working: "NA"
+          agent: "main"
+          comment: |
+            APScheduler jobs registered:
+              - marketing.automations.daily → cron 09:00 UTC → _run_all_automations_daily
+              - marketing.campaigns.scheduled → interval 5m → _run_scheduled_campaigns
+            Endpoints:
+              1) POST /api/salons/{id}/marketing/automations
+                 body {"type":"birthday","active":true,"template_body":"Happy birthday {{name}}!"}
+                 → 200, id present; type must be one of
+                   birthday | wedding_anniversary | spouse_birthday | win_back | reminder
+              2) GET /automations → list returns created row.
+              3) PUT /automations/{aid} → updated fields persisted.
+              4) DELETE /automations/{aid} → 200.
+              5) POST /automations/{aid}/run-now → 200 with {ok:true, sent:<int>}.
+                 With a test user whose dob == today, birthday automation should send=1.
+                 (Note: sends will call twilio; provider "sent" or "failed" both acceptable
+                  functionally — we just need the marketing_messages row created.)
+              6) Invalid type → 422 validation error.
+              7) Auth: 403 without token.
+              8) Frequency cap: running the same automation twice in a row for the same
+                 customer within 20h should NOT double-send (message row not created
+                 second time).
+
+  - task: "Marketing M7 — Rewards CRUD + issue play-link + public play/spin + prize side-effects"
+    implemented: true
+    working: "NA"
+    file: "/app/backend/marketing.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: true
+    status_history:
+        - working: "NA"
+          agent: "main"
+          comment: |
+            Endpoints:
+              1) POST /api/salons/{id}/marketing/rewards
+                 body {"type":"scratch","name":"Test","active":true,
+                       "prize_table":[
+                          {"label":"Wallet 50","weight":2,"prize_type":"wallet_credit","prize_value":50},
+                          {"label":"Better luck","weight":8,"prize_type":"better_luck"}
+                       ],
+                       "max_plays_per_day_per_customer":1}
+                 → 200, id present.
+              2) GET /rewards → returns created row.
+              3) PUT/DELETE → work like Campaigns.
+              4) POST /rewards/{rid}/issue body {"customer_phone":"9999900011"}
+                 → {ok:true, play_url:"...api/public/rewards/play/<token>"}.
+              5) Repeated issue for same customer/reward on same day → 400
+                 "No eligible reward to issue" (per-day cap).
+              6) GET (no auth) /api/public/rewards/play/{token}
+                 → {play, reward:{id,name,type}, already_played:false, prize:null}.
+              7) POST (no auth) /api/public/rewards/play/{token}/spin
+                 → {prize:{label,prize_type,prize_value,...}, played_at:"..."}.
+              8) Second call to /spin → {already_played:true, prize:<same>}.
+              9) Invalid token → 400.
+             10) If prize_type=wallet_credit with prize_value>0, the customer's
+                 customer_memberships.balance was incremented (may be no-op if
+                 no membership row) and a wallet_transactions row was inserted.
+             11) Auth: CRUD 403 without token; issue endpoint 403 without token;
+                 play/spin are PUBLIC (no auth).
 
 # July 5, 2026 — Continuation session (Marketing Module M0–M3 built)
 # .env files restored, socketio dep reinstalled. Backend healthy.

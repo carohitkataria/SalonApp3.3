@@ -14738,6 +14738,12 @@ marketing_mod.init_marketing_router(
 )
 fastapi_app.include_router(marketing_mod.marketing_router)
 
+# Register marketing scheduler jobs (M6 automations daily + M5 scheduled campaigns every 5m)
+try:
+    marketing_mod.register_marketing_jobs(scheduler)
+except Exception as _e:
+    logger.error(f"[STARTUP] marketing scheduler registration failed: {_e}")
+
 # Health check endpoint for Kubernetes liveness/readiness probes
 @fastapi_app.get("/health")
 async def health_check():

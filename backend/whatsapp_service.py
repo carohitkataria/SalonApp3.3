@@ -200,13 +200,18 @@ async def send_whatsapp_message(
 
     # Twilio path — reuse the existing twilio_service helpers.
     try:
-        from twilio_service import send_whatsapp_message as twilio_send  # type: ignore
+        from twilio_service import send_whatsapp_notification  # async, dict-returning
         body = text or (f"[{template_name}] " + " | ".join(template_params or []))
-        result = twilio_send(to, body)  # sync
-        # Normalise shape
+        result = await send_whatsapp_notification(_normalize_e164(to), body)
+        # Normalise shape — twilio_service returns e.g. {"success": True/False, "sid": ...}
         if isinstance(result, dict):
-            result.setdefault("provider", "twilio")
-            return result
+            status = "sent" if result.get("success") or result.get("status") == "sent" else "failed"
+            return {
+                "status": status,
+                "provider": "twilio",
+                "message_id": result.get("sid") or result.get("message_id"),
+                "raw": result,
+            }
         return {"status": "sent" if result else "failed", "provider": "twilio"}
     except Exception as e:
         logger.warning(f"[WhatsApp] Twilio send fallback failed: {e}")

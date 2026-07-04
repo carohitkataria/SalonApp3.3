@@ -789,27 +789,43 @@ async def marketing_overview(
     )
     dt = datetime.fromisoformat(date_to.replace("Z", "+00:00")) if date_to else now
 
-    # Messages
+    # Messages + spend
+    match_range = {"$gte": df.isoformat(), "$lte": dt.isoformat()}
     total_sent = await _db.marketing_messages.count_documents(
-        {"salon_id": salon_id, "sent_at": {"$gte": df.isoformat(), "$lte": dt.isoformat()}}
+        {"salon_id": salon_id, "sent_at": match_range}
     )
     delivered = await _db.marketing_messages.count_documents(
-        {"salon_id": salon_id, "delivered_at": {"$gte": df.isoformat(), "$lte": dt.isoformat()}}
+        {"salon_id": salon_id, "delivered_at": match_range}
     )
     read = await _db.marketing_messages.count_documents(
-        {"salon_id": salon_id, "read_at": {"$gte": df.isoformat(), "$lte": dt.isoformat()}}
+        {"salon_id": salon_id, "read_at": match_range}
     )
+    failed = await _db.marketing_messages.count_documents(
+        {"salon_id": salon_id, "failed_at": match_range}
+    )
+    spend = 0.0
+    async for m in _db.marketing_messages.find(
+        {"salon_id": salon_id, "sent_at": match_range}, {"provider_cost": 1}
+    ):
+        spend += float(m.get("provider_cost") or 0)
     # Coupons
     redemptions = await _db.salon_coupon_redemptions.count_documents(
-        {"salon_id": salon_id, "redeemed_at": {"$gte": df.isoformat(), "$lte": dt.isoformat()}}
+        {"salon_id": salon_id, "redeemed_at": match_range}
     )
     coupon_revenue = 0.0
     cursor = _db.salon_coupon_redemptions.find(
-        {"salon_id": salon_id, "redeemed_at": {"$gte": df.isoformat(), "$lte": dt.isoformat()}},
+        {"salon_id": salon_id, "redeemed_at": match_range},
         {"amount": 1},
     )
     async for r in cursor:
         coupon_revenue += float(r.get("amount") or 0)
+    # Campaign stats
+    campaigns_run = await _db.marketing_campaigns.count_documents(
+        {"salon_id": salon_id, "launched_at": match_range}
+    )
+    automations_active = await _db.marketing_automations.count_documents(
+        {"salon_id": salon_id, "active": True}
+    )
 
     return {
         "range": {"from": df.isoformat(), "to": dt.isoformat()},
@@ -817,12 +833,15 @@ async def marketing_overview(
             "sent": total_sent,
             "delivered": delivered,
             "read": read,
-            "spend_inr": 0,  # provider spend not tracked yet
+            "failed": failed,
+            "spend_inr": round(spend, 2),
         },
         "conversion": {
             "coupon_redemptions": redemptions,
             "coupon_discount_amount": round(coupon_revenue, 2),
         },
+        "campaigns_run": campaigns_run,
+        "automations_active": automations_active,
     }
 
 
@@ -909,3 +928,781 @@ async def put_marketing_settings(salon_id: str, body: MarketingSettingsIn, reque
         {"salon_id": salon_id}, {"$set": {**upd, "salon_id": salon_id}}, upsert=True
     )
     return {"salon_id": salon_id, **upd}
+
+
+# ================================================================
+# M5 — Campaigns (compose, send, schedule)
+# ================================================================
+
+import asyncio
+import base64
+import hmac as _hmac
+import hashlib as _hashlib
+import random
+
+CAMPAIGN_STATUSES = {"draft", "scheduled", "running", "completed", "paused", "stopped", "failed"}
+
+# Rough provider costs per message (INR) — used only for spend estimation.
+# Real numbers come from webhook `pricing` field once wired; for now use a
+# conservative default.
+DEFAULT_MSG_COST = {"twilio": 0.60, "meta": 0.90}
+
+
+class CampaignIn(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    name: str
+    segment_id: Optional[str] = None      # if None, sends to ad-hoc phones
+    ad_hoc_phones: Optional[List[str]] = None
+    template_body: str                     # rendered body (with {{name}} etc.)
+    template_id: Optional[str] = None
+    coupon_id: Optional[str] = None
+    schedule_at: Optional[str] = None      # ISO datetime, if given → scheduled
+    provider: Optional[str] = None         # override provider for this send
+
+
+def _render(body: str, ctx: Dict[str, Any]) -> str:
+    """Very small mustache-lite renderer — supports {{key}} substitutions only."""
+    if not body:
+        return ""
+    out = body
+    for k, v in (ctx or {}).items():
+        out = out.replace("{{" + k + "}}", "" if v is None else str(v))
+    return out
+
+
+async def _send_one_campaign_message(
+    *,
+    salon_id: str,
+    campaign_id: str,
+    to_phone: str,
+    body: str,
+    provider: Optional[str] = None,
+    context: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    """Send a single message and record a marketing_messages row."""
+    from whatsapp_service import send_whatsapp_message, get_active_provider
+
+    active = (provider or get_active_provider()).lower()
+    now = _now_iso()
+    doc: Dict[str, Any] = {
+        "id": str(uuid.uuid4()),
+        "campaign_id": campaign_id,
+        "salon_id": salon_id,
+        "to_phone": _normalize_phone(to_phone),
+        "body": body,
+        "provider": active,
+        "status": "queued",
+        "queued_at": now,
+        "context": context or {},
+    }
+    await _db.marketing_messages.insert_one(doc)
+
+    result = await send_whatsapp_message(to_phone, text=body, force_provider=active)
+    upd: Dict[str, Any] = {"provider_result": result, "status": result.get("status", "failed")}
+    if result.get("status") == "sent":
+        upd["sent_at"] = _now_iso()
+        upd["provider_cost"] = DEFAULT_MSG_COST.get(active, 0.60)
+        if result.get("message_id"):
+            upd["provider_message_id"] = result["message_id"]
+    elif result.get("status") == "mock":
+        upd["sent_at"] = _now_iso()
+        upd["provider_cost"] = 0
+        upd["mock"] = True
+    else:
+        upd["failed_at"] = _now_iso()
+        upd["error"] = str(result.get("error") or result.get("reason") or "unknown")
+
+    await _db.marketing_messages.update_one({"id": doc["id"]}, {"$set": upd})
+    return {"id": doc["id"], "status": upd["status"], "provider": active, "cost": upd.get("provider_cost", 0)}
+
+
+async def _resolve_campaign_recipients(salon_id: str, campaign: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """Return [{phone, name, ...}, ...] for either a segment or the ad-hoc list."""
+    seg_id = campaign.get("segment_id")
+    recipients: List[Dict[str, Any]] = []
+    if seg_id:
+        seg = await _db.marketing_segments.find_one({"id": seg_id, "salon_id": salon_id})
+        if not seg:
+            return []
+        rules_dict = seg.get("rules") or {"logic": "AND", "conditions": []}
+        rules = SegmentRules(**rules_dict)
+        recipients = await _evaluate_segment(salon_id, rules)
+    else:
+        phones = campaign.get("ad_hoc_phones") or []
+        for p in phones:
+            n = _normalize_phone(p)
+            if not n:
+                continue
+            u = await _db.users.find_one({"phone": n})
+            recipients.append({"phone": n, "name": (u or {}).get("name")})
+    return recipients
+
+
+async def _run_campaign(salon_id: str, campaign_id: str) -> None:
+    """Background task — send all messages for a campaign."""
+    campaign = await _db.marketing_campaigns.find_one({"id": campaign_id, "salon_id": salon_id})
+    if not campaign:
+        return
+    if campaign.get("status") not in ("running", "scheduled"):
+        return
+    await _db.marketing_campaigns.update_one(
+        {"id": campaign_id},
+        {"$set": {"status": "running", "launched_at": _now_iso()}},
+    )
+
+    body_tpl = campaign.get("template_body") or ""
+    coupon = None
+    if campaign.get("coupon_id"):
+        coupon = await _db.salon_coupons.find_one({"id": campaign["coupon_id"], "salon_id": salon_id})
+
+    recipients = await _resolve_campaign_recipients(salon_id, campaign)
+    stats = {"sent": 0, "failed": 0, "delivered": 0, "read": 0}
+    for r in recipients:
+        # Re-check status — allow pause/stop
+        c = await _db.marketing_campaigns.find_one({"id": campaign_id}, {"status": 1})
+        if not c or c.get("status") in ("paused", "stopped"):
+            break
+        ctx = {
+            "name": (r.get("name") or "").split(" ")[0] or "there",
+            "coupon_code": (coupon or {}).get("code", ""),
+            "coupon_title": (coupon or {}).get("title", ""),
+            "coupon_value": str((coupon or {}).get("value", "")),
+        }
+        body = _render(body_tpl, ctx)
+        result = await _send_one_campaign_message(
+            salon_id=salon_id,
+            campaign_id=campaign_id,
+            to_phone=r["phone"],
+            body=body,
+            provider=campaign.get("provider"),
+            context=ctx,
+        )
+        if result["status"] in ("sent", "mock"):
+            stats["sent"] += 1
+        else:
+            stats["failed"] += 1
+        # Small yield to avoid hammering the provider
+        await asyncio.sleep(0.05)
+
+    final_status = "completed"
+    c = await _db.marketing_campaigns.find_one({"id": campaign_id}, {"status": 1})
+    if c and c.get("status") == "stopped":
+        final_status = "stopped"
+    elif c and c.get("status") == "paused":
+        final_status = "paused"
+    await _db.marketing_campaigns.update_one(
+        {"id": campaign_id},
+        {"$set": {"status": final_status, "stats": stats, "completed_at": _now_iso()}},
+    )
+
+
+@marketing_router.get("/salons/{salon_id}/marketing/campaigns")
+async def list_campaigns(salon_id: str, request: Request):
+    user = await _require_user(request)
+    _assert_salon_scope(user, salon_id)
+    out = []
+    async for c in _db.marketing_campaigns.find({"salon_id": salon_id}).sort("created_at", -1):
+        out.append(_clean(c))
+    return {"campaigns": out}
+
+
+@marketing_router.post("/salons/{salon_id}/marketing/campaigns")
+async def create_campaign(salon_id: str, body: CampaignIn, request: Request):
+    user = await _require_admin(request)
+    _assert_salon_scope(user, salon_id)
+    doc = body.model_dump()
+    is_scheduled = bool(doc.get("schedule_at"))
+    doc.update({
+        "id": str(uuid.uuid4()),
+        "salon_id": salon_id,
+        "status": "scheduled" if is_scheduled else "draft",
+        "created_at": _now_iso(),
+        "created_by": user.get("user_id"),
+        "stats": {"sent": 0, "failed": 0, "delivered": 0, "read": 0},
+    })
+    await _db.marketing_campaigns.insert_one(doc)
+    return _clean(doc)
+
+
+@marketing_router.get("/salons/{salon_id}/marketing/campaigns/{cid}")
+async def get_campaign(salon_id: str, cid: str, request: Request):
+    user = await _require_user(request)
+    _assert_salon_scope(user, salon_id)
+    c = await _db.marketing_campaigns.find_one({"id": cid, "salon_id": salon_id})
+    if not c:
+        raise HTTPException(status_code=404, detail="Campaign not found")
+    return _clean(c)
+
+
+@marketing_router.put("/salons/{salon_id}/marketing/campaigns/{cid}")
+async def update_campaign(salon_id: str, cid: str, body: CampaignIn, request: Request):
+    user = await _require_admin(request)
+    _assert_salon_scope(user, salon_id)
+    upd = body.model_dump()
+    upd["updated_at"] = _now_iso()
+    res = await _db.marketing_campaigns.update_one({"id": cid, "salon_id": salon_id}, {"$set": upd})
+    if res.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Campaign not found")
+    c = await _db.marketing_campaigns.find_one({"id": cid})
+    return _clean(c)
+
+
+@marketing_router.delete("/salons/{salon_id}/marketing/campaigns/{cid}")
+async def delete_campaign(salon_id: str, cid: str, request: Request):
+    user = await _require_admin(request)
+    _assert_salon_scope(user, salon_id)
+    c = await _db.marketing_campaigns.find_one({"id": cid, "salon_id": salon_id}, {"status": 1})
+    if not c:
+        raise HTTPException(status_code=404, detail="Campaign not found")
+    if c.get("status") == "running":
+        raise HTTPException(status_code=400, detail="Cannot delete a running campaign; stop it first")
+    await _db.marketing_campaigns.delete_one({"id": cid, "salon_id": salon_id})
+    return {"deleted": True, "id": cid}
+
+
+class CampaignPreviewIn(BaseModel):
+    segment_id: Optional[str] = None
+    ad_hoc_phones: Optional[List[str]] = None
+
+
+@marketing_router.post("/salons/{salon_id}/marketing/campaigns/preview-audience")
+async def preview_campaign_audience(salon_id: str, body: CampaignPreviewIn, request: Request):
+    user = await _require_user(request)
+    _assert_salon_scope(user, salon_id)
+    dummy_campaign = body.model_dump()
+    recipients = await _resolve_campaign_recipients(salon_id, dummy_campaign)
+    est_cost = round(len(recipients) * DEFAULT_MSG_COST.get("twilio", 0.60), 2)
+    return {"count": len(recipients), "estimated_spend_inr": est_cost, "sample": recipients[:20]}
+
+
+@marketing_router.post("/salons/{salon_id}/marketing/campaigns/{cid}/launch")
+async def launch_campaign(salon_id: str, cid: str, request: Request):
+    """Send immediately in the background."""
+    user = await _require_admin(request)
+    _assert_salon_scope(user, salon_id)
+    c = await _db.marketing_campaigns.find_one({"id": cid, "salon_id": salon_id})
+    if not c:
+        raise HTTPException(status_code=404, detail="Campaign not found")
+    if c.get("status") in ("running", "completed"):
+        raise HTTPException(status_code=400, detail=f"Campaign is already {c['status']}")
+    await _db.marketing_campaigns.update_one(
+        {"id": cid}, {"$set": {"status": "running", "launched_at": _now_iso()}}
+    )
+    asyncio.create_task(_run_campaign(salon_id, cid))
+    return {"ok": True, "id": cid, "status": "running"}
+
+
+@marketing_router.post("/salons/{salon_id}/marketing/campaigns/{cid}/pause")
+async def pause_campaign(salon_id: str, cid: str, request: Request):
+    user = await _require_admin(request)
+    _assert_salon_scope(user, salon_id)
+    res = await _db.marketing_campaigns.update_one(
+        {"id": cid, "salon_id": salon_id, "status": {"$in": ["running", "scheduled"]}},
+        {"$set": {"status": "paused", "paused_at": _now_iso()}},
+    )
+    if res.matched_count == 0:
+        raise HTTPException(status_code=400, detail="Campaign cannot be paused in its current state")
+    return {"ok": True, "id": cid, "status": "paused"}
+
+
+@marketing_router.post("/salons/{salon_id}/marketing/campaigns/{cid}/resume")
+async def resume_campaign(salon_id: str, cid: str, request: Request):
+    user = await _require_admin(request)
+    _assert_salon_scope(user, salon_id)
+    c = await _db.marketing_campaigns.find_one(
+        {"id": cid, "salon_id": salon_id, "status": "paused"}
+    )
+    if not c:
+        raise HTTPException(status_code=400, detail="Campaign is not paused")
+    await _db.marketing_campaigns.update_one(
+        {"id": cid}, {"$set": {"status": "running"}}
+    )
+    asyncio.create_task(_run_campaign(salon_id, cid))
+    return {"ok": True, "id": cid, "status": "running"}
+
+
+@marketing_router.post("/salons/{salon_id}/marketing/campaigns/{cid}/stop")
+async def stop_campaign(salon_id: str, cid: str, request: Request):
+    user = await _require_admin(request)
+    _assert_salon_scope(user, salon_id)
+    res = await _db.marketing_campaigns.update_one(
+        {"id": cid, "salon_id": salon_id, "status": {"$in": ["running", "paused", "scheduled"]}},
+        {"$set": {"status": "stopped", "stopped_at": _now_iso()}},
+    )
+    if res.matched_count == 0:
+        raise HTTPException(status_code=400, detail="Campaign cannot be stopped in its current state")
+    return {"ok": True, "id": cid, "status": "stopped"}
+
+
+@marketing_router.get("/salons/{salon_id}/marketing/campaigns/{cid}/messages")
+async def campaign_messages(salon_id: str, cid: str, request: Request, limit: int = Query(default=100, le=500)):
+    user = await _require_user(request)
+    _assert_salon_scope(user, salon_id)
+    out = []
+    cursor = _db.marketing_messages.find({"salon_id": salon_id, "campaign_id": cid}).sort("queued_at", -1).limit(limit)
+    async for m in cursor:
+        out.append(_clean(m))
+    return {"messages": out}
+
+
+# ================================================================
+# M6 — Automations (birthday / anniversary / spouse-b'day / win-back / reminders)
+# ================================================================
+
+AUTOMATION_TYPES = {"birthday", "wedding_anniversary", "spouse_birthday", "win_back", "reminder"}
+
+
+class AutomationIn(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    type: str
+    active: bool = True
+    template_body: str
+    coupon_id: Optional[str] = None
+    threshold_days: Optional[int] = None       # for win_back (last visit ≥ N days)
+    offset_days: Optional[int] = None          # for reminder (send N days before/after)
+    provider: Optional[str] = None
+
+    @field_validator("type")
+    @classmethod
+    def _t(cls, v):
+        if v not in AUTOMATION_TYPES:
+            raise ValueError("Unsupported automation type")
+        return v
+
+
+@marketing_router.get("/salons/{salon_id}/marketing/automations")
+async def list_automations(salon_id: str, request: Request):
+    user = await _require_user(request)
+    _assert_salon_scope(user, salon_id)
+    out = []
+    async for a in _db.marketing_automations.find({"salon_id": salon_id}).sort("created_at", -1):
+        out.append(_clean(a))
+    return {"automations": out}
+
+
+@marketing_router.post("/salons/{salon_id}/marketing/automations")
+async def create_automation(salon_id: str, body: AutomationIn, request: Request):
+    user = await _require_admin(request)
+    _assert_salon_scope(user, salon_id)
+    doc = body.model_dump()
+    doc.update({
+        "id": str(uuid.uuid4()),
+        "salon_id": salon_id,
+        "created_at": _now_iso(),
+        "created_by": user.get("user_id"),
+        "last_run_at": None,
+        "last_run_sent": 0,
+    })
+    await _db.marketing_automations.insert_one(doc)
+    return _clean(doc)
+
+
+@marketing_router.put("/salons/{salon_id}/marketing/automations/{aid}")
+async def update_automation(salon_id: str, aid: str, body: AutomationIn, request: Request):
+    user = await _require_admin(request)
+    _assert_salon_scope(user, salon_id)
+    res = await _db.marketing_automations.update_one(
+        {"id": aid, "salon_id": salon_id}, {"$set": {**body.model_dump(), "updated_at": _now_iso()}}
+    )
+    if res.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Automation not found")
+    a = await _db.marketing_automations.find_one({"id": aid})
+    return _clean(a)
+
+
+@marketing_router.delete("/salons/{salon_id}/marketing/automations/{aid}")
+async def delete_automation(salon_id: str, aid: str, request: Request):
+    user = await _require_admin(request)
+    _assert_salon_scope(user, salon_id)
+    res = await _db.marketing_automations.delete_one({"id": aid, "salon_id": salon_id})
+    if res.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Automation not found")
+    return {"deleted": True, "id": aid}
+
+
+@marketing_router.post("/salons/{salon_id}/marketing/automations/{aid}/run-now")
+async def run_automation_now(salon_id: str, aid: str, request: Request):
+    """Manually trigger an automation (useful for testing)."""
+    user = await _require_admin(request)
+    _assert_salon_scope(user, salon_id)
+    n = await _run_automation(salon_id, aid)
+    return {"ok": True, "id": aid, "sent": n}
+
+
+async def _run_automation(salon_id: str, aid: str) -> int:
+    autom = await _db.marketing_automations.find_one({"id": aid, "salon_id": salon_id})
+    if not autom or not autom.get("active"):
+        return 0
+    today = datetime.now(timezone.utc)
+    tm = today.month
+    td = today.day
+    atype = autom.get("type")
+    coupon = None
+    if autom.get("coupon_id"):
+        coupon = await _db.salon_coupons.find_one({"id": autom["coupon_id"], "salon_id": salon_id})
+
+    # 1) Resolve target customers
+    customers = await _resolve_customers_for_salon(salon_id)
+    targets: List[Dict[str, Any]] = []
+    for c in customers:
+        dob = c.get("dob") or ""
+        wa = c.get("wedding_anniversary") or ""
+        sd = c.get("spouse_date_of_birth") or ""
+        pick = False
+        if atype == "birthday" and dob[5:10] == f"{tm:02d}-{td:02d}":
+            pick = True
+        elif atype == "wedding_anniversary" and wa[5:10] == f"{tm:02d}-{td:02d}":
+            pick = True
+        elif atype == "spouse_birthday" and sd[5:10] == f"{tm:02d}-{td:02d}":
+            pick = True
+        elif atype == "win_back":
+            thr = int(autom.get("threshold_days") or 90)
+            stats = await _compute_stats(salon_id, c.get("phone"))
+            lv = stats.get("last_visit_days")
+            if lv is not None and lv >= thr:
+                pick = True
+        elif atype == "reminder":
+            # Reminder: bookings scheduled today at this salon (offset_days=0 default)
+            offset = int(autom.get("offset_days") or 0)
+            target_date = (today + timedelta(days=offset)).strftime("%Y-%m-%d")
+            has_booking = await _db.tokens.count_documents({
+                "salon_id": salon_id,
+                "user_phone": c.get("phone"),
+                "date": target_date,
+                "status": {"$nin": ["cancelled", "completed"]},
+            })
+            if has_booking:
+                pick = True
+        if pick:
+            targets.append(c)
+
+    # 2) Send messages
+    body_tpl = autom.get("template_body") or ""
+    sent = 0
+    for c in targets:
+        # Frequency cap — 24h dedup for automations of this type
+        one_day_ago = (today - timedelta(hours=20)).isoformat()
+        recent = await _db.marketing_messages.count_documents({
+            "salon_id": salon_id,
+            "to_phone": _normalize_phone(c.get("phone")),
+            "context.automation_type": atype,
+            "sent_at": {"$gte": one_day_ago},
+        })
+        if recent:
+            continue
+        ctx = {
+            "name": (c.get("name") or "").split(" ")[0] or "there",
+            "spouse_name": c.get("spouse_name") or "",
+            "coupon_code": (coupon or {}).get("code", ""),
+            "coupon_title": (coupon or {}).get("title", ""),
+            "automation_type": atype,
+        }
+        result = await _send_one_campaign_message(
+            salon_id=salon_id,
+            campaign_id=f"auto:{aid}",
+            to_phone=c.get("phone"),
+            body=_render(body_tpl, ctx),
+            provider=autom.get("provider"),
+            context=ctx,
+        )
+        if result["status"] in ("sent", "mock"):
+            sent += 1
+        await asyncio.sleep(0.05)
+
+    await _db.marketing_automations.update_one(
+        {"id": aid}, {"$set": {"last_run_at": _now_iso(), "last_run_sent": sent}}
+    )
+    return sent
+
+
+async def _run_all_automations_daily():
+    """Called by APScheduler once a day — iterates every active automation."""
+    try:
+        cursor = _db.marketing_automations.find({"active": True})
+        async for autom in cursor:
+            try:
+                await _run_automation(autom["salon_id"], autom["id"])
+            except Exception as ex:
+                logger.error(f"[Marketing] automation {autom.get('id')} failed: {ex}")
+    except Exception as e:
+        logger.error(f"[Marketing] daily automation sweep failed: {e}")
+
+
+async def _run_scheduled_campaigns():
+    """Called every 5 minutes — pick up campaigns whose schedule_at has passed."""
+    now_iso = _now_iso()
+    cursor = _db.marketing_campaigns.find({
+        "status": "scheduled",
+        "schedule_at": {"$lte": now_iso},
+    })
+    async for c in cursor:
+        try:
+            asyncio.create_task(_run_campaign(c["salon_id"], c["id"]))
+        except Exception as ex:
+            logger.error(f"[Marketing] scheduled campaign kickoff failed: {ex}")
+
+
+def register_marketing_jobs(scheduler):
+    """Called from server.py after scheduler is created."""
+    # Daily at 09:00 UTC (~ 14:30 IST)
+    scheduler.add_job(_run_all_automations_daily, "cron", hour=9, minute=0, id="marketing.automations.daily")
+    # Every 5 minutes for scheduled campaigns
+    scheduler.add_job(_run_scheduled_campaigns, "interval", minutes=5, id="marketing.campaigns.scheduled")
+
+
+# ================================================================
+# M7 — Rewards (scratch card & spin wheel)
+# ================================================================
+
+REWARD_TYPES = {"scratch", "spin"}
+PRIZE_TYPES = {"wallet_credit", "loyalty_points", "coupon", "free_addon", "better_luck"}
+
+
+class RewardPrize(BaseModel):
+    label: str
+    weight: float = Field(default=1.0, ge=0)
+    prize_type: str
+    prize_value: Optional[float] = None
+    coupon_code: Optional[str] = None
+    note: Optional[str] = None
+
+    @field_validator("prize_type")
+    @classmethod
+    def _p(cls, v):
+        if v not in PRIZE_TYPES:
+            raise ValueError("Unsupported prize_type")
+        return v
+
+
+class RewardIn(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    type: str
+    name: str
+    active: bool = True
+    prize_table: List[RewardPrize]
+    max_plays_per_day_per_customer: Optional[int] = 1
+    valid_from: Optional[str] = None
+    valid_to: Optional[str] = None
+
+    @field_validator("type")
+    @classmethod
+    def _t(cls, v):
+        if v not in REWARD_TYPES:
+            raise ValueError("type must be 'scratch' or 'spin'")
+        return v
+
+
+def _play_signing_key() -> bytes:
+    return (os.environ.get("JWT_SECRET_KEY") or "salonhub-reward-signer").encode("utf-8")
+
+
+def _make_play_token(payload: Dict[str, Any]) -> str:
+    body = base64.urlsafe_b64encode(
+        (str(payload).encode("utf-8"))  # deterministic-ish; we only trust the signature
+    ).decode("ascii").rstrip("=")
+    sig = _hmac.new(_play_signing_key(), body.encode("ascii"), _hashlib.sha256).hexdigest()[:24]
+    return f"{body}.{sig}"
+
+
+def _verify_play_token(token: str) -> Optional[Dict[str, Any]]:
+    try:
+        body, sig = token.split(".", 1)
+        expected = _hmac.new(_play_signing_key(), body.encode("ascii"), _hashlib.sha256).hexdigest()[:24]
+        if not _hmac.compare_digest(sig, expected):
+            return None
+        raw = base64.urlsafe_b64decode(body + "===").decode("utf-8")
+        import ast
+        return ast.literal_eval(raw)
+    except Exception:
+        return None
+
+
+@marketing_router.get("/salons/{salon_id}/marketing/rewards")
+async def list_rewards(salon_id: str, request: Request):
+    user = await _require_user(request)
+    _assert_salon_scope(user, salon_id)
+    out = []
+    async for r in _db.reward_configs.find({"salon_id": salon_id}).sort("created_at", -1):
+        out.append(_clean(r))
+    return {"rewards": out}
+
+
+@marketing_router.post("/salons/{salon_id}/marketing/rewards")
+async def create_reward(salon_id: str, body: RewardIn, request: Request):
+    user = await _require_admin(request)
+    _assert_salon_scope(user, salon_id)
+    doc = body.model_dump()
+    doc.update({
+        "id": str(uuid.uuid4()),
+        "salon_id": salon_id,
+        "created_at": _now_iso(),
+        "created_by": user.get("user_id"),
+    })
+    await _db.reward_configs.insert_one(doc)
+    return _clean(doc)
+
+
+@marketing_router.put("/salons/{salon_id}/marketing/rewards/{rid}")
+async def update_reward(salon_id: str, rid: str, body: RewardIn, request: Request):
+    user = await _require_admin(request)
+    _assert_salon_scope(user, salon_id)
+    res = await _db.reward_configs.update_one(
+        {"id": rid, "salon_id": salon_id}, {"$set": {**body.model_dump(), "updated_at": _now_iso()}}
+    )
+    if res.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Reward not found")
+    r = await _db.reward_configs.find_one({"id": rid})
+    return _clean(r)
+
+
+@marketing_router.delete("/salons/{salon_id}/marketing/rewards/{rid}")
+async def delete_reward(salon_id: str, rid: str, request: Request):
+    user = await _require_admin(request)
+    _assert_salon_scope(user, salon_id)
+    res = await _db.reward_configs.delete_one({"id": rid, "salon_id": salon_id})
+    if res.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Reward not found")
+    return {"deleted": True, "id": rid}
+
+
+class RewardIssueIn(BaseModel):
+    customer_phone: str
+    reward_id: Optional[str] = None
+    booking_id: Optional[str] = None
+
+
+async def issue_reward_play(*, salon_id: str, customer_phone: str,
+                             reward_id: Optional[str] = None,
+                             booking_id: Optional[str] = None) -> Optional[str]:
+    """Called (a) manually via the /issue endpoint or (b) automatically from an
+    invoice hook in server.py. Returns a play URL or None if nothing to issue."""
+    reward = None
+    if reward_id:
+        reward = await _db.reward_configs.find_one({"id": reward_id, "salon_id": salon_id, "active": True})
+    else:
+        reward = await _db.reward_configs.find_one({"salon_id": salon_id, "active": True})
+    if not reward:
+        return None
+    # Anti-abuse: per-day cap
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    cap = int(reward.get("max_plays_per_day_per_customer") or 1)
+    used = await _db.reward_plays.count_documents({
+        "salon_id": salon_id,
+        "reward_id": reward["id"],
+        "customer_phone": _normalize_phone(customer_phone),
+        "issued_date": today,
+    })
+    if used >= cap:
+        return None
+    play = {
+        "id": str(uuid.uuid4()),
+        "salon_id": salon_id,
+        "reward_id": reward["id"],
+        "customer_phone": _normalize_phone(customer_phone),
+        "booking_id": booking_id,
+        "status": "issued",
+        "issued_at": _now_iso(),
+        "issued_date": today,
+    }
+    await _db.reward_plays.insert_one(play)
+    token = _make_play_token({"pid": play["id"], "sid": salon_id, "rid": reward["id"]})
+    backend_url = os.environ.get("APP_URL") or os.environ.get("BACKEND_PUBLIC_URL") or ""
+    return f"{backend_url.rstrip('/')}/api/public/rewards/play/{token}" if backend_url else f"/api/public/rewards/play/{token}"
+
+
+@marketing_router.post("/salons/{salon_id}/marketing/rewards/{rid}/issue")
+async def issue_reward_endpoint(salon_id: str, rid: str, body: RewardIssueIn, request: Request):
+    user = await _require_admin(request)
+    _assert_salon_scope(user, salon_id)
+    url = await issue_reward_play(
+        salon_id=salon_id,
+        customer_phone=body.customer_phone,
+        reward_id=rid,
+        booking_id=body.booking_id,
+    )
+    if not url:
+        raise HTTPException(status_code=400, detail="No eligible reward to issue (inactive / cap reached)")
+    return {"ok": True, "play_url": url}
+
+
+def _pick_prize(prize_table: List[Dict[str, Any]]) -> Dict[str, Any]:
+    total = sum(float(p.get("weight") or 0) for p in prize_table) or 1.0
+    r = random.random() * total
+    acc = 0.0
+    for p in prize_table:
+        acc += float(p.get("weight") or 0)
+        if r <= acc:
+            return p
+    return prize_table[-1]
+
+
+@marketing_router.get("/public/rewards/play/{token}")
+async def get_reward_play(token: str):
+    payload = _verify_play_token(token)
+    if not payload:
+        raise HTTPException(status_code=400, detail="Invalid or expired reward link")
+    play = await _db.reward_plays.find_one({"id": payload.get("pid")})
+    if not play:
+        raise HTTPException(status_code=404, detail="Reward not found")
+    reward = await _db.reward_configs.find_one({"id": play.get("reward_id")})
+    if not reward:
+        raise HTTPException(status_code=404, detail="Reward config missing")
+    return {
+        "play": _clean(play),
+        "reward": {"id": reward["id"], "name": reward.get("name"), "type": reward.get("type")},
+        "already_played": play.get("status") == "played",
+        "prize": play.get("prize") if play.get("status") == "played" else None,
+    }
+
+
+@marketing_router.post("/public/rewards/play/{token}/spin")
+async def spin_reward(token: str):
+    payload = _verify_play_token(token)
+    if not payload:
+        raise HTTPException(status_code=400, detail="Invalid or expired reward link")
+    play = await _db.reward_plays.find_one({"id": payload.get("pid")})
+    if not play:
+        raise HTTPException(status_code=404, detail="Reward not found")
+    if play.get("status") == "played":
+        return {"already_played": True, "prize": play.get("prize")}
+    reward = await _db.reward_configs.find_one({"id": play.get("reward_id")})
+    if not reward or not reward.get("active"):
+        raise HTTPException(status_code=400, detail="Reward is inactive")
+    prize = _pick_prize(reward.get("prize_table") or [])
+    now = _now_iso()
+    await _db.reward_plays.update_one(
+        {"id": play["id"]},
+        {"$set": {"status": "played", "prize": prize, "played_at": now}},
+    )
+    # Apply prize side-effects
+    try:
+        salon_id = play.get("salon_id")
+        phone = play.get("customer_phone")
+        if prize.get("prize_type") == "wallet_credit" and salon_id and phone:
+            amount = float(prize.get("prize_value") or 0)
+            if amount > 0:
+                await _db.customer_memberships.update_one(
+                    {"salon_id": salon_id, "customer_phone": phone},
+                    {"$inc": {"balance": amount}},
+                )
+                await _db.wallet_transactions.insert_one({
+                    "id": str(uuid.uuid4()),
+                    "salon_id": salon_id,
+                    "customer_phone": phone,
+                    "amount": amount,
+                    "type": "credit",
+                    "note": f"Reward — {prize.get('label')}",
+                    "created_at": now,
+                })
+        elif prize.get("prize_type") == "loyalty_points" and salon_id and phone:
+            pts = int(prize.get("prize_value") or 0)
+            if pts > 0:
+                await _db.loyalty_wallets.update_one(
+                    {"salon_id": salon_id, "customer_phone": phone},
+                    {"$inc": {"points": pts}},
+                    upsert=True,
+                )
+    except Exception as e:
+        logger.warning(f"[Reward] side-effect failed: {e}")
+    return {"prize": prize, "played_at": now}
+
