@@ -14858,6 +14858,25 @@ async def startup_event():
     except Exception as e:
         logger.error(f"[STARTUP] product samples seed failed: {e}")
     scheduler.start()
+    # Marketing M0 — one-time migration to add can_access_marketing=true to
+    # admin/branch-manager records. We overwrite existing values (default:
+    # admins/BM = True) because the field was added AFTER their records were
+    # created — the previous default was implicitly "true" via role-based
+    # checks. Staff records keep their explicit value if already set.
+    try:
+        r_admin = await db.salon_users.update_many(
+            {"role": {"$in": ["salon_admin", "admin", "platform_admin", "branch_manager"]}},
+            {"$set": {"permissions.can_access_marketing": True}},
+        )
+        r_staff = await db.salon_users.update_many(
+            {"role": "staff", "permissions.can_access_marketing": {"$exists": False}},
+            {"$set": {"permissions.can_access_marketing": False}},
+        )
+        logger.info(
+            f"[STARTUP] can_access_marketing migration: admins/managers={r_admin.modified_count} staff={r_staff.modified_count}"
+        )
+    except Exception as e:
+        logger.error(f"[STARTUP] can_access_marketing migration failed: {e}")
     # Phase 10/11 — start the salon-store reservation sweeper
     try:
         salon_store_mod.start_sweeper()
