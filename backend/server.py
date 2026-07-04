@@ -2859,22 +2859,25 @@ async def initialize_data():
         salon = await db.salons.find_one({}, {"_id": 0})
         salon_id = salon["id"]
     
-    # Initialize services
+    # Initialize services (Jul 2026 — only starter "General" services)
     service_count = await db.services.count_documents({})
     if service_count == 0:
-        services = [
-            {"id": str(uuid.uuid4()), "service_name": "Haircut", "description": "Regular haircut", "default_duration": 30, "base_price": 150, "is_active": True},
-            {"id": str(uuid.uuid4()), "service_name": "Beard Trim", "description": "Beard trimming and shaping", "default_duration": 20, "base_price": 80, "is_active": True},
-            {"id": str(uuid.uuid4()), "service_name": "Hair Color", "description": "Full hair coloring", "default_duration": 60, "base_price": 500, "is_active": True},
-            {"id": str(uuid.uuid4()), "service_name": "Facial", "description": "Relaxing facial treatment", "default_duration": 45, "base_price": 400, "is_active": True},
-            {"id": str(uuid.uuid4()), "service_name": "Head Massage", "description": "Soothing head massage", "default_duration": 30, "base_price": 200, "is_active": True},
-            {"id": str(uuid.uuid4()), "service_name": "Hair Spa", "description": "Complete hair spa treatment", "default_duration": 60, "base_price": 600, "is_active": True},
-            {"id": str(uuid.uuid4()), "service_name": "Shave", "description": "Clean shave", "default_duration": 20, "base_price": 100, "is_active": True},
-            {"id": str(uuid.uuid4()), "service_name": "Pedicure", "description": "Foot care and pedicure", "default_duration": 45, "base_price": 350, "is_active": True},
-            {"id": str(uuid.uuid4()), "service_name": "Manicure", "description": "Hand care and manicure", "default_duration": 45, "base_price": 300, "is_active": True},
-            {"id": str(uuid.uuid4()), "service_name": "Waxing", "description": "Body waxing service", "default_duration": 40, "base_price": 400, "is_active": True}
-        ]
-        await db.services.insert_many(services)
+        from predefined_services import PREDEFINED_SERVICES as _STARTER_SERVICES
+        services = []
+        for sd in _STARTER_SERVICES:
+            services.append({
+                "id": str(uuid.uuid4()),
+                "service_name": sd["service_name"],
+                "description": sd.get("description") or "",
+                "category": sd.get("category") or "General",
+                "gender_tag": sd.get("gender_tag") or "Unisex",
+                "default_duration": sd.get("default_duration") or 30,
+                "base_price": sd.get("base_price") or 0,
+                "price_type": sd.get("price_type") or "fixed",
+                "is_active": True,
+            })
+        if services:
+            await db.services.insert_many(services)
         service_ids = [s["id"] for s in services]
     else:
         services = await db.services.find({}, {"_id": 0}).to_list(100)
@@ -3445,6 +3448,11 @@ async def create_salon(salon: SalonCreate, current_salon=Depends(get_current_sal
     salon_dict["created_at"] = datetime.now(timezone.utc).isoformat()
     
     await db.salons.insert_one(salon_dict)
+    # Auto-create Main Branch so customer search can find the salon immediately.
+    try:
+        await ensure_main_branch_for_salon(salon_dict)
+    except Exception as e:
+        logger.warning(f"[create_salon] Main Branch auto-create failed for salon {salon_dict['id']}: {e}")
     return Salon(**salon_dict)
 
 @api_router.put("/salons/{salon_id}", response_model=Salon)
@@ -4340,6 +4348,59 @@ async def delete_service(service_id: str, current_salon=Depends(get_current_salo
     await db.barber_services.delete_many({"service_id": service_id})
     return {"message": "Service deleted"}
 
+
+@api_router.post("/salons/{salon_id}/services/bulk-delete")
+async def bulk_delete_salon_services(
+    salon_id: str,
+    body: dict,
+    current_user=Depends(get_current_salon_user),
+):
+    """Bulk delete services for a salon.
+
+    Behaviour (Jul 2026 requirement — salon bulk-delete):
+    * Salon-owned services (`salon_id == salon_id`) are HARD-deleted.
+    * Global services (no salon_id) are disabled for THIS salon only (via
+      `salon_services.is_enabled=False`) — they remain in the global catalog.
+    * All barber_services links for these services within this salon are cleared.
+
+    Body: {"service_ids": ["...", "..."]}
+    Returns: {ok, hard_deleted, disabled_for_salon, barber_links_removed}.
+    """
+    ids = list((body or {}).get("service_ids") or [])
+    if not ids:
+        raise HTTPException(status_code=400, detail="service_ids is required")
+    now_iso = datetime.now(timezone.utc).isoformat()
+
+    services_docs = await db.services.find({"id": {"$in": ids}}, {"_id": 0, "id": 1, "salon_id": 1}).to_list(length=None)
+    salon_owned = [s["id"] for s in services_docs if s.get("salon_id") == salon_id]
+    global_ids = [s["id"] for s in services_docs if not s.get("salon_id")]
+
+    hard_res = None
+    if salon_owned:
+        hard_res = await db.services.delete_many({"id": {"$in": salon_owned}, "salon_id": salon_id})
+        await db.salon_services.delete_many({"salon_id": salon_id, "service_id": {"$in": salon_owned}})
+
+    disabled_res = None
+    if global_ids:
+        disabled_res = await db.salon_services.update_many(
+            {"salon_id": salon_id, "service_id": {"$in": global_ids}},
+            {"$set": {"is_enabled": False, "updated_at": now_iso}},
+        )
+
+    # Clean up barber_services links (only for this salon's barbers)
+    salon_barber_ids = await db.barbers.distinct("id", {"salon_id": salon_id})
+    bs_res = await db.barber_services.delete_many({
+        "barber_id": {"$in": salon_barber_ids},
+        "service_id": {"$in": ids},
+    })
+
+    return {
+        "ok": True,
+        "hard_deleted": (hard_res.deleted_count if hard_res else 0),
+        "disabled_for_salon": (disabled_res.modified_count if disabled_res else 0),
+        "barber_links_removed": bs_res.deleted_count,
+    }
+
 @api_router.get("/services/categories")
 async def get_service_categories():
     """Get all unique service categories with thumbnails"""
@@ -5160,6 +5221,14 @@ async def register_salon(salon: SalonCreate):
         del salon_dict["password"]  # Don't store plain password
     
     await db.salons.insert_one(salon_dict)
+    
+    # Bug #3 fix: A new salon MUST have a Main Branch immediately so the
+    # customer-side salon search (`/api/public/salon-locations`) — which
+    # returns one row per active branch — can find it right after signup.
+    try:
+        await ensure_main_branch_for_salon(salon_dict)
+    except Exception as e:
+        logger.warning(f"[register_salon] Main Branch auto-create failed for salon {salon_dict['id']}: {e}")
     
     return Salon(**salon_dict)
 
@@ -7470,6 +7539,43 @@ async def create_salon_booking(salon_id: str, body: dict, current_user=Depends(g
     booking_branch_id = await resolve_branch_id(salon_id, requested_branch_id)
     if not requested_branch_id and barber and barber.get("branch_id"):
         booking_branch_id = barber.get("branch_id")
+
+    # Handle wallet payment — must debit from customer's membership wallet first
+    payment_status = "pending"
+    payment_confirmed = False
+    if payment_mode == "wallet":
+        if not phone:
+            raise HTTPException(status_code=400, detail="Customer mobile number is required for wallet payment.")
+        membership = await db.customer_memberships.find_one({
+            "salon_id": salon_id,
+            "customer_phone": phone,
+            "is_active": True,
+        }, {"_id": 0})
+        if not membership:
+            raise HTTPException(status_code=400, detail="No active wallet/membership found for this customer.")
+        current_balance = float(membership.get("wallet_balance") or 0)
+        if current_balance < total_amount:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Insufficient wallet balance. Available: ₹{current_balance:.2f}, Required: ₹{total_amount:.2f}",
+            )
+        new_balance = current_balance - total_amount
+        await db.customer_memberships.update_one(
+            {"id": membership["id"]},
+            {"$set": {"wallet_balance": new_balance}}
+        )
+        await db.wallet_transactions.insert_one({
+            "id": str(uuid.uuid4()),
+            "customer_phone": phone,
+            "salon_id": salon_id,
+            "transaction_type": "debit",
+            "amount": total_amount,
+            "balance_after": new_balance,
+            "description": f"Salon booking payment - {shift} shift",
+            "created_at": datetime.now(timezone.utc).isoformat(),
+        })
+        payment_status = "paid"
+        payment_confirmed = True
     
     token_dict = {
         "id": str(uuid.uuid4()),
@@ -7487,9 +7593,9 @@ async def create_salon_booking(salon_id: str, body: dict, current_user=Depends(g
         "time_slot": shift,
         "total_amount": total_amount,
         "status": "waiting",
-        "payment_status": "pending",
+        "payment_status": payment_status,
         "payment_mode": payment_mode,
-        "payment_confirmed": False,
+        "payment_confirmed": payment_confirmed,
         "source": "salon",
         "booking_type": "instant",
         "booking_for_self": True,
@@ -14668,10 +14774,48 @@ async def _attendance_auto_close_wrapper():
 
 scheduler.add_job(_attendance_auto_close_wrapper, 'cron', hour=18, minute=25)
 
+async def cleanup_legacy_predefined_services():
+    """One-time cleanup for the July 2026 "reduce predefined services" change.
+    
+    Removes all GLOBAL (i.e. `salon_id` missing/null) predefined services whose
+    category is not "General" from the `db.services` collection, and clears any
+    salon_service mappings that pointed at them so the salon services list is
+    not left with dangling references.
+    
+    Idempotent: the flag doc `db.system_migrations.cleanup_predefined_v1` stops
+    re-runs.
+    """
+    marker = await db.system_migrations.find_one({"_id": "cleanup_predefined_v1"})
+    if marker:
+        return
+    # 1) Delete global (unowned) services outside General
+    stale = await db.services.find(
+        {"$or": [{"salon_id": {"$exists": False}}, {"salon_id": None}], "category": {"$ne": "General"}},
+        {"_id": 0, "id": 1},
+    ).to_list(length=None)
+    stale_ids = [s["id"] for s in stale if s.get("id")]
+    if stale_ids:
+        res_svc = await db.services.delete_many({"id": {"$in": stale_ids}})
+        res_ss = await db.salon_services.delete_many({"service_id": {"$in": stale_ids}})
+        res_bs = await db.barber_services.delete_many({"service_id": {"$in": stale_ids}})
+        logger.info(
+            f"[cleanup_predefined_v1] Removed {res_svc.deleted_count} legacy services, "
+            f"{res_ss.deleted_count} salon_service links, {res_bs.deleted_count} barber_service links."
+        )
+    else:
+        logger.info("[cleanup_predefined_v1] No legacy predefined services found.")
+    await db.system_migrations.insert_one({"_id": "cleanup_predefined_v1", "at": datetime.now(timezone.utc).isoformat()})
+
+
 @fastapi_app.on_event("startup")
 async def startup_event():
     await initialize_data()
     await migrate_branches()
+    # Jul 2026 — cleanup legacy predefined services (all non-General global services)
+    try:
+        await cleanup_legacy_predefined_services()
+    except Exception as e:
+        logger.error(f"[STARTUP] cleanup_legacy_predefined_services failed: {e}")
     # Phase 2 (Part C) — per-branch pricing migration (idempotent)
     try:
         await migrate_subscription_pricing_v2()

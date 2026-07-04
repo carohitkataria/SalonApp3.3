@@ -3594,11 +3594,11 @@ metadata:
 
 test_plan:
   current_focus:
-    - "Module 2 — Leave Tracker: leave-types-config CRUD"
-    - "Module 2 — Leave Tracker: balance + ledger + manual adjust"
-    - "Module 2 — Leave Tracker: leave-records CRUD + balance side-effects"
-    - "Module 2 — Leave Tracker: auth + cross-salon isolation"
-    - "Module 3 — Staff Settings Consolidation backend touchpoints (attendance_rules patch)"
+    - "Salon manual booking: wallet payment_mode"
+    - "Bulk delete salon services endpoint"
+    - "New salon signup auto-creates Main Branch (customer search visibility)"
+    - "Inventory manual add — auto financial purchase entry"
+    - "Inventory sell — optional customer_name/phone persistence"
   stuck_tasks: []
   test_all: false
   test_priority: "high_first"
@@ -4521,7 +4521,64 @@ agent_communication:
 agent_communication:
     - agent: "main"
       message: |
-        ROUND 2 (this session) — Implemented + tested:
+        JULY 4, 2026 SESSION — Continuation request from user (7 items). Implemented:
+        1) Salon manual booking now supports "Wallet (Membership)" payment mode
+           (frontend + backend). Requires customer phone + active membership;
+           auto-debits balance and creates wallet_transaction.
+        2) Reduced pre-loaded services to only the "General" category (6 items).
+           Cleanup migration `cleanup_predefined_v1` deletes legacy global
+           services on startup. Removed "Load Predefined Services" button from
+           OfferingsModule. Added POST /salons/{salon_id}/services/bulk-delete
+           and a Bulk Delete UI (multi-select checkboxes) on services page.
+        3) New salons now auto-create a Main Branch on signup (both
+           /api/salon/register and /api/salons endpoints), so the public
+           "Find a salon" endpoint returns them immediately.
+        4) Platform "Grant Pro" dialog: renamed label to "Duration in Months"
+           with helper text + live expiry-date preview. Frontend fmtDate now
+           renders "Unlimited" for grants with year ≥ 2100 (comp / lifetime).
+        5) Global CSS: html/body/#root now min-height:100vh, width:100%,
+           min-width:100% so the app fills the viewport at any zoom level.
+        6) Twilio: configured backend/.env with the user's approved sender
+           +918560934455 (Account SID ACab924...522d1 + auth token
+           a025faa02...). Non-OTP WhatsApp messages (booking confirmations,
+           status alerts) now go from the approved sender instead of sandbox.
+           NOTE: OTP still needs TWILIO_VERIFY_SERVICE_SID which we don't have.
+        7) Inventory redesign:
+           a) Manual "Add item" modal now has a "Payment mode for purchase"
+              select (none | cash | upi | bank). When != none, an automatic
+              financial_transactions outflow (category=inventory_purchase) is
+              recorded with cost_price × qty_total.
+           b) Items now displayed as a LIST (rows) instead of chip grid.
+           c) Assign/Consume flows merged into a single modal with a mode
+              toggle. Staff picker is now a dropdown populated from
+              /api/salons/{id}/barbers.
+           d) Sell modal has optional customer_name + customer_phone fields.
+              Backend `sell_pos` accepts + persists them on the financial
+              transaction (and normalizes 10-digit phones to +91).
+           e) Item is clickable — opens ItemDetailModal with all fields + logs
+              (movement history). Removed the Log button from the item row
+              and removed the top-level Movements tab from the Inventory page.
+
+        Please test backend for:
+        - POST /api/salons/{salon_id}/salon-booking with payment_mode='wallet'
+          (existing behavior + new wallet debit path).
+        - POST /api/salons/{salon_id}/services/bulk-delete: needs auth (salon
+          user). Verify hard_delete for salon-owned services and
+          disabled_for_salon for global. Idempotent.
+        - POST /api/salon/register: verify new salon shows up in
+          /api/public/salon-locations (should return the Main Branch row).
+        - POST /api/salon/inventory with purchase_payment_mode='cash' & qty>0
+          & cost_price>0 → returns financial_transaction_id and creates an
+          outflow row in financial_transactions.
+        - POST /api/salon/inventory/{id}/sell with customer_name/customer_phone
+          → both persisted on the txn record.
+        
+        Admin creds: identifier='admin' / password='salon123' → salon_id
+        7be4d7c9-7e16-445f-8af7-c17d64279d4b.
+
+    - agent: "main"
+      message: |
+        ROUND 2 (previous session) — Implemented + tested:
         1) Staff section permissions (can_access_services / can_access_gallery /
            can_access_staff / can_view_all_staff) added to backend model, login token,
            and the REAL grant-access UI in StaffProfilePage → Access tab (both the

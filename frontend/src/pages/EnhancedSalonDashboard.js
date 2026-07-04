@@ -2932,20 +2932,27 @@ export default function EnhancedSalonDashboard() {
           <div className="mb-4">
             <Label>Payment Mode</Label>
             <div className="flex flex-wrap gap-2 mt-2">
-              {['cash', 'upi', 'card', 'pay_later'].map((mode) => (
+              {['cash', 'upi', 'card', 'wallet', 'pay_later'].map((mode) => (
                 <button
                   key={mode}
+                  type="button"
                   onClick={() => setManualBookingForm(prev => ({ ...prev, payment_mode: mode }))}
+                  data-testid={`manual-booking-payment-${mode}`}
                   className={`px-3 py-2 rounded-lg border text-sm transition-colors capitalize ${
                     manualBookingForm.payment_mode === mode
                       ? 'bg-gold text-black border-gold font-semibold'
                       : 'bg-card border-border hover:bg-muted'
                   }`}
                 >
-                  {mode === 'pay_later' ? 'Pay Later at Salon' : mode.toUpperCase()}
+                  {mode === 'pay_later' ? 'Pay Later at Salon' : mode === 'wallet' ? 'Wallet (Membership)' : mode.toUpperCase()}
                 </button>
               ))}
             </div>
+            {manualBookingForm.payment_mode === 'wallet' && (
+              <p className="text-[11px] text-amber-600 dark:text-amber-400 mt-1.5">
+                ⓘ Customer must have an active membership wallet with sufficient balance. Amount will be auto-deducted.
+              </p>
+            )}
           </div>
 
           {/* Action Buttons */}

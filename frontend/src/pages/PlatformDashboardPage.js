@@ -40,7 +40,11 @@ const readAuth = () => {
 const fmtDate = (iso) => {
   if (!iso) return '—';
   try {
-    return new Date(iso).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
+    const d = new Date(iso);
+    // Complimentary / lifetime grants are stored as year 3026 (1000-year expiry).
+    // Show a friendlier "Unlimited" label instead of a nonsense year.
+    if (d.getFullYear() >= 2100) return 'Unlimited';
+    return d.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
   } catch { return iso; }
 };
 const fmtTs = (iso) => {
@@ -746,8 +750,25 @@ function OverrideModals({
             <p className="text-sm text-muted-foreground">Creates a granted subscription. The salon pays nothing for the duration.</p>
             <div className="grid grid-cols-2 gap-3">
               <div>
-                <label className="text-xs uppercase tracking-widest text-muted-foreground/80 font-bold">Duration (months)</label>
-                <Input type="number" min={1} value={grantForm.duration_months} onChange={(e) => setGrantForm({ ...grantForm, duration_months: e.target.value })} className="mt-1 bg-card border-border" />
+                <label className="text-xs uppercase tracking-widest text-muted-foreground/80 font-bold">Duration in Months</label>
+                <Input type="number" min={1} max={120} value={grantForm.duration_months} onChange={(e) => setGrantForm({ ...grantForm, duration_months: e.target.value })} className="mt-1 bg-card border-border" />
+                <div className="text-[10px] text-muted-foreground mt-1">
+                  Enter the number of <b>months</b> (e.g. <b>3</b>&nbsp;=&nbsp;3 months, <b>12</b>&nbsp;=&nbsp;1 year). Max 120.
+                </div>
+                {grantForm.duration_months > 0 && (
+                  <div className="text-[11px] mt-1.5 text-emerald-600 dark:text-emerald-400">
+                    Expiry preview:&nbsp;
+                    <b>
+                      {(() => {
+                        const m = Number(grantForm.duration_months) || 0;
+                        if (!m) return '—';
+                        const d = new Date();
+                        d.setDate(d.getDate() + Math.round(30 * m));
+                        return d.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
+                      })()}
+                    </b>
+                  </div>
+                )}
               </div>
               <div>
                 <label className="text-xs uppercase tracking-widest text-muted-foreground/80 font-bold">Max branches</label>

@@ -104,6 +104,12 @@ class InventoryCreate(BaseModel):
     sku_code: Optional[str] = Field(default=None, max_length=80)
     image_url: Optional[str] = Field(default=None, max_length=600)
     branch_id: Optional[str] = None
+    # Jul 2026 — auto-purchase-entry fields when salon adds stock manually
+    purchase_payment_mode: Optional[str] = Field(
+        default="none",
+        description="cash | upi | bank | none (none = do not create financial entry)"
+    )
+    purchase_note: Optional[str] = Field(default=None, max_length=500)
 
     @field_validator("unit")
     @classmethod
@@ -114,6 +120,15 @@ class InventoryCreate(BaseModel):
     def _v_av(cls, v):
         if v not in VALID_AVAILABILITY:
             raise ValueError(f"availability must be one of {VALID_AVAILABILITY}")
+        return v
+
+    @field_validator("purchase_payment_mode")
+    @classmethod
+    def _v_ppm(cls, v):
+        if v is None or v == "":
+            return "none"
+        if v not in {"cash", "upi", "bank", "none"}:
+            raise ValueError("purchase_payment_mode must be cash | upi | bank | none")
         return v
 
 
@@ -169,6 +184,9 @@ class SellPayload(BaseModel):
     staff_id: Optional[str] = None
     branch_id: Optional[str] = None
     note: Optional[str] = Field(default=None, max_length=500)
+    # Jul 2026 — optional customer info when selling inventory
+    customer_name: Optional[str] = Field(default=None, max_length=120)
+    customer_phone: Optional[str] = Field(default=None, max_length=20)
 
     @field_validator("payment_mode")
     @classmethod
@@ -449,7 +467,34 @@ async def create_inventory(payload: InventoryCreate, user: dict = Depends(_salon
             created_by=user.get("user_id") or "salon_user",
             note="Initial stock on manual create",
         )
-    return _enrich(doc)
+    # Jul 2026 — auto-post a purchase-outflow to Financials when the salon
+    # opts in with a real payment mode (cash / upi / bank). Nomenclature:
+    # `purchase_payment_mode = "none"` disables the finance entry entirely.
+    fin_id = None
+    ppm = (payload.purchase_payment_mode or "none")
+    if ppm != "none" and doc["qty_total"] > 0 and (doc.get("cost_price") or 0) > 0:
+        amount = round(float(doc["cost_price"]) * int(doc["qty_total"]), 2)
+        fin_id = str(uuid.uuid4())
+        await _db.financial_transactions.insert_one({
+            "id": fin_id,
+            "salon_id": salon_id,
+            "branch_id": doc.get("branch_id"),
+            "type": "outflow",
+            "category": "inventory_purchase",
+            "amount": amount,
+            "payment_mode": ppm,
+            "narration": f"Inventory purchase · {doc.get('name')} × {doc['qty_total']}",
+            "reference_id": item_id,
+            "reference_type": "manual_inventory_add",
+            "created_by": user.get("user_id") or "salon_user",
+            "date": _today_str(),
+            "created_at": _now_iso(),
+            "note": payload.purchase_note,
+        })
+    enriched = _enrich(doc)
+    if fin_id:
+        enriched["financial_transaction_id"] = fin_id
+    return enriched
 
 
 @salon_inventory_router.put("/api/salon/inventory/{item_id}")
@@ -690,6 +735,14 @@ async def sell_pos(item_id: str, payload: SellPayload, user: dict = Depends(_sal
     total_amount = round(line_sub + line_gst, 2)
 
     txn_id = str(uuid.uuid4())
+    # Normalize customer phone (add +91 for 10-digit Indian numbers)
+    cust_phone = (payload.customer_phone or "").strip()
+    if cust_phone and not cust_phone.startswith("+"):
+        digits = "".join(c for c in cust_phone if c.isdigit())
+        if len(digits) == 10:
+            cust_phone = f"+91{digits}"
+        elif digits:
+            cust_phone = digits
     txn = {
         "id": txn_id,
         "salon_id": salon_id,
@@ -698,7 +751,10 @@ async def sell_pos(item_id: str, payload: SellPayload, user: dict = Depends(_sal
         "category": "product_sale",
         "amount": total_amount,
         "payment_mode": payload.payment_mode,
-        "narration": f"POS sale · {item.get('name')} × {payload.qty}",
+        "narration": (
+            f"POS sale · {item.get('name')} × {payload.qty}"
+            + (f" · {payload.customer_name}" if payload.customer_name else "")
+        ),
         "reference_id": txn_id,           # self-ref since POS sale = the txn itself
         "reference_type": "pos_sale",
         "staff_id": payload.staff_id,
@@ -709,6 +765,8 @@ async def sell_pos(item_id: str, payload: SellPayload, user: dict = Depends(_sal
         "inventory_item_id": item_id,
         "qty": payload.qty,
         "note": payload.note,
+        "customer_name": payload.customer_name or None,
+        "customer_phone": cust_phone or None,
     }
     await _db.financial_transactions.insert_one(txn.copy())
 
@@ -717,7 +775,12 @@ async def sell_pos(item_id: str, payload: SellPayload, user: dict = Depends(_sal
         qty_delta=-payload.qty,
         qty_after=int(updated.get("qty_total") or 0),
         reference_type="pos_sale", reference_id=txn_id,
-        staff_id=payload.staff_id, note=payload.note,
+        staff_id=payload.staff_id,
+        note=(
+            (payload.note or "")
+            + (f" · Sold to: {payload.customer_name}" if payload.customer_name else "")
+            + (f" ({cust_phone})" if cust_phone else "")
+        ).strip(" ·") or None,
         created_by=user.get("user_id") or "salon_user",
     )
     await _maybe_low_stock_alert(updated)
