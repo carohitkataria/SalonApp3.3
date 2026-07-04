@@ -19,6 +19,7 @@ import CustomerMaster from '@/components/CustomerMaster';
 import OfferingsModule from '@/components/OfferingsModule';
 import FinancialsModule from '@/components/FinancialsModule';
 import MyProfile from '@/components/MyProfile';
+import MarketingTab from '@/components/MarketingTab';
 import SalonNotificationSettings from '@/components/SalonNotificationSettings';
 import OperationalHoursModule from '@/components/OperationalHoursModule';
 import Analytics from '@/components/Analytics';
@@ -40,7 +41,7 @@ import {
   Clock, User, Phone, Bell, MapPin, Settings, CheckCircle, Calendar,
   Users, ArrowLeft, FileText, Download, Plus, X, TrendingUp, Menu,
   Shield, DollarSign, Database, Pin, PinOff, Edit, CreditCard, Banknote, Smartphone,
-  LayoutDashboard, Activity, Zap, Wallet, Search, Building2, ShoppingBag, Boxes
+  LayoutDashboard, Activity, Zap, Wallet, Search, Building2, ShoppingBag, Boxes, Megaphone
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
@@ -93,6 +94,7 @@ export default function EnhancedSalonDashboard() {
       'staff': isAdmin || isBM || hasPermission('can_access_staff'),
       'services': isAdmin || isBM || hasPermission('can_access_services'),
       'gallery': isAdmin || isBM || hasPermission('can_access_gallery'),
+      'marketing': isAdmin || isBM || hasPermission('can_access_gallery') || hasPermission('can_access_marketing'),
       'financials': isAdmin || isBM || hasPermission('can_access_financials'),
       'analytics': isAdmin || isBM || hasPermission('can_access_analytics'),
       'salon': isAdmin || hasPermission('can_edit_salon'),
@@ -1152,7 +1154,7 @@ export default function EnhancedSalonDashboard() {
     { id: 'analytics', label: 'Analytics', icon: TrendingUp, show: checkIsAdmin() || checkIsBranchManager() || checkHasPermission('can_access_analytics') },
     { id: 'marketplace', label: 'Marketplace', icon: ShoppingBag, show: checkIsAdmin(), route: '/salon/marketplace' },
     { id: 'inventory', label: 'Inventory', icon: Boxes, show: checkIsAdmin() || checkIsBranchManager() },
-    { id: 'gallery', label: 'Gallery', icon: FileText, show: checkIsAdmin() || checkIsBranchManager() || checkHasPermission('can_access_gallery') },
+    { id: 'marketing', label: 'Marketing', icon: Megaphone, show: checkIsAdmin() || checkIsBranchManager() || checkHasPermission('can_access_gallery') || checkHasPermission('can_access_marketing') },
     { id: 'salon', label: 'Salon Settings', icon: Settings, show: checkIsAdmin() || checkHasPermission('can_edit_salon') }
   ].filter(item => item.show);
 
@@ -2004,7 +2006,13 @@ export default function EnhancedSalonDashboard() {
           />
         )}
 
-        {activeTab === 'gallery' && (
+        {activeTab === 'marketing' && (
+          <MarketingTab
+            salonId={salonId}
+            getAuthHeaders={getAuthHeaders}
+          >
+            {/* Gallery panel is rendered as a child so the existing photo
+                gallery keeps working under the "Gallery" sub-tab. */}
           <div className="space-y-6">
             <div className="bg-card/50 backdrop-blur-sm border border-gold/20 rounded-2xl p-6 shadow-xl">
               <h2 className="text-2xl font-playfair font-bold text-foreground mb-4 flex items-center">
@@ -2178,6 +2186,7 @@ export default function EnhancedSalonDashboard() {
               )}
             </div>
           </div>
+          </MarketingTab>
         )}
 
         {activeTab === 'analytics' && (

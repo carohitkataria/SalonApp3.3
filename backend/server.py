@@ -455,6 +455,11 @@ class User(BaseModel):
     address: Optional[str] = None
     city: Optional[str] = None
     pincode: Optional[str] = None
+    # Marketing / customer master fields (M1)
+    wedding_anniversary: Optional[str] = None  # YYYY-MM-DD
+    spouse_name: Optional[str] = None
+    spouse_date_of_birth: Optional[str] = None  # YYYY-MM-DD
+    important_dates: Optional[List[Dict[str, Any]]] = None  # [{label, date}, ...]
     is_otp_verified: Optional[bool] = False  # OTP verification status
     otp_verified_at: Optional[str] = None  # When OTP was verified
     # Whether the user has set a password for password-based login. We never
@@ -512,6 +517,11 @@ class UserProfileUpdate(BaseModel):
     address: Optional[str] = None
     city: Optional[str] = None
     pincode: Optional[str] = None
+    # Marketing / customer master fields (M1)
+    wedding_anniversary: Optional[str] = None
+    spouse_name: Optional[str] = None
+    spouse_date_of_birth: Optional[str] = None
+    important_dates: Optional[List[Dict[str, Any]]] = None
 
 # Token/Booking Models
 class BookingCreate(BaseModel):
@@ -636,6 +646,7 @@ class SalonUserPermissions(BaseModel):
     can_access_gallery: bool = False    # See Gallery section
     can_access_staff: bool = False      # See Staff Management section (own profile by default)
     can_view_all_staff: bool = False    # When can_access_staff, see ALL staff (not just own)
+    can_access_marketing: bool = False  # See Marketing section (campaigns/coupons/rewards)
 
 class SalonUserCreate(BaseModel):
     salon_id: str
@@ -2948,7 +2959,8 @@ async def initialize_data():
                 "can_access_services": True,
                 "can_access_gallery": True,
                 "can_access_staff": True,
-                "can_view_all_staff": True
+                "can_view_all_staff": True,
+                "can_access_marketing": True
             },
             "created_at": datetime.now(timezone.utc).isoformat()
         }
@@ -5364,6 +5376,7 @@ async def salon_user_login(credentials: SalonUserLogin):
     permissions.setdefault("can_access_gallery", False)
     permissions.setdefault("can_access_staff", False)
     permissions.setdefault("can_view_all_staff", False)
+    permissions.setdefault("can_access_marketing", False)
 
     assigned_branch_ids = salon_user.get("assigned_branch_ids") or []
     staff_id = salon_user.get("staff_id")
@@ -5435,7 +5448,8 @@ async def create_salon_user(user_data: SalonUserCreate, current_user=Depends(get
             "can_access_services": False,
             "can_access_gallery": False,
             "can_access_staff": False,
-            "can_view_all_staff": False
+            "can_view_all_staff": False,
+            "can_access_marketing": False
         }
     else:
         permissions = user_data.permissions.dict() if user_data.permissions else {
@@ -5446,7 +5460,8 @@ async def create_salon_user(user_data: SalonUserCreate, current_user=Depends(get
             "can_access_services": False,
             "can_access_gallery": False,
             "can_access_staff": False,
-            "can_view_all_staff": False
+            "can_view_all_staff": False,
+            "can_access_marketing": False
         }
 
     # Validate role
@@ -14713,6 +14728,15 @@ attendance_mode_mod.init_attendance_mode(
     get_current_salon_admin=get_current_salon_admin,
 )
 fastapi_app.include_router(attendance_mode_mod.attendance_mode_router)
+
+# Marketing Module (SalonHub 2.0) — segments, coupons, channels, webhook, overview
+import marketing as marketing_mod  # noqa: E402
+marketing_mod.init_marketing_router(
+    db=db,
+    get_current_salon_user=get_current_salon_user,
+    get_current_salon_admin=get_current_salon_admin,
+)
+fastapi_app.include_router(marketing_mod.marketing_router)
 
 # Health check endpoint for Kubernetes liveness/readiness probes
 @fastapi_app.get("/health")
