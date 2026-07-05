@@ -9,7 +9,7 @@ import json
 from datetime import datetime
 import random
 
-BASE_URL = "https://task-completion-sync.preview.emergentagent.com"
+BASE_URL = "https://salon-dashboard-pro-6.preview.emergentagent.com"
 ADMIN_IDENTIFIER = "admin"
 ADMIN_PASSWORD = "salon123"
 

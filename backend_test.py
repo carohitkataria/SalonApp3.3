@@ -18,7 +18,7 @@ import string
 from datetime import datetime, timezone
 
 # Configuration
-BASE_URL = "https://293cd839-0730-4ffb-888b-e93570167fa8.preview.emergentagent.com/api"
+BASE_URL = "https://salon-dashboard-pro-6.preview.emergentagent.com/api"
 ADMIN_CREDENTIALS = {"identifier": "admin", "password": "salon123"}
 EXPECTED_SALON_ID = "f78671f8-621a-42d9-a055-097ba21c0bbf"
 
