@@ -6,10 +6,13 @@ import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter } from '@/components/ui/dialog';
 import { toast } from 'sonner';
+import LoyaltyProgramSettings from '@/components/LoyaltyProgramSettings';
+import MembershipManagement from '@/components/MembershipManagement';
+import SoldMembershipManagement from '@/components/SoldMembershipManagement';
 import {
   Megaphone, BarChart3, Ticket, Gift, Award, Sparkles, Image as ImageIcon,
   Settings as SettingsIcon, Users as UsersIcon, Send, Plus, Trash2, Eye, EyeOff, RefreshCw,
-  Zap, Play, Pause, Square, MessageCircle
+  Zap, Play, Pause, Square, MessageCircle, Package
 } from 'lucide-react';
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
@@ -19,12 +22,16 @@ const SUB_TABS = [
   { id: 'overview', label: 'Overview', icon: BarChart3 },
   { id: 'campaigns', label: 'Campaigns', icon: Send },
   { id: 'automations', label: 'Automations', icon: Zap },
+  { id: 'offers', label: 'Offers & Perks', icon: Gift },
+  { id: 'gallery', label: 'Gallery', icon: ImageIcon },
+  { id: 'settings', label: 'Settings', icon: SettingsIcon },
+];
+
+const OFFERS_TABS = [
   { id: 'coupons', label: 'Coupons', icon: Ticket },
   { id: 'rewards', label: 'Rewards', icon: Gift },
   { id: 'loyalty', label: 'Loyalty', icon: Award },
   { id: 'memberships', label: 'Memberships', icon: Sparkles },
-  { id: 'gallery', label: 'Gallery', icon: ImageIcon },
-  { id: 'settings', label: 'Settings', icon: SettingsIcon },
 ];
 
 const SEGMENT_FIELDS = [
@@ -48,11 +55,8 @@ export default function MarketingTab({ salonId, getAuthHeaders, children, onOpen
   const renderPanel = () => {
     if (activeSub === 'overview') return <OverviewPanel salonId={salonId} getAuthHeaders={getAuthHeaders} />;
     if (activeSub === 'campaigns') return <CampaignsPanel salonId={salonId} getAuthHeaders={getAuthHeaders} />;
-    if (activeSub === 'coupons') return <CouponsPanel salonId={salonId} getAuthHeaders={getAuthHeaders} />;
-    if (activeSub === 'rewards') return <RewardsPanel salonId={salonId} getAuthHeaders={getAuthHeaders} />;
     if (activeSub === 'automations') return <AutomationsPanel salonId={salonId} getAuthHeaders={getAuthHeaders} />;
-    if (activeSub === 'loyalty') return <LoyaltyPanel />;
-    if (activeSub === 'memberships') return <MembershipsPanel />;
+    if (activeSub === 'offers') return <OffersAndPerksPanel salonId={salonId} getAuthHeaders={getAuthHeaders} />;
     if (activeSub === 'gallery') return children /* Gallery legacy panel rendered by parent */;
     if (activeSub === 'settings') return <MarketingSettingsPanel salonId={salonId} getAuthHeaders={getAuthHeaders} />;
     return null;
@@ -67,7 +71,7 @@ export default function MarketingTab({ salonId, getAuthHeaders, children, onOpen
           </div>
           <div>
             <h2 className="text-lg md:text-xl font-playfair font-bold text-foreground">Marketing</h2>
-            <p className="text-xs text-muted-foreground">Campaigns · Coupons · Rewards · Loyalty · Memberships · Gallery · Settings</p>
+            <p className="text-xs text-muted-foreground">Campaigns · Automations · Offers &amp; Perks · Gallery · Settings</p>
           </div>
         </div>
 
@@ -103,13 +107,46 @@ export default function MarketingTab({ salonId, getAuthHeaders, children, onOpen
 
 function OverviewPanel({ salonId, getAuthHeaders }) {
   const [data, setData] = useState(null);
+  const [settings, setSettings] = useState(null);
+  const [campaigns, setCampaigns] = useState([]);
+  const [dailySends, setDailySends] = useState([]);
   const [loading, setLoading] = useState(true);
 
   const load = async () => {
     try {
       setLoading(true);
-      const res = await axios.get(`${API}/salons/${salonId}/marketing/overview`, { headers: getAuthHeaders() });
-      setData(res.data);
+      const [ov, st, cp] = await Promise.all([
+        axios.get(`${API}/salons/${salonId}/marketing/overview`, { headers: getAuthHeaders() }),
+        axios.get(`${API}/salons/${salonId}/marketing/settings`, { headers: getAuthHeaders() }),
+        axios.get(`${API}/salons/${salonId}/marketing/campaigns`, { headers: getAuthHeaders() }),
+      ]);
+      setData(ov.data);
+      setSettings(st.data);
+      const list = cp.data.campaigns || [];
+      setCampaigns(list);
+      // Build a last-7-days bar from campaign message counts we have
+      // (best-effort: fetch per-campaign messages for last-launched 3)
+      const recent = list
+        .filter(c => c.launched_at)
+        .sort((a, b) => new Date(b.launched_at) - new Date(a.launched_at))
+        .slice(0, 5);
+      const buckets = {};
+      for (let i = 6; i >= 0; i--) {
+        const d = new Date();
+        d.setDate(d.getDate() - i);
+        buckets[d.toISOString().slice(0, 10)] = 0;
+      }
+      for (const c of recent) {
+        try {
+          const m = await axios.get(`${API}/salons/${salonId}/marketing/campaigns/${c.id}/messages?limit=500`, { headers: getAuthHeaders() });
+          for (const msg of (m.data.messages || [])) {
+            if (!msg.sent_at) continue;
+            const k = msg.sent_at.slice(0, 10);
+            if (k in buckets) buckets[k]++;
+          }
+        } catch (e) { /* skip */ }
+      }
+      setDailySends(Object.entries(buckets).map(([date, count]) => ({ date, count })));
     } catch (e) {
       toast.error('Failed to load overview');
     } finally {
@@ -125,33 +162,149 @@ function OverviewPanel({ salonId, getAuthHeaders }) {
     { label: 'Read', value: data?.messaging?.read ?? 0, tone: 'from-violet-500/20 to-violet-500/5', accent: 'text-violet-500' },
     { label: 'Coupon redemptions', value: data?.conversion?.coupon_redemptions ?? 0, tone: 'from-amber-500/20 to-amber-500/5', accent: 'text-amber-500' },
     { label: 'Discount given (₹)', value: (data?.conversion?.coupon_discount_amount ?? 0).toFixed(2), tone: 'from-rose-500/20 to-rose-500/5', accent: 'text-rose-500' },
-    { label: 'Messaging spend (₹)', value: (data?.messaging?.spend_inr ?? 0).toFixed(2), tone: 'from-slate-500/20 to-slate-500/5', accent: 'text-slate-500' },
+    { label: 'Failed sends', value: data?.messaging?.failed ?? 0, tone: 'from-red-500/20 to-red-500/5', accent: 'text-red-500' },
   ];
 
+  const spend = Number(data?.messaging?.spend_inr ?? 0);
+  const cap = Number(settings?.monthly_cap_inr ?? 0);
+  const pct = cap > 0 ? Math.min(100, (spend / cap) * 100) : 0;
+  const maxDaily = Math.max(1, ...dailySends.map(d => d.count));
+
   return (
-    <Card>
-      <CardHeader className="flex flex-row items-center justify-between">
-        <CardTitle className="text-base">Performance & Spend — Last 30 days</CardTitle>
-        <Button variant="outline" size="sm" onClick={load} disabled={loading}>
-          <RefreshCw className={`w-3.5 h-3.5 mr-1 ${loading ? 'animate-spin' : ''}`} />
-          Refresh
-        </Button>
-      </CardHeader>
-      <CardContent>
-        <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
-          {cards.map((c, i) => (
-            <div key={i} className={`p-3 rounded-xl border border-border bg-gradient-to-br ${c.tone}`}>
-              <p className="text-xs text-muted-foreground">{c.label}</p>
-              <p className={`text-2xl font-bold ${c.accent}`}>{c.value}</p>
+    <div className="space-y-4">
+      <Card>
+        <CardHeader className="flex flex-row items-center justify-between">
+          <div>
+            <CardTitle className="text-base">Performance & Spend — Last 30 days</CardTitle>
+            {data?.range?.from && (
+              <p className="text-[11px] text-muted-foreground mt-1">
+                {new Date(data.range.from).toLocaleDateString()} — {new Date(data.range.to).toLocaleDateString()}
+              </p>
+            )}
+          </div>
+          <Button variant="outline" size="sm" onClick={load} disabled={loading}>
+            <RefreshCw className={`w-3.5 h-3.5 mr-1 ${loading ? 'animate-spin' : ''}`} />
+            Refresh
+          </Button>
+        </CardHeader>
+        <CardContent>
+          <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+            {cards.map((c, i) => (
+              <div key={i} className={`p-3 rounded-xl border border-border bg-gradient-to-br ${c.tone}`}>
+                <p className="text-xs text-muted-foreground">{c.label}</p>
+                <p className={`text-2xl font-bold ${c.accent}`}>{c.value}</p>
+              </div>
+            ))}
+          </div>
+        </CardContent>
+      </Card>
+
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        {/* Spend vs Cap */}
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm flex items-center gap-2">
+              <SettingsIcon className="w-4 h-4 text-gold" /> Spend vs Monthly Cap
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="flex items-baseline justify-between mb-2">
+              <p className="text-2xl font-bold text-gold">₹{spend.toFixed(2)}</p>
+              <p className="text-xs text-muted-foreground">
+                {cap > 0 ? `of ₹${cap.toFixed(0)} cap` : 'no cap set'}
+              </p>
             </div>
-          ))}
-        </div>
-        <p className="text-[11px] text-muted-foreground mt-4">
-          Numbers will populate as campaigns are launched via the Meta WhatsApp Cloud API and coupons are
-          redeemed at checkout.
-        </p>
-      </CardContent>
-    </Card>
+            <div className="h-2.5 w-full rounded-full bg-background/60 border border-border overflow-hidden">
+              <div
+                className={`h-full transition-all ${pct >= 90 ? 'bg-red-500' : pct >= 70 ? 'bg-amber-500' : 'bg-emerald-500'}`}
+                style={{ width: `${pct}%` }}
+              />
+            </div>
+            <div className="flex justify-between mt-1">
+              <p className="text-[10px] text-muted-foreground">{cap > 0 ? `${pct.toFixed(0)}% used` : 'set a cap in Settings'}</p>
+              <p className="text-[10px] text-muted-foreground">
+                {data?.campaigns_run || 0} campaign(s) · {data?.automations_active || 0} automation(s) active
+              </p>
+            </div>
+            {settings?.spend_brake && (
+              <p className="text-[11px] text-red-500 font-semibold mt-2">
+                🛑 Spend brake is ON — all sending is paused.
+              </p>
+            )}
+          </CardContent>
+        </Card>
+
+        {/* Daily sends bar */}
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm flex items-center gap-2">
+              <BarChart3 className="w-4 h-4 text-gold" /> Sends — Last 7 Days
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            {dailySends.length === 0 ? (
+              <p className="text-xs text-muted-foreground">No data yet.</p>
+            ) : (
+              <div className="flex items-end gap-1.5 h-24">
+                {dailySends.map(d => (
+                  <div key={d.date} className="flex-1 flex flex-col items-center gap-1">
+                    <div
+                      className="w-full bg-gradient-to-t from-gold/60 to-gold rounded-t"
+                      style={{ height: `${(d.count / maxDaily) * 100}%`, minHeight: d.count > 0 ? '4px' : '0' }}
+                      title={`${d.date}: ${d.count}`}
+                    />
+                    <p className="text-[9px] text-muted-foreground">
+                      {new Date(d.date).toLocaleDateString(undefined, { weekday: 'short' })[0]}
+                    </p>
+                    <p className="text-[9px] font-semibold">{d.count}</p>
+                  </div>
+                ))}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* Top campaigns */}
+      <Card>
+        <CardHeader className="pb-2">
+          <CardTitle className="text-sm flex items-center gap-2">
+            <Send className="w-4 h-4 text-gold" /> Recent Campaigns
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          {campaigns.length === 0 ? (
+            <p className="text-xs text-muted-foreground">No campaigns yet. Head to the Campaigns tab to build one.</p>
+          ) : (
+            <div className="divide-y divide-border">
+              {campaigns.slice(0, 5).map(c => (
+                <div key={c.id} className="py-2 flex items-center justify-between gap-2">
+                  <div className="min-w-0">
+                    <p className="text-sm font-semibold truncate">{c.name}</p>
+                    <p className="text-[11px] text-muted-foreground">
+                      {c.status} · sent {c.stats?.sent || 0} · failed {c.stats?.failed || 0}
+                      {c.launched_at ? ` · ${new Date(c.launched_at).toLocaleString()}` : ''}
+                    </p>
+                  </div>
+                  <span className={`text-[10px] px-1.5 py-0.5 rounded-full border ${
+                    c.status === 'completed' ? 'border-emerald-500/50 text-emerald-600' :
+                    c.status === 'running' ? 'border-emerald-500/50 text-emerald-600' :
+                    c.status === 'paused' ? 'border-amber-500/50 text-amber-600' :
+                    c.status === 'stopped' || c.status === 'failed' ? 'border-red-500/50 text-red-500' :
+                    'border-slate-500/50 text-slate-500'
+                  }`}>{c.status}</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      <p className="text-[11px] text-muted-foreground">
+        Metrics refresh from the backend and provider webhook. Read/delivered require Meta WhatsApp Cloud API webhooks
+        (Twilio doesn&apos;t forward read receipts for template messages).
+      </p>
+    </div>
   );
 }
 
@@ -982,7 +1135,89 @@ function CouponEditorDialog({ salonId, getAuthHeaders, initial, onClose, onSaved
 }
 
 
-// ============ Placeholders ============
+// ============ Offers & Perks (merged Coupons + Rewards + Loyalty + Memberships) ============
+
+function OffersAndPerksPanel({ salonId, getAuthHeaders }) {
+  const [inner, setInner] = useState('coupons');
+  const [membershipView, setMembershipView] = useState('plans'); // plans | sold
+
+  const renderInner = () => {
+    if (inner === 'coupons') return <CouponsPanel salonId={salonId} getAuthHeaders={getAuthHeaders} />;
+    if (inner === 'rewards') return <RewardsPanel salonId={salonId} getAuthHeaders={getAuthHeaders} />;
+    if (inner === 'loyalty') return (
+      <LoyaltyProgramSettings salonId={salonId} getAuthHeaders={getAuthHeaders} />
+    );
+    if (inner === 'memberships') return (
+      <div className="space-y-3">
+        <div className="flex flex-wrap gap-2 p-2 rounded-xl bg-background/60 border border-border">
+          <button
+            onClick={() => setMembershipView('plans')}
+            className={`px-3 py-1.5 rounded-full text-xs font-semibold transition ${
+              membershipView === 'plans' ? 'bg-gold text-black shadow-sm' : 'text-muted-foreground hover:bg-accent/40'
+            }`}
+          >
+            <Package className="w-3 h-3 inline mr-1" /> Plans
+          </button>
+          <button
+            onClick={() => setMembershipView('sold')}
+            className={`px-3 py-1.5 rounded-full text-xs font-semibold transition ${
+              membershipView === 'sold' ? 'bg-gold text-black shadow-sm' : 'text-muted-foreground hover:bg-accent/40'
+            }`}
+          >
+            <UsersIcon className="w-3 h-3 inline mr-1" /> Sold Memberships
+          </button>
+        </div>
+        {membershipView === 'plans'
+          ? <MembershipManagement salonId={salonId} getAuthHeaders={getAuthHeaders} />
+          : <SoldMembershipManagement salonId={salonId} getAuthHeaders={getAuthHeaders} />}
+      </div>
+    );
+    return null;
+  };
+
+  return (
+    <div className="space-y-4">
+      <Card>
+        <CardHeader className="pb-3">
+          <CardTitle className="text-base flex items-center gap-2">
+            <Gift className="w-4 h-4 text-gold" /> Offers &amp; Perks
+          </CardTitle>
+          <p className="text-[11px] text-muted-foreground">
+            One home for everything customers can earn or redeem — coupon codes, scratch/spin rewards,
+            loyalty points, and membership plans.
+          </p>
+        </CardHeader>
+        <CardContent className="pt-0">
+          <div className="flex flex-wrap gap-2">
+            {OFFERS_TABS.map(t => {
+              const Icon = t.icon;
+              const active = inner === t.id;
+              return (
+                <button
+                  key={t.id}
+                  onClick={() => setInner(t.id)}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold border transition-all ${
+                    active
+                      ? 'bg-gold text-black border-gold shadow-sm'
+                      : 'bg-background/70 text-foreground border-border hover:bg-accent/40'
+                  }`}
+                >
+                  <Icon className="w-3 h-3" />
+                  {t.label}
+                </button>
+              );
+            })}
+          </div>
+        </CardContent>
+      </Card>
+
+      {renderInner()}
+    </div>
+  );
+}
+
+
+// ============ Placeholders (kept for future use, referenced nowhere now) ============
 
 function PlaceholderPanel({ title, note, icon: Icon }) {
   return (
@@ -995,40 +1230,6 @@ function PlaceholderPanel({ title, note, icon: Icon }) {
       </CardHeader>
       <CardContent>
         <p className="text-sm text-muted-foreground">{note}</p>
-      </CardContent>
-    </Card>
-  );
-}
-
-function LoyaltyPanel() {
-  return (
-    <Card>
-      <CardHeader>
-        <CardTitle className="text-base flex items-center gap-2">
-          <Award className="w-4 h-4 text-gold" /> Loyalty Program
-        </CardTitle>
-      </CardHeader>
-      <CardContent>
-        <p className="text-sm text-muted-foreground">
-          Loyalty is managed under <b>Salon Settings → Loyalty Program</b>. Consolidation here comes in M8.
-        </p>
-      </CardContent>
-    </Card>
-  );
-}
-
-function MembershipsPanel() {
-  return (
-    <Card>
-      <CardHeader>
-        <CardTitle className="text-base flex items-center gap-2">
-          <Sparkles className="w-4 h-4 text-gold" /> Memberships
-        </CardTitle>
-      </CardHeader>
-      <CardContent>
-        <p className="text-sm text-muted-foreground">
-          Membership plans are managed under <b>Services & Offerings → Memberships</b>. Consolidation here comes in M8.
-        </p>
       </CardContent>
     </Card>
   );

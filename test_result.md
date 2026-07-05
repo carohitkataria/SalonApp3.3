@@ -3598,9 +3598,36 @@ test_plan:
     - "Marketing M5 — Campaigns compose/launch/pause/resume/stop + messages"
     - "Marketing M6 — Automations CRUD + run-now + daily scheduler wiring"
     - "Marketing M7 — Rewards CRUD + issue play-link + public play/spin + prize side-effects"
+    - "Marketing M8/M9 — Frontend consolidation (Offers & Perks) + Overview dashboard v2"
   stuck_tasks: []
   test_all: false
   test_priority: "high_first"
+
+frontend:
+  - task: "Marketing M8/M9 — Frontend consolidation (Offers & Perks) + Overview dashboard v2"
+    implemented: true
+    working: "NA"
+    file: "/app/frontend/src/components/MarketingTab.js"
+    stuck_count: 0
+    priority: "medium"
+    needs_retesting: false
+    status_history:
+        - working: "NA"
+          agent: "main"
+          comment: |
+            M8 — Frontend consolidation:
+              * SUB_TABS reduced from 9 → 6:
+                Overview · Campaigns · Automations · Offers & Perks · Gallery · Settings
+              * New OffersAndPerksPanel wraps 4 inner pills:
+                Coupons (CouponsPanel) · Rewards (RewardsPanel) · Loyalty (real LoyaltyProgramSettings component) ·
+                Memberships (real MembershipManagement + SoldMembershipManagement, with a Plans/Sold sub-toggle).
+            M9 — Overview dashboard v2:
+              * Added spend-vs-cap horizontal bar (green/amber/red thresholds) tied to
+                marketing_settings.monthly_cap_inr + spend_brake status pill.
+              * Added last-7-days send bar chart built from recent campaigns' messages.
+              * Added Recent Campaigns list (top 5) with status pill.
+              * Range dates shown from /marketing/overview.
+              * All numbers pull from real backend endpoints — no mocks.
 
 # =================================================================
 # Marketing Module — M4 to M7 (July 5, 2026 — added on top of M0-M3)
