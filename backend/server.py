@@ -11351,10 +11351,22 @@ async def get_salon_home_kpis(
     service_dur_cache: Dict[str, int] = {}
     used_minutes = 0
     for t in completed_basis:
-        for sid in (t.get("selected_services") or []):
+        for svc_obj in (t.get("selected_services") or []):
+            # Handle both string ID and dict formats for backward compatibility
+            if isinstance(svc_obj, dict):
+                sid = svc_obj.get("service_id") or svc_obj.get("id")
+                dur = svc_obj.get("default_duration") or svc_obj.get("duration")
+            else:
+                sid = svc_obj
+                dur = None
+            if not sid:
+                continue
             if sid not in service_dur_cache:
-                svc = await db.services.find_one({"id": sid}, {"_id": 0, "default_duration": 1})
-                service_dur_cache[sid] = int((svc or {}).get("default_duration") or 30)
+                if dur is not None:
+                    service_dur_cache[sid] = int(dur or 30)
+                else:
+                    svc = await db.services.find_one({"id": sid}, {"_id": 0, "default_duration": 1})
+                    service_dur_cache[sid] = int((svc or {}).get("default_duration") or 30)
             used_minutes += service_dur_cache[sid]
     available_minutes = barber_count * 8 * 60
     chair_utilization = round(min(100.0, used_minutes * 100.0 / available_minutes), 1) if available_minutes else 0.0
@@ -11404,7 +11416,13 @@ async def get_salon_home_kpis(
     # -- top services today (by count + revenue) --
     svc_ct: Dict[str, Dict[str, Any]] = {}
     for t in completed_basis:
-        for sid in (t.get("selected_services") or []):
+        for svc_obj in (t.get("selected_services") or []):
+            if isinstance(svc_obj, dict):
+                sid = svc_obj.get("service_id") or svc_obj.get("id")
+            else:
+                sid = svc_obj
+            if not sid:
+                continue
             if sid not in svc_ct:
                 svc_ct[sid] = {"service_id": sid, "count": 0}
             svc_ct[sid]["count"] += 1
@@ -11605,19 +11623,39 @@ async def create_direct_invoice(
     subtotal = 0.0
     service_details = []
     for sid in selected_services:
+        # Accept either a raw string ID or a dict {service_id, price?}
+        if isinstance(sid, dict):
+            svc_id = sid.get("service_id") or sid.get("id")
+            fallback_price = sid.get("price") or sid.get("base_price")
+        else:
+            svc_id = sid
+            fallback_price = None
+        if not svc_id:
+            continue
         # Barber-specific pricing
         price = None
         if barber_id and barber_id != "any":
             barber = await db.barbers.find_one({"id": barber_id}, {"_id": 0})
             if barber:
-                bs = next((s for s in (barber.get("services") or []) if s.get("service_id") == sid), None)
+                bs = next((s for s in (barber.get("services") or []) if s.get("service_id") == svc_id), None)
                 if bs:
                     price = float(bs.get("price") or 0)
-        if price is None:
-            svc = await db.services.find_one({"id": sid}, {"_id": 0})
-            price = float((svc or {}).get("base_price") or 0)
+        if price is None or price == 0:
+            svc = await db.services.find_one({"id": svc_id}, {"_id": 0})
+            if svc:
+                # Robust price lookup — try multiple field names
+                price = float(
+                    svc.get("base_price")
+                    or svc.get("price")
+                    or svc.get("selling_price")
+                    or svc.get("default_price")
+                    or 0
+                )
+        if (price is None or price == 0) and fallback_price:
+            price = float(fallback_price)
+        price = float(price or 0)
         subtotal += price
-        service_details.append({"service_id": sid, "price": price})
+        service_details.append({"service_id": svc_id, "price": price})
 
     # -- Product subtotal (also decrements inventory) --
     product_subtotal = 0.0
@@ -11628,15 +11666,22 @@ async def create_direct_invoice(
         unit_price = float(p.get("unit_price") or 0)
         if not pid or qty <= 0:
             continue
-        if unit_price <= 0:
+        item = None
+        if unit_price <= 0 or True:  # always look up for stock check
             item = await db.salon_inventory.find_one({"id": pid, "salon_id": salon_id}, {"_id": 0})
-            if item:
+            if item and unit_price <= 0:
                 unit_price = float(item.get("retail_price") or item.get("selling_price") or 0)
+        # Stock validation — soft guard (does not block sale for a non-existent item)
+        if item is not None:
+            available = int(item.get("stock_quantity") or 0)
+            if available < qty:
+                # Allow but log; UI should ideally block this
+                logger.warning(f"Insufficient stock for {pid}: requested {qty}, have {available}")
         line_total = qty * unit_price
         product_subtotal += line_total
         product_details.append({
             "product_id": pid,
-            "name": p.get("name"),
+            "name": p.get("name") or (item or {}).get("name"),
             "qty": qty,
             "unit_price": unit_price,
             "line_total": line_total,
