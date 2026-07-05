@@ -3594,14 +3594,82 @@ metadata:
 
 test_plan:
   current_focus:
-    - "Marketing M4 — Overview real spend/campaign metrics"
-    - "Marketing M5 — Campaigns compose/launch/pause/resume/stop + messages"
-    - "Marketing M6 — Automations CRUD + run-now + daily scheduler wiring"
-    - "Marketing M7 — Rewards CRUD + issue play-link + public play/spin + prize side-effects"
-    - "Marketing M8/M9 — Frontend consolidation (Offers & Perks) + Overview dashboard v2"
+    - "M-Reels — Customer-side vertical video feed at /reels"
+    - "M-Templates — WhatsApp templates hub with Twilio sync (Meta on standby)"
   stuck_tasks: []
   test_all: false
   test_priority: "high_first"
+
+  - task: "M-Reels — Customer-side vertical video feed at /reels"
+    implemented: true
+    working: "NA"
+    file: "/app/backend/marketing.py, /app/frontend/src/pages/ReelsFeed.js, /app/frontend/src/components/BottomNav.js, /app/frontend/src/App.js"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: true
+    status_history:
+        - working: "NA"
+          agent: "main"
+          comment: |
+            Backend endpoint (public, no auth):
+              GET /api/public/reels?salon_id=<optional>&limit=50
+              → Aggregates video URLs from every active salon's photo_gallery.
+              → Filters via _is_video_url (`data:video` prefix OR file ext .mp4/.webm/.mov/.ogg).
+              → Response: {reels:[{id, salon_id, salon_name, salon_logo, url, index}], count}
+            Frontend:
+              * New /reels route wrapped in CustomerLayout.
+              * ReelsFeed.js — full-screen scroll-snap vertical feed with
+                IntersectionObserver auto-play, mute toggle, "Visit salon" link.
+              * BottomNav now has 3 items: Home · Reels · History.
+            Empty-state (currently returned since there are no video URLs in
+            gallery) renders the "No reels yet" black screen with Play icon.
+
+  - task: "M-Templates — WhatsApp templates hub with Twilio sync (Meta on standby)"
+    implemented: true
+    working: "NA"
+    file: "/app/backend/marketing.py, /app/frontend/src/components/MarketingTab.js"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: true
+    status_history:
+        - working: "NA"
+          agent: "main"
+          comment: |
+            Backend endpoints (salon admin auth):
+              * GET  /api/salons/{id}/marketing/templates/providers → {providers:[{id, connected, note}]}
+              * POST /api/salons/{id}/marketing/templates/sync-twilio → pulls Content list + ApprovalRequests
+              * POST /api/salons/{id}/marketing/templates/sync-meta → 400 until Meta creds set
+              * GET  /api/salons/{id}/marketing/templates/list[?provider=twilio|meta]
+              * POST /api/salons/{id}/marketing/templates/draft (rich body) → creates a local draft
+              * POST /api/salons/{id}/marketing/templates/{tid}/submit body {provider:"twilio"|"meta"}
+              * GET  /api/salons/{id}/marketing/templates/{tid}/refresh-status
+              * DELETE /api/salons/{id}/marketing/templates/v2/{tid}
+
+            Frontend:
+              * New Marketing sub-tab "Templates" with a provider connection strip
+                (Twilio: connected / Meta: not connected until creds arrive),
+                per-status counters (approved/pending/rejected/draft), filter pills,
+                inline "Submit → Twilio / Meta" buttons for drafts, "Refresh" for
+                pending, view/delete, and a compose dialog.
+
+            Verified with real Twilio account:
+              * Sync pulled 50 real templates including 3 approved and 47 rejected
+                with actual rejection reasons from the WhatsApp business account.
+
+  - task: "Social Media OAuth (Instagram / Facebook)"
+    implemented: false
+    working: "NA"
+    file: "N/A"
+    stuck_count: 0
+    priority: "medium"
+    needs_retesting: false
+    status_history:
+        - working: "NA"
+          agent: "main"
+          comment: |
+            DEFERRED per user decision (option 5b). Blocked by Meta credentials
+            (Meta App ID + App Secret + OAuth redirect config). Will pick up when
+            user shares Meta app credentials.
 
 frontend:
   - task: "Marketing M8/M9 — Frontend consolidation (Offers & Perks) + Overview dashboard v2"

@@ -12,7 +12,7 @@ import SoldMembershipManagement from '@/components/SoldMembershipManagement';
 import {
   Megaphone, BarChart3, Ticket, Gift, Award, Sparkles, Image as ImageIcon,
   Settings as SettingsIcon, Users as UsersIcon, Send, Plus, Trash2, Eye, EyeOff, RefreshCw,
-  Zap, Play, Pause, Square, MessageCircle, Package
+  Zap, Play, Pause, Square, MessageCircle, Package, MessageSquare, CheckCircle2, Clock, XCircle, AlertCircle
 } from 'lucide-react';
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
@@ -22,6 +22,7 @@ const SUB_TABS = [
   { id: 'overview', label: 'Overview', icon: BarChart3 },
   { id: 'campaigns', label: 'Campaigns', icon: Send },
   { id: 'automations', label: 'Automations', icon: Zap },
+  { id: 'templates', label: 'Templates', icon: MessageSquare },
   { id: 'offers', label: 'Offers & Perks', icon: Gift },
   { id: 'gallery', label: 'Gallery', icon: ImageIcon },
   { id: 'settings', label: 'Settings', icon: SettingsIcon },
@@ -56,6 +57,7 @@ export default function MarketingTab({ salonId, getAuthHeaders, children, onOpen
     if (activeSub === 'overview') return <OverviewPanel salonId={salonId} getAuthHeaders={getAuthHeaders} />;
     if (activeSub === 'campaigns') return <CampaignsPanel salonId={salonId} getAuthHeaders={getAuthHeaders} />;
     if (activeSub === 'automations') return <AutomationsPanel salonId={salonId} getAuthHeaders={getAuthHeaders} />;
+    if (activeSub === 'templates') return <TemplatesPanel salonId={salonId} getAuthHeaders={getAuthHeaders} />;
     if (activeSub === 'offers') return <OffersAndPerksPanel salonId={salonId} getAuthHeaders={getAuthHeaders} />;
     if (activeSub === 'gallery') return children /* Gallery legacy panel rendered by parent */;
     if (activeSub === 'settings') return <MarketingSettingsPanel salonId={salonId} getAuthHeaders={getAuthHeaders} />;
@@ -71,7 +73,7 @@ export default function MarketingTab({ salonId, getAuthHeaders, children, onOpen
           </div>
           <div>
             <h2 className="text-lg md:text-xl font-playfair font-bold text-foreground">Marketing</h2>
-            <p className="text-xs text-muted-foreground">Campaigns · Automations · Offers &amp; Perks · Gallery · Settings</p>
+            <p className="text-xs text-muted-foreground">Campaigns · Automations · Templates · Offers &amp; Perks · Gallery · Settings</p>
           </div>
         </div>
 
@@ -1804,6 +1806,347 @@ function IssueRewardDialog({ salonId, getAuthHeaders, reward, onClose }) {
           <Button className="bg-gold text-black hover:bg-gold/90" onClick={issue} disabled={busy}>
             {busy ? 'Issuing…' : 'Issue play link'}
           </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+
+
+// ============ WhatsApp Templates (approval sync + author + submit) ============
+
+const STATUS_PILL = {
+  approved: { color: 'border-emerald-500/50 text-emerald-600', Icon: CheckCircle2 },
+  pending: { color: 'border-amber-500/50 text-amber-600', Icon: Clock },
+  submitted: { color: 'border-amber-500/50 text-amber-600', Icon: Clock },
+  paused: { color: 'border-amber-500/50 text-amber-600', Icon: Clock },
+  rejected: { color: 'border-red-500/50 text-red-500', Icon: XCircle },
+  failed: { color: 'border-red-500/50 text-red-500', Icon: XCircle },
+  draft: { color: 'border-slate-500/50 text-slate-500', Icon: MessageSquare },
+  unknown: { color: 'border-slate-500/50 text-slate-500', Icon: AlertCircle },
+};
+
+function TemplatesPanel({ salonId, getAuthHeaders }) {
+  const [templates, setTemplates] = useState([]);
+  const [providers, setProviders] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [syncing, setSyncing] = useState('');
+  const [editing, setEditing] = useState(null);
+  const [filter, setFilter] = useState('all');
+
+  const load = async () => {
+    try {
+      setLoading(true);
+      const [t, p] = await Promise.all([
+        axios.get(`${API}/salons/${salonId}/marketing/templates/list`, { headers: getAuthHeaders() }),
+        axios.get(`${API}/salons/${salonId}/marketing/templates/providers`, { headers: getAuthHeaders() }),
+      ]);
+      setTemplates(t.data.templates || []);
+      setProviders(p.data.providers || []);
+    } catch (e) { toast.error('Failed to load templates'); }
+    finally { setLoading(false); }
+  };
+  useEffect(() => { load(); /* eslint-disable-next-line */ }, [salonId]);
+
+  const syncProvider = async (provider) => {
+    try {
+      setSyncing(provider);
+      const res = await axios.post(`${API}/salons/${salonId}/marketing/templates/sync-${provider}`, {}, { headers: getAuthHeaders() });
+      toast.success(`${provider}: synced ${res.data.synced} template(s)`);
+      load();
+    } catch (e) { toast.error(e.response?.data?.detail || `${provider} sync failed`); }
+    finally { setSyncing(''); }
+  };
+
+  const remove = async (t) => {
+    if (!window.confirm(`Delete template "${t.name}"? (Only removes it from this dashboard — provider copy remains)`)) return;
+    try {
+      await axios.delete(`${API}/salons/${salonId}/marketing/templates/v2/${t.id}`, { headers: getAuthHeaders() });
+      toast.success('Removed from dashboard');
+      load();
+    } catch (e) { toast.error('Delete failed'); }
+  };
+
+  const refreshStatus = async (t) => {
+    try {
+      const res = await axios.get(`${API}/salons/${salonId}/marketing/templates/${t.id}/refresh-status`, { headers: getAuthHeaders() });
+      toast.success(`Status: ${res.data.approval_status}`);
+      load();
+    } catch (e) { toast.error(e.response?.data?.detail || 'Refresh failed'); }
+  };
+
+  const submit = async (t, provider) => {
+    try {
+      const res = await axios.post(`${API}/salons/${salonId}/marketing/templates/${t.id}/submit`,
+        { provider }, { headers: getAuthHeaders() });
+      toast.success(`Submitted → ${res.data.approval_status}`);
+      load();
+    } catch (e) { toast.error(e.response?.data?.detail || 'Submit failed'); }
+  };
+
+  const filtered = templates.filter(t => {
+    if (filter === 'all') return true;
+    return (t.approval_status || 'unknown').toLowerCase() === filter;
+  });
+
+  const counts = templates.reduce((acc, t) => {
+    const k = (t.approval_status || 'unknown').toLowerCase();
+    acc[k] = (acc[k] || 0) + 1;
+    return acc;
+  }, {});
+
+  return (
+    <div className="space-y-4">
+      {/* Provider strip */}
+      <Card>
+        <CardHeader className="pb-2">
+          <CardTitle className="text-base flex items-center gap-2">
+            <MessageSquare className="w-4 h-4 text-gold" /> WhatsApp Templates
+          </CardTitle>
+          <p className="text-[11px] text-muted-foreground">
+            Compose messages, submit for WhatsApp approval, and see live status. Twilio and Meta both supported.
+          </p>
+        </CardHeader>
+        <CardContent className="pt-0">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            {providers.map(p => (
+              <div key={p.id} className={`p-3 rounded-lg border flex items-center justify-between ${p.connected ? 'border-emerald-500/50 bg-emerald-500/5' : 'border-amber-500/50 bg-amber-500/5'}`}>
+                <div>
+                  <p className="text-xs text-muted-foreground uppercase tracking-wide">{p.id}</p>
+                  <p className="text-sm font-semibold">
+                    {p.connected ? 'Connected' : 'Not connected'}
+                  </p>
+                  {p.note && <p className="text-[11px] text-amber-600 mt-1">{p.note}</p>}
+                </div>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={!p.connected || syncing === p.id}
+                  onClick={() => syncProvider(p.id)}
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 mr-1 ${syncing === p.id ? 'animate-spin' : ''}`} />
+                  {syncing === p.id ? 'Syncing…' : 'Sync now'}
+                </Button>
+              </div>
+            ))}
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Header + filter */}
+      <Card>
+        <CardHeader className="flex flex-row items-center justify-between flex-wrap gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
+            <CardTitle className="text-base">Templates ({templates.length})</CardTitle>
+            <div className="flex gap-1 flex-wrap">
+              {['all', 'approved', 'pending', 'rejected', 'draft'].map(k => (
+                <button
+                  key={k}
+                  onClick={() => setFilter(k)}
+                  className={`px-2 py-1 rounded-full text-[10px] font-semibold uppercase border transition ${
+                    filter === k
+                      ? 'bg-gold text-black border-gold'
+                      : 'bg-background/60 text-muted-foreground border-border hover:bg-accent/40'
+                  }`}
+                >
+                  {k}{k !== 'all' && counts[k] ? ` · ${counts[k]}` : ''}
+                </button>
+              ))}
+            </div>
+          </div>
+          <Button size="sm" className="bg-gold text-black hover:bg-gold/90" onClick={() => setEditing({})}>
+            <Plus className="w-3.5 h-3.5 mr-1" /> New template
+          </Button>
+        </CardHeader>
+        <CardContent>
+          {loading ? <p className="text-sm text-muted-foreground">Loading…</p> :
+            filtered.length === 0 ? (
+              <p className="text-sm text-muted-foreground">
+                No templates {filter !== 'all' ? `with status "${filter}"` : ''}. Compose a new one, or click <b>Sync now</b> above to pull existing templates from your provider.
+              </p>
+            ) : (
+              <div className="divide-y divide-border">
+                {filtered.map(t => {
+                  const status = (t.approval_status || 'unknown').toLowerCase();
+                  const meta = STATUS_PILL[status] || STATUS_PILL.unknown;
+                  const StatusIcon = meta.Icon;
+                  return (
+                    <div key={t.id} className="py-3 flex items-start justify-between gap-3 flex-wrap">
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <p className="text-sm font-mono font-semibold">{t.name}</p>
+                          {t.provider && (
+                            <span className="text-[10px] px-1.5 py-0.5 rounded-full border border-gold/50 text-gold uppercase">
+                              {t.provider}
+                            </span>
+                          )}
+                          <span className={`text-[10px] px-1.5 py-0.5 rounded-full border ${meta.color} flex items-center gap-1`}>
+                            <StatusIcon className="w-3 h-3" /> {status}
+                          </span>
+                          {t.category && (
+                            <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-background/60 border border-border text-muted-foreground uppercase">
+                              {t.category}
+                            </span>
+                          )}
+                          {t.lang_code && <span className="text-[10px] text-muted-foreground">{t.lang_code}</span>}
+                        </div>
+                        {t.body && (
+                          <p className="text-[12px] text-muted-foreground line-clamp-2 mt-1 whitespace-pre-wrap">
+                            {t.body}
+                          </p>
+                        )}
+                        {t.rejection_reason && (
+                          <p className="text-[11px] text-red-500 mt-1">Rejection: {t.rejection_reason}</p>
+                        )}
+                        {t.last_synced_at && (
+                          <p className="text-[10px] text-muted-foreground mt-1">
+                            Last synced: {new Date(t.last_synced_at).toLocaleString()}
+                          </p>
+                        )}
+                      </div>
+                      <div className="flex flex-col gap-1 items-end">
+                        {status === 'draft' && (
+                          <div className="flex gap-1">
+                            <Button variant="outline" size="sm" onClick={() => submit(t, 'twilio')} disabled={!providers.find(p => p.id === 'twilio')?.connected}>Submit → Twilio</Button>
+                            <Button variant="outline" size="sm" onClick={() => submit(t, 'meta')} disabled={!providers.find(p => p.id === 'meta')?.connected}>Submit → Meta</Button>
+                          </div>
+                        )}
+                        {['pending', 'submitted', 'paused'].includes(status) && (
+                          <Button variant="outline" size="sm" onClick={() => refreshStatus(t)}>
+                            <RefreshCw className="w-3.5 h-3.5 mr-1" /> Refresh
+                          </Button>
+                        )}
+                        <div className="flex gap-1">
+                          <Button variant="outline" size="sm" onClick={() => setEditing(t)}>View</Button>
+                          <Button variant="ghost" size="sm" onClick={() => remove(t)}>
+                            <Trash2 className="w-3.5 h-3.5 text-red-500" />
+                          </Button>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )
+          }
+        </CardContent>
+      </Card>
+
+      {editing !== null && (
+        <TemplateEditorDialog
+          salonId={salonId}
+          getAuthHeaders={getAuthHeaders}
+          initial={editing}
+          providers={providers}
+          onClose={() => setEditing(null)}
+          onSaved={() => { setEditing(null); load(); }}
+        />
+      )}
+    </div>
+  );
+}
+
+function TemplateEditorDialog({ salonId, getAuthHeaders, initial, providers, onClose, onSaved }) {
+  const isView = !!initial?.id;
+  const [form, setForm] = useState({
+    name: initial?.name || '',
+    friendly_name: initial?.friendly_name || '',
+    category: initial?.category || 'utility',
+    lang_code: initial?.lang_code || 'en',
+    body: initial?.body || '',
+    header_text: initial?.header_text || '',
+    footer_text: initial?.footer_text || '',
+  });
+  const [saving, setSaving] = useState(false);
+
+  const save = async () => {
+    if (!form.name.trim()) return toast.error('Name required');
+    if (!/^[a-z0-9_]+$/.test(form.name)) return toast.error('Name must be lowercase letters, digits, underscores');
+    if (!form.body.trim()) return toast.error('Body required');
+    try {
+      setSaving(true);
+      await axios.post(`${API}/salons/${salonId}/marketing/templates/draft`, form, { headers: getAuthHeaders() });
+      toast.success('Draft saved');
+      onSaved();
+    } catch (e) { toast.error(e.response?.data?.detail || 'Save failed'); }
+    finally { setSaving(false); }
+  };
+
+  return (
+    <Dialog open onOpenChange={onClose}>
+      <DialogContent className="max-w-xl">
+        <DialogHeader>
+          <DialogTitle>{isView ? `Template: ${initial.name}` : 'New template'}</DialogTitle>
+        </DialogHeader>
+        <div className="space-y-3 max-h-[70vh] overflow-y-auto">
+          {isView ? (
+            <>
+              <div className="p-3 rounded-lg bg-background/50 border border-border whitespace-pre-wrap text-sm">
+                {initial.body || <span className="text-muted-foreground">(no body)</span>}
+              </div>
+              <div className="grid grid-cols-2 gap-2 text-xs">
+                <p><span className="text-muted-foreground">Provider:</span> {initial.provider || '—'}</p>
+                <p><span className="text-muted-foreground">Status:</span> {initial.approval_status || '—'}</p>
+                <p><span className="text-muted-foreground">Category:</span> {initial.category || '—'}</p>
+                <p><span className="text-muted-foreground">Language:</span> {initial.lang_code || '—'}</p>
+                {initial.provider_sid && <p className="col-span-2 break-all"><span className="text-muted-foreground">Provider SID:</span> {initial.provider_sid}</p>}
+                {initial.rejection_reason && <p className="col-span-2 text-red-500"><span className="text-muted-foreground">Rejection:</span> {initial.rejection_reason}</p>}
+              </div>
+            </>
+          ) : (
+            <>
+              <div>
+                <Label>Name * (lowercase, digits, underscores)</Label>
+                <Input value={form.name} onChange={e => setForm({ ...form, name: e.target.value.toLowerCase() })} placeholder="e.g. booking_reminder_v2" />
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <Label>Friendly name</Label>
+                  <Input value={form.friendly_name} onChange={e => setForm({ ...form, friendly_name: e.target.value })} placeholder="Optional" />
+                </div>
+                <div>
+                  <Label>Category *</Label>
+                  <select value={form.category} onChange={e => setForm({ ...form, category: e.target.value })} className="h-10 w-full rounded-md border border-input bg-background px-2 text-sm">
+                    <option value="utility">Utility</option>
+                    <option value="marketing">Marketing</option>
+                    <option value="authentication">Authentication</option>
+                  </select>
+                </div>
+                <div>
+                  <Label>Language code *</Label>
+                  <Input value={form.lang_code} onChange={e => setForm({ ...form, lang_code: e.target.value })} placeholder="en, en_US, hi, etc." />
+                </div>
+              </div>
+              <div>
+                <Label>Message body *</Label>
+                <textarea
+                  value={form.body}
+                  onChange={e => setForm({ ...form, body: e.target.value })}
+                  rows={6}
+                  className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                  placeholder="Hi {{1}}, your appointment at {{2}} on {{3}} is confirmed."
+                />
+                <p className="text-[11px] text-muted-foreground mt-1">
+                  Use <code>{'{{1}}'}</code>, <code>{'{{2}}'}</code>, … for positional parameters (Twilio/Meta convention).
+                </p>
+              </div>
+              <div className="p-3 rounded-lg border border-border bg-background/50">
+                <p className="text-[11px] text-muted-foreground">
+                  After saving as draft, use <b>Submit → Twilio</b> or <b>Submit → Meta</b> in the list to send it for WhatsApp approval.
+                  {providers?.find(p => p.id === 'meta')?.connected === false && ' (Meta is not connected yet — only Twilio will be available.)'}
+                </p>
+              </div>
+            </>
+          )}
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={onClose}>{isView ? 'Close' : 'Cancel'}</Button>
+          {!isView && (
+            <Button className="bg-gold text-black hover:bg-gold/90" onClick={save} disabled={saving}>
+              {saving ? 'Saving…' : 'Save as draft'}
+            </Button>
+          )}
         </DialogFooter>
       </DialogContent>
     </Dialog>

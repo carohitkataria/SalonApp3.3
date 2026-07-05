@@ -29,6 +29,7 @@ import SalonRatingsPage from '@/pages/SalonRatingsPage';
 import CustomerWalletPage from '@/pages/CustomerWalletPage';
 import CustomerNotificationsPage from '@/pages/CustomerNotificationsPage';
 import CustomerProfilePage from '@/pages/CustomerProfilePage';
+import ReelsFeed from '@/pages/ReelsFeed';
 
 // Salon Pages
 import OTPLoginPage from '@/pages/OTPLoginPage';
@@ -84,6 +85,7 @@ function App() {
                   {/* Customer Routes with Layout */}
                   <Route path="/salons" element={<CustomerLayout><SalonSelectionPage /></CustomerLayout>} />
                   <Route path="/history" element={<CustomerLayout><HistoryPage /></CustomerLayout>} />
+                  <Route path="/reels" element={<CustomerLayout><ReelsFeed /></CustomerLayout>} />
                   <Route path="/profile" element={<CustomerLayout><CustomerProfilePage /></CustomerLayout>} />
                   
                   {/* Salon Main Page - New Hub after selecting a salon */}

@@ -1706,3 +1706,421 @@ async def spin_reward(token: str):
         logger.warning(f"[Reward] side-effect failed: {e}")
     return {"prize": prize, "played_at": now}
 
+
+
+# ================================================================
+# Customer-side Reels (public) + Templates management (Twilio + Meta)
+# ================================================================
+
+import re as _re
+
+VIDEO_URL_RE = _re.compile(r"(\.mp4|\.webm|\.mov|\.ogg)(\?|$)", _re.IGNORECASE)
+
+
+def _is_video_url(url: str) -> bool:
+    if not url or not isinstance(url, str):
+        return False
+    if url.startswith("data:video"):
+        return True
+    return bool(VIDEO_URL_RE.search(url))
+
+
+@marketing_router.get("/public/reels")
+async def public_reels(salon_id: Optional[str] = Query(default=None), limit: int = Query(default=50, le=200)):
+    """Aggregate video URLs from salons' photo_gallery for the customer-side
+    swipeable Reels feed. If salon_id is provided, only that salon's videos
+    are returned; otherwise the feed mixes all salons."""
+    query: Dict[str, Any] = {"is_active": True} if salon_id is None else {"id": salon_id}
+    out: List[Dict[str, Any]] = []
+    cursor = _db.salons.find(query, {"id": 1, "name": 1, "photo_gallery": 1, "logo": 1, "primary_color": 1})
+    async for s in cursor:
+        gallery = s.get("photo_gallery") or []
+        for idx, url in enumerate(gallery):
+            if _is_video_url(url):
+                out.append({
+                    "id": f"{s.get('id')}:{idx}",
+                    "salon_id": s.get("id"),
+                    "salon_name": s.get("name"),
+                    "salon_logo": s.get("logo"),
+                    "url": url,
+                    "index": idx,
+                })
+                if len(out) >= limit:
+                    break
+        if len(out) >= limit:
+            break
+    # Newest first (simple: reverse — we don't have per-item timestamps yet)
+    out.reverse()
+    return {"reels": out, "count": len(out)}
+
+
+# ---------- Templates: Twilio + Meta sync ----------
+
+TEMPLATE_CATEGORIES = {"utility", "marketing", "authentication"}
+
+
+class TemplateCreateIn(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    name: str = Field(..., min_length=3, max_length=64)
+    friendly_name: Optional[str] = None
+    category: str = "utility"           # utility | marketing | authentication
+    lang_code: str = "en"                # BCP-47 (WhatsApp uses en_US, but Twilio uses en)
+    body: str
+    header_text: Optional[str] = None
+    footer_text: Optional[str] = None
+    buttons: Optional[List[Dict[str, Any]]] = None   # [{type:"URL"|"QUICK_REPLY", text, url?}]
+
+    @field_validator("name")
+    @classmethod
+    def _n(cls, v):
+        # WhatsApp/Twilio names must be lowercase, digits, underscores
+        if not _re.match(r"^[a-z0-9_]+$", v):
+            raise ValueError("Template name must contain only lowercase letters, digits and underscores")
+        return v
+
+    @field_validator("category")
+    @classmethod
+    def _c(cls, v):
+        v2 = (v or "").lower()
+        if v2 not in TEMPLATE_CATEGORIES:
+            raise ValueError("category must be one of: utility, marketing, authentication")
+        return v2
+
+
+async def _twilio_content_get(path: str, params: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    """Twilio Content API helper. Uses API Key SID+Secret from env."""
+    sid = os.environ.get("TWILIO_API_KEY_SID") or os.environ.get("TWILIO_ACCOUNT_SID")
+    secret = os.environ.get("TWILIO_API_KEY_SECRET")
+    if not sid or not secret:
+        return {"error": "Twilio credentials not configured", "http_status": 0}
+    url = f"https://content.twilio.com/v1{path}"
+    async with httpx.AsyncClient(timeout=15.0) as client:
+        resp = await client.get(url, params=params or {}, auth=(sid, secret))
+    if resp.status_code // 100 != 2:
+        return {"error": resp.text[:400], "http_status": resp.status_code}
+    return resp.json()
+
+
+async def _twilio_content_post(path: str, payload: Any) -> Dict[str, Any]:
+    sid = os.environ.get("TWILIO_API_KEY_SID") or os.environ.get("TWILIO_ACCOUNT_SID")
+    secret = os.environ.get("TWILIO_API_KEY_SECRET")
+    if not sid or not secret:
+        return {"error": "Twilio credentials not configured", "http_status": 0}
+    url = f"https://content.twilio.com/v1{path}"
+    async with httpx.AsyncClient(timeout=20.0) as client:
+        resp = await client.post(
+            url,
+            json=payload if isinstance(payload, dict) else None,
+            data=payload if not isinstance(payload, dict) else None,
+            auth=(sid, secret),
+            headers={"Content-Type": "application/json"} if isinstance(payload, dict) else None,
+        )
+    if resp.status_code // 100 != 2:
+        return {"error": resp.text[:400], "http_status": resp.status_code}
+    return resp.json()
+
+
+try:
+    import httpx  # ensure available at module scope
+except Exception:
+    pass
+
+
+async def _meta_templates_list(waba_id: Optional[str] = None) -> Dict[str, Any]:
+    waba_id = waba_id or os.environ.get("META_WA_BUSINESS_ACCOUNT_ID")
+    token = os.environ.get("META_WA_ACCESS_TOKEN")
+    api_ver = os.environ.get("META_WA_API_VERSION") or "v21.0"
+    if not (waba_id and token):
+        return {"connected": False, "templates": []}
+    url = f"https://graph.facebook.com/{api_ver}/{waba_id}/message_templates"
+    async with httpx.AsyncClient(timeout=15.0) as client:
+        resp = await client.get(url, headers={"Authorization": f"Bearer {token}"})
+    if resp.status_code // 100 != 2:
+        return {"connected": True, "error": resp.text[:400], "http_status": resp.status_code, "templates": []}
+    return {"connected": True, "templates": (resp.json() or {}).get("data", [])}
+
+
+@marketing_router.get("/salons/{salon_id}/marketing/templates/providers")
+async def templates_provider_status(salon_id: str, request: Request):
+    """Return the connection state of each WhatsApp template provider."""
+    user = await _require_user(request)
+    _assert_salon_scope(user, salon_id)
+    twilio_ok = bool(
+        (os.environ.get("TWILIO_API_KEY_SID") or os.environ.get("TWILIO_ACCOUNT_SID"))
+        and os.environ.get("TWILIO_API_KEY_SECRET")
+    )
+    meta_ok = bool(
+        os.environ.get("META_WA_ACCESS_TOKEN")
+        and os.environ.get("META_WA_BUSINESS_ACCOUNT_ID")
+    )
+    return {
+        "providers": [
+            {"id": "twilio", "connected": twilio_ok, "note": None if twilio_ok else "TWILIO_API_KEY_SID / SECRET missing"},
+            {"id": "meta", "connected": meta_ok, "note": None if meta_ok else "META_WA_ACCESS_TOKEN / META_WA_BUSINESS_ACCOUNT_ID missing"},
+        ],
+    }
+
+
+@marketing_router.post("/salons/{salon_id}/marketing/templates/sync-twilio")
+async def sync_twilio_templates(salon_id: str, request: Request):
+    """Pull the Twilio Content template list + approval status into
+    db.marketing_templates for this salon."""
+    user = await _require_admin(request)
+    _assert_salon_scope(user, salon_id)
+    data = await _twilio_content_get("/Content")
+    if "error" in data:
+        raise HTTPException(status_code=502, detail=f"Twilio sync failed: {data.get('error')}")
+    contents = data.get("contents") or []
+    saved = 0
+    for c in contents:
+        sid = c.get("sid")
+        if not sid:
+            continue
+        # Also fetch approval status for whatsapp
+        appr = await _twilio_content_get(f"/Content/{sid}/ApprovalRequests")
+        wa_status = "unknown"
+        wa_reason = None
+        if isinstance(appr, dict):
+            whs = appr.get("whatsapp") or {}
+            wa_status = whs.get("status") or "unknown"
+            wa_reason = whs.get("rejection_reason")
+        # Extract body from types (text/media/quick-reply/etc.)
+        types = c.get("types") or {}
+        body_text = ""
+        for t_body in types.values():
+            body_text = (t_body or {}).get("body") or body_text
+            if body_text:
+                break
+        doc = {
+            "provider": "twilio",
+            "provider_sid": sid,
+            "salon_id": salon_id,
+            "name": c.get("friendly_name") or sid,
+            "friendly_name": c.get("friendly_name"),
+            "lang_code": c.get("language"),
+            "body": body_text,
+            "approval_status": wa_status,
+            "rejection_reason": wa_reason,
+            "last_synced_at": _now_iso(),
+        }
+        await _db.marketing_templates.update_one(
+            {"salon_id": salon_id, "provider": "twilio", "provider_sid": sid},
+            {"$set": doc, "$setOnInsert": {"id": str(uuid.uuid4()), "created_at": _now_iso()}},
+            upsert=True,
+        )
+        saved += 1
+    return {"synced": saved, "provider": "twilio"}
+
+
+@marketing_router.post("/salons/{salon_id}/marketing/templates/sync-meta")
+async def sync_meta_templates(salon_id: str, request: Request):
+    user = await _require_admin(request)
+    _assert_salon_scope(user, salon_id)
+    data = await _meta_templates_list()
+    if not data.get("connected"):
+        raise HTTPException(status_code=400, detail="Meta WhatsApp is not connected — add creds in backend .env")
+    if "error" in data:
+        raise HTTPException(status_code=502, detail=f"Meta sync failed: {data.get('error')}")
+    saved = 0
+    for t in data.get("templates", []):
+        name = t.get("name")
+        if not name:
+            continue
+        # Extract body component
+        body_text = ""
+        for comp in (t.get("components") or []):
+            if comp.get("type") == "BODY":
+                body_text = comp.get("text", "")
+                break
+        doc = {
+            "provider": "meta",
+            "provider_sid": t.get("id"),
+            "salon_id": salon_id,
+            "name": name,
+            "friendly_name": name,
+            "lang_code": t.get("language"),
+            "category": (t.get("category") or "").lower(),
+            "body": body_text,
+            "approval_status": (t.get("status") or "").lower(),  # APPROVED, PENDING, REJECTED
+            "rejection_reason": t.get("rejected_reason") or t.get("reason"),
+            "last_synced_at": _now_iso(),
+        }
+        await _db.marketing_templates.update_one(
+            {"salon_id": salon_id, "provider": "meta", "name": name},
+            {"$set": doc, "$setOnInsert": {"id": str(uuid.uuid4()), "created_at": _now_iso()}},
+            upsert=True,
+        )
+        saved += 1
+    return {"synced": saved, "provider": "meta"}
+
+
+# List/get/delete now scoped per-provider
+@marketing_router.get("/salons/{salon_id}/marketing/templates/list")
+async def list_templates_v2(salon_id: str, request: Request, provider: Optional[str] = Query(default=None)):
+    user = await _require_user(request)
+    _assert_salon_scope(user, salon_id)
+    q: Dict[str, Any] = {"salon_id": salon_id}
+    if provider:
+        q["provider"] = provider
+    out = []
+    async for t in _db.marketing_templates.find(q).sort("created_at", -1):
+        out.append(_clean(t))
+    return {"templates": out}
+
+
+class TemplateSubmitIn(BaseModel):
+    provider: str = "twilio"   # twilio | meta
+
+
+@marketing_router.post("/salons/{salon_id}/marketing/templates/{tid}/submit")
+async def submit_template_for_approval(salon_id: str, tid: str, body: TemplateSubmitIn, request: Request):
+    """Submit a draft template to the chosen provider for WhatsApp approval."""
+    user = await _require_admin(request)
+    _assert_salon_scope(user, salon_id)
+    t = await _db.marketing_templates.find_one({"id": tid, "salon_id": salon_id})
+    if not t:
+        raise HTTPException(status_code=404, detail="Template not found")
+    provider = (body.provider or "twilio").lower()
+
+    if provider == "twilio":
+        # 1) Create Content template if not created yet
+        sid = t.get("provider_sid")
+        if not sid:
+            create_payload = {
+                "friendly_name": t.get("friendly_name") or t.get("name"),
+                "language": t.get("lang_code") or "en",
+                "types": {
+                    "twilio/text": {"body": t.get("body") or ""}
+                },
+            }
+            created = await _twilio_content_post("/Content", create_payload)
+            if "error" in created:
+                raise HTTPException(status_code=502, detail=f"Twilio create failed: {created.get('error')}")
+            sid = created.get("sid")
+            await _db.marketing_templates.update_one(
+                {"id": tid}, {"$set": {"provider_sid": sid, "provider": "twilio"}}
+            )
+        # 2) Submit for WhatsApp approval
+        submit_payload = {
+            "name": t.get("name"),
+            "category": (t.get("category") or "UTILITY").upper(),  # Twilio expects UTILITY / MARKETING / AUTHENTICATION
+        }
+        appr = await _twilio_content_post(f"/Content/{sid}/ApprovalRequests/whatsapp", submit_payload)
+        if "error" in appr:
+            raise HTTPException(status_code=502, detail=f"Twilio approval submit failed: {appr.get('error')}")
+        wa_status = ((appr.get("whatsapp") or {}).get("status")) or "pending"
+        await _db.marketing_templates.update_one(
+            {"id": tid},
+            {"$set": {"approval_status": wa_status, "submitted_at": _now_iso(), "last_synced_at": _now_iso()}},
+        )
+        return {"ok": True, "provider": "twilio", "sid": sid, "approval_status": wa_status}
+
+    if provider == "meta":
+        waba_id = os.environ.get("META_WA_BUSINESS_ACCOUNT_ID")
+        token = os.environ.get("META_WA_ACCESS_TOKEN")
+        if not (waba_id and token):
+            raise HTTPException(status_code=400, detail="Meta credentials not configured")
+        api_ver = os.environ.get("META_WA_API_VERSION") or "v21.0"
+        payload = {
+            "name": t.get("name"),
+            "language": t.get("lang_code") or "en_US",
+            "category": (t.get("category") or "UTILITY").upper(),
+            "components": [{"type": "BODY", "text": t.get("body") or ""}],
+        }
+        url = f"https://graph.facebook.com/{api_ver}/{waba_id}/message_templates"
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            resp = await client.post(url, headers={"Authorization": f"Bearer {token}"}, json=payload)
+        if resp.status_code // 100 != 2:
+            raise HTTPException(status_code=502, detail=f"Meta submit failed: {resp.text[:400]}")
+        data = resp.json()
+        await _db.marketing_templates.update_one(
+            {"id": tid},
+            {"$set": {
+                "provider": "meta",
+                "provider_sid": data.get("id"),
+                "approval_status": (data.get("status") or "PENDING").lower(),
+                "submitted_at": _now_iso(),
+            }},
+        )
+        return {"ok": True, "provider": "meta", "id": data.get("id"), "approval_status": (data.get("status") or "PENDING").lower()}
+
+    raise HTTPException(status_code=400, detail="Unknown provider")
+
+
+@marketing_router.get("/salons/{salon_id}/marketing/templates/{tid}/refresh-status")
+async def refresh_template_status(salon_id: str, tid: str, request: Request):
+    """Poll the provider for the latest approval status of a submitted template."""
+    user = await _require_admin(request)
+    _assert_salon_scope(user, salon_id)
+    t = await _db.marketing_templates.find_one({"id": tid, "salon_id": salon_id})
+    if not t:
+        raise HTTPException(status_code=404, detail="Template not found")
+    if t.get("provider") == "twilio" and t.get("provider_sid"):
+        appr = await _twilio_content_get(f"/Content/{t['provider_sid']}/ApprovalRequests")
+        if "error" in appr:
+            raise HTTPException(status_code=502, detail=appr.get("error"))
+        whs = (appr.get("whatsapp") or {})
+        status_v = whs.get("status") or "unknown"
+        reason = whs.get("rejection_reason")
+        await _db.marketing_templates.update_one(
+            {"id": tid},
+            {"$set": {"approval_status": status_v, "rejection_reason": reason, "last_synced_at": _now_iso()}},
+        )
+        return {"provider": "twilio", "approval_status": status_v, "rejection_reason": reason}
+    if t.get("provider") == "meta" and t.get("provider_sid"):
+        waba_id = os.environ.get("META_WA_BUSINESS_ACCOUNT_ID")
+        token = os.environ.get("META_WA_ACCESS_TOKEN")
+        api_ver = os.environ.get("META_WA_API_VERSION") or "v21.0"
+        if not (waba_id and token):
+            raise HTTPException(status_code=400, detail="Meta credentials not configured")
+        url = f"https://graph.facebook.com/{api_ver}/{waba_id}/message_templates?name={t.get('name')}"
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            resp = await client.get(url, headers={"Authorization": f"Bearer {token}"})
+        if resp.status_code // 100 != 2:
+            raise HTTPException(status_code=502, detail=resp.text[:400])
+        arr = (resp.json() or {}).get("data") or []
+        if not arr:
+            return {"provider": "meta", "approval_status": "not_found"}
+        latest = arr[0]
+        st = (latest.get("status") or "PENDING").lower()
+        await _db.marketing_templates.update_one({"id": tid}, {"$set": {"approval_status": st, "last_synced_at": _now_iso()}})
+        return {"provider": "meta", "approval_status": st}
+    raise HTTPException(status_code=400, detail="Template not yet submitted to a provider")
+
+
+# Draft CRUD -- update existing endpoint set to also accept the richer TemplateCreateIn.
+
+
+@marketing_router.post("/salons/{salon_id}/marketing/templates/draft")
+async def create_template_draft(salon_id: str, body: TemplateCreateIn, request: Request):
+    """Create a draft template in our DB. It won't be sent to any provider
+    until /submit is called."""
+    user = await _require_admin(request)
+    _assert_salon_scope(user, salon_id)
+    # De-duplicate by (salon, name)
+    existing = await _db.marketing_templates.find_one({"salon_id": salon_id, "name": body.name})
+    if existing:
+        raise HTTPException(status_code=409, detail="Template name already exists for this salon")
+    doc = body.model_dump()
+    doc.update({
+        "id": str(uuid.uuid4()),
+        "salon_id": salon_id,
+        "provider": None,
+        "provider_sid": None,
+        "approval_status": "draft",
+        "created_at": _now_iso(),
+        "created_by": user.get("user_id"),
+    })
+    await _db.marketing_templates.insert_one(doc)
+    return _clean(doc)
+
+
+@marketing_router.delete("/salons/{salon_id}/marketing/templates/v2/{tid}")
+async def delete_template_v2(salon_id: str, tid: str, request: Request):
+    user = await _require_admin(request)
+    _assert_salon_scope(user, salon_id)
+    res = await _db.marketing_templates.delete_one({"id": tid, "salon_id": salon_id})
+    if res.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Template not found")
+    return {"deleted": True, "id": tid}
+
