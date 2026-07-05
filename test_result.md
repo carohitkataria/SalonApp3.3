@@ -3594,11 +3594,127 @@ metadata:
 
 test_plan:
   current_focus:
-    - "M-Reels — Customer-side vertical video feed at /reels"
-    - "M-Templates — WhatsApp templates hub with Twilio sync (Meta on standby)"
+    - "Bug — Salon manual booking Wallet payment option visibility & wiring"
+    - "Feature — Customer-side booking: replace inline chips with post-Confirm identity sheet (Send OTP / Continue as Guest)"
   stuck_tasks: []
   test_all: false
   test_priority: "high_first"
+
+  - task: "Bug — Salon manual booking Wallet payment option visibility & wiring"
+    implemented: true
+    working: "NA"
+    file: "/app/frontend/src/pages/EnhancedSalonDashboard.js"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: true
+    status_history:
+        - working: "NA"
+          agent: "main"
+          comment: |
+            User report: "While add booking by Salon: the Wallet option isn't visible."
+            Investigation: Wallet was already one of five payment mode buttons at
+            line 2944 (`['cash','upi','card','wallet','pay_later']`), so it was
+            technically rendered — but with generic text "Wallet (Membership)" it
+            was easy to miss, and no live wallet-balance context was shown.
+            Fix (frontend only):
+              1) `handleCustomerSelection` now pre-fetches wallet info via
+                 GET /api/salons/{salon_id}/customers/{phone}/wallet the moment a
+                 customer is selected in the dialog.
+              2) `handleOpenManualBooking` clears walletInfo on dialog open.
+              3) Payment Mode row now renders a green Wallet-available chip
+                 (balance + membership name) next to the "Payment Mode" label
+                 whenever the selected customer has an active membership.
+              4) The Wallet button itself:
+                 * Uses the Wallet lucide icon
+                 * Shows LIVE balance in the label ("Wallet · ₹1200") when the
+                   selected customer has a positive wallet balance
+                 * Is disabled + greyed out (with title="Customer has no active
+                   membership wallet") when a customer is selected but has no
+                   membership — previously indistinguishable from a valid state.
+            Backend: NO CHANGE — wallet booking backend was already verified in
+            the July-4 session (task "Salon manual booking: wallet payment_mode").
+            How to test in browser:
+              1) Login as admin/salon123.
+              2) Click "Add Booking" → dialog opens.
+              3) Mode "Select Existing Customer" → search a customer WITH an
+                 active membership (e.g. any customer whose row shows a wallet
+                 balance). Verify: green chip "Wallet available: ₹XYZ · <plan>"
+                 appears above the Payment Mode buttons, and the Wallet button
+                 label becomes "Wallet · ₹XYZ" with a wallet icon.
+              4) Search a customer WITHOUT a membership. Verify: Wallet button is
+                 rendered but disabled + greyed out; label falls back to
+                 "Wallet (Membership)".
+              5) In "Add New Customer" mode (ad-hoc), all five payment mode
+                 buttons must be visible (Wallet is enabled — backend will
+                 reject if the phone has no membership).
+              6) Confirming a booking with payment_mode=wallet for a member
+                 customer must still create the booking successfully (existing
+                 backend behaviour, do NOT re-test backend).
+
+  - task: "Feature — Customer-side booking: post-Confirm identity sheet (Send OTP / Continue as Guest)"
+    implemented: true
+    working: "NA"
+    file: "/app/frontend/src/pages/SinglePageBooking.js, /app/frontend/src/components/BookingIdentitySheet.js"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: true
+    status_history:
+        - working: "NA"
+          agent: "main"
+          comment: |
+            User ask: "Remove the book with guest or login chips from the customer
+            side payment/booking confirmation page. Once customer click on the
+            confirm booking, ask for mobile number with 2 options: Send OTP or
+            Continue as Guest (standard word from famous apps)."
+            Changes (frontend only, no backend):
+              A) Removed the inline "How would you like to book?" chooser cards
+                 (Book as Guest / Login to Book) from SinglePageBooking.js
+                 (previously lines 1297-1340).
+              B) Removed the inline guest identity card (previously lines
+                 1343-1395) that used to show once "Book as Guest" was chosen.
+              C) The sticky "Confirm Booking" button now:
+                 * If user IS logged in → submits directly (unchanged).
+                 * If user is NOT logged in → opens the BookingIdentitySheet
+                   bottom sheet directly (regardless of prior guest state).
+              D) Rewrote BookingIdentitySheet.js into a single-step form with:
+                 * A prominent 10-digit mobile input (+91 chip, autofocus, big text)
+                 * Full name input
+                 * Men / Women / Other pill selector
+                 * TWO CTAs:
+                    - **Send OTP** (primary gold button, disabled until phone valid) →
+                      closes sheet, opens the existing CustomerAuthModal with
+                      autoSubmitAfterLogin=true so the booking auto-completes
+                      after OTP verification.
+                    - **Continue as Guest** (secondary outline button, disabled
+                      until name+phone+gender valid) → sets bookingMode='guest'
+                      and calls handleSubmit → booking is placed with is_guest=true.
+                 * Footer copy explaining OTP benefits (history/wallet/member perks).
+              E) "Continue as Guest" is the standard wording used by BookMyShow,
+                 Amazon and IRCTC — most recognizable Indian pattern.
+            How to test:
+              1) Open a salon booking page as a logged-out user (open in incognito
+                 or clear localStorage). Route: /salons → pick a salon → /book/{salonId}.
+              2) Select 1+ services, a barber, a payment mode (cash / upi / card /
+                 pay_later — wallet requires membership).
+              3) Verify: NO inline "How would you like to book?" cards.
+                 NO inline guest details form.
+                 Only the Confirm Booking button at the bottom.
+              4) Tap "Confirm Booking". The BookingIdentitySheet slides up from the
+                 bottom.
+              5) Verify the sheet shows: mobile input (autofocused, +91 chip),
+                 full name, gender pills, and 2 buttons — "Send OTP" (gold) &
+                 "Continue as Guest" (outline).
+              6) Test invalid: phone <10 digits keeps both CTAs disabled;
+                 phone valid but name empty → Continue-as-Guest still disabled,
+                 Send-OTP enabled.
+              7) Fill valid name+phone+gender, tap **Continue as Guest**:
+                 booking is placed immediately (is_guest=true) and the confirmation
+                 page appears.
+              8) Repeat, tap **Send OTP**: the sheet closes, the existing
+                 CustomerAuthModal opens (OTP entry). Enter OTP → after successful
+                 login the booking auto-submits.
+              9) Verify a logged-in user tapping Confirm Booking does NOT see the
+                 sheet — it submits directly.
 
   - task: "M-Reels — Customer-side vertical video feed at /reels"
     implemented: true

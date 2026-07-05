@@ -1294,105 +1294,10 @@ export default function SinglePageBooking() {
             </div>
           </div>
 
-          {/* Guest vs Login choice — shown only when NOT signed in.
-              - 'guest': show name/mobile/gender form (no OTP). The booking is
-                tagged is_otp_verified_at_booking=false.
-              - 'login': open CustomerAuthModal (Password / OTP / Sign up).
-              Once `isUserLoggedIn` becomes true, this section disappears. */}
-          {!isUserLoggedIn && !bookingMode && (
-            <div className="bg-card border border-border rounded-xl p-4 space-y-3" data-testid="booking-mode-chooser">
-              <h3 className="text-sm font-semibold text-foreground">How would you like to book?</h3>
-              <motion.button
-                whileHover={{ scale: 1.01 }}
-                whileTap={{ scale: 0.99 }}
-                onClick={() => setBookingMode('guest')}
-                className="w-full p-4 rounded-xl border-2 border-border hover:border-gold bg-background text-left transition-all"
-                data-testid="book-as-guest-btn"
-              >
-                <div className="flex items-start gap-3">
-                  <div className="p-2.5 bg-purple-500/10 rounded-full">
-                    <Smartphone className="w-5 h-5 text-purple-600" />
-                  </div>
-                  <div className="flex-1">
-                    <p className="font-bold text-foreground">Book as Guest</p>
-                    <p className="text-xs text-muted-foreground mt-0.5">Quick booking with mobile, name & gender. No OTP needed.</p>
-                  </div>
-                </div>
-              </motion.button>
-              <motion.button
-                whileHover={{ scale: 1.01 }}
-                whileTap={{ scale: 0.99 }}
-                onClick={() => { setBookingMode('login'); setShowAuthModal(true); }}
-                className="w-full p-4 rounded-xl border-2 border-border hover:border-gold bg-background text-left transition-all"
-                data-testid="login-to-book-btn"
-              >
-                <div className="flex items-start gap-3">
-                  <div className="p-2.5 bg-gold/10 rounded-full">
-                    <User className="w-5 h-5 text-gold" />
-                  </div>
-                  <div className="flex-1">
-                    <p className="font-bold text-foreground">Login to Book</p>
-                    <p className="text-xs text-muted-foreground mt-0.5">Access booking history, wallet & member benefits.</p>
-                  </div>
-                </div>
-              </motion.button>
-            </div>
-          )}
-
-          {/* Guest identity form — only when 'guest' mode is selected. */}
-          {!isUserLoggedIn && bookingMode === 'guest' && (
-            <div className="bg-card border border-border rounded-xl p-4 space-y-3" data-testid="guest-identity-card">
-              <div className="flex items-center justify-between flex-wrap gap-2">
-                <h3 className="text-sm font-medium text-foreground">Your details</h3>
-                <button
-                  type="button"
-                  onClick={() => setBookingMode(null)}
-                  className="text-xs text-gold hover:underline"
-                  data-testid="guest-change-mode-btn"
-                >
-                  Change
-                </button>
-              </div>
-              <p className="text-xs text-muted-foreground -mt-1">
-                We only need a few details to confirm your slot. No OTP required to book.
-              </p>
-              <Input
-                value={guestName}
-                onChange={(e) => setGuestName(e.target.value)}
-                placeholder="Full name"
-                className="h-10"
-                data-testid="guest-name-input"
-              />
-              <div className="flex gap-2">
-                <span className="inline-flex items-center px-3 h-10 rounded-lg border border-border bg-background text-sm text-muted-foreground">+91</span>
-                <Input
-                  value={guestPhone}
-                  onChange={(e) => setGuestPhone(e.target.value.replace(/\D/g, '').slice(0, 10))}
-                  placeholder="10-digit mobile"
-                  inputMode="numeric"
-                  className="h-10 flex-1"
-                  data-testid="guest-phone-input"
-                />
-              </div>
-              <div className="flex gap-2 flex-wrap">
-                {['Men', 'Women', 'Other'].map((g) => (
-                  <button
-                    key={g}
-                    type="button"
-                    onClick={() => setGuestGender(g)}
-                    className={`px-4 py-2 rounded-full border-2 text-sm font-medium transition-all ${
-                      guestGender === g
-                        ? 'bg-gold text-black border-gold'
-                        : 'bg-background text-foreground border-border hover:border-gold/50'
-                    }`}
-                    data-testid={`guest-gender-${g.toLowerCase()}`}
-                  >
-                    {g}
-                  </button>
-                ))}
-              </div>
-            </div>
-          )}
+          {/* Login/Guest choice is now shown as a bottom-sheet AFTER the user
+              taps "Confirm Booking" (see BookingIdentitySheet below).
+              The inline chooser + guest form used to live here — removed
+              on purpose to give a cleaner payment page. */}
 
           {/* Login modal trigger — when 'login' mode but modal closed. */}
           {!isUserLoggedIn && bookingMode === 'login' && !showAuthModal && (
@@ -1657,14 +1562,9 @@ export default function SinglePageBooking() {
               <Button
                 type="button"
                 onClick={() => {
-                  // Item 10 — When user isn't logged in and hasn't completed guest details,
-                  // open the polished bottom sheet instead of relying on the inline cards.
-                  const guestReady =
-                    (guestName || '').trim().length >= 2 &&
-                    (guestPhone || '').length === 10 &&
-                    !!guestGender;
+                  // Logged-in users go straight through. Everyone else sees
+                  // the identity sheet with "Send OTP" or "Continue as Guest".
                   if (isUserLoggedIn) { handleSubmit(); return; }
-                  if (bookingMode === 'guest' && guestReady) { handleSubmit(); return; }
                   setShowIdentitySheet(true);
                 }}
                 disabled={loading || !paymentMode || (paymentMode === 'wallet' && !walletSufficient)}

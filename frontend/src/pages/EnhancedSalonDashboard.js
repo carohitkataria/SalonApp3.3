@@ -1010,6 +1010,7 @@ export default function EnhancedSalonDashboard() {
     setBookingMode('existing');
     setCustomerSearchQuery('');
     setSelectedCustomer(null);
+    setWalletInfo(null);
     setManualSelectedCategory('All');
     setManualBookingForm({
       customer_name: '',
@@ -1058,7 +1059,7 @@ export default function EnhancedSalonDashboard() {
     }
   };
 
-  const handleCustomerSelection = (customer) => {
+  const handleCustomerSelection = async (customer) => {
     setSelectedCustomer(customer);
     setManualBookingForm(prev => ({
       ...prev,
@@ -1066,6 +1067,19 @@ export default function EnhancedSalonDashboard() {
       phone: customer.phone,
       gender: customer.gender || 'Men'
     }));
+    // Pre-fetch wallet balance so the Wallet payment button shows the amount
+    // and gets enabled/disabled correctly.
+    try {
+      const phoneQ = String(customer.phone || '').replace(/^\+91/, '').replace(/\D/g, '');
+      if (phoneQ) {
+        const res = await axios.get(`${API}/salons/${salonId}/customers/${phoneQ}/wallet`);
+        setWalletInfo(res.data || null);
+      } else {
+        setWalletInfo(null);
+      }
+    } catch (err) {
+      setWalletInfo(null);
+    }
   };
 
   const toggleManualServiceSelection = (serviceId) => {
@@ -2939,23 +2953,44 @@ export default function EnhancedSalonDashboard() {
 
           {/* Payment Mode */}
           <div className="mb-4">
-            <Label>Payment Mode</Label>
+            <div className="flex items-center justify-between flex-wrap gap-2">
+              <Label>Payment Mode</Label>
+              {walletInfo?.has_membership && (
+                <span className="text-[11px] px-2 py-0.5 rounded-full border border-emerald-500/50 text-emerald-600 bg-emerald-500/5">
+                  Wallet available: ₹{Number(walletInfo.wallet_balance || 0).toFixed(0)} · {walletInfo.membership_name}
+                </span>
+              )}
+            </div>
             <div className="flex flex-wrap gap-2 mt-2">
-              {['cash', 'upi', 'card', 'wallet', 'pay_later'].map((mode) => (
-                <button
-                  key={mode}
-                  type="button"
-                  onClick={() => setManualBookingForm(prev => ({ ...prev, payment_mode: mode }))}
-                  data-testid={`manual-booking-payment-${mode}`}
-                  className={`px-3 py-2 rounded-lg border text-sm transition-colors capitalize ${
-                    manualBookingForm.payment_mode === mode
-                      ? 'bg-gold text-black border-gold font-semibold'
-                      : 'bg-card border-border hover:bg-muted'
-                  }`}
-                >
-                  {mode === 'pay_later' ? 'Pay Later at Salon' : mode === 'wallet' ? 'Wallet (Membership)' : mode.toUpperCase()}
-                </button>
-              ))}
+              {['cash', 'upi', 'card', 'wallet', 'pay_later'].map((mode) => {
+                const isWallet = mode === 'wallet';
+                const walletUsable = !!walletInfo?.has_membership && Number(walletInfo?.wallet_balance || 0) > 0;
+                const disabled = isWallet && bookingMode === 'existing' && selectedCustomer && !walletUsable;
+                return (
+                  <button
+                    key={mode}
+                    type="button"
+                    onClick={() => !disabled && setManualBookingForm(prev => ({ ...prev, payment_mode: mode }))}
+                    data-testid={`manual-booking-payment-${mode}`}
+                    disabled={disabled}
+                    className={`px-3 py-2 rounded-lg border text-sm transition-colors capitalize inline-flex items-center gap-1.5 ${
+                      manualBookingForm.payment_mode === mode
+                        ? 'bg-gold text-black border-gold font-semibold'
+                        : disabled
+                          ? 'bg-muted/40 border-border text-muted-foreground cursor-not-allowed opacity-60'
+                          : 'bg-card border-border hover:bg-muted'
+                    }`}
+                    title={disabled ? 'Customer has no active membership wallet' : ''}
+                  >
+                    {isWallet && <Wallet className="w-4 h-4" />}
+                    {mode === 'pay_later'
+                      ? 'Pay Later at Salon'
+                      : isWallet
+                        ? (walletUsable ? `Wallet · ₹${Number(walletInfo.wallet_balance).toFixed(0)}` : 'Wallet (Membership)')
+                        : mode.toUpperCase()}
+                  </button>
+                );
+              })}
             </div>
             {manualBookingForm.payment_mode === 'wallet' && (
               <p className="text-[11px] text-amber-600 dark:text-amber-400 mt-1.5">
