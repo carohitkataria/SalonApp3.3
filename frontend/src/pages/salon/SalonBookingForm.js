@@ -76,16 +76,29 @@ export default function SalonBookingForm({
     try {
       const [bRes, sRes, mRes, cRes] = await Promise.all([
         axios.get(`${API}/salons/${salonId}/barbers`, { headers: getSalonAuthHeaders() }),
-        axios.get(`${API}/salons/${salonId}/services/enabled`).catch(() =>
-          axios.get(`${API}/services`, { headers: getSalonAuthHeaders() })
-        ),
+        (async () => {
+          try {
+            const r = await axios.get(`${API}/salons/${salonId}/services/enabled`);
+            const arr = Array.isArray(r.data) ? r.data : (r.data?.services || r.data?.enabled_services || []);
+            if (arr && arr.length > 0) return { data: arr };
+          } catch (e) { /* fall through */ }
+          try {
+            const r2 = await axios.get(`${API}/services`);
+            return { data: r2.data || [] };
+          } catch (e2) {
+            return { data: [] };
+          }
+        })(),
         axios.get(`${API}/salons/${salonId}/membership-plans`, { headers: getSalonAuthHeaders() })
           .catch(() => ({ data: { plans: [] } })),
         axios.get(`${API}/salons/${salonId}/customers`, { headers: getSalonAuthHeaders() })
           .catch(() => ({ data: { customers: [] } })),
       ]);
       setBarbers(bRes.data?.barbers || bRes.data || []);
-      const svcData = sRes.data?.services || sRes.data?.enabled_services || sRes.data || [];
+      const svcRaw = sRes.data;
+      const svcData = Array.isArray(svcRaw)
+        ? svcRaw
+        : (svcRaw?.services || svcRaw?.enabled_services || []);
       setServices(Array.isArray(svcData) ? svcData : []);
       setMembershipPlans(mRes.data?.plans || mRes.data || []);
       setCustomers(cRes.data?.customers || []);
