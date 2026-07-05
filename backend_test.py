@@ -1,1143 +1,600 @@
+#!/usr/bin/env python3
 """
-backend_test.py — Comprehensive backend testing for SalonHub Marketing Module (M0-M3)
-
-Tests:
-  - Marketing M0: Meta WhatsApp scaffolding + channels + webhook (5 tests)
-  - Marketing M1: Customer master fields (wedding_anniversary/spouse/important_dates) (4 tests)
-  - Marketing M2: Segments CRUD + preview (7 tests)
-  - Marketing M3: Salon Coupons CRUD + publish + validate + public list (13 tests)
-  - can_access_marketing permission persistence (5 tests)
-
-Total: 34 tests
+Phase 1b Regression Test Suite
+Tests home-kpis date_mode extensions and direct-invoice/salon-booking with products
 """
 
-import httpx
+import requests
 import json
-import random
-import string
-from datetime import datetime, timezone
+from datetime import datetime, timedelta
+import os
 
-# Configuration
-BASE_URL = "https://salon-dashboard-pro-6.preview.emergentagent.com/api"
-ADMIN_CREDENTIALS = {"identifier": "admin", "password": "salon123"}
-EXPECTED_SALON_ID = "f78671f8-621a-42d9-a055-097ba21c0bbf"
+# Load environment
+BACKEND_URL = os.getenv('REACT_APP_BACKEND_URL', 'https://salon-dashboard-pro-6.preview.emergentagent.com')
+BASE_URL = f"{BACKEND_URL}/api"
 
-# Test state
+# Test credentials from /app/memory/test_credentials.md
+ADMIN_LOGIN = "admin"
+ADMIN_PASSWORD = "salon123"
+SALON_ID = "0464ce08-74d1-4351-abd0-5bde9eecc7a6"
+
+# Global variables
 admin_token = None
-salon_id = None
-test_customer_phone = None
-test_segment_id = None
-test_coupon_id = None
-test_staff_user_id = None
-test_staff_token = None
+test_inventory_id = None
+initial_stock = None
 
+def log_test(test_name, status, details=""):
+    """Log test results"""
+    symbol = "✅" if status == "PASS" else "❌"
+    print(f"\n{symbol} {test_name}: {status}")
+    if details:
+        print(f"   {details}")
 
-def random_string(length=8):
-    """Generate random string for unique test data"""
-    return ''.join(random.choices(string.ascii_lowercase + string.digits, k=length))
-
-
-def print_test(test_num, description):
-    """Print test header"""
-    print(f"\n{'='*80}")
-    print(f"TEST {test_num}: {description}")
-    print('='*80)
-
-
-def print_result(passed, message=""):
-    """Print test result"""
-    status = "✅ PASS" if passed else "❌ FAIL"
-    print(f"{status}: {message}")
-    return passed
-
-
-async def admin_login():
-    """Login as salon admin and get token"""
-    global admin_token, salon_id
+def login_admin():
+    """Login as admin and get token"""
+    global admin_token
+    print("\n" + "="*80)
+    print("PHASE 1B REGRESSION TEST - AUTHENTICATION")
+    print("="*80)
     
-    print_test("SETUP", "Admin Login")
+    url = f"{BASE_URL}/salon/users/login"
+    payload = {
+        "identifier": ADMIN_LOGIN,
+        "password": ADMIN_PASSWORD
+    }
     
-    async with httpx.AsyncClient(timeout=30.0) as client:
-        response = await client.post(
-            f"{BASE_URL}/salon/users/login",
-            json=ADMIN_CREDENTIALS
-        )
+    try:
+        response = requests.post(url, json=payload)
+        print(f"Login URL: {url}")
+        print(f"Status: {response.status_code}")
         
-        if response.status_code != 200:
-            print_result(False, f"Login failed: {response.status_code} - {response.text}")
+        if response.status_code == 200:
+            data = response.json()
+            admin_token = data.get('access_token')
+            salon_id = data.get('salon_id')
+            log_test("Admin Login", "PASS", f"Token obtained, salon_id: {salon_id}")
+            return True
+        else:
+            log_test("Admin Login", "FAIL", f"Status {response.status_code}: {response.text}")
             return False
+    except Exception as e:
+        log_test("Admin Login", "FAIL", f"Exception: {str(e)}")
+        return False
+
+def get_auth_headers():
+    """Get authorization headers"""
+    return {
+        "Authorization": f"Bearer {admin_token}",
+        "Content-Type": "application/json"
+    }
+
+def get_inventory_items():
+    """Helper to get inventory items from API"""
+    try:
+        inv_url = f"{BASE_URL}/salon/inventory"
+        inv_response = requests.get(inv_url, headers=get_auth_headers())
+        if inv_response.status_code == 200:
+            data = inv_response.json()
+            return data.get('inventory_items', []) if isinstance(data, dict) else data
+    except:
+        pass
+    return []
+
+def get_or_create_inventory_item():
+    """Get existing inventory item or create a test one"""
+    global test_inventory_id, initial_stock
+    
+    print("\n" + "="*80)
+    print("INVENTORY SETUP")
+    print("="*80)
+    
+    # Try to get existing inventory
+    url = f"{BASE_URL}/salon/inventory"
+    try:
+        response = requests.get(url, headers=get_auth_headers())
+        print(f"GET {url}")
+        print(f"Status: {response.status_code}")
         
-        data = response.json()
-        admin_token = data.get("access_token")
-        salon_id = data.get("salon_id")
+        if response.status_code == 200:
+            data = response.json()
+            items = data.get('inventory_items', []) if isinstance(data, dict) else data
+            if items and len(items) > 0:
+                item = items[0]
+                test_inventory_id = item.get('id')
+                initial_stock = item.get('stock_quantity', 0)
+                log_test("Get Inventory", "PASS", f"Found item: {item.get('name')}, stock: {initial_stock}, id: {test_inventory_id}")
+                return True
         
-        if not admin_token or not salon_id:
-            print_result(False, f"Missing token or salon_id in response: {data}")
+        # Create a test inventory item
+        print("\nNo inventory found, creating test item...")
+        create_url = f"{BASE_URL}/salon/inventory"
+        payload = {
+            "name": "Test Shampoo Phase1b",
+            "category": "General",
+            "purchase_price": 100,
+            "retail_price": 250,
+            "stock_quantity": 50,
+            "sku_code": "TEST-PHASE1B-001"
+        }
+        
+        response = requests.post(create_url, json=payload, headers=get_auth_headers())
+        print(f"POST {create_url}")
+        print(f"Status: {response.status_code}")
+        
+        if response.status_code == 200:
+            item = response.json()
+            test_inventory_id = item.get('id')
+            initial_stock = item.get('stock_quantity', 50)
+            log_test("Create Inventory", "PASS", f"Created item: {item.get('name')}, stock: {initial_stock}, id: {test_inventory_id}")
+            return True
+        else:
+            log_test("Create Inventory", "FAIL", f"Status {response.status_code}: {response.text}")
             return False
-        
-        print_result(True, f"Logged in successfully. Salon ID: {salon_id}")
-        return True
+            
+    except Exception as e:
+        log_test("Inventory Setup", "FAIL", f"Exception: {str(e)}")
+        return False
 
-
-# ============================================================================
-# Marketing M0 — Meta WhatsApp scaffolding + channels + webhook
-# ============================================================================
-
-async def test_m0_1_ping_with_auth():
-    """M0-1: GET /api/salons/{id}/marketing/ping with auth → 200"""
-    print_test("M0-1", "Marketing ping endpoint with authentication")
+def test_home_kpis_date_modes():
+    """Test 1: GET /api/salons/{salon_id}/home-kpis with date_mode extensions"""
+    print("\n" + "="*80)
+    print("TEST 1: GET /api/salons/{salon_id}/home-kpis — date_mode extensions")
+    print("="*80)
     
-    async with httpx.AsyncClient(timeout=30.0) as client:
-        response = await client.get(
-            f"{BASE_URL}/salons/{salon_id}/marketing/ping",
-            headers={"Authorization": f"Bearer {admin_token}"}
-        )
-        
-        if response.status_code != 200:
-            return print_result(False, f"Expected 200, got {response.status_code}: {response.text}")
-        
-        data = response.json()
-        if not data.get("ok") or data.get("module") != "marketing":
-            return print_result(False, f"Invalid response structure: {data}")
-        
-        return print_result(True, f"Ping successful: {data}")
-
-
-async def test_m0_2_channels_with_auth():
-    """M0-2: GET /api/salons/{id}/marketing/channels with auth → 200"""
-    print_test("M0-2", "Marketing channels endpoint with authentication")
+    base_url = f"{BASE_URL}/salons/{SALON_ID}/home-kpis"
     
-    async with httpx.AsyncClient(timeout=30.0) as client:
-        response = await client.get(
-            f"{BASE_URL}/salons/{salon_id}/marketing/channels",
-            headers={"Authorization": f"Bearer {admin_token}"}
-        )
-        
-        if response.status_code != 200:
-            return print_result(False, f"Expected 200, got {response.status_code}: {response.text}")
-        
-        data = response.json()
-        if "active_provider" not in data or "channels" not in data:
-            return print_result(False, f"Missing required fields: {data}")
-        
-        # Check for Twilio channel
-        channels = data.get("channels", [])
-        if not channels:
-            return print_result(False, "No channels returned")
-        
-        twilio_channel = next((c for c in channels if c.get("provider") == "whatsapp_twilio"), None)
-        if not twilio_channel:
-            return print_result(False, f"No Twilio WhatsApp channel found: {channels}")
-        
-        return print_result(True, f"Channels retrieved: {data}")
-
-
-async def test_m0_3_webhook_verify_wrong_token():
-    """M0-3: GET /api/webhooks/whatsapp with wrong verify token → 403"""
-    print_test("M0-3", "WhatsApp webhook verification with wrong token")
+    # Calculate dates
+    today = datetime.now().strftime('%Y-%m-%d')
+    yesterday = (datetime.now() - timedelta(days=1)).strftime('%Y-%m-%d')
+    three_days_ago = (datetime.now() - timedelta(days=3)).strftime('%Y-%m-%d')
     
-    async with httpx.AsyncClient(timeout=30.0) as client:
-        response = await client.get(
-            f"{BASE_URL}/webhooks/whatsapp",
-            params={
-                "hub.mode": "subscribe",
-                "hub.verify_token": "WRONG_TOKEN",
-                "hub.challenge": "test_challenge_123"
+    test_cases = [
+        {
+            "name": "1a) date_mode=today (default)",
+            "params": {},
+            "expected_date_basis": today
+        },
+        {
+            "name": "1b) date_mode=yesterday",
+            "params": {"date_mode": "yesterday"},
+            "expected_date_basis": yesterday
+        },
+        {
+            "name": "1c) date_mode=range with date_from & date_to",
+            "params": {
+                "date_mode": "range",
+                "date_from": three_days_ago,
+                "date_to": today
+            },
+            "expected_date_basis": today
+        },
+        {
+            "name": "1d) date_mode=range without params (defaults to today)",
+            "params": {"date_mode": "range"},
+            "expected_date_basis": today
+        },
+        {
+            "name": "1e) date_mode=week",
+            "params": {"date_mode": "week"},
+            "expected_date_basis": None  # Just check 200
+        }
+    ]
+    
+    for test_case in test_cases:
+        try:
+            response = requests.get(base_url, params=test_case["params"], headers=get_auth_headers())
+            
+            if response.status_code == 200:
+                data = response.json()
+                
+                # Check required top-level keys
+                required_keys = ['primary', 'secondary', 'staff_leaderboard', 'reviews', 
+                               'targets', 'revenue_7d', 'payment_mix', 'top_services', 
+                               'busy_hours', 'date_basis']
+                
+                missing_keys = [key for key in required_keys if key not in data]
+                
+                if missing_keys:
+                    log_test(test_case["name"], "FAIL", f"Missing keys: {missing_keys}")
+                else:
+                    # Check date_basis if expected
+                    if test_case["expected_date_basis"]:
+                        actual_date = data.get('date_basis')
+                        if actual_date == test_case["expected_date_basis"]:
+                            log_test(test_case["name"], "PASS", f"date_basis={actual_date}, all keys present")
+                        else:
+                            log_test(test_case["name"], "FAIL", f"Expected date_basis={test_case['expected_date_basis']}, got {actual_date}")
+                    else:
+                        log_test(test_case["name"], "PASS", f"Status 200, all keys present")
+            else:
+                log_test(test_case["name"], "FAIL", f"Status {response.status_code}: {response.text[:200]}")
+                
+        except Exception as e:
+            log_test(test_case["name"], "FAIL", f"Exception: {str(e)}")
+
+def test_direct_invoice_with_products():
+    """Test 2: POST /api/salons/{salon_id}/direct-invoice with products"""
+    print("\n" + "="*80)
+    print("TEST 2: POST /api/salons/{salon_id}/direct-invoice — with products")
+    print("="*80)
+    
+    url = f"{BASE_URL}/salons/{SALON_ID}/direct-invoice"
+    
+    # Get a service ID first
+    services_url = f"{BASE_URL}/salons/{SALON_ID}/services/enabled"
+    try:
+        response = requests.get(services_url, headers=get_auth_headers())
+        services = response.json() if response.status_code == 200 else []
+        service_id = services[0]['id'] if services else "cf2c81bc-dd05-4c1b-a737-267b25ea801d"
+    except:
+        service_id = "cf2c81bc-dd05-4c1b-a737-267b25ea801d"
+    
+    # Test 2a: Services only (regression)
+    print("\n--- Test 2a: Services only (regression from Phase 1) ---")
+    payload_services_only = {
+        "customer_name": "Services Only Test",
+        "phone": "9876500010",
+        "gender": "Men",
+        "barber_id": None,
+        "selected_services": [
+            {
+                "service_id": service_id,
+                "service_name": "Test Haircut",
+                "base_price": 300,
+                "default_duration": 30
             }
-        )
-        
-        if response.status_code != 403:
-            return print_result(False, f"Expected 403, got {response.status_code}: {response.text}")
-        
-        return print_result(True, "Webhook verification correctly rejected wrong token")
-
-
-async def test_m0_4_webhook_post_empty():
-    """M0-4: POST /api/webhooks/whatsapp with empty body → 200"""
-    print_test("M0-4", "WhatsApp webhook POST with empty body")
+        ],
+        "selected_products": [],
+        "payment_mode": "cash"
+    }
     
-    async with httpx.AsyncClient(timeout=30.0) as client:
-        response = await client.post(
-            f"{BASE_URL}/webhooks/whatsapp",
-            json={}
-        )
-        
-        if response.status_code != 200:
-            return print_result(False, f"Expected 200, got {response.status_code}: {response.text}")
-        
-        data = response.json()
-        if not data.get("received"):
-            return print_result(False, f"Invalid response: {data}")
-        
-        return print_result(True, f"Webhook POST accepted: {data}")
-
-
-async def test_m0_5_endpoints_without_auth():
-    """M0-5: Marketing endpoints without auth → 403"""
-    print_test("M0-5", "Marketing endpoints without authentication")
+    try:
+        response = requests.post(url, json=payload_services_only, headers=get_auth_headers())
+        if response.status_code == 200:
+            data = response.json()
+            totals = data.get('totals', {})
+            subtotal = totals.get('subtotal', 0)
+            grand_total = totals.get('grand_total', 0)
+            log_test("2a) Services only", "PASS", f"Status 200, subtotal={subtotal}, grand_total={grand_total}")
+        else:
+            log_test("2a) Services only", "FAIL", f"Status {response.status_code}: {response.text[:200]}")
+    except Exception as e:
+        log_test("2a) Services only", "FAIL", f"Exception: {str(e)}")
     
-    async with httpx.AsyncClient(timeout=30.0) as client:
-        # Test ping without auth
-        response1 = await client.get(f"{BASE_URL}/salons/{salon_id}/marketing/ping")
-        
-        # Test channels without auth
-        response2 = await client.get(f"{BASE_URL}/salons/{salon_id}/marketing/channels")
-        
-        if response1.status_code != 403:
-            return print_result(False, f"Ping without auth: expected 403, got {response1.status_code}")
-        
-        if response2.status_code != 403:
-            return print_result(False, f"Channels without auth: expected 403, got {response2.status_code}")
-        
-        return print_result(True, "Both endpoints correctly require authentication")
-
-
-# ============================================================================
-# Marketing M1 — Customer master fields
-# ============================================================================
-
-async def test_m1_1_create_customer():
-    """M1-1: Create fresh customer via POST /api/user/login"""
-    global test_customer_phone
-    
-    print_test("M1-1", "Create fresh test customer")
-    
-    # Generate unique 10-digit phone
-    test_customer_phone = f"98765{random.randint(10000, 99999)}"
-    
-    async with httpx.AsyncClient(timeout=30.0) as client:
-        response = await client.post(
-            f"{BASE_URL}/user/login",
-            json={
-                "name": f"Test Customer {random_string(4)}",
-                "phone": test_customer_phone,
-                "gender": "Male"
+    # Test 2b: Products only (no services) - NEW in Phase 1b
+    print("\n--- Test 2b: Products only (no selected_services) ---")
+    payload_products_only = {
+        "customer_name": "Product Only",
+        "phone": "9876500001",
+        "gender": "Men",
+        "barber_id": None,
+        "selected_services": [],
+        "selected_products": [
+            {
+                "product_id": test_inventory_id or "dummy-id",
+                "name": "Test Shampoo",
+                "qty": 2,
+                "unit_price": 250
             }
-        )
-        
-        if response.status_code != 200:
-            return print_result(False, f"Customer creation failed: {response.status_code} - {response.text}")
-        
-        data = response.json()
-        if not data.get("access_token"):
-            return print_result(False, f"No access token in response: {data}")
-        
-        return print_result(True, f"Customer created with phone: {test_customer_phone}")
-
-
-async def test_m1_2_get_customer_new_fields():
-    """M1-2: GET /api/users/by-phone/{phone} → new fields present (initially null)"""
-    print_test("M1-2", "Get customer profile - verify new marketing fields")
+        ],
+        "payment_mode": "cash"
+    }
     
-    async with httpx.AsyncClient(timeout=30.0) as client:
-        response = await client.get(f"{BASE_URL}/users/by-phone/{test_customer_phone}")
-        
-        if response.status_code != 200:
-            return print_result(False, f"Expected 200, got {response.status_code}: {response.text}")
-        
-        data = response.json()
-        
-        # Check for new marketing fields
-        required_fields = ["wedding_anniversary", "spouse_name", "spouse_date_of_birth", "important_dates"]
-        missing_fields = [f for f in required_fields if f not in data]
-        
-        if missing_fields:
-            return print_result(False, f"Missing fields: {missing_fields}. Response: {data}")
-        
-        return print_result(True, f"All marketing fields present: {required_fields}")
-
-
-async def test_m1_3_update_customer_marketing_fields():
-    """M1-3: PUT /api/users/by-phone/{phone} with marketing fields → 200"""
-    print_test("M1-3", "Update customer marketing fields")
+    try:
+        response = requests.post(url, json=payload_products_only, headers=get_auth_headers())
+        if response.status_code == 200:
+            data = response.json()
+            totals = data.get('totals', {})
+            subtotal = totals.get('subtotal', 0)
+            grand_total = totals.get('grand_total', 0)
+            token_id = data.get('token_id')
+            
+            # Verify totals
+            if subtotal >= 500 and grand_total >= 500:
+                log_test("2b) Products only - totals", "PASS", f"subtotal={subtotal}, grand_total={grand_total}")
+            else:
+                log_test("2b) Products only - totals", "FAIL", f"Expected >=500, got subtotal={subtotal}, grand_total={grand_total}")
+            
+            # Verify token has selected_products
+            if token_id:
+                token_url = f"{BASE_URL}/tokens/{token_id}"
+                token_response = requests.get(token_url, headers=get_auth_headers())
+                if token_response.status_code == 200:
+                    token_data = token_response.json()
+                    selected_products = token_data.get('selected_products', [])
+                    if len(selected_products) == 1 and selected_products[0].get('qty') == 2:
+                        log_test("2b) Products only - token verification", "PASS", f"Token has selected_products array with qty=2")
+                    else:
+                        log_test("2b) Products only - token verification", "FAIL", f"Token selected_products: {selected_products}")
+        else:
+            log_test("2b) Products only", "FAIL", f"Status {response.status_code}: {response.text[:200]}")
+    except Exception as e:
+        log_test("2b) Products only", "FAIL", f"Exception: {str(e)}")
     
-    update_data = {
-        "wedding_anniversary": "2018-11-14",
-        "spouse_name": "Priya",
-        "spouse_date_of_birth": "1993-06-04",
-        "important_dates": [
-            {"label": "Kid Bday", "date": "2020-01-05"}
+    # Test 2c: Services + Products together
+    print("\n--- Test 2c: Services + Products together ---")
+    
+    # Get current stock before
+    stock_before = None
+    if test_inventory_id:
+        items = get_inventory_items()
+        for item in items:
+            if item.get('id') == test_inventory_id:
+                stock_before = item.get('stock_quantity')
+                break
+    
+    payload_both = {
+        "customer_name": "Services Plus Products",
+        "phone": "9876500002",
+        "gender": "Women",
+        "barber_id": None,
+        "selected_services": [
+            {
+                "service_id": service_id,
+                "service_name": "Test Haircut",
+                "base_price": 300,
+                "default_duration": 30
+            }
+        ],
+        "selected_products": [
+            {
+                "product_id": test_inventory_id or "dummy-id",
+                "name": "Test Shampoo",
+                "qty": 1,
+                "unit_price": 250
+            }
+        ],
+        "payment_mode": "cash"
+    }
+    
+    try:
+        response = requests.post(url, json=payload_both, headers=get_auth_headers())
+        if response.status_code == 200:
+            data = response.json()
+            totals = data.get('totals', {})
+            subtotal = totals.get('subtotal', 0)
+            grand_total = totals.get('grand_total', 0)
+            
+            # Verify totals include both services and products
+            expected_min = 300 + 250  # service + product
+            if subtotal >= expected_min:
+                log_test("2c) Services + Products - totals", "PASS", f"subtotal={subtotal} (includes services+products)")
+            else:
+                log_test("2c) Services + Products - totals", "FAIL", f"Expected >={expected_min}, got {subtotal}")
+            
+            # Check stock decrement
+            if test_inventory_id and stock_before is not None:
+                items = get_inventory_items()
+                for item in items:
+                    if item.get('id') == test_inventory_id:
+                        stock_after = item.get('stock_quantity')
+                        if stock_after == stock_before - 1:
+                            log_test("2c) Inventory decrement", "PASS", f"Stock: {stock_before} → {stock_after}")
+                        else:
+                            log_test("2c) Inventory decrement", "FAIL", f"Expected {stock_before - 1}, got {stock_after}")
+                        break
+        else:
+            log_test("2c) Services + Products", "FAIL", f"Status {response.status_code}: {response.text[:200]}")
+    except Exception as e:
+        log_test("2c) Services + Products", "FAIL", f"Exception: {str(e)}")
+    
+    # Test 2d: Missing both services and products
+    print("\n--- Test 2d: Missing both services and products → 400 ---")
+    payload_empty = {
+        "customer_name": "Empty Order",
+        "phone": "9876500003",
+        "gender": "Men",
+        "barber_id": None,
+        "selected_services": [],
+        "selected_products": [],
+        "payment_mode": "cash"
+    }
+    
+    try:
+        response = requests.post(url, json=payload_empty, headers=get_auth_headers())
+        if response.status_code == 400:
+            error_msg = response.json().get('detail', '')
+            if 'service' in error_msg.lower() or 'product' in error_msg.lower():
+                log_test("2d) Missing both → 400", "PASS", f"Correctly rejected: {error_msg}")
+            else:
+                log_test("2d) Missing both → 400", "PARTIAL", f"Got 400 but message unclear: {error_msg}")
+        else:
+            log_test("2d) Missing both → 400", "FAIL", f"Expected 400, got {response.status_code}")
+    except Exception as e:
+        log_test("2d) Missing both → 400", "FAIL", f"Exception: {str(e)}")
+    
+    # Test 2e: Wallet payment without phone
+    print("\n--- Test 2e: Wallet payment without phone ---")
+    payload_wallet_no_phone = {
+        "customer_name": "Walk-in Wallet",
+        "phone": "",
+        "gender": "Men",
+        "barber_id": None,
+        "selected_services": [
+            {
+                "service_id": service_id,
+                "service_name": "Test Haircut",
+                "base_price": 300,
+                "default_duration": 30
+            }
+        ],
+        "selected_products": [],
+        "payment_mode": "wallet"
+    }
+    
+    try:
+        response = requests.post(url, json=payload_wallet_no_phone, headers=get_auth_headers())
+        # Should either work (walk-in) or error 400 (membership required)
+        if response.status_code in [200, 400]:
+            log_test("2e) Wallet without phone", "PASS", f"Status {response.status_code} (expected behavior)")
+        else:
+            log_test("2e) Wallet without phone", "FAIL", f"Unexpected status {response.status_code}")
+    except Exception as e:
+        log_test("2e) Wallet without phone", "FAIL", f"Exception: {str(e)}")
+
+def test_salon_booking_with_products():
+    """Test 3: POST /api/salons/{salon_id}/salon-booking with products"""
+    print("\n" + "="*80)
+    print("TEST 3: POST /api/salons/{salon_id}/salon-booking — with products (regression)")
+    print("="*80)
+    
+    url = f"{BASE_URL}/salons/{SALON_ID}/salon-booking"
+    
+    # Get a service ID
+    services_url = f"{BASE_URL}/salons/{SALON_ID}/services/enabled"
+    try:
+        response = requests.get(services_url, headers=get_auth_headers())
+        services = response.json() if response.status_code == 200 else []
+        service_id = services[0]['id'] if services else "cf2c81bc-dd05-4c1b-a737-267b25ea801d"
+    except:
+        service_id = "cf2c81bc-dd05-4c1b-a737-267b25ea801d"
+    
+    # Get barber ID
+    barbers_url = f"{BASE_URL}/salons/{SALON_ID}/barbers"
+    try:
+        response = requests.get(barbers_url, headers=get_auth_headers())
+        barbers = response.json() if response.status_code == 200 else []
+        barber_id = barbers[0]['id'] if barbers else "a8c9c773-0c00-4f4b-903c-2a94b77222c4"
+    except:
+        barber_id = "a8c9c773-0c00-4f4b-903c-2a94b77222c4"
+    
+    # Test 3a: Pure service booking (regression)
+    print("\n--- Test 3a: Pure service booking (regression) ---")
+    payload_service = {
+        "customer_name": "Service Booking",
+        "phone": "9876500020",
+        "gender": "Men",
+        "barber_id": barber_id,
+        "date": datetime.now().strftime('%Y-%m-%d'),
+        "shift": "Morning",
+        "selected_services": [
+            {
+                "service_id": service_id,
+                "service_name": "Test Haircut",
+                "base_price": 300,
+                "default_duration": 30
+            }
+        ],
+        "selected_products": []
+    }
+    
+    try:
+        response = requests.post(url, json=payload_service, headers=get_auth_headers())
+        if response.status_code == 200:
+            data = response.json()
+            token_id = data.get('token_id')
+            log_test("3a) Pure service booking", "PASS", f"Status 200, token_id={token_id}")
+        else:
+            log_test("3a) Pure service booking", "FAIL", f"Status {response.status_code}: {response.text[:200]}")
+    except Exception as e:
+        log_test("3a) Pure service booking", "FAIL", f"Exception: {str(e)}")
+    
+    # Test 3b: Services + Products
+    print("\n--- Test 3b: Services + Products ---")
+    
+    # Get stock before
+    stock_before = None
+    if test_inventory_id:
+        items = get_inventory_items()
+        for item in items:
+            if item.get('id') == test_inventory_id:
+                stock_before = item.get('stock_quantity')
+                break
+    
+    payload_both = {
+        "customer_name": "Booking with Products",
+        "phone": "9876500021",
+        "gender": "Women",
+        "barber_id": barber_id,
+        "date": datetime.now().strftime('%Y-%m-%d'),
+        "shift": "Morning",
+        "selected_services": [
+            {
+                "service_id": service_id,
+                "service_name": "Test Haircut",
+                "base_price": 300,
+                "default_duration": 30
+            }
+        ],
+        "selected_products": [
+            {
+                "product_id": test_inventory_id or "dummy-id",
+                "name": "Test Shampoo",
+                "qty": 2,
+                "unit_price": 250
+            }
         ]
     }
     
-    async with httpx.AsyncClient(timeout=30.0) as client:
-        response = await client.put(
-            f"{BASE_URL}/users/by-phone/{test_customer_phone}",
-            json=update_data
-        )
-        
-        if response.status_code != 200:
-            return print_result(False, f"Expected 200, got {response.status_code}: {response.text}")
-        
-        data = response.json()
-        
-        # Verify fields are echoed back
-        if data.get("wedding_anniversary") != update_data["wedding_anniversary"]:
-            return print_result(False, f"wedding_anniversary mismatch: {data}")
-        
-        if data.get("spouse_name") != update_data["spouse_name"]:
-            return print_result(False, f"spouse_name mismatch: {data}")
-        
-        return print_result(True, f"Marketing fields updated successfully")
+    try:
+        response = requests.post(url, json=payload_both, headers=get_auth_headers())
+        if response.status_code == 200:
+            data = response.json()
+            token_id = data.get('token_id')
+            total_amount = data.get('total_amount', 0)
+            
+            # Verify token created
+            log_test("3b) Booking with products - creation", "PASS", f"Status 200, token_id={token_id}, total={total_amount}")
+            
+            # Verify token has selected_products
+            if token_id:
+                token_url = f"{BASE_URL}/tokens/{token_id}"
+                token_response = requests.get(token_url, headers=get_auth_headers())
+                if token_response.status_code == 200:
+                    token_data = token_response.json()
+                    selected_products = token_data.get('selected_products', [])
+                    if len(selected_products) > 0:
+                        log_test("3b) Token has selected_products", "PASS", f"Products: {len(selected_products)} items")
+                    else:
+                        log_test("3b) Token has selected_products", "FAIL", "No selected_products in token")
+            
+            # Check stock decrement
+            if test_inventory_id and stock_before is not None:
+                items = get_inventory_items()
+                for item in items:
+                    if item.get('id') == test_inventory_id:
+                        stock_after = item.get('stock_quantity')
+                        expected_stock = stock_before - 2  # qty=2
+                        if stock_after == expected_stock:
+                            log_test("3b) Inventory decrement", "PASS", f"Stock: {stock_before} → {stock_after}")
+                        else:
+                            log_test("3b) Inventory decrement", "FAIL", f"Expected {expected_stock}, got {stock_after}")
+                        break
+        else:
+            log_test("3b) Booking with products", "FAIL", f"Status {response.status_code}: {response.text[:200]}")
+    except Exception as e:
+        log_test("3b) Booking with products", "FAIL", f"Exception: {str(e)}")
 
-
-async def test_m1_4_verify_persistence():
-    """M1-4: GET again to verify persistence"""
-    print_test("M1-4", "Verify marketing fields persistence")
-    
-    async with httpx.AsyncClient(timeout=30.0) as client:
-        response = await client.get(f"{BASE_URL}/users/by-phone/{test_customer_phone}")
-        
-        if response.status_code != 200:
-            return print_result(False, f"Expected 200, got {response.status_code}: {response.text}")
-        
-        data = response.json()
-        
-        # Verify persisted values
-        if data.get("wedding_anniversary") != "2018-11-14":
-            return print_result(False, f"wedding_anniversary not persisted: {data}")
-        
-        if data.get("spouse_name") != "Priya":
-            return print_result(False, f"spouse_name not persisted: {data}")
-        
-        if data.get("spouse_date_of_birth") != "1993-06-04":
-            return print_result(False, f"spouse_date_of_birth not persisted: {data}")
-        
-        important_dates = data.get("important_dates", [])
-        if not important_dates or important_dates[0].get("label") != "Kid Bday":
-            return print_result(False, f"important_dates not persisted: {data}")
-        
-        return print_result(True, "All marketing fields persisted correctly")
-
-
-# ============================================================================
-# Marketing M2 — Segments CRUD + preview
-# ============================================================================
-
-async def test_m2_1_preview_empty_segment():
-    """M2-1: POST /api/salons/{id}/marketing/segments/preview with empty rules → 200"""
-    print_test("M2-1", "Preview segment with empty rules")
-    
-    async with httpx.AsyncClient(timeout=30.0) as client:
-        response = await client.post(
-            f"{BASE_URL}/salons/{salon_id}/marketing/segments/preview",
-            headers={"Authorization": f"Bearer {admin_token}"},
-            json={
-                "name": "tmp",
-                "rules": {
-                    "logic": "AND",
-                    "conditions": []
-                }
-            }
-        )
-        
-        if response.status_code != 200:
-            return print_result(False, f"Expected 200, got {response.status_code}: {response.text}")
-        
-        data = response.json()
-        if "count" not in data or "sample" not in data:
-            return print_result(False, f"Missing required fields: {data}")
-        
-        return print_result(True, f"Preview returned count: {data.get('count')}, sample size: {len(data.get('sample', []))}")
-
-
-async def test_m2_2_create_segment():
-    """M2-2: POST /api/salons/{id}/marketing/segments → 201/200 with id"""
-    global test_segment_id
-    
-    print_test("M2-2", "Create marketing segment")
-    
-    async with httpx.AsyncClient(timeout=30.0) as client:
-        response = await client.post(
-            f"{BASE_URL}/salons/{salon_id}/marketing/segments",
-            headers={"Authorization": f"Bearer {admin_token}"},
-            json={
-                "name": f"Test Segment {random_string(4)}",
-                "description": "Test segment for birthday month",
-                "rules": {
-                    "logic": "OR",
-                    "conditions": [
-                        {"field": "birthday_month", "op": "eq", "value": 7}
-                    ]
-                }
-            }
-        )
-        
-        if response.status_code not in [200, 201]:
-            return print_result(False, f"Expected 200/201, got {response.status_code}: {response.text}")
-        
-        data = response.json()
-        test_segment_id = data.get("id")
-        
-        if not test_segment_id:
-            return print_result(False, f"No segment ID in response: {data}")
-        
-        return print_result(True, f"Segment created with ID: {test_segment_id}")
-
-
-async def test_m2_3_list_segments():
-    """M2-3: GET /api/salons/{id}/marketing/segments → contains created segment"""
-    print_test("M2-3", "List marketing segments")
-    
-    async with httpx.AsyncClient(timeout=30.0) as client:
-        response = await client.get(
-            f"{BASE_URL}/salons/{salon_id}/marketing/segments",
-            headers={"Authorization": f"Bearer {admin_token}"}
-        )
-        
-        if response.status_code != 200:
-            return print_result(False, f"Expected 200, got {response.status_code}: {response.text}")
-        
-        data = response.json()
-        segments = data.get("segments", [])
-        
-        # Find our test segment
-        found = any(s.get("id") == test_segment_id for s in segments)
-        
-        if not found:
-            return print_result(False, f"Test segment {test_segment_id} not found in list: {segments}")
-        
-        return print_result(True, f"Segment list contains {len(segments)} segments including test segment")
-
-
-async def test_m2_4_update_segment():
-    """M2-4: PUT /api/salons/{id}/marketing/segments/{seg_id} to rename → 200"""
-    print_test("M2-4", "Update segment name")
-    
-    new_name = f"Updated Segment {random_string(4)}"
-    
-    async with httpx.AsyncClient(timeout=30.0) as client:
-        response = await client.put(
-            f"{BASE_URL}/salons/{salon_id}/marketing/segments/{test_segment_id}",
-            headers={"Authorization": f"Bearer {admin_token}"},
-            json={
-                "name": new_name,
-                "description": "Updated description",
-                "rules": {
-                    "logic": "OR",
-                    "conditions": [
-                        {"field": "birthday_month", "op": "eq", "value": 7}
-                    ]
-                }
-            }
-        )
-        
-        if response.status_code != 200:
-            return print_result(False, f"Expected 200, got {response.status_code}: {response.text}")
-        
-        data = response.json()
-        if data.get("name") != new_name:
-            return print_result(False, f"Name not updated: {data}")
-        
-        return print_result(True, f"Segment updated to: {new_name}")
-
-
-async def test_m2_5_preview_invalid_field():
-    """M2-5: Preview with invalid field name → 422"""
-    print_test("M2-5", "Preview segment with invalid field")
-    
-    async with httpx.AsyncClient(timeout=30.0) as client:
-        response = await client.post(
-            f"{BASE_URL}/salons/{salon_id}/marketing/segments/preview",
-            headers={"Authorization": f"Bearer {admin_token}"},
-            json={
-                "name": "invalid",
-                "rules": {
-                    "logic": "AND",
-                    "conditions": [
-                        {"field": "invalid_field_foo", "op": "eq", "value": "test"}
-                    ]
-                }
-            }
-        )
-        
-        if response.status_code != 422:
-            return print_result(False, f"Expected 422, got {response.status_code}: {response.text}")
-        
-        return print_result(True, "Invalid field correctly rejected with 422")
-
-
-async def test_m2_6_segments_require_auth():
-    """M2-6: Segment endpoints without auth → 403"""
-    print_test("M2-6", "Segment endpoints require authentication")
-    
-    async with httpx.AsyncClient(timeout=30.0) as client:
-        # Test list without auth
-        response = await client.get(f"{BASE_URL}/salons/{salon_id}/marketing/segments")
-        
-        if response.status_code != 403:
-            return print_result(False, f"Expected 403, got {response.status_code}")
-        
-        return print_result(True, "Segment endpoints correctly require authentication")
-
-
-async def test_m2_7_delete_segment():
-    """M2-7: DELETE /api/salons/{id}/marketing/segments/{seg_id} → {deleted:true}"""
-    print_test("M2-7", "Delete marketing segment")
-    
-    async with httpx.AsyncClient(timeout=30.0) as client:
-        response = await client.delete(
-            f"{BASE_URL}/salons/{salon_id}/marketing/segments/{test_segment_id}",
-            headers={"Authorization": f"Bearer {admin_token}"}
-        )
-        
-        if response.status_code != 200:
-            return print_result(False, f"Expected 200, got {response.status_code}: {response.text}")
-        
-        data = response.json()
-        if not data.get("deleted"):
-            return print_result(False, f"Deleted flag not true: {data}")
-        
-        return print_result(True, f"Segment deleted successfully")
-
-
-# ============================================================================
-# Marketing M3 — Salon Coupons CRUD + publish + validate + public list
-# ============================================================================
-
-async def test_m3_1_create_coupon():
-    """M3-1: POST /api/salons/{id}/coupons → code uppercased"""
-    global test_coupon_id
-    
-    print_test("M3-1", "Create salon coupon")
-    
-    coupon_code = f"test{random_string(4)}"
-    
-    async with httpx.AsyncClient(timeout=30.0) as client:
-        response = await client.post(
-            f"{BASE_URL}/salons/{salon_id}/coupons",
-            headers={"Authorization": f"Bearer {admin_token}"},
-            json={
-                "code": coupon_code,
-                "title": "Test Coupon 10%",
-                "type": "percent",
-                "value": 10,
-                "min_bill_amount": 300,
-                "per_customer_limit": 1,
-                "visibility": "published",
-                "is_active": True
-            }
-        )
-        
-        if response.status_code != 200:
-            return print_result(False, f"Expected 200, got {response.status_code}: {response.text}")
-        
-        data = response.json()
-        test_coupon_id = data.get("id")
-        returned_code = data.get("code")
-        
-        if not test_coupon_id:
-            return print_result(False, f"No coupon ID in response: {data}")
-        
-        if returned_code != coupon_code.upper():
-            return print_result(False, f"Code not uppercased: expected {coupon_code.upper()}, got {returned_code}")
-        
-        return print_result(True, f"Coupon created with ID: {test_coupon_id}, code: {returned_code}")
-
-
-async def test_m3_2_duplicate_coupon():
-    """M3-2: Duplicate POST with same code → 409"""
-    print_test("M3-2", "Create duplicate coupon")
-    
-    # Get the code from the previous coupon
-    async with httpx.AsyncClient(timeout=30.0) as client:
-        # First get the existing coupon code
-        get_response = await client.get(
-            f"{BASE_URL}/salons/{salon_id}/coupons/{test_coupon_id}",
-            headers={"Authorization": f"Bearer {admin_token}"}
-        )
-        
-        if get_response.status_code != 200:
-            return print_result(False, f"Could not get existing coupon: {get_response.status_code}")
-        
-        existing_code = get_response.json().get("code")
-        
-        # Try to create duplicate
-        response = await client.post(
-            f"{BASE_URL}/salons/{salon_id}/coupons",
-            headers={"Authorization": f"Bearer {admin_token}"},
-            json={
-                "code": existing_code,
-                "title": "Duplicate Coupon",
-                "type": "percent",
-                "value": 10,
-                "min_bill_amount": 300,
-                "per_customer_limit": 1,
-                "visibility": "published",
-                "is_active": True
-            }
-        )
-        
-        if response.status_code != 409:
-            return print_result(False, f"Expected 409, got {response.status_code}: {response.text}")
-        
-        return print_result(True, "Duplicate coupon correctly rejected with 409")
-
-
-async def test_m3_3_list_coupons():
-    """M3-3: GET /api/salons/{id}/coupons → returns the new coupon"""
-    print_test("M3-3", "List salon coupons")
-    
-    async with httpx.AsyncClient(timeout=30.0) as client:
-        response = await client.get(
-            f"{BASE_URL}/salons/{salon_id}/coupons",
-            headers={"Authorization": f"Bearer {admin_token}"}
-        )
-        
-        if response.status_code != 200:
-            return print_result(False, f"Expected 200, got {response.status_code}: {response.text}")
-        
-        data = response.json()
-        coupons = data.get("coupons", [])
-        
-        # Find our test coupon
-        found = any(c.get("id") == test_coupon_id for c in coupons)
-        
-        if not found:
-            return print_result(False, f"Test coupon {test_coupon_id} not found in list")
-        
-        return print_result(True, f"Coupon list contains {len(coupons)} coupons including test coupon")
-
-
-async def test_m3_4_unpublish_coupon():
-    """M3-4: POST /api/salons/{id}/coupons/{cid}/unpublish → visibility:'private'"""
-    print_test("M3-4", "Unpublish coupon")
-    
-    async with httpx.AsyncClient(timeout=30.0) as client:
-        response = await client.post(
-            f"{BASE_URL}/salons/{salon_id}/coupons/{test_coupon_id}/unpublish",
-            headers={"Authorization": f"Bearer {admin_token}"}
-        )
-        
-        if response.status_code != 200:
-            return print_result(False, f"Expected 200, got {response.status_code}: {response.text}")
-        
-        data = response.json()
-        if data.get("visibility") != "private":
-            return print_result(False, f"Visibility not set to private: {data}")
-        
-        return print_result(True, "Coupon unpublished successfully")
-
-
-async def test_m3_5_publish_coupon():
-    """M3-5: POST /api/salons/{id}/coupons/{cid}/publish → visibility:'published'"""
-    print_test("M3-5", "Publish coupon")
-    
-    async with httpx.AsyncClient(timeout=30.0) as client:
-        response = await client.post(
-            f"{BASE_URL}/salons/{salon_id}/coupons/{test_coupon_id}/publish",
-            headers={"Authorization": f"Bearer {admin_token}"}
-        )
-        
-        if response.status_code != 200:
-            return print_result(False, f"Expected 200, got {response.status_code}: {response.text}")
-        
-        data = response.json()
-        if data.get("visibility") != "published":
-            return print_result(False, f"Visibility not set to published: {data}")
-        
-        return print_result(True, "Coupon published successfully")
-
-
-async def test_m3_6_public_coupons_list():
-    """M3-6: GET /api/public/salons/{id}/coupons → coupon listed when published"""
-    print_test("M3-6", "Public coupons list")
-    
-    async with httpx.AsyncClient(timeout=30.0) as client:
-        response = await client.get(f"{BASE_URL}/public/salons/{salon_id}/coupons")
-        
-        if response.status_code != 200:
-            return print_result(False, f"Expected 200, got {response.status_code}: {response.text}")
-        
-        data = response.json()
-        coupons = data.get("coupons", [])
-        
-        # Find our test coupon (should be visible since it's published)
-        found = any(c.get("id") == test_coupon_id for c in coupons)
-        
-        if not found:
-            return print_result(False, f"Published coupon not found in public list")
-        
-        return print_result(True, f"Public list contains {len(coupons)} coupons including test coupon")
-
-
-async def test_m3_7_validate_coupon_success():
-    """M3-7: POST /api/salons/{id}/coupons/validate with valid bill → discount calculated"""
-    print_test("M3-7", "Validate coupon with valid bill amount")
-    
-    # Get the coupon code
-    async with httpx.AsyncClient(timeout=30.0) as client:
-        get_response = await client.get(
-            f"{BASE_URL}/salons/{salon_id}/coupons/{test_coupon_id}",
-            headers={"Authorization": f"Bearer {admin_token}"}
-        )
-        
-        if get_response.status_code != 200:
-            return print_result(False, f"Could not get coupon: {get_response.status_code}")
-        
-        coupon_code = get_response.json().get("code")
-        
-        # Validate with bill amount 500 (10% discount = 50)
-        response = await client.post(
-            f"{BASE_URL}/salons/{salon_id}/coupons/validate",
-            json={
-                "code": coupon_code,
-                "bill_amount": 500
-            }
-        )
-        
-        if response.status_code != 200:
-            return print_result(False, f"Expected 200, got {response.status_code}: {response.text}")
-        
-        data = response.json()
-        
-        if not data.get("valid"):
-            return print_result(False, f"Coupon not valid: {data}")
-        
-        discount = data.get("discount_amount")
-        final = data.get("final_amount")
-        
-        if discount != 50.0:
-            return print_result(False, f"Expected discount 50, got {discount}")
-        
-        if final != 450.0:
-            return print_result(False, f"Expected final amount 450, got {final}")
-        
-        return print_result(True, f"Coupon validated: discount={discount}, final={final}")
-
-
-async def test_m3_8_validate_below_min_bill():
-    """M3-8: Validate with bill below min_bill_amount → 400"""
-    print_test("M3-8", "Validate coupon with bill below minimum")
-    
-    async with httpx.AsyncClient(timeout=30.0) as client:
-        # Get the coupon code
-        get_response = await client.get(
-            f"{BASE_URL}/salons/{salon_id}/coupons/{test_coupon_id}",
-            headers={"Authorization": f"Bearer {admin_token}"}
-        )
-        
-        if get_response.status_code != 200:
-            return print_result(False, f"Could not get coupon: {get_response.status_code}")
-        
-        coupon_code = get_response.json().get("code")
-        
-        # Validate with bill amount 200 (below min 300)
-        response = await client.post(
-            f"{BASE_URL}/salons/{salon_id}/coupons/validate",
-            json={
-                "code": coupon_code,
-                "bill_amount": 200
-            }
-        )
-        
-        if response.status_code != 400:
-            return print_result(False, f"Expected 400, got {response.status_code}: {response.text}")
-        
-        detail = response.json().get("detail", "")
-        if "Minimum bill amount" not in detail:
-            return print_result(False, f"Expected minimum bill message, got: {detail}")
-        
-        return print_result(True, f"Below minimum bill correctly rejected: {detail}")
-
-
-async def test_m3_9_validate_invalid_code():
-    """M3-9: Validate wrong code → 404"""
-    print_test("M3-9", "Validate with invalid coupon code")
-    
-    async with httpx.AsyncClient(timeout=30.0) as client:
-        response = await client.post(
-            f"{BASE_URL}/salons/{salon_id}/coupons/validate",
-            json={
-                "code": "INVALID_CODE_XYZ",
-                "bill_amount": 500
-            }
-        )
-        
-        if response.status_code != 404:
-            return print_result(False, f"Expected 404, got {response.status_code}: {response.text}")
-        
-        return print_result(True, "Invalid coupon code correctly rejected with 404")
-
-
-async def test_m3_10_update_coupon():
-    """M3-10: PUT /api/salons/{id}/coupons/{cid} updates fields correctly"""
-    print_test("M3-10", "Update coupon fields")
-    
-    async with httpx.AsyncClient(timeout=30.0) as client:
-        # Get current coupon
-        get_response = await client.get(
-            f"{BASE_URL}/salons/{salon_id}/coupons/{test_coupon_id}",
-            headers={"Authorization": f"Bearer {admin_token}"}
-        )
-        
-        if get_response.status_code != 200:
-            return print_result(False, f"Could not get coupon: {get_response.status_code}")
-        
-        coupon = get_response.json()
-        
-        # Update title
-        new_title = f"Updated Coupon {random_string(4)}"
-        coupon["title"] = new_title
-        
-        response = await client.put(
-            f"{BASE_URL}/salons/{salon_id}/coupons/{test_coupon_id}",
-            headers={"Authorization": f"Bearer {admin_token}"},
-            json=coupon
-        )
-        
-        if response.status_code != 200:
-            return print_result(False, f"Expected 200, got {response.status_code}: {response.text}")
-        
-        data = response.json()
-        if data.get("title") != new_title:
-            return print_result(False, f"Title not updated: {data}")
-        
-        return print_result(True, f"Coupon updated to: {new_title}")
-
-
-async def test_m3_11_coupons_require_auth():
-    """M3-11: Coupon CRUD endpoints without auth → 403"""
-    print_test("M3-11", "Coupon CRUD endpoints require authentication")
-    
-    async with httpx.AsyncClient(timeout=30.0) as client:
-        # Test list without auth
-        response = await client.get(f"{BASE_URL}/salons/{salon_id}/coupons")
-        
-        if response.status_code != 403:
-            return print_result(False, f"Expected 403, got {response.status_code}")
-        
-        return print_result(True, "Coupon CRUD endpoints correctly require authentication")
-
-
-async def test_m3_12_validate_is_public():
-    """M3-12: Validate endpoint is public (no auth required)"""
-    print_test("M3-12", "Validate endpoint is public")
-    
-    async with httpx.AsyncClient(timeout=30.0) as client:
-        # Get the coupon code
-        get_response = await client.get(
-            f"{BASE_URL}/salons/{salon_id}/coupons/{test_coupon_id}",
-            headers={"Authorization": f"Bearer {admin_token}"}
-        )
-        
-        if get_response.status_code != 200:
-            return print_result(False, f"Could not get coupon: {get_response.status_code}")
-        
-        coupon_code = get_response.json().get("code")
-        
-        # Validate WITHOUT auth
-        response = await client.post(
-            f"{BASE_URL}/salons/{salon_id}/coupons/validate",
-            json={
-                "code": coupon_code,
-                "bill_amount": 500
-            }
-        )
-        
-        if response.status_code != 200:
-            return print_result(False, f"Validate endpoint requires auth (should be public): {response.status_code}")
-        
-        return print_result(True, "Validate endpoint is correctly public (no auth required)")
-
-
-async def test_m3_13_delete_coupon():
-    """M3-13: DELETE /api/salons/{id}/coupons/{cid} → {deleted:true}"""
-    print_test("M3-13", "Delete coupon")
-    
-    async with httpx.AsyncClient(timeout=30.0) as client:
-        response = await client.delete(
-            f"{BASE_URL}/salons/{salon_id}/coupons/{test_coupon_id}",
-            headers={"Authorization": f"Bearer {admin_token}"}
-        )
-        
-        if response.status_code != 200:
-            return print_result(False, f"Expected 200, got {response.status_code}: {response.text}")
-        
-        data = response.json()
-        if not data.get("deleted"):
-            return print_result(False, f"Deleted flag not true: {data}")
-        
-        return print_result(True, "Coupon deleted successfully")
-
-
-# ============================================================================
-# can_access_marketing permission persistence
-# ============================================================================
-
-async def test_perm_1_admin_has_marketing_permission():
-    """PERM-1: Admin login → permissions.can_access_marketing === true"""
-    print_test("PERM-1", "Admin has can_access_marketing permission")
-    
-    # Re-login to get fresh permissions
-    async with httpx.AsyncClient(timeout=30.0) as client:
-        response = await client.post(
-            f"{BASE_URL}/salon/users/login",
-            json=ADMIN_CREDENTIALS
-        )
-        
-        if response.status_code != 200:
-            return print_result(False, f"Login failed: {response.status_code}")
-        
-        data = response.json()
-        permissions = data.get("permissions", {})
-        
-        if not permissions.get("can_access_marketing"):
-            return print_result(False, f"Admin missing can_access_marketing permission: {permissions}")
-        
-        return print_result(True, f"Admin has can_access_marketing: {permissions.get('can_access_marketing')}")
-
-
-async def test_perm_2_create_staff_with_marketing():
-    """PERM-2: Create staff with can_access_marketing=true"""
-    global test_staff_user_id
-    
-    print_test("PERM-2", "Create staff with marketing permission")
-    
-    login_id = f"teststaff_{random_string(6)}"
-    
-    async with httpx.AsyncClient(timeout=30.0) as client:
-        response = await client.post(
-            f"{BASE_URL}/salon/users",
-            headers={"Authorization": f"Bearer {admin_token}"},
-            json={
-                "salon_id": salon_id,
-                "name": f"Test Staff {random_string(4)}",
-                "mobile": f"98765{random.randint(10000, 99999)}",
-                "login_id": login_id,
-                "password": "testpass123",
-                "role": "staff",
-                "permissions": {
-                    "can_access_marketing": True
-                }
-            }
-        )
-        
-        if response.status_code != 200:
-            return print_result(False, f"Staff creation failed: {response.status_code} - {response.text}")
-        
-        data = response.json()
-        test_staff_user_id = data.get("id")
-        permissions = data.get("permissions", {})
-        
-        if not test_staff_user_id:
-            return print_result(False, f"No user ID in response: {data}")
-        
-        if not permissions.get("can_access_marketing"):
-            return print_result(False, f"can_access_marketing not set: {permissions}")
-        
-        return print_result(True, f"Staff created with ID: {test_staff_user_id}, marketing permission: true")
-
-
-async def test_perm_3_staff_login_has_marketing():
-    """PERM-3: Staff login → permissions.can_access_marketing === true"""
-    global test_staff_token
-    
-    print_test("PERM-3", "Staff login returns marketing permission")
-    
-    # Get the staff login_id
-    async with httpx.AsyncClient(timeout=30.0) as client:
-        # First get the staff user details
-        get_response = await client.get(
-            f"{BASE_URL}/salons/{salon_id}/users",
-            headers={"Authorization": f"Bearer {admin_token}"}
-        )
-        
-        if get_response.status_code != 200:
-            return print_result(False, f"Could not get staff users: {get_response.status_code}")
-        
-        users = get_response.json().get("users", [])
-        test_staff = next((u for u in users if u.get("id") == test_staff_user_id), None)
-        
-        if not test_staff:
-            return print_result(False, f"Test staff user not found")
-        
-        login_id = test_staff.get("login_id")
-        
-        # Login as staff
-        response = await client.post(
-            f"{BASE_URL}/salon/users/login",
-            json={
-                "identifier": login_id,
-                "password": "testpass123"
-            }
-        )
-        
-        if response.status_code != 200:
-            return print_result(False, f"Staff login failed: {response.status_code} - {response.text}")
-        
-        data = response.json()
-        test_staff_token = data.get("access_token")
-        permissions = data.get("permissions", {})
-        
-        if not permissions.get("can_access_marketing"):
-            return print_result(False, f"can_access_marketing not in login response: {permissions}")
-        
-        return print_result(True, f"Staff login successful, marketing permission: true")
-
-
-async def test_perm_4_create_staff_without_permissions():
-    """PERM-4: Create staff WITHOUT permissions → defaults to false"""
-    print_test("PERM-4", "Create staff without permissions defaults to false")
-    
-    login_id = f"teststaff2_{random_string(6)}"
-    
-    async with httpx.AsyncClient(timeout=30.0) as client:
-        response = await client.post(
-            f"{BASE_URL}/salon/users",
-            headers={"Authorization": f"Bearer {admin_token}"},
-            json={
-                "salon_id": salon_id,
-                "name": f"Test Staff No Perms {random_string(4)}",
-                "mobile": f"98765{random.randint(10000, 99999)}",
-                "login_id": login_id,
-                "password": "testpass123",
-                "role": "staff"
-                # No permissions field
-            }
-        )
-        
-        if response.status_code != 200:
-            return print_result(False, f"Staff creation failed: {response.status_code} - {response.text}")
-        
-        data = response.json()
-        permissions = data.get("permissions", {})
-        
-        if permissions.get("can_access_marketing") is not False:
-            return print_result(False, f"can_access_marketing should default to false: {permissions}")
-        
-        return print_result(True, f"Staff created with default can_access_marketing: false")
-
-
-async def test_perm_5_update_marketing_permission():
-    """PERM-5: PUT /api/salon/users/{user_id} flipping the flag persists"""
-    print_test("PERM-5", "Update marketing permission persists")
-    
-    async with httpx.AsyncClient(timeout=30.0) as client:
-        # Update to flip the permission to false
-        response = await client.put(
-            f"{BASE_URL}/salon/users/{test_staff_user_id}",
-            headers={"Authorization": f"Bearer {admin_token}"},
-            json={
-                "permissions": {
-                    "can_access_marketing": False
-                }
-            }
-        )
-        
-        if response.status_code != 200:
-            return print_result(False, f"Update failed: {response.status_code} - {response.text}")
-        
-        data = response.json()
-        permissions = data.get("permissions", {})
-        
-        if permissions.get("can_access_marketing") is not False:
-            return print_result(False, f"Permission not updated: {permissions}")
-        
-        # Verify by logging in again
-        get_response = await client.get(
-            f"{BASE_URL}/salons/{salon_id}/users",
-            headers={"Authorization": f"Bearer {admin_token}"}
-        )
-        
-        if get_response.status_code != 200:
-            return print_result(False, f"Could not verify: {get_response.status_code}")
-        
-        users = get_response.json().get("users", [])
-        test_staff = next((u for u in users if u.get("id") == test_staff_user_id), None)
-        
-        if not test_staff:
-            return print_result(False, "Test staff user not found for verification")
-        
-        verify_perms = test_staff.get("permissions", {})
-        if verify_perms.get("can_access_marketing") is not False:
-            return print_result(False, f"Permission not persisted: {verify_perms}")
-        
-        return print_result(True, "Marketing permission updated and persisted successfully")
-
-
-# ============================================================================
-# Main test runner
-# ============================================================================
-
-async def run_all_tests():
-    """Run all marketing module tests"""
+def main():
+    """Run all Phase 1b regression tests"""
     print("\n" + "="*80)
-    print("SALONHUB MARKETING MODULE (M0-M3) BACKEND TESTING")
+    print("PHASE 1B REGRESSION TEST SUITE")
+    print("Testing: home-kpis date_mode extensions + direct-invoice/salon-booking with products")
     print("="*80)
+    print(f"Backend URL: {BACKEND_URL}")
+    print(f"Salon ID: {SALON_ID}")
+    print(f"Admin Login: {ADMIN_LOGIN}")
     
-    # Setup
-    if not await admin_login():
-        print("\n❌ SETUP FAILED: Could not login as admin")
+    # Step 1: Login
+    if not login_admin():
+        print("\n❌ CRITICAL: Admin login failed. Cannot proceed with tests.")
         return
     
-    results = []
+    # Step 2: Setup inventory
+    if not get_or_create_inventory_item():
+        print("\n⚠️  WARNING: Inventory setup failed. Product tests may fail.")
     
-    # Marketing M0 tests
-    results.append(await test_m0_1_ping_with_auth())
-    results.append(await test_m0_2_channels_with_auth())
-    results.append(await test_m0_3_webhook_verify_wrong_token())
-    results.append(await test_m0_4_webhook_post_empty())
-    results.append(await test_m0_5_endpoints_without_auth())
-    
-    # Marketing M1 tests
-    results.append(await test_m1_1_create_customer())
-    results.append(await test_m1_2_get_customer_new_fields())
-    results.append(await test_m1_3_update_customer_marketing_fields())
-    results.append(await test_m1_4_verify_persistence())
-    
-    # Marketing M2 tests
-    results.append(await test_m2_1_preview_empty_segment())
-    results.append(await test_m2_2_create_segment())
-    results.append(await test_m2_3_list_segments())
-    results.append(await test_m2_4_update_segment())
-    results.append(await test_m2_5_preview_invalid_field())
-    results.append(await test_m2_6_segments_require_auth())
-    results.append(await test_m2_7_delete_segment())
-    
-    # Marketing M3 tests
-    results.append(await test_m3_1_create_coupon())
-    results.append(await test_m3_2_duplicate_coupon())
-    results.append(await test_m3_3_list_coupons())
-    results.append(await test_m3_4_unpublish_coupon())
-    results.append(await test_m3_5_publish_coupon())
-    results.append(await test_m3_6_public_coupons_list())
-    results.append(await test_m3_7_validate_coupon_success())
-    results.append(await test_m3_8_validate_below_min_bill())
-    results.append(await test_m3_9_validate_invalid_code())
-    results.append(await test_m3_10_update_coupon())
-    results.append(await test_m3_11_coupons_require_auth())
-    results.append(await test_m3_12_validate_is_public())
-    results.append(await test_m3_13_delete_coupon())
-    
-    # Permission tests
-    results.append(await test_perm_1_admin_has_marketing_permission())
-    results.append(await test_perm_2_create_staff_with_marketing())
-    results.append(await test_perm_3_staff_login_has_marketing())
-    results.append(await test_perm_4_create_staff_without_permissions())
-    results.append(await test_perm_5_update_marketing_permission())
+    # Step 3: Run tests
+    test_home_kpis_date_modes()
+    test_direct_invoice_with_products()
+    test_salon_booking_with_products()
     
     # Summary
     print("\n" + "="*80)
-    print("TEST SUMMARY")
+    print("PHASE 1B REGRESSION TEST COMPLETE")
     print("="*80)
-    
-    passed = sum(1 for r in results if r)
-    total = len(results)
-    
-    print(f"\nTotal Tests: {total}")
-    print(f"Passed: {passed} ✅")
-    print(f"Failed: {total - passed} ❌")
-    print(f"Success Rate: {(passed/total*100):.1f}%")
-    
-    if passed == total:
-        print("\n🎉 ALL TESTS PASSED! Marketing Module is production-ready.")
-    else:
-        print(f"\n⚠️  {total - passed} test(s) failed. Please review the output above.")
-    
-    print("="*80 + "\n")
-
+    print("\nReview the test results above.")
+    print("Focus: REGRESSION — nothing that used to work should break.")
 
 if __name__ == "__main__":
-    import asyncio
-    asyncio.run(run_all_tests())
+    main()

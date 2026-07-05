@@ -37,6 +37,8 @@ import SalonSignupPage from '@/pages/SalonSignupPage';
 import EnhancedSalonDashboard from '@/pages/EnhancedSalonDashboard';
 import NewBookingPage from '@/pages/salon/NewBookingPage';
 import QuickInvoicePage from '@/pages/salon/QuickInvoicePage';
+import AddCustomerPage from '@/pages/salon/AddCustomerPage';
+import SellMembershipPage from '@/pages/salon/SellMembershipPage';
 import StaffProfilePage from '@/pages/StaffProfilePage';
 import PaymentCallbackPage from '@/pages/PaymentCallbackPage';
 
@@ -109,6 +111,8 @@ function App() {
                   <Route path="/salon/dashboard" element={<EnhancedSalonDashboard />} />
                   <Route path="/salon/dashboard/new-booking" element={<NewBookingPage />} />
                   <Route path="/salon/dashboard/quick-invoice" element={<QuickInvoicePage />} />
+                  <Route path="/salon/dashboard/add-customer" element={<AddCustomerPage />} />
+                  <Route path="/salon/dashboard/sell-membership" element={<SellMembershipPage />} />
                   <Route path="/salon/staff/:staffId" element={<StaffProfilePage />} />
                   <Route path="/salon/marketplace" element={<MarketplacePage />} />
                   <Route path="/salon/checkout" element={<CheckoutPage />} />

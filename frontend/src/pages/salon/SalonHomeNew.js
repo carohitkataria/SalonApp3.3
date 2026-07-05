@@ -56,6 +56,10 @@ export default function SalonHomeNew({
   barbers = [],
   dateMode = 'today',
   setDateMode,
+  dateFrom,
+  setDateFrom,
+  dateTo,
+  setDateTo,
   dailySales = 0,
   goToTab,
   navigate: navigateProp,
@@ -80,19 +84,18 @@ export default function SalonHomeNew({
     const t = setInterval(fetchKpis, 60_000);
     return () => clearInterval(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [salonId, dateMode]);
+  }, [salonId, dateMode, dateFrom, dateTo]);
 
   const fetchKpis = async () => {
     if (!salonId) return;
     setRefreshing(true);
     try {
-      const res = await axios.get(
-        `${API}/salons/${salonId}/home-kpis?date_mode=${dateMode || 'today'}`,
-        { headers: getAuthHeaders?.() || {} }
-      );
+      let url = `${API}/salons/${salonId}/home-kpis?date_mode=${dateMode || 'today'}`;
+      if (dateMode === 'range' && dateFrom) url += `&date_from=${dateFrom}`;
+      if (dateMode === 'range' && dateTo) url += `&date_to=${dateTo}`;
+      const res = await axios.get(url, { headers: getAuthHeaders?.() || {} });
       setKpis(res.data);
     } catch (err) {
-      // silent fail; KPIs will just show 0s
       console.warn('home-kpis fetch failed', err);
     } finally {
       setLoadingKpis(false);
@@ -152,9 +155,9 @@ export default function SalonHomeNew({
             {now.toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}
           </p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
           <div className="inline-flex rounded-lg border border-border bg-card p-0.5">
-            {['today', 'tomorrow', 'week'].map((m) => (
+            {['today', 'yesterday'].map((m) => (
               <button
                 key={m}
                 onClick={() => setDateMode && setDateMode(m)}
@@ -165,7 +168,23 @@ export default function SalonHomeNew({
                 {m.charAt(0).toUpperCase() + m.slice(1)}
               </button>
             ))}
+            <button
+              onClick={() => setDateMode && setDateMode('range')}
+              className={`px-2.5 py-1 text-[11px] font-semibold rounded-md transition ${
+                dateMode === 'range' ? 'bg-gold text-black' : 'text-foreground hover:bg-muted'
+              }`}
+              title="Custom range"
+            >
+              Range
+            </button>
           </div>
+          {dateMode === 'range' && (
+            <div className="inline-flex gap-1 items-center text-[11px]">
+              <input type="date" value={dateFrom || ''} onChange={(e) => setDateFrom && setDateFrom(e.target.value)} className="h-7 px-1.5 rounded-md border border-border bg-background" />
+              <span className="text-muted-foreground">→</span>
+              <input type="date" value={dateTo || ''} onChange={(e) => setDateTo && setDateTo(e.target.value)} className="h-7 px-1.5 rounded-md border border-border bg-background" />
+            </div>
+          )}
           <button
             onClick={fetchKpis}
             className="p-1.5 rounded-lg border border-border hover:bg-muted"
@@ -227,7 +246,7 @@ export default function SalonHomeNew({
       {/* 3. Secondary metric pills */}
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2">
         <MetricPill tint="blue" label="Appointments" value={secondary.appointments_count || tokens.length || 0} onClick={() => goToTab && goToTab('queue')} icon={Calendar} />
-        <MetricPill tint="emerald" label="New Clients" value={secondary.new_clients_count || 0} onClick={() => goToTab && goToTab('customer-master')} icon={UserPlus} />
+        <MetricPill tint="emerald" label="New Customers" value={secondary.new_clients_count || 0} onClick={() => navigate('/salon/dashboard?tab=customer-master&filter=new')} icon={UserPlus} />
         <MetricPill tint="violet" label="Retention" value={`${Number(secondary.retention_rate || 0)}%`} onClick={() => goToTab && goToTab('customer-master')} icon={Sparkles} />
         <MetricPill tint="amber" label="Retail Sales" value={`₹${Number(secondary.retail_sales || 0).toLocaleString('en-IN')}`} onClick={() => goToTab && goToTab('inventory')} icon={ShoppingBag} />
         <MetricPill tint="rose" label="Reminders" value={`${Number(secondary.reminder_confirmation_rate || 0)}%`} onClick={() => goToTab && goToTab('marketing')} icon={Send} />
@@ -238,7 +257,7 @@ export default function SalonHomeNew({
       <div className="grid grid-cols-3 md:grid-cols-6 gap-2">
         <QuickAction
           label="New Booking"
-          desc="Full-page flow"
+          desc="Book / Invoice"
           icon={Calendar}
           tint="from-amber-400 to-yellow-500"
           onClick={() => navigate('/salon/dashboard/new-booking')}
@@ -249,7 +268,7 @@ export default function SalonHomeNew({
           desc="Bill without queue"
           icon={FileText}
           tint="from-emerald-400 to-teal-500"
-          onClick={() => navigate('/salon/dashboard/quick-invoice')}
+          onClick={() => navigate('/salon/dashboard/new-booking')}
           testId="quick-invoice"
         />
         <QuickAction
@@ -257,23 +276,23 @@ export default function SalonHomeNew({
           desc="Wallet top-up"
           icon={BadgeCheck}
           tint="from-violet-400 to-purple-500"
-          onClick={() => goToTab && goToTab('services')}
+          onClick={() => navigate('/salon/dashboard/sell-membership')}
           testId="quick-membership"
         />
         <QuickAction
-          label="Add Client"
-          desc="Customer Master"
+          label="Add Customer"
+          desc="Quick create"
           icon={UserPlus}
           tint="from-blue-400 to-indigo-500"
-          onClick={() => goToTab && goToTab('customer-master')}
-          testId="quick-add-client"
+          onClick={() => navigate('/salon/dashboard/add-customer')}
+          testId="quick-add-customer"
         />
         <QuickAction
           label="Retail Sale"
           desc="Products / POS"
           icon={ShoppingBag}
           tint="from-pink-400 to-rose-500"
-          onClick={() => goToTab && goToTab('inventory')}
+          onClick={() => navigate('/salon/dashboard/new-booking')}
           testId="quick-retail"
         />
         <QuickAction

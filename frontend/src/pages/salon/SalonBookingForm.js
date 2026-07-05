@@ -1,17 +1,24 @@
 /**
- * SalonBookingForm.js — Shared form UI for both:
- *   - New Booking (POST /api/salons/{salonId}/salon-booking)
- *   - Quick Invoice (POST /api/salons/{salonId}/direct-invoice)
+ * SalonBookingForm.js — Unified form for New Booking + Quick Invoice.
  *
- * Presents services as chips (grouped by category), and includes coupon +
- * membership upsell + wallet payment.
+ * Bottom action bar exposes BOTH primary CTAs:
+ *   - Add to Queue     → POST /api/salons/{id}/salon-booking
+ *   - Generate Invoice → POST /api/salons/{id}/direct-invoice
+ *
+ * Services shown as chips (grouped by category). Also lets the salon
+ * add products from their inventory in the same order (chips with qty).
+ * Coupon + membership upsell + wallet payment supported.
+ *
+ * Customer name / phone / gender are OPTIONAL. Only required when the
+ * salon opts into features that need them (wallet payment, membership sale).
  */
 import React, { useEffect, useMemo, useState } from 'react';
 import axios from 'axios';
 import { toast } from 'sonner';
 import {
-  User, Phone, ArrowLeft, Scissors, Wallet, CreditCard,
-  Banknote, Smartphone, Search, TicketPercent, BadgeCheck, X, Loader2, Check
+  User, Phone, ArrowLeft, Scissors, Wallet, CreditCard, Banknote, Smartphone,
+  Search, TicketPercent, BadgeCheck, X, Loader2, Check, Plus, Minus,
+  UserPlus, ShoppingBag, FileText, Calendar,
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { getSalonAuthHeaders, getSalonId } from './salonAuthHelper';
@@ -26,55 +33,51 @@ const PAYMENT_MODES = [
   { id: 'wallet', label: 'Wallet', icon: Wallet, color: 'text-amber-500 bg-amber-500/10 border-amber-500/40' },
 ];
 
-export default function SalonBookingForm({
-  mode = 'booking',              // 'booking' | 'invoice'
-  onSubmitted,                   // callback(response)
-  submitLabel = 'Create Booking',
-  pageTitle = 'New Booking',
-  pageSubtitle = 'Fill in customer + services to create a booking',
-  headerAccent = 'gold',
-}) {
+export default function SalonBookingForm({ initialMode = 'booking' }) {
   const navigate = useNavigate();
   const salonId = getSalonId();
 
   const [barbers, setBarbers] = useState([]);
   const [services, setServices] = useState([]);
+  const [products, setProducts] = useState([]);
   const [membershipPlans, setMembershipPlans] = useState([]);
   const [customers, setCustomers] = useState([]);
 
   const [customerSearch, setCustomerSearch] = useState('');
   const [selectedCustomer, setSelectedCustomer] = useState(null);
+  const [showAddCustomer, setShowAddCustomer] = useState(false);
+
   const [form, setForm] = useState({
     customer_name: '',
     phone: '',
     gender: 'Men',
-    barber_id: 'any',
+    barber_id: '',
     selected_services: [],
+    selected_products: {},              // { productId: qty }
     payment_mode: 'cash',
   });
 
   const [walletInfo, setWalletInfo] = useState(null);
   const [couponCode, setCouponCode] = useState('');
-  const [couponInfo, setCouponInfo] = useState(null); // { discount_amount, coupon }
+  const [couponInfo, setCouponInfo] = useState(null);
   const [validatingCoupon, setValidatingCoupon] = useState(false);
   const [selectedMembershipId, setSelectedMembershipId] = useState('');
   const [tipAmount, setTipAmount] = useState(0);
-  const [category, setCategory] = useState('All');
-  const [submitting, setSubmitting] = useState(false);
+  const [serviceCategory, setServiceCategory] = useState('All');
+  const [productCategory, setProductCategory] = useState('All');
   const [notes, setNotes] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+  const [submittingKind, setSubmittingKind] = useState(null);
 
   useEffect(() => {
-    if (!salonId) {
-      navigate('/salon/login');
-      return;
-    }
+    if (!salonId) { navigate('/salon/login'); return; }
     fetchInitial();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const fetchInitial = async () => {
     try {
-      const [bRes, sRes, mRes, cRes] = await Promise.all([
+      const [bRes, sRes, pRes, mRes, cRes] = await Promise.all([
         axios.get(`${API}/salons/${salonId}/barbers`, { headers: getSalonAuthHeaders() }),
         (async () => {
           try {
@@ -85,21 +88,25 @@ export default function SalonBookingForm({
           try {
             const r2 = await axios.get(`${API}/services`);
             return { data: r2.data || [] };
-          } catch (e2) {
-            return { data: [] };
-          }
+          } catch (e2) { return { data: [] }; }
         })(),
+        axios.get(`${API}/salon/inventory?page_size=200`, { headers: getSalonAuthHeaders() })
+          .catch(() => ({ data: { inventory_items: [] } })),
         axios.get(`${API}/salons/${salonId}/membership-plans`, { headers: getSalonAuthHeaders() })
           .catch(() => ({ data: { plans: [] } })),
         axios.get(`${API}/salons/${salonId}/customers`, { headers: getSalonAuthHeaders() })
           .catch(() => ({ data: { customers: [] } })),
       ]);
-      setBarbers(bRes.data?.barbers || bRes.data || []);
+      const bList = bRes.data?.barbers || bRes.data || [];
+      setBarbers(bList);
+      // preselect first barber for convenience
+      if (bList.length > 0 && !form.barber_id) {
+        setForm((f) => ({ ...f, barber_id: bList[0].id }));
+      }
       const svcRaw = sRes.data;
-      const svcData = Array.isArray(svcRaw)
-        ? svcRaw
-        : (svcRaw?.services || svcRaw?.enabled_services || []);
+      const svcData = Array.isArray(svcRaw) ? svcRaw : (svcRaw?.services || svcRaw?.enabled_services || []);
       setServices(Array.isArray(svcData) ? svcData : []);
+      setProducts(pRes.data?.inventory_items || []);
       setMembershipPlans(mRes.data?.plans || mRes.data || []);
       setCustomers(cRes.data?.customers || []);
     } catch (err) {
@@ -108,43 +115,65 @@ export default function SalonBookingForm({
     }
   };
 
-  // Filter services by category
-  const categories = useMemo(() => {
+  // ------- Services & products memos -------
+  const serviceCategories = useMemo(() => {
     const set = new Set(services.map((s) => s.category || 'General'));
     return ['All', ...Array.from(set)];
   }, [services]);
-
   const visibleServices = useMemo(() => {
-    if (category === 'All') return services;
-    return services.filter((s) => (s.category || 'General') === category);
-  }, [category, services]);
+    if (serviceCategory === 'All') return services;
+    return services.filter((s) => (s.category || 'General') === serviceCategory);
+  }, [serviceCategory, services]);
+
+  const productCategories = useMemo(() => {
+    const set = new Set(products.map((p) => p.category || 'General'));
+    return ['All', ...Array.from(set)];
+  }, [products]);
+  const visibleProducts = useMemo(() => {
+    if (productCategory === 'All') return products;
+    return products.filter((p) => (p.category || 'General') === productCategory);
+  }, [productCategory, products]);
 
   const selectedServiceObjs = useMemo(
     () => services.filter((s) => form.selected_services.includes(s.id)),
     [services, form.selected_services]
   );
+  const selectedProductObjs = useMemo(() => {
+    return Object.entries(form.selected_products || {})
+      .filter(([, qty]) => Number(qty) > 0)
+      .map(([id, qty]) => {
+        const p = products.find((x) => x.id === id) || {};
+        return { id, qty: Number(qty), name: p.name, price: Number(p.retail_price || p.selling_price || p.price || 0), category: p.category };
+      });
+  }, [form.selected_products, products]);
 
-  // Money
-  const subtotal = useMemo(
+  // ------- Money -------
+  const serviceSubtotal = useMemo(
     () => selectedServiceObjs.reduce((sum, s) => sum + Number(s.base_price || 0), 0),
     [selectedServiceObjs]
   );
+  const productSubtotal = useMemo(
+    () => selectedProductObjs.reduce((sum, p) => sum + p.qty * p.price, 0),
+    [selectedProductObjs]
+  );
+  const subtotal = serviceSubtotal + productSubtotal;
 
   const selectedMembership = useMemo(
     () => membershipPlans.find((p) => p.id === selectedMembershipId) || null,
     [membershipPlans, selectedMembershipId]
   );
-
   const membershipDiscountPct = Number(
     selectedMembership?.discount_percentage || selectedMembership?.service_discount_pct || 0
   );
-  const membershipDiscountAmt = Math.round(subtotal * membershipDiscountPct) / 100;
+  // Discount applies only on services (not products)
+  const membershipDiscountAmt = Math.round(serviceSubtotal * membershipDiscountPct) / 100;
   const membershipSalePrice = Number(selectedMembership?.price || selectedMembership?.plan_price || 0);
 
   const couponDiscount = Number(couponInfo?.discount_amount || 0);
-  const servicesTotal = Math.max(0, subtotal - membershipDiscountAmt - couponDiscount);
-  const grandTotal = Math.max(0, servicesTotal + membershipSalePrice + Number(tipAmount || 0));
+  const grandTotalBeforeMembership = Math.max(0, subtotal - membershipDiscountAmt - couponDiscount);
+  const grandTotal = Math.max(0, grandTotalBeforeMembership + membershipSalePrice + Number(tipAmount || 0));
 
+  // ------- Handlers -------
   const toggleService = (id) => {
     setForm((prev) => ({
       ...prev,
@@ -152,6 +181,15 @@ export default function SalonBookingForm({
         ? prev.selected_services.filter((x) => x !== id)
         : [...prev.selected_services, id],
     }));
+  };
+
+  const setProductQty = (id, delta) => {
+    setForm((prev) => {
+      const q = Math.max(0, Number(prev.selected_products[id] || 0) + delta);
+      const next = { ...(prev.selected_products || {}) };
+      if (q === 0) delete next[id]; else next[id] = q;
+      return { ...prev, selected_products: next };
+    });
   };
 
   const handleSelectCustomer = async (c) => {
@@ -170,8 +208,35 @@ export default function SalonBookingForm({
       } else {
         setWalletInfo(null);
       }
-    } catch (e) {
-      setWalletInfo(null);
+    } catch (e) { setWalletInfo(null); }
+  };
+
+  const handleClearCustomer = () => {
+    setSelectedCustomer(null);
+    setWalletInfo(null);
+    setForm({ ...form, customer_name: '', phone: '', gender: 'Men' });
+  };
+
+  const handleQuickAddCustomer = async (name, phone, gender = 'Men') => {
+    const cleanPhone = (phone || '').replace(/\D/g, '');
+    if (!name || !cleanPhone || cleanPhone.length < 10) {
+      toast.error('Enter name and 10-digit phone');
+      return;
+    }
+    try {
+      const withPrefix = cleanPhone.startsWith('91') && cleanPhone.length === 12 ? cleanPhone : cleanPhone.slice(-10);
+      await axios.post(
+        `${API}/salons/${salonId}/customers`,
+        { name, phone: `+91${withPrefix}`, gender, email: '', notes: '', birthday: '', anniversary: '' },
+        { headers: getSalonAuthHeaders() }
+      );
+      toast.success(`Added ${name}`);
+      setForm({ ...form, customer_name: name, phone: `+91${withPrefix}`, gender });
+      setSelectedCustomer({ name, phone: `+91${withPrefix}`, gender });
+      setCustomers((cs) => [{ id: `local-${Date.now()}`, name, phone: `+91${withPrefix}`, gender }, ...cs]);
+      setShowAddCustomer(false);
+    } catch (err) {
+      toast.error(err.response?.data?.detail || 'Failed to add customer');
     }
   };
 
@@ -198,35 +263,37 @@ export default function SalonBookingForm({
     }
   };
 
-  const removeCoupon = () => {
-    setCouponInfo(null);
-    setCouponCode('');
-  };
+  const removeCoupon = () => { setCouponInfo(null); setCouponCode(''); };
 
-  const canSubmit = form.selected_services.length > 0
-    && (form.customer_name || '').trim().length > 0;
+  const canSubmit = form.selected_services.length > 0 || selectedProductObjs.length > 0;
 
-  const handleSubmit = async () => {
+  const submit = async (kind /* 'booking' | 'invoice' */) => {
     if (!canSubmit) {
-      toast.error('Enter customer name and select at least one service');
+      toast.error('Add at least one service or product');
       return;
     }
     if (form.payment_mode === 'wallet' && !form.phone) {
-      toast.error('Customer phone required for wallet payment');
+      toast.error('Wallet payment needs customer phone');
+      return;
+    }
+    if (selectedMembershipId && !form.phone) {
+      toast.error('Enter customer phone to sell a membership');
       return;
     }
     setSubmitting(true);
+    setSubmittingKind(kind);
     try {
-      const endpoint = mode === 'invoice'
+      const endpoint = kind === 'invoice'
         ? `${API}/salons/${salonId}/direct-invoice`
         : `${API}/salons/${salonId}/salon-booking`;
 
       const payload = {
-        customer_name: form.customer_name,
+        customer_name: form.customer_name || 'Walk-in',
         phone: form.phone,
         gender: form.gender,
-        barber_id: form.barber_id,
+        barber_id: form.barber_id || (barbers[0]?.id ?? null),
         selected_services: form.selected_services,
+        selected_products: selectedProductObjs.map((p) => ({ product_id: p.id, name: p.name, qty: p.qty, unit_price: p.price })),
         payment_mode: form.payment_mode,
         coupon_code: couponCode.trim().toUpperCase() || undefined,
         membership_plan_id: selectedMembershipId || undefined,
@@ -234,13 +301,17 @@ export default function SalonBookingForm({
         notes: notes || undefined,
       };
       const res = await axios.post(endpoint, payload, { headers: getSalonAuthHeaders() });
-      toast.success(mode === 'invoice' ? 'Invoice generated' : 'Booking created');
-      if (onSubmitted) onSubmitted(res.data);
-      else navigate('/salon/dashboard');
+      toast.success(kind === 'invoice' ? 'Invoice generated' : 'Booking added to queue');
+      if (kind === 'invoice') {
+        navigate('/salon/dashboard');
+      } else {
+        navigate('/salon/dashboard?tab=queue');
+      }
     } catch (err) {
       toast.error(err.response?.data?.detail || 'Something went wrong');
     } finally {
       setSubmitting(false);
+      setSubmittingKind(null);
     }
   };
 
@@ -251,14 +322,10 @@ export default function SalonBookingForm({
       }).slice(0, 8)
     : [];
 
-  const accentBar = headerAccent === 'invoice'
-    ? 'from-emerald-500 to-teal-600'
-    : 'from-gold to-amber-500';
-
   return (
     <div className="min-h-screen bg-background text-foreground">
-      {/* Sticky header */}
-      <div className={`sticky top-0 z-30 border-b border-border bg-background/90 backdrop-blur-md`}>
+      {/* HEADER */}
+      <div className="sticky top-0 z-30 border-b border-border bg-background/95 backdrop-blur-md">
         <div className="max-w-[1180px] mx-auto flex items-center gap-3 px-4 py-3">
           <button
             onClick={() => navigate('/salon/dashboard')}
@@ -267,64 +334,64 @@ export default function SalonBookingForm({
           >
             <ArrowLeft className="w-5 h-5" />
           </button>
-          <div className="flex-1">
-            <h1 className={`text-xl md:text-2xl font-bold bg-gradient-to-r ${accentBar} bg-clip-text text-transparent`}>{pageTitle}</h1>
-            <p className="text-xs text-muted-foreground">{pageSubtitle}</p>
+          <div className="flex-1 min-w-0">
+            <h1 className="text-xl md:text-2xl font-bold bg-gradient-to-r from-gold to-amber-500 bg-clip-text text-transparent">
+              New Booking / Invoice
+            </h1>
+            <p className="text-xs text-muted-foreground truncate">Fill the order and choose an action at the bottom</p>
           </div>
-          <button
-            onClick={handleSubmit}
-            disabled={!canSubmit || submitting}
-            data-testid="submit-booking-form"
-            className={`hidden md:inline-flex items-center gap-2 px-5 py-2 rounded-lg font-semibold text-sm transition ${
-              canSubmit && !submitting
-                ? mode === 'invoice'
-                  ? 'bg-emerald-500 hover:bg-emerald-600 text-white'
-                  : 'bg-gold hover:bg-gold/90 text-black'
-                : 'bg-muted text-muted-foreground cursor-not-allowed'
-            }`}
-          >
-            {submitting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
-            {submitLabel} · ₹{grandTotal.toFixed(0)}
-          </button>
+          <div className="hidden md:flex items-center gap-2 text-sm">
+            <span className="text-muted-foreground">Total</span>
+            <span className="font-bold text-lg text-gold">₹{grandTotal.toFixed(0)}</span>
+          </div>
         </div>
       </div>
 
-      <div className="max-w-[1180px] mx-auto p-4 grid grid-cols-1 lg:grid-cols-3 gap-4 pb-32 lg:pb-8">
-        {/* LEFT — customer + services */}
+      {/* BODY */}
+      <div className="max-w-[1180px] mx-auto p-4 grid grid-cols-1 lg:grid-cols-3 gap-4 pb-40">
+        {/* LEFT — customer + services + products */}
         <div className="lg:col-span-2 space-y-4">
           {/* Customer */}
           <section className="bg-card border border-border rounded-2xl p-4">
             <div className="flex items-center justify-between mb-3">
-              <h3 className="text-sm font-bold flex items-center gap-2"><User className="w-4 h-4 text-gold" /> Customer</h3>
+              <h3 className="text-sm font-bold flex items-center gap-2"><User className="w-4 h-4 text-gold" /> Customer <span className="text-[10px] font-normal text-muted-foreground">(optional)</span></h3>
               {selectedCustomer && (
-                <button onClick={() => { setSelectedCustomer(null); setWalletInfo(null); setForm({ ...form, customer_name: '', phone: '' }); }} className="text-xs text-muted-foreground hover:text-foreground flex items-center gap-1"><X className="w-3 h-3" /> Clear</button>
+                <button onClick={handleClearCustomer} className="text-xs text-muted-foreground hover:text-foreground flex items-center gap-1"><X className="w-3 h-3" /> Clear</button>
               )}
             </div>
 
-            {/* Existing customer search */}
-            <div className="relative mb-3">
-              <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
-              <input
-                type="text"
-                value={customerSearch}
-                onChange={(e) => setCustomerSearch(e.target.value)}
-                placeholder="Search existing customer by name or phone…"
-                className="w-full pl-9 pr-3 py-2 rounded-lg bg-background border border-border text-sm focus:outline-none focus:ring-2 focus:ring-gold/40"
-              />
-              {filteredCustomers.length > 0 && (
-                <div className="absolute z-20 top-full left-0 right-0 mt-1 bg-card border border-border rounded-lg shadow-lg max-h-52 overflow-y-auto">
-                  {filteredCustomers.map((c) => (
-                    <button
-                      key={c.id || c.phone}
-                      onClick={() => { handleSelectCustomer(c); setCustomerSearch(''); }}
-                      className="w-full text-left px-3 py-2 hover:bg-muted text-sm flex items-center justify-between"
-                    >
-                      <span className="font-medium">{c.name}</span>
-                      <span className="text-xs text-muted-foreground">{c.phone}</span>
-                    </button>
-                  ))}
-                </div>
-              )}
+            <div className="flex gap-2 mb-3">
+              <div className="relative flex-1">
+                <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+                <input
+                  type="text"
+                  value={customerSearch}
+                  onChange={(e) => setCustomerSearch(e.target.value)}
+                  placeholder="Search existing customer by name or phone…"
+                  className="w-full pl-9 pr-3 py-2 rounded-lg bg-background border border-border text-sm focus:outline-none focus:ring-2 focus:ring-gold/40"
+                />
+                {filteredCustomers.length > 0 && (
+                  <div className="absolute z-20 top-full left-0 right-0 mt-1 bg-card border border-border rounded-lg shadow-lg max-h-52 overflow-y-auto">
+                    {filteredCustomers.map((c) => (
+                      <button
+                        key={c.id || c.phone}
+                        onClick={() => { handleSelectCustomer(c); setCustomerSearch(''); }}
+                        className="w-full text-left px-3 py-2 hover:bg-muted text-sm flex items-center justify-between"
+                      >
+                        <span className="font-medium">{c.name}</span>
+                        <span className="text-xs text-muted-foreground">{c.phone}</span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+              <button
+                onClick={() => setShowAddCustomer(true)}
+                className="inline-flex items-center gap-1 px-3 py-2 rounded-lg bg-gold/10 border border-gold/40 text-gold text-xs font-semibold hover:bg-gold hover:text-black transition whitespace-nowrap"
+                data-testid="quick-add-customer"
+              >
+                <UserPlus className="w-3.5 h-3.5" /> New
+              </button>
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -332,17 +399,17 @@ export default function SalonBookingForm({
                 type="text"
                 value={form.customer_name}
                 onChange={(e) => setForm({ ...form, customer_name: e.target.value })}
-                placeholder="Customer name"
+                placeholder="Customer name (optional)"
                 className="px-3 py-2 rounded-lg bg-background border border-border text-sm focus:outline-none focus:ring-2 focus:ring-gold/40"
               />
               <input
                 type="tel"
                 value={form.phone}
                 onChange={(e) => setForm({ ...form, phone: e.target.value })}
-                placeholder="Phone (10 digits)"
+                placeholder="Phone (optional, 10 digits)"
                 className="px-3 py-2 rounded-lg bg-background border border-border text-sm focus:outline-none focus:ring-2 focus:ring-gold/40"
               />
-              <div className="flex gap-2">
+              <div className="flex gap-2 sm:col-span-2">
                 {['Men', 'Women', 'Kids'].map((g) => (
                   <button
                     key={g}
@@ -365,18 +432,13 @@ export default function SalonBookingForm({
             )}
           </section>
 
-          {/* Barber */}
+          {/* Stylist — real barbers only, no "any" */}
           <section className="bg-card border border-border rounded-2xl p-4">
             <h3 className="text-sm font-bold mb-3 flex items-center gap-2"><Scissors className="w-4 h-4 text-gold" /> Assign Stylist</h3>
             <div className="flex flex-wrap gap-2">
-              <button
-                onClick={() => setForm({ ...form, barber_id: 'any' })}
-                className={`px-3 py-1.5 rounded-full text-xs font-medium border transition ${
-                  form.barber_id === 'any' ? 'bg-gold text-black border-gold' : 'bg-background border-border hover:border-gold/40'
-                }`}
-              >
-                Any Available
-              </button>
+              {barbers.length === 0 && (
+                <p className="text-xs text-muted-foreground">No active staff. Add barbers to assign services.</p>
+              )}
               {barbers.map((b) => (
                 <button
                   key={b.id}
@@ -394,15 +456,18 @@ export default function SalonBookingForm({
           {/* Services — chips */}
           <section className="bg-card border border-border rounded-2xl p-4">
             <div className="flex items-center justify-between mb-3">
-              <h3 className="text-sm font-bold">Services <span className="text-xs text-muted-foreground">({form.selected_services.length} selected)</span></h3>
+              <h3 className="text-sm font-bold flex items-center gap-1.5">
+                <Scissors className="w-4 h-4 text-gold" /> Services
+                <span className="text-xs text-muted-foreground">({form.selected_services.length} selected)</span>
+              </h3>
             </div>
             <div className="flex flex-wrap gap-1.5 mb-3">
-              {categories.map((c) => (
+              {serviceCategories.map((c) => (
                 <button
                   key={c}
-                  onClick={() => setCategory(c)}
+                  onClick={() => setServiceCategory(c)}
                   className={`px-2.5 py-1 rounded-full text-[11px] font-medium border transition ${
-                    category === c ? 'bg-foreground text-background border-foreground' : 'bg-background border-border hover:border-gold/40'
+                    serviceCategory === c ? 'bg-foreground text-background border-foreground' : 'bg-background border-border hover:border-gold/40'
                   }`}
                 >
                   {c}
@@ -411,7 +476,7 @@ export default function SalonBookingForm({
             </div>
             <div className="flex flex-wrap gap-2">
               {visibleServices.length === 0 && (
-                <p className="text-xs text-muted-foreground">No services in this category</p>
+                <p className="text-xs text-muted-foreground">No services available</p>
               )}
               {visibleServices.map((s) => {
                 const on = form.selected_services.includes(s.id);
@@ -435,6 +500,67 @@ export default function SalonBookingForm({
             </div>
           </section>
 
+          {/* Products / Retail — chips with qty */}
+          <section className="bg-card border border-border rounded-2xl p-4">
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="text-sm font-bold flex items-center gap-1.5">
+                <ShoppingBag className="w-4 h-4 text-pink-500" /> Products
+                <span className="text-xs text-muted-foreground">({selectedProductObjs.length} in cart)</span>
+              </h3>
+            </div>
+            {products.length === 0 ? (
+              <p className="text-xs text-muted-foreground">No products in inventory yet.</p>
+            ) : (
+              <>
+                <div className="flex flex-wrap gap-1.5 mb-3">
+                  {productCategories.map((c) => (
+                    <button
+                      key={c}
+                      onClick={() => setProductCategory(c)}
+                      className={`px-2.5 py-1 rounded-full text-[11px] font-medium border transition ${
+                        productCategory === c ? 'bg-foreground text-background border-foreground' : 'bg-background border-border hover:border-pink-500/40'
+                      }`}
+                    >
+                      {c}
+                    </button>
+                  ))}
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  {visibleProducts.map((p) => {
+                    const qty = Number(form.selected_products[p.id] || 0);
+                    const price = Number(p.retail_price || p.selling_price || p.price || 0);
+                    return (
+                      <div
+                        key={p.id}
+                        className={`inline-flex items-center gap-1.5 px-2 py-1.5 rounded-full text-xs font-medium border ${
+                          qty > 0 ? 'bg-pink-500/10 border-pink-500/50' : 'bg-background border-border'
+                        }`}
+                      >
+                        <span>{p.name}</span>
+                        <span className="text-[10px] text-muted-foreground">₹{price}</span>
+                        {qty === 0 ? (
+                          <button
+                            onClick={() => setProductQty(p.id, 1)}
+                            className="ml-1 w-5 h-5 rounded-full bg-pink-500 text-white inline-flex items-center justify-center"
+                            title="Add"
+                          >
+                            <Plus className="w-3 h-3" />
+                          </button>
+                        ) : (
+                          <div className="ml-1 inline-flex items-center gap-1">
+                            <button onClick={() => setProductQty(p.id, -1)} className="w-5 h-5 rounded-full bg-muted inline-flex items-center justify-center"><Minus className="w-3 h-3" /></button>
+                            <span className="w-4 text-center font-bold">{qty}</span>
+                            <button onClick={() => setProductQty(p.id, 1)} className="w-5 h-5 rounded-full bg-pink-500 text-white inline-flex items-center justify-center"><Plus className="w-3 h-3" /></button>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </>
+            )}
+          </section>
+
           {/* Notes */}
           <section className="bg-card border border-border rounded-2xl p-4">
             <h3 className="text-sm font-bold mb-2">Notes (optional)</h3>
@@ -448,9 +574,8 @@ export default function SalonBookingForm({
           </section>
         </div>
 
-        {/* RIGHT — order summary */}
+        {/* RIGHT — coupon, membership, order summary, payment */}
         <div className="space-y-4">
-          {/* Coupon + Membership */}
           <section className="bg-card border border-border rounded-2xl p-4 space-y-4">
             <div>
               <label className="text-xs font-bold flex items-center gap-1 mb-2"><TicketPercent className="w-3.5 h-3.5 text-blue-500" /> Coupon Code</label>
@@ -498,7 +623,7 @@ export default function SalonBookingForm({
               </select>
               {selectedMembership && (
                 <p className="text-[11px] text-muted-foreground mt-1">
-                  Applies {membershipDiscountPct}% off (₹{membershipDiscountAmt.toFixed(0)}) to this order + adds ₹{Number(selectedMembership.credit || 0)} wallet credit.
+                  Applies {membershipDiscountPct}% off services (₹{membershipDiscountAmt.toFixed(0)}) + adds ₹{Number(selectedMembership.credit || 0)} wallet credit.
                 </p>
               )}
             </div>
@@ -520,16 +645,14 @@ export default function SalonBookingForm({
           <section className="bg-card border border-border rounded-2xl p-4">
             <h3 className="text-sm font-bold mb-3">Order Summary</h3>
             <div className="space-y-1.5 text-sm">
-              <Row label="Subtotal" value={subtotal} />
+              {serviceSubtotal > 0 && <Row label="Services" value={serviceSubtotal} />}
+              {productSubtotal > 0 && <Row label="Products" value={productSubtotal} />}
               {membershipDiscountAmt > 0 && (
                 <Row label={`Membership (${membershipDiscountPct}% off)`} value={-membershipDiscountAmt} negative />
               )}
               {couponDiscount > 0 && (
                 <Row label={`Coupon (${couponCode})`} value={-couponDiscount} negative />
               )}
-              <div className="border-t border-border pt-2 mt-2">
-                <Row label="Services total" value={servicesTotal} bold />
-              </div>
               {membershipSalePrice > 0 && <Row label="Membership sale" value={membershipSalePrice} />}
               {Number(tipAmount) > 0 && <Row label="Tip" value={Number(tipAmount)} />}
               <div className="border-t border-border pt-2 mt-2 flex items-center justify-between">
@@ -566,42 +689,49 @@ export default function SalonBookingForm({
               })}
             </div>
           </section>
+        </div>
+      </div>
 
-          {/* Mobile submit */}
+      {/* STICKY BOTTOM ACTION BAR */}
+      <div className="fixed bottom-0 left-0 right-0 z-40 bg-background/95 backdrop-blur-md border-t border-border">
+        <div className="max-w-[1180px] mx-auto p-3 flex items-center gap-2 md:gap-3">
+          <div className="flex-1 min-w-0">
+            <p className="text-[10px] text-muted-foreground uppercase tracking-wide">Grand Total</p>
+            <p className="text-xl md:text-2xl font-bold text-gold leading-tight">₹{grandTotal.toFixed(0)}</p>
+          </div>
           <button
-            onClick={handleSubmit}
+            onClick={() => submit('booking')}
             disabled={!canSubmit || submitting}
-            className={`lg:hidden w-full flex items-center justify-center gap-2 px-5 py-3 rounded-xl font-bold text-base transition ${
+            data-testid="submit-add-booking"
+            className={`inline-flex items-center gap-2 px-3 md:px-5 py-2.5 rounded-xl font-bold text-xs md:text-sm transition ${
               canSubmit && !submitting
-                ? mode === 'invoice'
-                  ? 'bg-emerald-500 hover:bg-emerald-600 text-white'
-                  : 'bg-gold hover:bg-gold/90 text-black'
-                : 'bg-muted text-muted-foreground'
+                ? 'bg-gold hover:bg-gold/90 text-black'
+                : 'bg-muted text-muted-foreground cursor-not-allowed'
             }`}
           >
-            {submitting ? <Loader2 className="w-5 h-5 animate-spin" /> : <Check className="w-5 h-5" />}
-            {submitLabel} · ₹{grandTotal.toFixed(0)}
+            {submitting && submittingKind === 'booking' ? <Loader2 className="w-4 h-4 animate-spin" /> : <Calendar className="w-4 h-4" />}
+            <span>Add to Queue</span>
+          </button>
+          <button
+            onClick={() => submit('invoice')}
+            disabled={!canSubmit || submitting}
+            data-testid="submit-generate-invoice"
+            className={`inline-flex items-center gap-2 px-3 md:px-5 py-2.5 rounded-xl font-bold text-xs md:text-sm transition ${
+              canSubmit && !submitting
+                ? 'bg-emerald-500 hover:bg-emerald-600 text-white'
+                : 'bg-muted text-muted-foreground cursor-not-allowed'
+            }`}
+          >
+            {submitting && submittingKind === 'invoice' ? <Loader2 className="w-4 h-4 animate-spin" /> : <FileText className="w-4 h-4" />}
+            <span>Generate Invoice</span>
           </button>
         </div>
       </div>
 
-      {/* Mobile sticky bottom */}
-      <div className="lg:hidden fixed bottom-0 left-0 right-0 bg-background/95 backdrop-blur-md border-t border-border p-3 z-40">
-        <button
-          onClick={handleSubmit}
-          disabled={!canSubmit || submitting}
-          className={`w-full flex items-center justify-center gap-2 px-5 py-3 rounded-xl font-bold text-base ${
-            canSubmit && !submitting
-              ? mode === 'invoice'
-                ? 'bg-emerald-500 text-white'
-                : 'bg-gold text-black'
-              : 'bg-muted text-muted-foreground'
-          }`}
-        >
-          {submitting ? <Loader2 className="w-5 h-5 animate-spin" /> : <Check className="w-5 h-5" />}
-          {submitLabel} · ₹{grandTotal.toFixed(0)}
-        </button>
-      </div>
+      {/* Quick-add customer inline modal */}
+      {showAddCustomer && (
+        <QuickAddCustomer onClose={() => setShowAddCustomer(false)} onCreated={handleQuickAddCustomer} />
+      )}
     </div>
   );
 }
@@ -613,6 +743,52 @@ function Row({ label, value, negative = false, bold = false }) {
       <span className={`${negative ? 'text-emerald-600 dark:text-emerald-400' : ''}`}>
         {negative ? '-' : ''}₹{Math.abs(value).toFixed(0)}
       </span>
+    </div>
+  );
+}
+
+function QuickAddCustomer({ onClose, onCreated }) {
+  const [name, setName] = useState('');
+  const [phone, setPhone] = useState('');
+  const [gender, setGender] = useState('Men');
+  return (
+    <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4" onClick={onClose}>
+      <div className="bg-card border border-border rounded-2xl p-5 w-full max-w-sm" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between mb-3">
+          <h3 className="text-base font-bold flex items-center gap-2"><UserPlus className="w-4 h-4 text-gold" /> New Customer</h3>
+          <button onClick={onClose} className="p-1 hover:bg-muted rounded"><X className="w-4 h-4" /></button>
+        </div>
+        <div className="space-y-3">
+          <input
+            type="text"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            placeholder="Full name"
+            className="w-full px-3 py-2 rounded-lg bg-background border border-border text-sm focus:outline-none focus:ring-2 focus:ring-gold/40"
+            data-testid="qa-name"
+          />
+          <input
+            type="tel"
+            value={phone}
+            onChange={(e) => setPhone(e.target.value)}
+            placeholder="Phone (10 digits)"
+            className="w-full px-3 py-2 rounded-lg bg-background border border-border text-sm focus:outline-none focus:ring-2 focus:ring-gold/40"
+            data-testid="qa-phone"
+          />
+          <div className="flex gap-2">
+            {['Men', 'Women', 'Kids'].map((g) => (
+              <button key={g} onClick={() => setGender(g)} className={`flex-1 px-2 py-2 rounded-lg text-xs font-semibold border transition ${gender === g ? 'bg-gold text-black border-gold' : 'bg-background border-border hover:bg-muted'}`}>{g}</button>
+            ))}
+          </div>
+          <button
+            onClick={() => onCreated(name, phone, gender)}
+            className="w-full inline-flex items-center justify-center gap-2 px-4 py-2 rounded-lg bg-gold text-black font-bold text-sm"
+            data-testid="qa-submit"
+          >
+            <UserPlus className="w-4 h-4" /> Add Customer
+          </button>
+        </div>
+      </div>
     </div>
   );
 }

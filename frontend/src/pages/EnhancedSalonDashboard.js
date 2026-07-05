@@ -182,8 +182,10 @@ export default function EnhancedSalonDashboard() {
     const shifted = new Date(Date.UTC(y, m - 1, d + daysOffset));
     return fmt.format(shifted);
   };
-  const [dateMode, setDateMode] = useState('today'); // 'today' | 'tomorrow'
-  const date = dateMode === 'today' ? getISTDateOffset(0) : getISTDateOffset(1);
+  const [dateMode, setDateMode] = useState('today'); // 'today' | 'yesterday' | 'range'
+  const [dateFrom, setDateFrom] = useState('');
+  const [dateTo, setDateTo] = useState('');
+  const date = dateMode === 'yesterday' ? getISTDateOffset(-1) : getISTDateOffset(0);
   const [menuOpen, setMenuOpen] = useState(false);
   const [menuPinned, setMenuPinned] = useState(() => {
     return localStorage.getItem('menu_pinned') === 'true';
@@ -1381,6 +1383,10 @@ export default function EnhancedSalonDashboard() {
             barbers={barbers}
             dateMode={dateMode}
             setDateMode={setDateMode}
+            dateFrom={dateFrom}
+            setDateFrom={setDateFrom}
+            dateTo={dateTo}
+            setDateTo={setDateTo}
             dailySales={dailySales}
             goToTab={goToTab}
             navigate={navigate}
@@ -1406,28 +1412,49 @@ export default function EnhancedSalonDashboard() {
 
         {activeTab === 'queue' && (
           <div className="space-y-6">
-            {/* Date Toggle: Today / Tomorrow */}
+            {/* Date Toggle: Today / Yesterday / Range */}
             <div className="flex items-center justify-between flex-wrap gap-3">
-              <div className="inline-flex rounded-lg border border-border bg-card p-1">
-                <button
-                  onClick={() => setDateMode('today')}
-                  className={`px-4 py-1.5 text-sm font-semibold rounded-md transition-colors ${
-                    dateMode === 'today' ? 'bg-gold text-black' : 'text-foreground hover:bg-muted'
-                  }`}
-                >
-                  Today
-                </button>
-                <button
-                  onClick={() => setDateMode('tomorrow')}
-                  className={`px-4 py-1.5 text-sm font-semibold rounded-md transition-colors ${
-                    dateMode === 'tomorrow' ? 'bg-gold text-black' : 'text-foreground hover:bg-muted'
-                  }`}
-                >
-                  Tomorrow
-                </button>
+              <div className="flex items-center gap-2 flex-wrap">
+                <div className="inline-flex rounded-lg border border-border bg-card p-1">
+                  <button
+                    onClick={() => setDateMode('today')}
+                    className={`px-4 py-1.5 text-sm font-semibold rounded-md transition-colors ${
+                      dateMode === 'today' ? 'bg-gold text-black' : 'text-foreground hover:bg-muted'
+                    }`}
+                  >
+                    Today
+                  </button>
+                  <button
+                    onClick={() => setDateMode('yesterday')}
+                    className={`px-4 py-1.5 text-sm font-semibold rounded-md transition-colors ${
+                      dateMode === 'yesterday' ? 'bg-gold text-black' : 'text-foreground hover:bg-muted'
+                    }`}
+                  >
+                    Yesterday
+                  </button>
+                  <button
+                    onClick={() => setDateMode('range')}
+                    className={`px-4 py-1.5 text-sm font-semibold rounded-md transition-colors ${
+                      dateMode === 'range' ? 'bg-gold text-black' : 'text-foreground hover:bg-muted'
+                    }`}
+                  >
+                    Range
+                  </button>
+                </div>
+                {dateMode === 'range' && (
+                  <div className="inline-flex gap-1 items-center text-xs">
+                    <input type="date" value={dateFrom || ''} onChange={(e) => setDateFrom(e.target.value)} className="h-8 px-2 rounded-md border border-border bg-background" />
+                    <span className="text-muted-foreground">→</span>
+                    <input type="date" value={dateTo || ''} onChange={(e) => setDateTo(e.target.value)} className="h-8 px-2 rounded-md border border-border bg-background" />
+                  </div>
+                )}
               </div>
               <div className="text-xs text-muted-foreground">
-                Viewing bookings for <span className="font-semibold text-foreground">{new Date(date).toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric', month: 'short' })}</span>
+                Viewing bookings for <span className="font-semibold text-foreground">
+                  {dateMode === 'range'
+                    ? `${dateFrom || '—'} to ${dateTo || '—'}`
+                    : new Date(date).toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric', month: 'short' })}
+                </span>
               </div>
             </div>
             {/* Barber Filter */}

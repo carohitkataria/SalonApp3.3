@@ -12,7 +12,7 @@ from pydantic import BaseModel, Field, ConfigDict
 from typing import List, Optional, Dict, Any
 from enum import Enum
 import uuid
-from datetime import datetime, timezone, time, timedelta
+from datetime import datetime, timezone, time, timedelta, date
 import calendar
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 import io
@@ -7479,6 +7479,7 @@ async def create_salon_booking(salon_id: str, body: dict, current_user=Depends(g
     gender = body.get("gender", "Men")
     barber_id = body.get("barber_id", "any")
     selected_services = body.get("selected_services", [])
+    selected_products = body.get("selected_products") or []
     shift = body.get("shift", "")
     date = body.get("date", datetime.now(timezone.utc).strftime("%Y-%m-%d"))
     payment_mode = body.get("payment_mode")
@@ -7519,6 +7520,35 @@ async def create_salon_booking(salon_id: str, body: dict, current_user=Depends(g
         service = await db.services.find_one({"id": service_id}, {"_id": 0})
         if service:
             total_amount += service.get("base_price", 0)
+
+    # Product lines (also decrement inventory)
+    product_details = []
+    for p in selected_products:
+        pid = p.get("product_id") or p.get("id")
+        qty = int(p.get("qty") or 0)
+        unit_price = float(p.get("unit_price") or 0)
+        if not pid or qty <= 0:
+            continue
+        if unit_price <= 0:
+            item = await db.salon_inventory.find_one({"id": pid, "salon_id": salon_id}, {"_id": 0})
+            if item:
+                unit_price = float(item.get("retail_price") or item.get("selling_price") or 0)
+        line_total = qty * unit_price
+        total_amount += line_total
+        product_details.append({
+            "product_id": pid,
+            "name": p.get("name"),
+            "qty": qty,
+            "unit_price": unit_price,
+            "line_total": line_total,
+        })
+        try:
+            await db.salon_inventory.update_one(
+                {"id": pid, "salon_id": salon_id},
+                {"$inc": {"stock_quantity": -qty}}
+            )
+        except Exception:
+            pass
 
     # Auto-assign barber when "any" is selected, using the same fastest-barber
     # logic as the customer booking flow (priority: shortest active queue today
@@ -7603,6 +7633,7 @@ async def create_salon_booking(salon_id: str, body: dict, current_user=Depends(g
         "barber_id": barber_id,
         "barber_name": barber_name,
         "selected_services": selected_services,
+        "selected_products": product_details,
         "date": date,
         "shift": shift,
         "time_slot": shift,
@@ -11225,29 +11256,43 @@ async def get_salon_live_status(salon_id: str, shift: Optional[str] = None, date
 async def get_salon_home_kpis(
     salon_id: str,
     date_mode: str = "today",
+    date_from: Optional[str] = None,
+    date_to: Optional[str] = None,
     current_salon=Depends(get_current_salon_user)
 ):
     """One-shot KPIs for the redesigned salon Home page.
 
-    Returns:
-      - Primary KPIs: today_sales, avg_ticket, rebooking_rate, no_show_rate, chair_utilization
-      - Secondary pills: appointments_count, new_clients_count, retention_rate, retail_sales,
-                          reminder_confirmation_rate, waitlist_count
-      - Staff leaderboard (today), Reviews summary, Targets vs actual, Revenue 7d series,
-        Payment mix (today), Top services (today), Busy hours histogram (last 7d).
+    date_mode: today | yesterday | tomorrow | range | week
+      When date_mode='range', supply date_from / date_to (YYYY-MM-DD).
     """
     # -- date basis --
     today = datetime.now(timezone.utc).date()
-    if date_mode == "tomorrow":
-        basis_date = (today + timedelta(days=1)).isoformat()
+    if date_mode == "yesterday":
+        start_date = end_date = today - timedelta(days=1)
+    elif date_mode == "tomorrow":
+        start_date = end_date = today + timedelta(days=1)
+    elif date_mode == "week":
+        start_date = today - timedelta(days=6)
+        end_date = today
+    elif date_mode == "range":
+        try:
+            start_date = date.fromisoformat(date_from) if date_from else today
+            end_date = date.fromisoformat(date_to) if date_to else today
+        except Exception:
+            start_date = end_date = today
+        if end_date < start_date:
+            start_date, end_date = end_date, start_date
     else:
-        basis_date = today.isoformat()
+        start_date = end_date = today
+    basis_date = end_date.isoformat()  # for legacy fields
+    date_start_iso = start_date.isoformat()
+    date_end_iso = end_date.isoformat()
 
-    # -- fetch tokens for the basis date --
+    # -- fetch tokens in the basis range --
     tokens_basis = await db.tokens.find(
-        {"salon_id": salon_id, "date": basis_date},
+        {"salon_id": salon_id, "date": {"$gte": date_start_iso, "$lte": date_end_iso}},
         {"_id": 0}
-    ).to_list(5000)
+    ).to_list(20000)
 
     completed_basis = [t for t in tokens_basis if t.get("status") == "completed"]
     total_amounts = [float(t.get("total_amount") or 0) for t in completed_basis]
@@ -11276,7 +11321,7 @@ async def get_salon_home_kpis(
                 "salon_id": salon_id,
                 "phone": {"$in": list(unique_phones)},
                 "status": "completed",
-                "date": {"$gte": prior_start, "$lt": basis_date},
+                "date": {"$gte": prior_start, "$lt": date_start_iso},
             },
             {"_id": 0, "phone": 1}
         ).to_list(20000)
@@ -11292,7 +11337,7 @@ async def get_salon_home_kpis(
             {
                 "salon_id": salon_id,
                 "phone": {"$in": list(unique_phones)},
-                "date": {"$lt": basis_date},
+                "date": {"$lt": date_start_iso},
             },
             {"_id": 0, "phone": 1}
         ).to_list(20000)
@@ -11318,7 +11363,7 @@ async def get_salon_home_kpis(
     retail_sales = 0.0
     try:
         rs_cursor = db.salon_store_orders.find(
-            {"salon_id": salon_id, "created_at": {"$gte": basis_date}},
+            {"salon_id": salon_id, "created_at": {"$gte": date_start_iso}},
             {"_id": 0, "total_amount": 1}
         )
         async for r in rs_cursor:
@@ -11546,16 +11591,17 @@ async def create_direct_invoice(
     gender = body.get("gender") or "Men"
     barber_id = body.get("barber_id") or "any"
     selected_services = body.get("selected_services") or []
+    selected_products = body.get("selected_products") or []  # [{product_id, name, qty, unit_price}]
     payment_mode = (body.get("payment_mode") or "cash").lower()
     coupon_code = (body.get("coupon_code") or "").strip().upper() or None
     membership_plan_id = body.get("membership_plan_id") or None
     tip_amount = float(body.get("tip_amount") or 0)
     notes = body.get("notes") or ""
 
-    if not selected_services:
-        raise HTTPException(status_code=400, detail="At least one service is required")
+    if not selected_services and not selected_products:
+        raise HTTPException(status_code=400, detail="Add at least one service or product")
 
-    # -- Compute base subtotal --
+    # -- Compute base subtotal (services) --
     subtotal = 0.0
     service_details = []
     for sid in selected_services:
@@ -11573,6 +11619,38 @@ async def create_direct_invoice(
         subtotal += price
         service_details.append({"service_id": sid, "price": price})
 
+    # -- Product subtotal (also decrements inventory) --
+    product_subtotal = 0.0
+    product_details = []
+    for p in selected_products:
+        pid = p.get("product_id") or p.get("id")
+        qty = int(p.get("qty") or 0)
+        unit_price = float(p.get("unit_price") or 0)
+        if not pid or qty <= 0:
+            continue
+        if unit_price <= 0:
+            item = await db.salon_inventory.find_one({"id": pid, "salon_id": salon_id}, {"_id": 0})
+            if item:
+                unit_price = float(item.get("retail_price") or item.get("selling_price") or 0)
+        line_total = qty * unit_price
+        product_subtotal += line_total
+        product_details.append({
+            "product_id": pid,
+            "name": p.get("name"),
+            "qty": qty,
+            "unit_price": unit_price,
+            "line_total": line_total,
+        })
+        # Decrement inventory (best effort)
+        try:
+            await db.salon_inventory.update_one(
+                {"id": pid, "salon_id": salon_id},
+                {"$inc": {"stock_quantity": -qty}}
+            )
+        except Exception:
+            pass
+    subtotal += product_subtotal
+
     membership_discount = 0.0
     membership_sale_amount = 0.0
     membership_info = None
@@ -11585,9 +11663,10 @@ async def create_direct_invoice(
         if not phone:
             raise HTTPException(status_code=400, detail="Customer phone required to sell membership")
 
-        # Apply plan's service discount to THIS order (if plan has discount_percentage)
+        # Apply plan's service discount to THIS order (services only, not products)
         disc_pct = float(plan.get("discount_percentage") or plan.get("service_discount_pct") or 0)
-        membership_discount = round(subtotal * disc_pct / 100.0, 2)
+        service_only_subtotal = subtotal - product_subtotal
+        membership_discount = round(service_only_subtotal * disc_pct / 100.0, 2)
         # The membership itself is a paid line (paid_amount from plan price)
         membership_sale_amount = float(plan.get("price") or plan.get("plan_price") or 0)
 
@@ -11698,6 +11777,7 @@ async def create_direct_invoice(
         "barber_id": barber_id,
         "barber_name": barber_name,
         "selected_services": selected_services,
+        "selected_products": product_details,
         "total_amount": grand_total,
         "subtotal": subtotal,
         "membership_discount": membership_discount,
