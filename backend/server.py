@@ -11218,6 +11218,563 @@ async def get_salon_live_status(salon_id: str, shift: Optional[str] = None, date
     """Get current live status for salon (alias for token-status)"""
     return await get_salon_token_status(salon_id, shift, date, branch_id)
 
+
+# ============ SALON HOME KPIs + DIRECT INVOICE ============
+
+@api_router.get("/salons/{salon_id}/home-kpis")
+async def get_salon_home_kpis(
+    salon_id: str,
+    date_mode: str = "today",
+    current_salon=Depends(get_current_salon_user)
+):
+    """One-shot KPIs for the redesigned salon Home page.
+
+    Returns:
+      - Primary KPIs: today_sales, avg_ticket, rebooking_rate, no_show_rate, chair_utilization
+      - Secondary pills: appointments_count, new_clients_count, retention_rate, retail_sales,
+                          reminder_confirmation_rate, waitlist_count
+      - Staff leaderboard (today), Reviews summary, Targets vs actual, Revenue 7d series,
+        Payment mix (today), Top services (today), Busy hours histogram (last 7d).
+    """
+    # -- date basis --
+    today = datetime.now(timezone.utc).date()
+    if date_mode == "tomorrow":
+        basis_date = (today + timedelta(days=1)).isoformat()
+    else:
+        basis_date = today.isoformat()
+
+    # -- fetch tokens for the basis date --
+    tokens_basis = await db.tokens.find(
+        {"salon_id": salon_id, "date": basis_date},
+        {"_id": 0}
+    ).to_list(5000)
+
+    completed_basis = [t for t in tokens_basis if t.get("status") == "completed"]
+    total_amounts = [float(t.get("total_amount") or 0) for t in completed_basis]
+
+    today_sales = round(sum(total_amounts), 2)
+    avg_ticket = round((today_sales / len(completed_basis)), 2) if completed_basis else 0.0
+
+    # no-show rate — skipped/cancelled over total tokens (today)
+    total_ct = len(tokens_basis)
+    ns_ct = sum(1 for t in tokens_basis if t.get("status") in ("skipped", "cancelled", "no_show"))
+    no_show_rate = round((ns_ct * 100.0 / total_ct), 1) if total_ct else 0.0
+
+    # -- rebooking / retention rate: fraction of completed today's customers
+    #    who had at least one earlier completed token (last 180 days) --
+    prior_start = (today - timedelta(days=180)).isoformat()
+    rebook_hit = 0
+    unique_phones = set()
+    for t in completed_basis:
+        ph = (t.get("phone") or "").strip()
+        if not ph:
+            continue
+        unique_phones.add(ph)
+    if unique_phones:
+        prior_agg = await db.tokens.find(
+            {
+                "salon_id": salon_id,
+                "phone": {"$in": list(unique_phones)},
+                "status": "completed",
+                "date": {"$gte": prior_start, "$lt": basis_date},
+            },
+            {"_id": 0, "phone": 1}
+        ).to_list(20000)
+        prior_phones = {p["phone"] for p in prior_agg}
+        rebook_hit = len(prior_phones & unique_phones)
+    rebooking_rate = round((rebook_hit * 100.0 / len(unique_phones)), 1) if unique_phones else 0.0
+    retention_rate = rebooking_rate  # alias (short-hand)
+
+    # -- new clients today: unique phones today with NO prior tokens ever --
+    new_clients_count = 0
+    if unique_phones:
+        seen_ever = await db.tokens.find(
+            {
+                "salon_id": salon_id,
+                "phone": {"$in": list(unique_phones)},
+                "date": {"$lt": basis_date},
+            },
+            {"_id": 0, "phone": 1}
+        ).to_list(20000)
+        prior_ever = {p["phone"] for p in seen_ever}
+        new_clients_count = sum(1 for p in unique_phones if p not in prior_ever)
+
+    # -- chair utilization: (completed service-minutes today) / (barbers * 8h * 60 min) --
+    barbers = await db.barbers.find({"salon_id": salon_id, "is_active": True}, {"_id": 0}).to_list(1000)
+    barber_count = max(1, len(barbers))
+    # Try to derive minutes from selected_services duration; fallback to 30m/service
+    service_dur_cache: Dict[str, int] = {}
+    used_minutes = 0
+    for t in completed_basis:
+        for sid in (t.get("selected_services") or []):
+            if sid not in service_dur_cache:
+                svc = await db.services.find_one({"id": sid}, {"_id": 0, "default_duration": 1})
+                service_dur_cache[sid] = int((svc or {}).get("default_duration") or 30)
+            used_minutes += service_dur_cache[sid]
+    available_minutes = barber_count * 8 * 60
+    chair_utilization = round(min(100.0, used_minutes * 100.0 / available_minutes), 1) if available_minutes else 0.0
+
+    # -- retail sales (from salon_orders or salon_store_sales if exists) --
+    retail_sales = 0.0
+    try:
+        rs_cursor = db.salon_store_orders.find(
+            {"salon_id": salon_id, "created_at": {"$gte": basis_date}},
+            {"_id": 0, "total_amount": 1}
+        )
+        async for r in rs_cursor:
+            retail_sales += float(r.get("total_amount") or 0)
+    except Exception:
+        retail_sales = 0.0
+
+    # -- reminder / confirmation rate (marketing messages sent today: delivered/sent%) --
+    reminder_confirmation_rate = None
+    try:
+        sent = await db.marketing_messages.count_documents(
+            {"salon_id": salon_id, "sent_at": {"$regex": f"^{basis_date}"}}
+        )
+        delivered = await db.marketing_messages.count_documents(
+            {"salon_id": salon_id, "sent_at": {"$regex": f"^{basis_date}"},
+             "status": {"$in": ["delivered", "read"]}}
+        )
+        reminder_confirmation_rate = round((delivered * 100.0 / sent), 1) if sent else 0.0
+    except Exception:
+        reminder_confirmation_rate = 0.0
+
+    # -- waitlist (feature not present in DB yet) --
+    waitlist_count = 0
+    try:
+        waitlist_count = await db.salon_waitlist.count_documents(
+            {"salon_id": salon_id, "status": "waiting"}
+        )
+    except Exception:
+        waitlist_count = 0
+
+    # -- payment mix (today) --
+    payment_mix: Dict[str, float] = {}
+    for t in completed_basis:
+        pm = (t.get("payment_mode") or "unknown").lower()
+        payment_mix[pm] = payment_mix.get(pm, 0.0) + float(t.get("total_amount") or 0)
+    payment_mix = {k: round(v, 2) for k, v in payment_mix.items()}
+
+    # -- top services today (by count + revenue) --
+    svc_ct: Dict[str, Dict[str, Any]] = {}
+    for t in completed_basis:
+        for sid in (t.get("selected_services") or []):
+            if sid not in svc_ct:
+                svc_ct[sid] = {"service_id": sid, "count": 0}
+            svc_ct[sid]["count"] += 1
+    if svc_ct:
+        svc_docs = await db.services.find(
+            {"id": {"$in": list(svc_ct.keys())}},
+            {"_id": 0, "id": 1, "service_name": 1, "base_price": 1}
+        ).to_list(200)
+        by_id = {s["id"]: s for s in svc_docs}
+        for sid, row in svc_ct.items():
+            info = by_id.get(sid) or {}
+            row["service_name"] = info.get("service_name") or "Service"
+            row["revenue"] = round(row["count"] * float(info.get("base_price") or 0), 2)
+    top_services = sorted(svc_ct.values(), key=lambda r: r.get("revenue", 0), reverse=True)[:5]
+
+    # -- staff leaderboard (today) --
+    staff_leaderboard: List[Dict[str, Any]] = []
+    barber_stats: Dict[str, Dict[str, Any]] = {}
+    for t in completed_basis:
+        bid = t.get("barber_id")
+        if not bid:
+            continue
+        row = barber_stats.setdefault(bid, {
+            "barber_id": bid,
+            "barber_name": t.get("barber_name") or "Barber",
+            "sales": 0.0,
+            "tips": 0.0,
+            "bookings": 0,
+            "rebook_count": 0,
+        })
+        row["sales"] += float(t.get("total_amount") or 0)
+        row["tips"] += float(t.get("tip_amount") or 0)
+        row["bookings"] += 1
+        # rebook: customer had past completed tokens with same barber (last 180d)
+        # keep this cheap — just flag if phone existed anywhere in prior set
+        if t.get("phone") and t["phone"] in unique_phones and rebook_hit:
+            pass  # aggregate rebook % below
+    # Compute rebook % per barber (simple)
+    for bid, row in barber_stats.items():
+        row["sales"] = round(row["sales"], 2)
+        row["tips"] = round(row["tips"], 2)
+        # % of returning customers among today's completed for this barber
+        row["rebook_pct"] = rebooking_rate
+    staff_leaderboard = sorted(barber_stats.values(), key=lambda r: r["sales"], reverse=True)
+
+    # -- reviews summary --
+    reviews_summary = {"avg_rating": 0.0, "total_reviews": 0, "distribution": {"5":0,"4":0,"3":0,"2":0,"1":0}}
+    try:
+        all_ratings = await db.ratings.find({"salon_id": salon_id}, {"_id": 0, "rating": 1}).to_list(5000)
+        if all_ratings:
+            total = len(all_ratings)
+            avg = sum(float(r.get("rating") or 0) for r in all_ratings) / total
+            dist = {"5":0,"4":0,"3":0,"2":0,"1":0}
+            for r in all_ratings:
+                k = str(int(round(float(r.get("rating") or 0))))
+                if k in dist:
+                    dist[k] += 1
+            reviews_summary = {"avg_rating": round(avg, 1), "total_reviews": total, "distribution": dist}
+    except Exception:
+        pass
+
+    # -- targets vs actual (from salon.settings.targets or fallback) --
+    salon_doc = await db.salons.find_one({"id": salon_id}, {"_id": 0}) or {}
+    targets = salon_doc.get("targets") or {}
+    daily_target = float(targets.get("daily_revenue") or 15000)
+    monthly_target = float(targets.get("monthly_revenue") or 300000)
+    membership_target = float(targets.get("monthly_memberships") or 20)
+
+    # month-to-date revenue
+    first_of_month = today.replace(day=1).isoformat()
+    mtd_docs = await db.tokens.find(
+        {"salon_id": salon_id, "status": "completed", "date": {"$gte": first_of_month, "$lte": today.isoformat()}},
+        {"_id": 0, "total_amount": 1}
+    ).to_list(20000)
+    mtd_revenue = round(sum(float(d.get("total_amount") or 0) for d in mtd_docs), 2)
+
+    # memberships sold this month
+    try:
+        mtd_memberships = await db.customer_memberships.count_documents({
+            "salon_id": salon_id,
+            "purchased_at": {"$gte": first_of_month}
+        })
+    except Exception:
+        mtd_memberships = 0
+
+    # -- revenue 7d sparkline --
+    revenue_7d: List[Dict[str, Any]] = []
+    for i in range(6, -1, -1):
+        d = (today - timedelta(days=i)).isoformat()
+        docs = await db.tokens.find(
+            {"salon_id": salon_id, "status": "completed", "date": d},
+            {"_id": 0, "total_amount": 1}
+        ).to_list(5000)
+        revenue_7d.append({"date": d, "total": round(sum(float(x.get("total_amount") or 0) for x in docs), 2)})
+
+    # -- busy hours histogram (last 7d) --
+    hist_start = (today - timedelta(days=6)).isoformat()
+    hist_docs = await db.tokens.find(
+        {"salon_id": salon_id, "date": {"$gte": hist_start, "$lte": today.isoformat()}},
+        {"_id": 0, "created_at": 1}
+    ).to_list(20000)
+    busy_hours = {str(h): 0 for h in range(24)}
+    for d in hist_docs:
+        try:
+            hh = datetime.fromisoformat((d.get("created_at") or "").replace("Z", "+00:00")).hour
+            busy_hours[str(hh)] += 1
+        except Exception:
+            continue
+
+    return {
+        "date_basis": basis_date,
+        "primary": {
+            "today_sales": today_sales,
+            "avg_ticket": avg_ticket,
+            "rebooking_rate": rebooking_rate,
+            "no_show_rate": no_show_rate,
+            "chair_utilization": chair_utilization,
+        },
+        "secondary": {
+            "appointments_count": total_ct,
+            "new_clients_count": new_clients_count,
+            "retention_rate": retention_rate,
+            "retail_sales": round(retail_sales, 2),
+            "reminder_confirmation_rate": reminder_confirmation_rate or 0.0,
+            "waitlist_count": waitlist_count,
+        },
+        "staff_leaderboard": staff_leaderboard,
+        "reviews": reviews_summary,
+        "targets": {
+            "daily_target": daily_target,
+            "daily_actual": today_sales,
+            "monthly_target": monthly_target,
+            "monthly_actual": mtd_revenue,
+            "membership_target": membership_target,
+            "membership_actual": mtd_memberships,
+        },
+        "revenue_7d": revenue_7d,
+        "payment_mix": payment_mix,
+        "top_services": top_services,
+        "busy_hours": busy_hours,
+    }
+
+
+@api_router.post("/salons/{salon_id}/direct-invoice")
+async def create_direct_invoice(
+    salon_id: str,
+    body: dict,
+    current_user=Depends(get_current_salon_user)
+):
+    """Create a direct invoice bypassing the queue.
+
+    Payload:
+      customer_name (str, required)
+      phone (str, optional)
+      gender (str, optional)
+      barber_id (str, optional)
+      selected_services (List[str], required)
+      payment_mode (str, required) — cash|upi|card|wallet
+      coupon_code (str, optional)
+      membership_plan_id (str, optional) — sold + discount applied to THIS order
+      tip_amount (float, optional)
+      notes (str, optional)
+
+    Effect:
+      - Computes bill with services + optional membership benefit + optional coupon
+      - Creates a `completed` token record (status=completed, payment_confirmed=True)
+        so it shows in sales/analytics/history.
+      - Generates the invoice PDF via generate_and_send_invoice(token_id).
+      - If membership_plan_id provided, sells the membership (credits wallet) and
+        applies the plan's discount % to this order (top-up wallet or discount).
+      - Records coupon redemption.
+    Returns invoice_id + token_id.
+    """
+    salon = await db.salons.find_one({"id": salon_id}, {"_id": 0})
+    if not salon:
+        raise HTTPException(status_code=404, detail="Salon not found")
+
+    customer_name = (body.get("customer_name") or "Walk-in").strip() or "Walk-in"
+    phone = (body.get("phone") or "").strip()
+    if phone:
+        phone = phone.replace(" ", "").replace("-", "")
+        if not phone.startswith("+91"):
+            phone = f"+91{phone}"
+    gender = body.get("gender") or "Men"
+    barber_id = body.get("barber_id") or "any"
+    selected_services = body.get("selected_services") or []
+    payment_mode = (body.get("payment_mode") or "cash").lower()
+    coupon_code = (body.get("coupon_code") or "").strip().upper() or None
+    membership_plan_id = body.get("membership_plan_id") or None
+    tip_amount = float(body.get("tip_amount") or 0)
+    notes = body.get("notes") or ""
+
+    if not selected_services:
+        raise HTTPException(status_code=400, detail="At least one service is required")
+
+    # -- Compute base subtotal --
+    subtotal = 0.0
+    service_details = []
+    for sid in selected_services:
+        # Barber-specific pricing
+        price = None
+        if barber_id and barber_id != "any":
+            barber = await db.barbers.find_one({"id": barber_id}, {"_id": 0})
+            if barber:
+                bs = next((s for s in (barber.get("services") or []) if s.get("service_id") == sid), None)
+                if bs:
+                    price = float(bs.get("price") or 0)
+        if price is None:
+            svc = await db.services.find_one({"id": sid}, {"_id": 0})
+            price = float((svc or {}).get("base_price") or 0)
+        subtotal += price
+        service_details.append({"service_id": sid, "price": price})
+
+    membership_discount = 0.0
+    membership_sale_amount = 0.0
+    membership_info = None
+
+    # -- Optional membership upsell: sell membership + apply discount to THIS order --
+    if membership_plan_id:
+        plan = await db.membership_plans.find_one({"id": membership_plan_id}, {"_id": 0})
+        if not plan:
+            raise HTTPException(status_code=404, detail="Membership plan not found")
+        if not phone:
+            raise HTTPException(status_code=400, detail="Customer phone required to sell membership")
+
+        # Apply plan's service discount to THIS order (if plan has discount_percentage)
+        disc_pct = float(plan.get("discount_percentage") or plan.get("service_discount_pct") or 0)
+        membership_discount = round(subtotal * disc_pct / 100.0, 2)
+        # The membership itself is a paid line (paid_amount from plan price)
+        membership_sale_amount = float(plan.get("price") or plan.get("plan_price") or 0)
+
+        expiry_date = datetime.now(timezone.utc) + timedelta(days=int(plan.get("validity_months") or 6) * 30)
+        existing = await db.customer_memberships.find_one({
+            "salon_id": salon_id, "customer_phone": phone, "is_active": True
+        }, {"_id": 0})
+        if existing:
+            new_balance = float(existing.get("wallet_balance") or 0) + float(plan.get("credit") or 0)
+            await db.customer_memberships.update_one(
+                {"id": existing["id"]},
+                {"$set": {
+                    "wallet_balance": new_balance,
+                    "expiry_date": expiry_date.isoformat(),
+                    "tier": plan.get("tier", existing.get("tier", "Custom")),
+                    "color": plan.get("color") or existing.get("color"),
+                }}
+            )
+        else:
+            await db.customer_memberships.insert_one({
+                "id": str(uuid.uuid4()),
+                "salon_id": salon_id,
+                "customer_phone": phone,
+                "customer_name": customer_name,
+                "membership_plan_id": plan["id"],
+                "membership_name": plan.get("name"),
+                "tier": plan.get("tier", "Custom"),
+                "color": plan.get("color"),
+                "payment_mode": payment_mode,
+                "paid_amount": membership_sale_amount,
+                "credit_added": float(plan.get("credit") or 0),
+                "wallet_balance": float(plan.get("credit") or 0),
+                "expiry_date": expiry_date.isoformat(),
+                "is_active": True,
+                "cancelled": False,
+                "payment_confirmed": True,
+                "purchased_at": datetime.now(timezone.utc).isoformat(),
+            })
+        membership_info = {
+            "plan_id": plan["id"],
+            "name": plan.get("name"),
+            "discount_pct": disc_pct,
+            "discount_amount": membership_discount,
+            "sold_at": membership_sale_amount,
+        }
+
+    # -- Optional coupon --
+    coupon_discount = 0.0
+    coupon_doc = None
+    if coupon_code:
+        try:
+            from marketing import _coupon_active as _coupon_active_fn  # type: ignore
+            from marketing import _compute_coupon_discount as _compute_coupon_discount_fn  # type: ignore
+        except Exception:
+            _coupon_active_fn = None
+            _compute_coupon_discount_fn = None
+        c = await db.salon_coupons.find_one({"salon_id": salon_id, "code": coupon_code})
+        if not c:
+            raise HTTPException(status_code=404, detail="Invalid coupon code")
+        if _coupon_active_fn and not _coupon_active_fn(c):
+            raise HTTPException(status_code=400, detail="Coupon expired or inactive")
+        bill_before_coupon = max(0.0, subtotal - membership_discount)
+        if bill_before_coupon < float(c.get("min_bill_amount") or 0):
+            raise HTTPException(status_code=400, detail=f"Minimum bill amount for coupon is ₹{c.get('min_bill_amount')}")
+        if _compute_coupon_discount_fn:
+            coupon_discount = await _compute_coupon_discount_fn(c, bill_before_coupon)
+        else:
+            # Fallback: percentage
+            if c.get("type") == "percentage":
+                coupon_discount = round(bill_before_coupon * float(c.get("value") or 0) / 100.0, 2)
+            else:
+                coupon_discount = float(c.get("value") or 0)
+        coupon_doc = c
+
+    services_total = round(max(0.0, subtotal - membership_discount - coupon_discount), 2)
+    grand_total = round(services_total + membership_sale_amount + tip_amount, 2)
+
+    # -- Auto-assign a barber if 'any' so history displays a name --
+    if not barber_id or barber_id == "any":
+        anyb = await db.barbers.find_one({"salon_id": salon_id, "is_active": True}, {"_id": 0})
+        barber_id = anyb["id"] if anyb else None
+
+    barber_name = "Direct Invoice"
+    if barber_id:
+        b = await db.barbers.find_one({"id": barber_id}, {"_id": 0})
+        if b:
+            barber_name = b.get("name") or barber_name
+
+    # -- Create synthetic completed token --
+    today_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    now_iso = datetime.now(timezone.utc).isoformat()
+
+    from datetime import datetime as _dt
+    _h = _dt.now().hour
+    shift = "Morning" if _h < 12 else ("Noon" if _h < 16 else "Evening")
+
+    token_id = str(uuid.uuid4())
+    token_number = await get_next_token_number(salon_id, today_str, shift)
+
+    token_doc = {
+        "id": token_id,
+        "salon_id": salon_id,
+        "branch_id": body.get("branch_id") or salon.get("main_branch_id"),
+        "token_number": token_number,
+        "customer_name": customer_name,
+        "phone": phone,
+        "gender": gender,
+        "barber_id": barber_id,
+        "barber_name": barber_name,
+        "selected_services": selected_services,
+        "total_amount": grand_total,
+        "subtotal": subtotal,
+        "membership_discount": membership_discount,
+        "coupon_discount": coupon_discount,
+        "coupon_code": coupon_code,
+        "tip_amount": tip_amount,
+        "membership_sale_amount": membership_sale_amount,
+        "date": today_str,
+        "shift": shift,
+        "status": "completed",
+        "payment_mode": payment_mode,
+        "payment_confirmed": True,
+        "payment_status": "paid",
+        "is_direct_invoice": True,
+        "notes": notes,
+        "created_at": now_iso,
+        "completed_at": now_iso,
+    }
+    await db.tokens.insert_one(token_doc)
+
+    # Coupon redemption record
+    if coupon_doc:
+        try:
+            from marketing import record_coupon_redemption as _rec
+            await _rec(
+                salon_id=salon_id,
+                coupon_id=coupon_doc.get("id"),
+                customer_phone=phone,
+                booking_id=token_id,
+                amount=coupon_discount,
+            )
+        except Exception:
+            pass
+
+    # Upsert customer master
+    if phone:
+        try:
+            await db.customer_master.update_one(
+                {"salon_id": salon_id, "phone": phone},
+                {
+                    "$set": {"name": customer_name, "gender": gender, "last_visit_at": now_iso},
+                    "$setOnInsert": {"id": str(uuid.uuid4()), "created_at": now_iso},
+                    "$inc": {"total_visits": 1, "total_spent": grand_total},
+                },
+                upsert=True,
+            )
+        except Exception:
+            pass
+
+    # Generate invoice PDF (best-effort; DB stores invoice even if WhatsApp fails)
+    invoice_id = None
+    try:
+        await generate_and_send_invoice(token_id)
+        refreshed = await db.tokens.find_one({"id": token_id}, {"_id": 0, "invoice_id": 1})
+        invoice_id = (refreshed or {}).get("invoice_id")
+    except Exception as e:
+        logger.warning(f"Direct-invoice PDF gen/send failed for token {token_id}: {e}")
+
+    return {
+        "success": True,
+        "token_id": token_id,
+        "token_number": token_number,
+        "invoice_id": invoice_id,
+        "totals": {
+            "subtotal": round(subtotal, 2),
+            "membership_discount": membership_discount,
+            "coupon_discount": coupon_discount,
+            "services_total": services_total,
+            "membership_sale": membership_sale_amount,
+            "tip_amount": tip_amount,
+            "grand_total": grand_total,
+        },
+        "membership": membership_info,
+        "coupon": {"code": coupon_code, "discount": coupon_discount} if coupon_code else None,
+    }
+
+
 # ============ RATING/REVIEW ROUTES ============
 
 @api_router.post("/ratings", response_model=RatingResponse)

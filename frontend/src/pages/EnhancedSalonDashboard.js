@@ -27,6 +27,7 @@ import SubscriptionPaywallModal from '@/components/SubscriptionPaywallModal';
 import SubscriptionBadge from '@/components/SubscriptionBadge';
 import StaffSettingsContent from '@/components/staff/StaffSettingsContent';
 import { InventoryView } from '@/pages/salon/SalonInventoryPage';
+import SalonHomeNew from '@/pages/salon/SalonHomeNew';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { SubscriptionProvider } from '@/contexts/SubscriptionContext';
 import { getSession, clearSession } from '@/utils/sessionManager';
@@ -1373,66 +1374,24 @@ export default function EnhancedSalonDashboard() {
 
         {/* ===== HOME DASHBOARD ===== */}
         {activeTab === 'home' && (
-          <div className="space-y-6">
-            {/* Welcome Header */}
-            <div className="flex items-center justify-between flex-wrap gap-3">
-              <div>
-                <h2 className="text-2xl font-playfair font-bold text-foreground">{salon?.salon_name || salon?.name || 'Salon'}</h2>
-                <p className="text-sm text-muted-foreground">{new Date().toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}</p>
-              </div>
-              <div className="flex items-center gap-3">
-                {/* Today / Tomorrow Toggle */}
-                <div className="inline-flex rounded-lg border border-border bg-card p-1">
-                  <button
-                    onClick={() => setDateMode('today')}
-                    className={`px-3 py-1.5 text-xs font-semibold rounded-md transition-colors ${
-                      dateMode === 'today' ? 'bg-gold text-black' : 'text-foreground hover:bg-muted'
-                    }`}
-                  >
-                    Today
-                  </button>
-                  <button
-                    onClick={() => setDateMode('tomorrow')}
-                    className={`px-3 py-1.5 text-xs font-semibold rounded-md transition-colors ${
-                      dateMode === 'tomorrow' ? 'bg-gold text-black' : 'text-foreground hover:bg-muted'
-                    }`}
-                  >
-                    Tomorrow
-                  </button>
-                </div>
-                {/* Manual Toggle Status Badge */}
-                {salon?.manual_toggle?.is_overridden && (() => {
-                  const mt = salon.manual_toggle;
-                  const isOnlineOnly = !mt.is_open && mt.closed_mode === 'online_only';
-                  const isFullClosed = !mt.is_open && (mt.closed_mode === 'full' || !mt.closed_mode);
-                  const isOpen = mt.is_open;
-                  const cls = isOpen
-                    ? 'bg-green-500/10 border-green-500/30 text-green-600 dark:text-green-400'
-                    : isOnlineOnly
-                      ? 'bg-amber-500/10 border-amber-500/30 text-amber-700 dark:text-amber-400'
-                      : 'bg-red-500/10 border-red-500/30 text-red-600 dark:text-red-400';
-                  const dot = isOpen ? 'bg-green-500 animate-pulse' : isOnlineOnly ? 'bg-amber-500' : 'bg-red-500';
-                  const label = isOpen
-                    ? 'MANUALLY OPEN'
-                    : isOnlineOnly
-                      ? 'CLOSED ONLINE'
-                      : 'MANUALLY CLOSED';
-                  return (
-                    <div className={`flex items-center gap-2 px-3 py-1.5 rounded-full border ${cls}`}>
-                      <span className={`w-2 h-2 rounded-full ${dot}`}></span>
-                      <span className="text-xs font-bold">{label}</span>
-                    </div>
-                  );
-                })()}
-                <div className="flex items-center gap-2">
-                  <Activity className="w-4 h-4 text-green-500 animate-pulse" />
-                  <span className="text-xs text-green-500 font-medium">Live</span>
-                </div>
-              </div>
-            </div>
-
-            {/* Staff self check-in (only in geo_checkin mode + linked staff) */}
-            {(() => {
+          <SalonHomeNew
+            salon={salon}
+            salonId={salonId}
+            tokens={tokens}
+            barbers={barbers}
+            dateMode={dateMode}
+            setDateMode={setDateMode}
+            dailySales={dailySales}
+            goToTab={goToTab}
+            navigate={navigate}
+            getAuthHeaders={getAuthHeaders}
+            handleCallToken={handleCallToken}
+            handleCompleteToken={handleCompleteToken}
+            handleOpenManualBooking={handleOpenManualBooking}
+            checkIsAdmin={checkIsAdmin}
+            checkIsBranchManager={checkIsBranchManager}
+            checkHasPermission={checkHasPermission}
+            salonUser={(() => {
               let su = salonUser;
               if (!su?.staffId) {
                 try {
@@ -1440,181 +1399,9 @@ export default function EnhancedSalonDashboard() {
                   if (raw) su = JSON.parse(raw);
                 } catch (e) { /* noop */ }
               }
-              const staffId = su?.staffId || su?.staff_id || null;
-              if (!staffId || !salonId) return null;
-              return (
-                <StaffCheckInWidget
-                  salonId={salonId}
-                  staffId={staffId}
-                  getAuthHeaders={getAuthHeaders}
-                />
-              );
+              return su;
             })()}
-
-            {/* Summary Cards */}
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-              <div 
-                className="bg-card border border-border rounded-xl p-4 hover:border-gold/30 transition-colors cursor-pointer"
-                onClick={() => goToTab('queue')}
-                title="View Queue"
-              >
-                <div className="flex items-center gap-2 mb-2">
-                  <div className="p-2 rounded-lg bg-blue-500/10"><Calendar className="w-5 h-5 text-blue-500" /></div>
-                </div>
-                <p className="text-2xl font-bold text-foreground">{tokens.length}</p>
-                <p className="text-xs text-muted-foreground">Total Tokens {dateMode === 'today' ? 'Today' : 'Tomorrow'}</p>
-              </div>
-              <div 
-                className="bg-card border border-border rounded-xl p-4 hover:border-gold/30 transition-colors cursor-pointer"
-                onClick={() => {
-                  setFilter('waiting');
-                  goToTab('queue');
-                }}
-                title="View Waiting Tokens"
-              >
-                <div className="flex items-center gap-2 mb-2">
-                  <div className="p-2 rounded-lg bg-yellow-500/10"><Clock className="w-5 h-5 text-yellow-500" /></div>
-                </div>
-                <p className="text-2xl font-bold text-yellow-500">{tokens.filter(t => t.status === 'waiting' || t.status === 'called').length}</p>
-                <p className="text-xs text-muted-foreground">Waiting / In Queue</p>
-              </div>
-              <div 
-                className="bg-card border border-border rounded-xl p-4 hover:border-gold/30 transition-colors cursor-pointer"
-                onClick={() => {
-                  setFilter('completed');
-                  goToTab('queue');
-                }}
-                title="View Completed Tokens"
-              >
-                <div className="flex items-center gap-2 mb-2">
-                  <div className="p-2 rounded-lg bg-green-500/10"><CheckCircle className="w-5 h-5 text-green-500" /></div>
-                </div>
-                <p className="text-2xl font-bold text-green-500">{tokens.filter(t => t.status === 'completed').length}</p>
-                <p className="text-xs text-muted-foreground">Served / Completed</p>
-              </div>
-              <div 
-                className="bg-card border border-border rounded-xl p-4 hover:border-gold/30 transition-colors cursor-pointer"
-                onClick={() => goToTab('analytics')}
-                title="View Analytics"
-              >
-                <div className="flex items-center gap-2 mb-2">
-                  <div className="p-2 rounded-lg bg-gold/10"><DollarSign className="w-5 h-5 text-gold" /></div>
-                </div>
-                <p className="text-2xl font-bold text-gold">₹{dailySales.toLocaleString('en-IN')}</p>
-                <p className="text-xs text-muted-foreground">Today's Sales</p>
-              </div>
-            </div>
-
-            {/* Upcoming Bookings */}
-            <div className="bg-card border border-border rounded-xl p-5">
-              <div className="flex items-center justify-between mb-4">
-                <h3 className="text-lg font-bold flex items-center gap-2">
-                  <Zap className="w-5 h-5 text-gold" /> Upcoming Queue
-                </h3>
-                <select
-                  value={homeBarberFilter}
-                  onChange={(e) => setHomeBarberFilter(e.target.value)}
-                  className="h-8 px-3 rounded-lg border border-border bg-background text-xs focus:outline-none focus:ring-2 focus:ring-gold/50"
-                >
-                  <option value="all">All Barbers</option>
-                  {barbers.map(b => (
-                    <option key={b.id} value={b.id}>{b.name}</option>
-                  ))}
-                </select>
-              </div>
-              {(() => {
-                const upcoming = tokens
-                  .filter(t => (t.status === 'waiting' || t.status === 'called'))
-                  .filter(t => homeBarberFilter === 'all' || t.barber_id === homeBarberFilter)
-                  .slice(0, 5);
-                return upcoming.length > 0 ? (
-                  <div className="space-y-2">
-                    {upcoming.map((token, idx) => (
-                      <div key={token.id} className={`flex items-center gap-3 p-3 rounded-lg border transition-all ${
-                        token.status === 'called' ? 'border-blue-500/50 bg-blue-500/5' : 'border-border hover:border-gold/30'
-                      }`}>
-                        <div className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold ${
-                          token.status === 'called' ? 'bg-blue-500 text-white' : 'bg-gold/10 text-gold'
-                        }`}>
-                          {idx + 1}
-                        </div>
-                        <div className="flex-1 min-w-0">
-                          <div className="flex items-center gap-2">
-                            <span className="font-semibold text-sm">{token.customer_name}</span>
-                            <span className="text-xs text-gold font-mono">{token.token_number}</span>
-                            {token.status === 'called' && (
-                              <span className="px-1.5 py-0.5 text-[10px] bg-blue-500/20 text-blue-500 rounded font-medium">IN SERVICE</span>
-                            )}
-                          </div>
-                          <p className="text-xs text-muted-foreground truncate">
-                            {token.barber_name} • {token.selected_services?.length || 0} services • ₹{token.total_amount}
-                          </p>
-                        </div>
-                        <span className={`text-xs font-medium px-2 py-1 rounded ${
-                          token.payment_confirmed ? 'bg-green-500/10 text-green-500' : 'bg-yellow-500/10 text-yellow-500'
-                        }`}>
-                          {token.payment_confirmed ? `✓ ${(token.payment_mode || '').toUpperCase()}` : '⏳ Unpaid'}
-                        </span>
-                      </div>
-                    ))}
-                  </div>
-                ) : (
-                  <div className="text-center py-8">
-                    <CheckCircle className="w-12 h-12 text-green-500/30 mx-auto mb-2" />
-                    <p className="text-sm text-muted-foreground">No upcoming bookings — queue is clear!</p>
-                  </div>
-                );
-              })()}
-              {tokens.filter(t => t.status === 'waiting' || t.status === 'called').length > 5 && (
-                <button
-                  onClick={() => goToTab('queue')}
-                  className="w-full mt-3 py-2 text-xs text-gold hover:text-gold/80 font-medium transition-colors"
-                >
-                  View all {tokens.filter(t => t.status === 'waiting' || t.status === 'called').length} in queue →
-                </button>
-              )}
-            </div>
-
-            {/* Quick Navigation */}
-            <div>
-              <h3 className="text-lg font-bold mb-3">Quick Actions</h3>
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                {[
-                  { id: 'queue', label: 'Token Queue', icon: Calendar, color: 'bg-blue-500/10 text-blue-500', desc: 'Manage live queue', show: true },
-                  { id: 'customer-master', label: 'Customers', icon: Database, color: 'bg-purple-500/10 text-purple-500', desc: 'Customer records', show: true },
-                  { id: 'services', label: 'Services', icon: Scissors, color: 'bg-emerald-500/10 text-emerald-500', desc: 'Offerings & memberships', show: checkIsAdmin() || checkIsBranchManager() || checkHasPermission('can_access_services') },
-                  { id: 'staff', label: 'Staff', icon: Users, color: 'bg-orange-500/10 text-orange-500', desc: 'Manage barbers', show: checkIsAdmin() || checkIsBranchManager() || checkHasPermission('can_access_staff') },
-                  { id: 'financials', label: 'Financials', icon: DollarSign, color: 'bg-gold/10 text-gold', desc: 'Cash flow & reports', show: checkIsAdmin() || checkHasPermission('can_access_financials') },
-                  { id: 'analytics', label: 'Analytics', icon: TrendingUp, color: 'bg-cyan-500/10 text-cyan-500', desc: 'Performance stats', show: checkIsAdmin() || checkHasPermission('can_access_analytics') },
-                  { id: 'inventory', label: 'Inventory', icon: Boxes, color: 'bg-pink-500/10 text-pink-500', desc: 'Stock & orders', show: checkIsAdmin() || checkIsBranchManager() },
-                  { id: 'salon', label: 'Settings', icon: Settings, color: 'bg-gray-500/10 text-gray-400', desc: 'Salon profile', show: checkIsAdmin() || checkHasPermission('can_edit_salon') },
-                ].filter(item => item.show).map(item => {
-                  const Icon = item.icon;
-                  return (
-                    <button
-                      key={item.id}
-                      onClick={() => {
-                        if (item.route) {
-                          navigate(item.route);
-                        } else {
-                          goToTab(item.id);
-                          if (!menuPinned) setMenuOpen(false);
-                        }
-                      }}
-                      data-testid={`quick-action-${item.id}`}
-                      className="p-4 bg-card border border-border rounded-xl hover:border-gold/40 transition-all text-left group"
-                    >
-                      <div className={`w-10 h-10 rounded-lg flex items-center justify-center mb-2 ${item.color}`}>
-                        <Icon className="w-5 h-5" />
-                      </div>
-                      <p className="font-semibold text-sm group-hover:text-gold transition-colors">{item.label}</p>
-                      <p className="text-[11px] text-muted-foreground">{item.desc}</p>
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-          </div>
+          />
         )}
 
         {activeTab === 'queue' && (

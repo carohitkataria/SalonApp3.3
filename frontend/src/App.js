@@ -35,6 +35,8 @@ import ReelsFeed from '@/pages/ReelsFeed';
 import OTPLoginPage from '@/pages/OTPLoginPage';
 import SalonSignupPage from '@/pages/SalonSignupPage';
 import EnhancedSalonDashboard from '@/pages/EnhancedSalonDashboard';
+import NewBookingPage from '@/pages/salon/NewBookingPage';
+import QuickInvoicePage from '@/pages/salon/QuickInvoicePage';
 import StaffProfilePage from '@/pages/StaffProfilePage';
 import PaymentCallbackPage from '@/pages/PaymentCallbackPage';
 
@@ -105,6 +107,8 @@ function App() {
                   <Route path="/salon/login" element={<OTPLoginPage />} />
                   <Route path="/salon/signup" element={<SalonSignupPage />} />
                   <Route path="/salon/dashboard" element={<EnhancedSalonDashboard />} />
+                  <Route path="/salon/dashboard/new-booking" element={<NewBookingPage />} />
+                  <Route path="/salon/dashboard/quick-invoice" element={<QuickInvoicePage />} />
                   <Route path="/salon/staff/:staffId" element={<StaffProfilePage />} />
                   <Route path="/salon/marketplace" element={<MarketplacePage />} />
                   <Route path="/salon/checkout" element={<CheckoutPage />} />
