@@ -20,7 +20,7 @@ import {
   Search, TicketPercent, BadgeCheck, X, Loader2, Check, Plus, Minus,
   UserPlus, ShoppingBag, FileText, Calendar,
 } from 'lucide-react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { getSalonAuthHeaders, getSalonId } from './salonAuthHelper';
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
@@ -35,6 +35,8 @@ const PAYMENT_MODES = [
 
 export default function SalonBookingForm({ initialMode = 'booking' }) {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const returnTo = searchParams.get('return'); // 'queue' | 'home' | null
   const salonId = getSalonId();
 
   const [barbers, setBarbers] = useState([]);
@@ -305,7 +307,11 @@ export default function SalonBookingForm({ initialMode = 'booking' }) {
       if (kind === 'invoice') {
         navigate('/salon/dashboard');
       } else {
-        navigate('/salon/dashboard?tab=queue');
+        // Prefer explicit return= query param, else default to queue tab.
+        const target = returnTo === 'home'
+          ? '/salon/dashboard'
+          : '/salon/dashboard?tab=queue';
+        navigate(target);
       }
     } catch (err) {
       toast.error(err.response?.data?.detail || 'Something went wrong');
@@ -328,9 +334,14 @@ export default function SalonBookingForm({ initialMode = 'booking' }) {
       <div className="sticky top-0 z-30 border-b border-border bg-background/95 backdrop-blur-md">
         <div className="max-w-[1180px] mx-auto flex items-center gap-3 px-4 py-3">
           <button
-            onClick={() => navigate('/salon/dashboard')}
+            onClick={() => {
+              const back = returnTo === 'queue'
+                ? '/salon/dashboard?tab=queue'
+                : '/salon/dashboard';
+              navigate(back);
+            }}
             className="p-2 rounded-lg hover:bg-muted transition"
-            title="Back to Home"
+            title="Back"
           >
             <ArrowLeft className="w-5 h-5" />
           </button>

@@ -1296,26 +1296,9 @@ export default function SinglePageBooking() {
 
           {/* Login/Guest choice is now shown as a bottom-sheet AFTER the user
               taps "Confirm Booking" (see BookingIdentitySheet below).
-              The inline chooser + guest form used to live here — removed
-              on purpose to give a cleaner payment page. */}
-
-          {/* Login modal trigger — when 'login' mode but modal closed. */}
-          {!isUserLoggedIn && bookingMode === 'login' && !showAuthModal && (
-            <div className="bg-card border border-border rounded-xl p-4 flex items-center justify-between gap-3" data-testid="login-pending-card">
-              <div>
-                <p className="text-sm font-medium text-foreground">Login required to continue</p>
-                <p className="text-xs text-muted-foreground mt-0.5">Reopen the login window or switch to guest checkout.</p>
-              </div>
-              <div className="flex gap-2 flex-shrink-0">
-                <Button size="sm" variant="outline" onClick={() => setBookingMode(null)} data-testid="login-switch-to-guest-btn">
-                  Use guest
-                </Button>
-                <Button size="sm" onClick={() => setShowAuthModal(true)} data-testid="login-reopen-btn">
-                  Open login
-                </Button>
-              </div>
-            </div>
-          )}
+              The inline chooser + guest form + login-pending helper card that
+              used to live here have been removed on purpose so the payment
+              page stays clean — the sheet is now the single source of truth. */}
 
           {/* Coupon Code */}
           <div className="bg-card border border-border rounded-xl p-4">

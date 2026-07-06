@@ -1495,9 +1495,10 @@ export default function EnhancedSalonDashboard() {
                 Call Next {selectedBarber !== 'all' && `(${barbers.find(b => b.id === selectedBarber)?.name})`}
               </Button>
               <Button
-                onClick={handleOpenManualBooking}
+                onClick={() => navigate('/salon/dashboard/new-booking?return=queue')}
                 variant="outline"
                 className="border-gold text-gold hover:bg-gold/10 px-3 md:px-6 py-3 text-xs md:text-lg w-[40%] md:flex-none"
+                data-testid="queue-add-booking-btn"
               >
                 <Plus className="mr-1 md:mr-2 w-4 md:w-5 h-4 md:h-5" />
                 <span className="hidden md:inline">Add Booking</span>

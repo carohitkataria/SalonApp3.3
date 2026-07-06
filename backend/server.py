@@ -4269,23 +4269,44 @@ async def get_salon_menu(salon_id: str, branch: Optional[str] = None):
 
 @api_router.get("/salons/{salon_id}/services/all")
 async def get_all_services_with_salon_status(salon_id: str):
-    """Get all services with their enabled status for the salon"""
-    # Get all services
-    all_services = await db.services.find({"is_active": True}, {"_id": 0}).to_list(1000)
-    
-    # Get salon's service statuses
+    """Get services for the given salon.
+
+    A service is visible to a salon if either:
+      • the salon created it (services.salon_id == salon_id), OR
+      • a salon_services row exists linking it to the salon (legacy).
+    Predefined / master services that were never explicitly loaded by the
+    salon are NOT auto-shown here (that was the "pre-filled services"
+    problem for fresh onboards).
+    """
+    # Get salon's linked services from salon_services (legacy / imported / explicitly loaded)
     salon_services = await db.salon_services.find(
         {"salon_id": salon_id},
         {"_id": 0, "service_id": 1, "is_enabled": 1}
     ).to_list(1000)
-    
-    # Create a map of service_id to is_enabled
-    salon_service_map = {ss["service_id"]: ss["is_enabled"] for ss in salon_services}
-    
-    # Add is_enabled field to each service
+    linked_ids = [ss["service_id"] for ss in salon_services]
+    linked_enabled_map = {ss["service_id"]: ss.get("is_enabled", False) for ss in salon_services}
+
+    # Fetch services either owned by this salon OR linked via salon_services.
+    query = {
+        "is_active": True,
+        "$or": [
+            {"salon_id": salon_id},
+            {"id": {"$in": linked_ids}} if linked_ids else {"id": "__no_match__"},
+        ],
+    }
+    all_services = await db.services.find(query, {"_id": 0}).to_list(1000)
+
+    # Add is_enabled_for_salon:
+    #   - Own service (salon_id == salon_id) is considered enabled by default
+    #   - Linked service uses salon_services flag
     for service in all_services:
-        service["is_enabled_for_salon"] = salon_service_map.get(service["id"], False)
-    
+        if service.get("salon_id") == salon_id:
+            service["is_enabled_for_salon"] = True
+            service["is_owned"] = True
+        else:
+            service["is_enabled_for_salon"] = linked_enabled_map.get(service["id"], False)
+            service["is_owned"] = False
+
     return all_services
 
 @api_router.put("/salons/{salon_id}/services/{service_id}/toggle")
@@ -4331,7 +4352,11 @@ async def create_service(service: ServiceCreate, current_salon=Depends(get_curre
     service_dict = service.model_dump()
     service_dict["id"] = str(uuid.uuid4())
     service_dict["is_active"] = True
-    
+    # Scope to the creating salon so it doesn't leak into other salons' lists.
+    salon_id = current_salon.get("salon_id") or current_salon.get("sub")
+    if salon_id:
+        service_dict["salon_id"] = salon_id
+
     await db.services.insert_one(service_dict)
     return Service(**service_dict)
 
