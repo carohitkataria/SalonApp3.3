@@ -15252,6 +15252,16 @@ async def cashfree_webhook(request: Request):
     if not order_id:
         return {"received": True, "verified": True}
 
+    # Customer → salon service payments (Cashfree Easy Split) share this
+    # webhook URL. Route them first; if handled, we're done. Any handler error
+    # is logged but does NOT block subscription handling below.
+    try:
+        svc_result = await service_payments_mod.handle_service_payment_webhook(payload)
+        if svc_result:
+            return {"received": True, "verified": True, **svc_result}
+    except Exception as e:
+        logger.error(f"[Cashfree Webhook] service payment handler error: {e}")
+
     sub = await db.salon_subscriptions.find_one(
         {"cashfree_order_id": order_id}, {"_id": 0}
     )
@@ -15387,6 +15397,18 @@ salon_store_mod.init_salon_store_router(
     require_supplier=_require_supplier_dep,
 )
 fastapi_app.include_router(salon_store_mod.salon_store_router)
+
+# Customer → salon service payments (Cashfree Easy Split). Shares the Cashfree
+# webhook mounted above; routes registered under /api/... via its own router.
+import service_payments as service_payments_mod  # noqa: E402
+service_payments_mod.init_service_payments_router(
+    db=db,
+    get_current_salon_user=get_current_salon_user,
+    create_in_app_notification=create_in_app_notification,
+    check_salon_admin_for_salon=_check_salon_admin_for_salon,
+    broadcast_update=broadcast_update,
+)
+fastapi_app.include_router(service_payments_mod.service_payments_router)
 
 # Phase 14 — Salon Inventory (browse + lifecycle + movement history)
 import salon_inventory as salon_inventory_mod  # noqa: E402

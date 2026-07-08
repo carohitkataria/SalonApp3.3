@@ -41,6 +41,7 @@ import AddCustomerPage from '@/pages/salon/AddCustomerPage';
 import SellMembershipPage from '@/pages/salon/SellMembershipPage';
 import StaffProfilePage from '@/pages/StaffProfilePage';
 import PaymentCallbackPage from '@/pages/PaymentCallbackPage';
+import ServicePaymentCallbackPage from '@/pages/ServicePaymentCallbackPage';
 
 // Platform Admin (HIDDEN — bookmark /platform/login only, no links from landing)
 import PlatformLoginPage from '@/pages/PlatformLoginPage';
@@ -124,6 +125,7 @@ function App() {
 
                   {/* Subscription / Payment */}
                   <Route path="/subscription/callback" element={<PaymentCallbackPage />} />
+                  <Route path="/pay/callback" element={<ServicePaymentCallbackPage />} />
 
                   {/* HIDDEN — Platform Admin (Part A). Not linked from anywhere. */}
                   <Route path="/platform/login" element={<PlatformLoginPage />} />

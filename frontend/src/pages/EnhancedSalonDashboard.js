@@ -19,6 +19,7 @@ import CustomerMaster from '@/components/CustomerMaster';
 import OfferingsModule from '@/components/OfferingsModule';
 import FinancialsModule from '@/components/FinancialsModule';
 import MyProfile from '@/components/MyProfile';
+import PaymentVendorSetup from '@/components/PaymentVendorSetup';
 import MarketingTab from '@/components/MarketingTab';
 import SalonNotificationSettings from '@/components/SalonNotificationSettings';
 import OperationalHoursModule from '@/components/OperationalHoursModule';
@@ -2064,6 +2065,9 @@ export default function EnhancedSalonDashboard() {
                   getAuthHeaders={getAuthHeaders}
                   onDeleteSalon={handleLogout}
                 />
+                <div className="mt-6">
+                  <PaymentVendorSetup salon={salon} getAuthHeaders={getAuthHeaders} />
+                </div>
               </TabsContent>
 
               <TabsContent value="staff-settings-link" className="mt-4">
