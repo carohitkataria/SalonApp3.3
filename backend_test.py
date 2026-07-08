@@ -1,672 +1,765 @@
 #!/usr/bin/env python3
 """
-Phase 2 Regression Tests
-Tests for:
-1. Grant Pro Access - duration_days/duration_months acceptance and expiry calculation
-2. Services scoping - new salons see empty catalog
+Phase 2 Backend Regression Tests
+=================================
+
+Tests 6 specific checks:
+1. POST /api/platform/salons/{id}/subscription/grant-pro with duration_days and duration_months
+2. NEW salon → empty services list
+3. Salon creates service → tagged with salon_id
+4. Regression: POST /api/salons/{salon_id}/salon-booking still works
+5. Regression: POST /api/salons/{salon_id}/direct-invoice still works
+6. Regression: GET /api/salons/{salon_id}/home-kpis?date_mode=today returns all required keys
 """
 
+import os
+import sys
 import requests
 import json
 import random
 import string
-from datetime import datetime, timedelta
-from typing import Dict, Any, Optional
+from datetime import datetime, timedelta, timezone
 
-# Backend URL
-BASE_URL = "https://salon-dashboard-pro-6.preview.emergentagent.com/api"
+# Backend URL from environment or default
+BASE_URL = os.environ.get("REACT_APP_BACKEND_URL", "https://jovial-mcclintock-6.preview.emergentagent.com").rstrip("/")
+API_URL = f"{BASE_URL}/api"
 
-# Test credentials
-PLATFORM_ADMIN_MOBILE = "+919999999999"
-PLATFORM_ADMIN_PASSWORD = "platform123"
+# Test credentials from test_credentials.md
+ADMIN_IDENTIFIER = "admin"
+ADMIN_PASSWORD = "salon123"
 
-# Existing salon for testing
-EXISTING_SALON_ID = "0464ce08-74d1-4351-abd0-5bde9eecc7a6"
-EXISTING_SALON_LOGIN = "admin"
-EXISTING_SALON_PASSWORD = "salon123"
+# Test results
+test_results = []
+total_tests = 0
+passed_tests = 0
 
-# Colors for output
-GREEN = '\033[92m'
-RED = '\033[91m'
-YELLOW = '\033[93m'
-BLUE = '\033[94m'
-RESET = '\033[0m'
 
-def log_test(test_name: str):
-    """Log test name"""
-    print(f"\n{BLUE}{'='*80}{RESET}")
-    print(f"{BLUE}TEST: {test_name}{RESET}")
-    print(f"{BLUE}{'='*80}{RESET}")
+def log_test(test_name, passed, details=""):
+    """Log test result"""
+    global total_tests, passed_tests
+    total_tests += 1
+    if passed:
+        passed_tests += 1
+    status = "✅ PASS" if passed else "❌ FAIL"
+    result = f"{status}: {test_name}"
+    if details:
+        result += f"\n    {details}"
+    test_results.append(result)
+    print(result)
 
-def log_pass(message: str):
-    """Log pass message"""
-    print(f"{GREEN}✅ PASS: {message}{RESET}")
 
-def log_fail(message: str):
-    """Log fail message"""
-    print(f"{RED}❌ FAIL: {message}{RESET}")
+def random_phone():
+    """Generate random 10-digit phone number"""
+    return "".join(random.choices(string.digits, k=10))
 
-def log_info(message: str):
-    """Log info message"""
-    print(f"{YELLOW}ℹ️  INFO: {message}{RESET}")
 
-def log_request(method: str, url: str, **kwargs):
-    """Log HTTP request"""
-    print(f"\n{YELLOW}→ {method} {url}{RESET}")
-    if 'json' in kwargs:
-        print(f"  Body: {json.dumps(kwargs['json'], indent=2)}")
-    if 'params' in kwargs:
-        print(f"  Params: {kwargs['params']}")
+def random_string(length=6):
+    """Generate random alphanumeric string"""
+    return "".join(random.choices(string.ascii_uppercase + string.digits, k=length))
 
-def log_response(response: requests.Response):
-    """Log HTTP response"""
-    status_color = GREEN if 200 <= response.status_code < 300 else RED
-    print(f"{status_color}← {response.status_code} {response.reason}{RESET}")
+
+# ============================================================================
+# TEST 1: Platform Admin Login
+# ============================================================================
+
+def test_platform_admin_login():
+    """Get platform admin JWT token"""
+    print("\n" + "="*80)
+    print("TEST 1: Platform Admin Authentication")
+    print("="*80)
+    
+    # Step 1: Request OTP
     try:
-        print(f"  Response: {json.dumps(response.json(), indent=2)[:500]}")
-    except:
-        print(f"  Response: {response.text[:500]}")
-
-def get_platform_admin_token() -> str:
-    """Login as platform admin and get JWT token"""
-    log_info("Logging in as platform admin...")
-    url = f"{BASE_URL}/platform/auth/login-password"
-    payload = {
-        "mobile": PLATFORM_ADMIN_MOBILE,
-        "password": PLATFORM_ADMIN_PASSWORD
-    }
-    log_request("POST", url, json=payload)
-    response = requests.post(url, json=payload)
-    log_response(response)
+        response = requests.post(
+            f"{API_URL}/platform/auth/request-otp",
+            json={"mobile": "7503070727"},
+            timeout=10
+        )
+        if response.status_code != 200:
+            log_test("Platform admin OTP request", False, f"Status: {response.status_code}, Response: {response.text}")
+            return None
+        log_test("Platform admin OTP request", True, "OTP requested successfully")
+    except Exception as e:
+        log_test("Platform admin OTP request", False, str(e))
+        return None
     
-    if response.status_code != 200:
-        raise Exception(f"Platform admin login failed: {response.text}")
+    # Step 2: Verify OTP (use mock OTP from response if available)
+    otp_data = response.json()
+    otp = otp_data.get("otp", "123456")  # Fallback to default if not in response
     
-    data = response.json()
-    token = data.get("access_token")
-    log_pass(f"Platform admin logged in successfully")
-    return token
-
-def get_salon_token(salon_id: str, login_id: str, password: str) -> str:
-    """Login as salon user and get JWT token"""
-    log_info(f"Logging in as salon user: {login_id}")
-    url = f"{BASE_URL}/salon/users/login"
-    payload = {
-        "identifier": login_id,
-        "password": password,
-        "salon_id": salon_id
-    }
-    log_request("POST", url, json=payload)
-    response = requests.post(url, json=payload)
-    log_response(response)
-    
-    if response.status_code != 200:
-        raise Exception(f"Salon login failed: {response.text}")
-    
-    data = response.json()
-    token = data.get("access_token")
-    log_pass(f"Salon user logged in successfully")
-    return token
-
-def calculate_days_difference(date_str: str, reference_date: datetime = None) -> int:
-    """Calculate days difference between a date string and reference date (default: now)"""
-    if reference_date is None:
-        reference_date = datetime.now()
-    
-    # Parse the date string (handle various formats)
     try:
-        # Try ISO format first
-        target_date = datetime.fromisoformat(date_str.replace('Z', '+00:00'))
-    except:
-        try:
-            # Try without timezone
-            target_date = datetime.strptime(date_str[:10], '%Y-%m-%d')
-        except:
-            raise ValueError(f"Cannot parse date: {date_str}")
-    
-    # Calculate difference
-    diff = (target_date.replace(tzinfo=None) - reference_date.replace(tzinfo=None)).days
-    return diff
-
-def cleanup_old_subscriptions(salon_id: str):
-    """Clean up old subscriptions to work around the grant-pro bug"""
-    import sys
-    sys.path.insert(0, '/app/backend')
-    from pymongo import MongoClient
-    from datetime import datetime, timezone
-    
-    client = MongoClient('mongodb://localhost:27017')
-    db = client['salon_hub_db']
-    
-    # Get all active subscriptions
-    subs = list(db.salon_subscriptions.find(
-        {'salon_id': salon_id, 'payment_status': {'$in': ['paid', 'granted']}},
-        {'_id': 0}
-    ).sort('created_at', -1))
-    
-    if len(subs) > 1:
-        # Keep the most recent one, mark others as cancelled
-        for sub in subs[1:]:
-            db.salon_subscriptions.update_one(
-                {'id': sub['id']},
-                {'$set': {
-                    'payment_status': 'cancelled',
-                    'subscription_status': 'cancelled',
-                    'updated_at': datetime.now(timezone.utc).isoformat()
-                }}
-            )
-
-def test_grant_pro_duration_days():
-    """Test 1a: Grant Pro Access with duration_days=100"""
-    log_test("Test 1a: Grant Pro Access with duration_days=100")
-    
-    token = get_platform_admin_token()
-    
-    url = f"{BASE_URL}/platform/salons/{EXISTING_SALON_ID}/subscription/grant-pro"
-    headers = {"Authorization": f"Bearer {token}"}
-    payload = {
-        "duration_days": 100,
-        "reason": "test days",
-        "max_branches": None
-    }
-    
-    log_request("POST", url, json=payload)
-    response = requests.post(url, json=payload, headers=headers)
-    log_response(response)
-    
-    if response.status_code != 200:
-        log_fail(f"Expected 200, got {response.status_code}")
-        return False
-    
-    log_pass("Grant Pro Access endpoint returned 200")
-    
-    # WORKAROUND: Clean up old subscriptions due to grant-pro bug
-    cleanup_old_subscriptions(EXISTING_SALON_ID)
-    
-    # Fetch salon subscription to verify expiry_date
-    log_info("Fetching salon subscription to verify expiry_date...")
-    url = f"{BASE_URL}/platform/salons/{EXISTING_SALON_ID}"
-    log_request("GET", url)
-    response = requests.get(url, headers=headers)
-    log_response(response)
-    
-    if response.status_code != 200:
-        log_fail(f"Failed to fetch salon: {response.status_code}")
-        return False
-    
-    data = response.json()
-    subscription_state = data.get("subscription_state", {})
-    expiry_date = subscription_state.get("expiry_date")
-    
-    if not expiry_date:
-        log_fail("No expiry_date found in subscription_state")
-        return False
-    
-    log_info(f"Expiry date: {expiry_date}")
-    
-    # Verify expiry_date is approximately 100 days from now
-    days_diff = calculate_days_difference(expiry_date)
-    log_info(f"Days from now: {days_diff}")
-    
-    # Check year is 2026 or 2027, NOT 3025 or 2034
-    expiry_year = int(expiry_date[:4])
-    if expiry_year not in [2026, 2027]:
-        log_fail(f"Expiry year is {expiry_year}, expected 2026 or 2027 (NOT 3025 or 2034)")
-        return False
-    
-    log_pass(f"Expiry year is {expiry_year} (correct, not 3025 or 2034)")
-    
-    # Allow some tolerance (95-105 days)
-    if 95 <= days_diff <= 105:
-        log_pass(f"Expiry date is approximately 100 days from now ({days_diff} days)")
-        return True
-    else:
-        log_fail(f"Expiry date is {days_diff} days from now, expected ~100 days")
-        return False
-
-def test_grant_pro_duration_months():
-    """Test 1b: Grant Pro Access with duration_months=3"""
-    log_test("Test 1b: Grant Pro Access with duration_months=3")
-    
-    token = get_platform_admin_token()
-    
-    url = f"{BASE_URL}/platform/salons/{EXISTING_SALON_ID}/subscription/grant-pro"
-    headers = {"Authorization": f"Bearer {token}"}
-    payload = {
-        "duration_months": 3,
-        "reason": "test months"
-    }
-    
-    log_request("POST", url, json=payload)
-    response = requests.post(url, json=payload, headers=headers)
-    log_response(response)
-    
-    if response.status_code != 200:
-        log_fail(f"Expected 200, got {response.status_code}")
-        return False
-    
-    log_pass("Grant Pro Access endpoint returned 200")
-    
-    # WORKAROUND: Clean up old subscriptions due to grant-pro bug
-    cleanup_old_subscriptions(EXISTING_SALON_ID)
-    
-    # Fetch salon subscription to verify expiry_date
-    log_info("Fetching salon subscription to verify expiry_date...")
-    url = f"{BASE_URL}/platform/salons/{EXISTING_SALON_ID}"
-    log_request("GET", url)
-    response = requests.get(url, headers=headers)
-    log_response(response)
-    
-    if response.status_code != 200:
-        log_fail(f"Failed to fetch salon: {response.status_code}")
-        return False
-    
-    data = response.json()
-    subscription_state = data.get("subscription_state", {})
-    expiry_date = subscription_state.get("expiry_date")
-    
-    if not expiry_date:
-        log_fail("No expiry_date found in subscription_state")
-        return False
-    
-    log_info(f"Expiry date: {expiry_date}")
-    
-    # Verify expiry_date is approximately 90 days from now (3 months)
-    days_diff = calculate_days_difference(expiry_date)
-    log_info(f"Days from now: {days_diff}")
-    
-    # Allow some tolerance (85-95 days for 3 months)
-    if 85 <= days_diff <= 95:
-        log_pass(f"Expiry date is approximately 90 days from now ({days_diff} days)")
-        return True
-    else:
-        log_fail(f"Expiry date is {days_diff} days from now, expected ~90 days")
-        return False
-
-def test_grant_pro_combined_duration():
-    """Test 1c: Grant Pro Access with duration_days=30 + duration_months=2"""
-    log_test("Test 1c: Grant Pro Access with duration_days=30 + duration_months=2")
-    
-    token = get_platform_admin_token()
-    
-    url = f"{BASE_URL}/platform/salons/{EXISTING_SALON_ID}/subscription/grant-pro"
-    headers = {"Authorization": f"Bearer {token}"}
-    payload = {
-        "duration_days": 30,
-        "duration_months": 2,
-        "reason": "combined"
-    }
-    
-    log_request("POST", url, json=payload)
-    response = requests.post(url, json=payload, headers=headers)
-    log_response(response)
-    
-    if response.status_code != 200:
-        log_fail(f"Expected 200, got {response.status_code}")
-        return False
-    
-    log_pass("Grant Pro Access endpoint returned 200")
-    
-    # WORKAROUND: Clean up old subscriptions due to grant-pro bug
-    cleanup_old_subscriptions(EXISTING_SALON_ID)
-    
-    # Fetch salon subscription to verify expiry_date
-    log_info("Fetching salon subscription to verify expiry_date...")
-    url = f"{BASE_URL}/platform/salons/{EXISTING_SALON_ID}"
-    log_request("GET", url)
-    response = requests.get(url, headers=headers)
-    log_response(response)
-    
-    if response.status_code != 200:
-        log_fail(f"Failed to fetch salon: {response.status_code}")
-        return False
-    
-    data = response.json()
-    subscription_state = data.get("subscription_state", {})
-    expiry_date = subscription_state.get("expiry_date")
-    
-    if not expiry_date:
-        log_fail("No expiry_date found in subscription_state")
-        return False
-    
-    log_info(f"Expiry date: {expiry_date}")
-    
-    # Verify expiry_date is approximately 90 days from now (30 + 60)
-    days_diff = calculate_days_difference(expiry_date)
-    log_info(f"Days from now: {days_diff}")
-    
-    # Allow some tolerance (85-95 days)
-    if 85 <= days_diff <= 95:
-        log_pass(f"Expiry date is approximately 90 days from now ({days_diff} days) - 30 days + 2 months")
-        return True
-    else:
-        log_fail(f"Expiry date is {days_diff} days from now, expected ~90 days (30 + 60)")
-        return False
-
-def test_grant_pro_no_duration():
-    """Test 1d: Grant Pro Access with no duration (should fail with 400)"""
-    log_test("Test 1d: Grant Pro Access with no duration (expect 400)")
-    
-    token = get_platform_admin_token()
-    
-    url = f"{BASE_URL}/platform/salons/{EXISTING_SALON_ID}/subscription/grant-pro"
-    headers = {"Authorization": f"Bearer {token}"}
-    payload = {
-        "reason": "no duration"
-    }
-    
-    log_request("POST", url, json=payload)
-    response = requests.post(url, json=payload, headers=headers)
-    log_response(response)
-    
-    if response.status_code != 400:
-        log_fail(f"Expected 400, got {response.status_code}")
-        return False
-    
-    log_pass("Grant Pro Access correctly returned 400 for missing duration")
-    
-    # Verify error message
-    try:
+        response = requests.post(
+            f"{API_URL}/platform/auth/verify-otp",
+            json={"mobile": "7503070727", "otp": otp},
+            timeout=10
+        )
+        if response.status_code != 200:
+            log_test("Platform admin OTP verify", False, f"Status: {response.status_code}, Response: {response.text}")
+            return None
+        
         data = response.json()
-        detail = data.get("detail", "")
-        if "Grant duration must be at least 1 day" in detail:
-            log_pass(f"Error message correct: '{detail}'")
-            return True
-        else:
-            log_fail(f"Error message incorrect: '{detail}', expected 'Grant duration must be at least 1 day'")
-            return False
-    except:
-        log_fail("Failed to parse error response")
-        return False
+        token = data.get("access_token")
+        if not token:
+            log_test("Platform admin OTP verify", False, "No access_token in response")
+            return None
+        
+        log_test("Platform admin OTP verify", True, f"Token obtained (length: {len(token)})")
+        return token
+    except Exception as e:
+        log_test("Platform admin OTP verify", False, str(e))
+        return None
 
-def test_grant_pro_large_months():
-    """Test 1e: Grant Pro Access with duration_months=100 (old-style still works)"""
-    log_test("Test 1e: Grant Pro Access with duration_months=100")
+
+# ============================================================================
+# TEST 2: Salon Admin Login
+# ============================================================================
+
+def test_salon_admin_login():
+    """Get salon admin JWT token"""
+    print("\n" + "="*80)
+    print("TEST 2: Salon Admin Authentication")
+    print("="*80)
     
-    token = get_platform_admin_token()
+    try:
+        response = requests.post(
+            f"{API_URL}/salon/users/login",
+            json={"identifier": ADMIN_IDENTIFIER, "password": ADMIN_PASSWORD},
+            timeout=10
+        )
+        if response.status_code != 200:
+            log_test("Salon admin login", False, f"Status: {response.status_code}, Response: {response.text}")
+            return None, None
+        
+        data = response.json()
+        token = data.get("access_token")
+        salon_id = data.get("salon_id")
+        
+        if not token or not salon_id:
+            log_test("Salon admin login", False, f"Missing token or salon_id in response")
+            return None, None
+        
+        log_test("Salon admin login", True, f"Token obtained, salon_id: {salon_id}")
+        return token, salon_id
+    except Exception as e:
+        log_test("Salon admin login", False, str(e))
+        return None, None
+
+
+# ============================================================================
+# TEST 3: Grant Pro Access with duration_days and duration_months
+# ============================================================================
+
+def test_grant_pro_access(platform_token, salon_id):
+    """Test POST /api/platform/salons/{id}/subscription/grant-pro"""
+    print("\n" + "="*80)
+    print("TEST 3: Grant Pro Access (duration_days and duration_months)")
+    print("="*80)
     
-    url = f"{BASE_URL}/platform/salons/{EXISTING_SALON_ID}/subscription/grant-pro"
-    headers = {"Authorization": f"Bearer {token}"}
-    payload = {
-        "duration_months": 100,
-        "reason": "old-style still works"
-    }
+    if not platform_token or not salon_id:
+        log_test("Grant Pro - duration_days=45", False, "Missing platform token or salon_id")
+        log_test("Grant Pro - duration_months=2", False, "Missing platform token or salon_id")
+        return
     
-    log_request("POST", url, json=payload)
-    response = requests.post(url, json=payload, headers=headers)
-    log_response(response)
+    headers = {"Authorization": f"Bearer {platform_token}"}
     
-    if response.status_code != 200:
-        log_fail(f"Expected 200, got {response.status_code}")
-        return False
+    # Test 3a: Grant with duration_days=45
+    try:
+        response = requests.post(
+            f"{API_URL}/platform/salons/{salon_id}/subscription/grant-pro",
+            json={
+                "duration_days": 45,
+                "reason": "Phase 2 test - 45 days",
+                "max_branches": 1
+            },
+            headers=headers,
+            timeout=10
+        )
+        
+        if response.status_code != 200:
+            log_test("Grant Pro - duration_days=45", False, f"Status: {response.status_code}, Response: {response.text}")
+        else:
+            data = response.json()
+            subscription_id = data.get("subscription_id")
+            
+            # Verify expiry date is roughly 45 days from now
+            if subscription_id:
+                # Get subscription details
+                sub_response = requests.get(
+                    f"{API_URL}/salons/{salon_id}/subscription/status",
+                    headers={"Authorization": f"Bearer {platform_token}"},
+                    timeout=10
+                )
+                if sub_response.status_code == 200:
+                    sub_data = sub_response.json()
+                    expiry_date = sub_data.get("expiry_date")
+                    if expiry_date:
+                        expiry_dt = datetime.fromisoformat(expiry_date.replace("Z", "+00:00"))
+                        now = datetime.now(timezone.utc)
+                        days_diff = (expiry_dt - now).days
+                        
+                        # Allow ±1 day tolerance
+                        if 44 <= days_diff <= 46:
+                            log_test("Grant Pro - duration_days=45", True, f"Expiry date ~{days_diff} days from now")
+                        else:
+                            log_test("Grant Pro - duration_days=45", False, f"Expiry date {days_diff} days from now (expected ~45)")
+                    else:
+                        log_test("Grant Pro - duration_days=45", False, "No expiry_date in subscription status")
+                else:
+                    log_test("Grant Pro - duration_days=45", False, f"Failed to get subscription status: {sub_response.status_code}")
+            else:
+                log_test("Grant Pro - duration_days=45", False, "No subscription_id in response")
+    except Exception as e:
+        log_test("Grant Pro - duration_days=45", False, str(e))
     
-    log_pass("Grant Pro Access endpoint returned 200")
-    
-    # WORKAROUND: Clean up old subscriptions due to grant-pro bug
-    cleanup_old_subscriptions(EXISTING_SALON_ID)
-    
-    # Fetch salon subscription to verify expiry_date
-    log_info("Fetching salon subscription to verify expiry_date...")
-    url = f"{BASE_URL}/platform/salons/{EXISTING_SALON_ID}"
-    log_request("GET", url)
-    response = requests.get(url, headers=headers)
-    log_response(response)
-    
-    if response.status_code != 200:
-        log_fail(f"Failed to fetch salon: {response.status_code}")
-        return False
-    
-    data = response.json()
-    subscription_state = data.get("subscription_state", {})
-    expiry_date = subscription_state.get("expiry_date")
-    
-    if not expiry_date:
-        log_fail("No expiry_date found in subscription_state")
-        return False
-    
-    log_info(f"Expiry date: {expiry_date}")
-    
-    # Verify expiry_date is approximately 3000 days from now (~8 years)
-    days_diff = calculate_days_difference(expiry_date)
-    log_info(f"Days from now: {days_diff}")
-    
-    # Allow some tolerance (2900-3100 days)
-    if 2900 <= days_diff <= 3100:
-        log_pass(f"Expiry date is approximately 3000 days from now ({days_diff} days) - ~8 years")
-        return True
-    else:
-        log_fail(f"Expiry date is {days_diff} days from now, expected ~3000 days")
-        return False
+    # Test 3b: Grant with duration_months=2
+    try:
+        response = requests.post(
+            f"{API_URL}/platform/salons/{salon_id}/subscription/grant-pro",
+            json={
+                "duration_months": 2,
+                "reason": "Phase 2 test - 2 months",
+                "max_branches": 1
+            },
+            headers=headers,
+            timeout=10
+        )
+        
+        if response.status_code != 200:
+            log_test("Grant Pro - duration_months=2", False, f"Status: {response.status_code}, Response: {response.text}")
+        else:
+            data = response.json()
+            subscription_id = data.get("subscription_id")
+            
+            # Verify expiry date is roughly 60 days from now
+            if subscription_id:
+                # Get subscription details
+                sub_response = requests.get(
+                    f"{API_URL}/salons/{salon_id}/subscription/status",
+                    headers={"Authorization": f"Bearer {platform_token}"},
+                    timeout=10
+                )
+                if sub_response.status_code == 200:
+                    sub_data = sub_response.json()
+                    expiry_date = sub_data.get("expiry_date")
+                    if expiry_date:
+                        expiry_dt = datetime.fromisoformat(expiry_date.replace("Z", "+00:00"))
+                        now = datetime.now(timezone.utc)
+                        days_diff = (expiry_dt - now).days
+                        
+                        # Allow ±1 day tolerance (2 months = 60 days)
+                        if 59 <= days_diff <= 61:
+                            log_test("Grant Pro - duration_months=2", True, f"Expiry date ~{days_diff} days from now")
+                        else:
+                            log_test("Grant Pro - duration_months=2", False, f"Expiry date {days_diff} days from now (expected ~60)")
+                    else:
+                        log_test("Grant Pro - duration_months=2", False, "No expiry_date in subscription status")
+                else:
+                    log_test("Grant Pro - duration_months=2", False, f"Failed to get subscription status: {sub_response.status_code}")
+            else:
+                log_test("Grant Pro - duration_months=2", False, "No subscription_id in response")
+    except Exception as e:
+        log_test("Grant Pro - duration_months=2", False, str(e))
+
+
+# ============================================================================
+# TEST 4: NEW salon → empty services list
+# ============================================================================
 
 def test_new_salon_empty_services():
-    """Test 2a: New salon sees empty service catalog"""
-    log_test("Test 2a: New salon sees empty service catalog")
+    """Test that new salon has empty services list"""
+    print("\n" + "="*80)
+    print("TEST 4: NEW Salon → Empty Services List")
+    print("="*80)
     
-    # Generate unique phone number
-    random_digits = ''.join(random.choices(string.digits, k=10))
-    phone = f"+91{random_digits}"
+    # Register a new salon with unique phone
+    unique_phone = f"+91{random_phone()}"
     
-    log_info(f"Creating new salon with phone: {phone}")
-    
-    # Register new salon
-    url = f"{BASE_URL}/salon/register"
-    payload = {
-        "phone": phone,
-        "salon_name": f"Test Salon {random_digits[:4]}",
-        "owner_name": "Test Owner",
-        "address": "Test Address",
-        "latitude": 12.9716,
-        "longitude": 77.5946
-    }
-    
-    log_request("POST", url, json=payload)
-    response = requests.post(url, json=payload)
-    log_response(response)
-    
-    if response.status_code != 200:
-        log_fail(f"Failed to register salon: {response.status_code}")
-        return False
-    
-    data = response.json()
-    new_salon_id = data.get("salon_id") or data.get("id")
-    
-    if not new_salon_id:
-        log_fail("No salon_id or id in registration response")
-        return False
-    
-    log_pass(f"New salon created with ID: {new_salon_id}")
-    
-    # Check services/all endpoint (unauthenticated)
-    log_info("Checking services/all endpoint for new salon...")
-    url = f"{BASE_URL}/salons/{new_salon_id}/services/all"
-    log_request("GET", url)
-    response = requests.get(url)
-    log_response(response)
-    
-    if response.status_code != 200:
-        log_fail(f"Failed to fetch services: {response.status_code}")
-        return False
-    
-    data = response.json()
-    services = data if isinstance(data, list) else data.get("services", [])
-    
-    if len(services) == 0:
-        log_pass("New salon has empty service catalog (no pre-filled services)")
-        return True
-    else:
-        log_fail(f"New salon has {len(services)} services, expected 0 (empty list)")
-        log_info(f"Services: {[s.get('service_name') for s in services[:5]]}")
-        return False
+    try:
+        response = requests.post(
+            f"{API_URL}/salon/register",
+            json={
+                "salon_name": f"Test Salon {random_string()}",
+                "owner_name": "Test Owner",
+                "phone": unique_phone,
+                "address": "Test Address",
+                "latitude": 12.9716,
+                "longitude": 77.5946,
+                "password": "test123456"
+            },
+            timeout=10
+        )
+        
+        if response.status_code != 200:
+            log_test("Register new salon", False, f"Status: {response.status_code}, Response: {response.text}")
+            return
+        
+        data = response.json()
+        new_salon_id = data.get("salon", {}).get("id")
+        
+        if not new_salon_id:
+            log_test("Register new salon", False, "No salon_id in response")
+            return
+        
+        log_test("Register new salon", True, f"Salon created: {new_salon_id}")
+        
+        # Login as the new salon
+        login_response = requests.post(
+            f"{API_URL}/salon/password-login",
+            json={"phone": unique_phone, "password": "test123456"},
+            timeout=10
+        )
+        
+        if login_response.status_code != 200:
+            log_test("New salon login", False, f"Status: {login_response.status_code}")
+            return
+        
+        login_data = login_response.json()
+        new_salon_token = login_data.get("access_token")
+        
+        if not new_salon_token:
+            log_test("New salon login", False, "No access_token in response")
+            return
+        
+        log_test("New salon login", True, "Login successful")
+        
+        # Get services list - should be empty
+        services_response = requests.get(
+            f"{API_URL}/salons/{new_salon_id}/services/all",
+            headers={"Authorization": f"Bearer {new_salon_token}"},
+            timeout=10
+        )
+        
+        if services_response.status_code != 200:
+            log_test("New salon services list", False, f"Status: {services_response.status_code}")
+            return
+        
+        services_data = services_response.json()
+        services = services_data.get("services", [])
+        
+        if len(services) == 0:
+            log_test("New salon services list", True, "Services list is empty as expected")
+        else:
+            log_test("New salon services list", False, f"Expected empty list, got {len(services)} services")
+        
+    except Exception as e:
+        log_test("New salon empty services test", False, str(e))
 
-def test_existing_salon_has_services():
-    """Test 2b: Existing salon still has services"""
-    log_test("Test 2b: Existing salon still has services")
-    
-    url = f"{BASE_URL}/salons/{EXISTING_SALON_ID}/services/all"
-    log_request("GET", url)
-    response = requests.get(url)
-    log_response(response)
-    
-    if response.status_code != 200:
-        log_fail(f"Failed to fetch services: {response.status_code}")
-        return False
-    
-    data = response.json()
-    services = data if isinstance(data, list) else data.get("services", [])
-    
-    if len(services) > 0:
-        log_pass(f"Existing salon has {len(services)} services (as expected)")
-        log_info(f"Sample services: {[s.get('service_name') for s in services[:3]]}")
-        return True
-    else:
-        log_fail("Existing salon has no services, expected some services")
-        return False
 
-def test_create_service_with_salon_id():
-    """Test 2c: Create service and verify it has salon_id"""
-    log_test("Test 2c: Create service and verify it has salon_id")
+# ============================================================================
+# TEST 5: Salon creates service → tagged with salon_id
+# ============================================================================
+
+def test_salon_creates_service(salon_token, salon_id):
+    """Test that salon-created service is tagged with salon_id"""
+    print("\n" + "="*80)
+    print("TEST 5: Salon Creates Service → Tagged with salon_id")
+    print("="*80)
     
-    # Login as existing salon
-    token = get_salon_token(EXISTING_SALON_ID, EXISTING_SALON_LOGIN, EXISTING_SALON_PASSWORD)
+    if not salon_token or not salon_id:
+        log_test("Create service with salon_id", False, "Missing salon token or salon_id")
+        return
     
-    # Create a new service
-    url = f"{BASE_URL}/services"
-    headers = {"Authorization": f"Bearer {token}"}
-    random_suffix = ''.join(random.choices(string.ascii_uppercase + string.digits, k=6))
-    payload = {
-        "service_name": f"Phase2 Test Service {random_suffix}",
-        "base_price": 150,
-        "category": "General",
-        "default_duration": 30
-    }
+    headers = {"Authorization": f"Bearer {salon_token}"}
+    service_name = f"Phase2 Test Service {random_string()}"
     
-    log_request("POST", url, json=payload)
-    response = requests.post(url, json=payload, headers=headers)
-    log_response(response)
+    try:
+        # Create a new service
+        response = requests.post(
+            f"{API_URL}/services",
+            json={
+                "service_name": service_name,
+                "base_price": 100,
+                "default_duration": 15,
+                "category": "General"
+            },
+            headers=headers,
+            timeout=10
+        )
+        
+        if response.status_code != 200:
+            log_test("Create service", False, f"Status: {response.status_code}, Response: {response.text}")
+            return
+        
+        data = response.json()
+        service_id = data.get("id")
+        
+        if not service_id:
+            log_test("Create service", False, "No service_id in response")
+            return
+        
+        log_test("Create service", True, f"Service created: {service_id}")
+        
+        # Get services list and verify the new service appears with salon_id
+        services_response = requests.get(
+            f"{API_URL}/salons/{salon_id}/services/all",
+            headers=headers,
+            timeout=10
+        )
+        
+        if services_response.status_code != 200:
+            log_test("Verify service in list", False, f"Status: {services_response.status_code}")
+            return
+        
+        services_data = services_response.json()
+        services = services_data.get("services", [])
+        
+        # Find the created service
+        created_service = None
+        for svc in services:
+            if svc.get("id") == service_id:
+                created_service = svc
+                break
+        
+        if not created_service:
+            log_test("Verify service in list", False, f"Service {service_id} not found in services list")
+            return
+        
+        # Check if service has salon_id and is_owned=true
+        service_salon_id = created_service.get("salon_id")
+        is_owned = created_service.get("is_owned")
+        is_enabled = created_service.get("is_enabled_for_salon")
+        
+        if service_salon_id == salon_id and is_owned is True:
+            log_test("Service tagged with salon_id", True, f"salon_id={salon_id}, is_owned=true, is_enabled_for_salon={is_enabled}")
+        else:
+            log_test("Service tagged with salon_id", False, f"salon_id={service_salon_id} (expected {salon_id}), is_owned={is_owned}")
+        
+    except Exception as e:
+        log_test("Salon creates service test", False, str(e))
+
+
+# ============================================================================
+# TEST 6: Regression - salon-booking still works
+# ============================================================================
+
+def test_salon_booking_regression(salon_token, salon_id):
+    """Test POST /api/salons/{salon_id}/salon-booking still works"""
+    print("\n" + "="*80)
+    print("TEST 6: Regression - salon-booking Still Works")
+    print("="*80)
     
-    if response.status_code != 200:
-        log_fail(f"Failed to create service: {response.status_code}")
-        return False
+    if not salon_token or not salon_id:
+        log_test("salon-booking regression", False, "Missing salon token or salon_id")
+        return
     
-    data = response.json()
-    service_id = data.get("id")
+    headers = {"Authorization": f"Bearer {salon_token}"}
     
-    if not service_id:
-        log_fail("No service ID in response")
-        return False
+    try:
+        # Get barbers
+        barbers_response = requests.get(
+            f"{API_URL}/salons/{salon_id}/barbers",
+            headers=headers,
+            timeout=10
+        )
+        
+        if barbers_response.status_code != 200:
+            log_test("Get barbers for booking", False, f"Status: {barbers_response.status_code}")
+            return
+        
+        barbers = barbers_response.json()
+        if not barbers or len(barbers) == 0:
+            log_test("Get barbers for booking", False, "No barbers found")
+            return
+        
+        barber_id = barbers[0].get("id")
+        log_test("Get barbers for booking", True, f"Found barber: {barber_id}")
+        
+        # Get enabled services
+        services_response = requests.get(
+            f"{API_URL}/salons/{salon_id}/services/enabled",
+            headers=headers,
+            timeout=10
+        )
+        
+        if services_response.status_code != 200:
+            log_test("Get services for booking", False, f"Status: {services_response.status_code}")
+            return
+        
+        services = services_response.json()
+        if not services or len(services) == 0:
+            log_test("Get services for booking", False, "No enabled services found")
+            return
+        
+        service_id = services[0].get("id")
+        log_test("Get services for booking", True, f"Found service: {service_id}")
+        
+        # Create booking
+        today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        booking_response = requests.post(
+            f"{API_URL}/salons/{salon_id}/salon-booking",
+            json={
+                "customer_name": "Test QA Customer",
+                "phone": "9999900001",
+                "gender": "Men",
+                "barber_id": barber_id,
+                "selected_services": [service_id],
+                "date": today,
+                "shift": "Morning",
+                "payment_mode": "cash"
+            },
+            headers=headers,
+            timeout=10
+        )
+        
+        if booking_response.status_code != 200:
+            log_test("Create salon-booking", False, f"Status: {booking_response.status_code}, Response: {booking_response.text}")
+            return
+        
+        booking_data = booking_response.json()
+        token_number = booking_data.get("token_number")
+        
+        if token_number:
+            log_test("Create salon-booking", True, f"Booking created with token: {token_number}")
+        else:
+            log_test("Create salon-booking", False, "No token_number in response")
+        
+    except Exception as e:
+        log_test("salon-booking regression test", False, str(e))
+
+
+# ============================================================================
+# TEST 7: Regression - direct-invoice still works
+# ============================================================================
+
+def test_direct_invoice_regression(salon_token, salon_id):
+    """Test POST /api/salons/{salon_id}/direct-invoice still works"""
+    print("\n" + "="*80)
+    print("TEST 7: Regression - direct-invoice Still Works")
+    print("="*80)
     
-    log_pass(f"Service created with ID: {service_id}")
+    if not salon_token or not salon_id:
+        log_test("direct-invoice regression", False, "Missing salon token or salon_id")
+        return
     
-    # Verify service appears in /salons/{id}/services/all and check salon_id there
-    log_info("Verifying service appears in salon's service list and has correct salon_id...")
-    url = f"{BASE_URL}/salons/{EXISTING_SALON_ID}/services/all"
-    log_request("GET", url)
-    response = requests.get(url)
-    log_response(response)
+    headers = {"Authorization": f"Bearer {salon_token}"}
     
-    if response.status_code != 200:
-        log_fail(f"Failed to fetch salon services: {response.status_code}")
-        return False
+    try:
+        # Get barbers
+        barbers_response = requests.get(
+            f"{API_URL}/salons/{salon_id}/barbers",
+            headers=headers,
+            timeout=10
+        )
+        
+        if barbers_response.status_code != 200:
+            log_test("Get barbers for invoice", False, f"Status: {barbers_response.status_code}")
+            return
+        
+        barbers = barbers_response.json()
+        if not barbers or len(barbers) == 0:
+            log_test("Get barbers for invoice", False, "No barbers found")
+            return
+        
+        barber_id = barbers[0].get("id")
+        log_test("Get barbers for invoice", True, f"Found barber: {barber_id}")
+        
+        # Get enabled services
+        services_response = requests.get(
+            f"{API_URL}/salons/{salon_id}/services/enabled",
+            headers=headers,
+            timeout=10
+        )
+        
+        if services_response.status_code != 200:
+            log_test("Get services for invoice", False, f"Status: {services_response.status_code}")
+            return
+        
+        services = services_response.json()
+        if not services or len(services) == 0:
+            log_test("Get services for invoice", False, "No enabled services found")
+            return
+        
+        service = services[0]
+        service_id = service.get("id")
+        service_name = service.get("service_name", "Service")
+        base_price = service.get("base_price", 100)
+        default_duration = service.get("default_duration", 15)
+        
+        log_test("Get services for invoice", True, f"Found service: {service_id}")
+        
+        # Create direct invoice
+        invoice_response = requests.post(
+            f"{API_URL}/salons/{salon_id}/direct-invoice",
+            json={
+                "customer_name": "Walkin Customer",
+                "phone": "9999900002",
+                "gender": "Men",
+                "barber_id": barber_id,
+                "selected_services": [{
+                    "service_id": service_id,
+                    "service_name": service_name,
+                    "base_price": base_price,
+                    "default_duration": default_duration
+                }],
+                "payment_mode": "cash"
+            },
+            headers=headers,
+            timeout=10
+        )
+        
+        if invoice_response.status_code != 200:
+            log_test("Create direct-invoice", False, f"Status: {invoice_response.status_code}, Response: {invoice_response.text}")
+            return
+        
+        invoice_data = invoice_response.json()
+        success = invoice_data.get("success")
+        token_number = invoice_data.get("token_number")
+        grand_total = invoice_data.get("totals", {}).get("grand_total", 0)
+        
+        if success and token_number and grand_total > 0:
+            log_test("Create direct-invoice", True, f"Invoice created: token={token_number}, grand_total={grand_total}")
+        else:
+            log_test("Create direct-invoice", False, f"success={success}, token_number={token_number}, grand_total={grand_total}")
+        
+    except Exception as e:
+        log_test("direct-invoice regression test", False, str(e))
+
+
+# ============================================================================
+# TEST 8: Regression - home-kpis with date_mode=today
+# ============================================================================
+
+def test_home_kpis_regression(salon_token, salon_id):
+    """Test GET /api/salons/{salon_id}/home-kpis?date_mode=today"""
+    print("\n" + "="*80)
+    print("TEST 8: Regression - home-kpis with date_mode=today")
+    print("="*80)
     
-    data = response.json()
-    services = data if isinstance(data, list) else data.get("services", [])
+    if not salon_token or not salon_id:
+        log_test("home-kpis regression", False, "Missing salon token or salon_id")
+        return
     
-    # Find the newly created service
-    found_service = None
-    for s in services:
-        if s.get("id") == service_id:
-            found_service = s
-            break
+    headers = {"Authorization": f"Bearer {salon_token}"}
     
-    if not found_service:
-        log_fail(f"Newly created service not found in salon's service list")
-        return False
-    
-    log_pass(f"Service found in salon's service list")
-    
-    # Verify salon_id from the service in the list
-    salon_id = found_service.get("salon_id")
-    if salon_id == EXISTING_SALON_ID:
-        log_pass(f"Service has correct salon_id: {salon_id}")
-    else:
-        log_fail(f"Service has salon_id: {salon_id}, expected: {EXISTING_SALON_ID}")
-        return False
-    
-    # Verify is_owned and is_enabled_for_salon flags
-    is_owned = found_service.get("is_owned")
-    is_enabled = found_service.get("is_enabled_for_salon")
-    
-    if is_owned:
-        log_pass("Service has is_owned=true")
-    else:
-        log_fail(f"Service has is_owned={is_owned}, expected true")
-        return False
-    
-    if is_enabled:
-        log_pass("Service has is_enabled_for_salon=true")
-    else:
-        log_fail(f"Service has is_enabled_for_salon={is_enabled}, expected true")
-        return False
-    
-    return True
+    try:
+        response = requests.get(
+            f"{API_URL}/salons/{salon_id}/home-kpis?date_mode=today",
+            headers=headers,
+            timeout=10
+        )
+        
+        if response.status_code != 200:
+            log_test("home-kpis date_mode=today", False, f"Status: {response.status_code}, Response: {response.text}")
+            return
+        
+        data = response.json()
+        
+        # Check for all required top-level keys
+        required_keys = [
+            "date_basis",
+            "primary",
+            "secondary",
+            "staff_leaderboard",
+            "reviews",
+            "targets",
+            "revenue_7d",
+            "payment_mix",
+            "top_services",
+            "busy_hours"
+        ]
+        
+        missing_keys = []
+        for key in required_keys:
+            if key not in data:
+                missing_keys.append(key)
+        
+        if len(missing_keys) == 0:
+            log_test("home-kpis all required keys present", True, f"All {len(required_keys)} keys present")
+        else:
+            log_test("home-kpis all required keys present", False, f"Missing keys: {', '.join(missing_keys)}")
+        
+        # Verify specific structures
+        if isinstance(data.get("staff_leaderboard"), list):
+            log_test("home-kpis staff_leaderboard is array", True)
+        else:
+            log_test("home-kpis staff_leaderboard is array", False, f"Type: {type(data.get('staff_leaderboard'))}")
+        
+        if isinstance(data.get("revenue_7d"), list):
+            log_test("home-kpis revenue_7d is array", True)
+        else:
+            log_test("home-kpis revenue_7d is array", False, f"Type: {type(data.get('revenue_7d'))}")
+        
+        if isinstance(data.get("payment_mix"), dict):
+            log_test("home-kpis payment_mix is dict", True)
+        else:
+            log_test("home-kpis payment_mix is dict", False, f"Type: {type(data.get('payment_mix'))}")
+        
+        if isinstance(data.get("top_services"), list):
+            log_test("home-kpis top_services is array", True)
+        else:
+            log_test("home-kpis top_services is array", False, f"Type: {type(data.get('top_services'))}")
+        
+        if isinstance(data.get("busy_hours"), dict):
+            log_test("home-kpis busy_hours is dict", True)
+            # Check if busy_hours has 24 hour keys
+            busy_hours = data.get("busy_hours", {})
+            if len(busy_hours) == 24:
+                log_test("home-kpis busy_hours has 24 hour keys", True)
+            else:
+                log_test("home-kpis busy_hours has 24 hour keys", False, f"Found {len(busy_hours)} keys")
+        else:
+            log_test("home-kpis busy_hours is dict", False, f"Type: {type(data.get('busy_hours'))}")
+        
+    except Exception as e:
+        log_test("home-kpis regression test", False, str(e))
+
+
+# ============================================================================
+# MAIN TEST RUNNER
+# ============================================================================
 
 def main():
-    """Run all tests"""
-    print(f"\n{BLUE}{'='*80}{RESET}")
-    print(f"{BLUE}PHASE 2 REGRESSION TESTS{RESET}")
-    print(f"{BLUE}{'='*80}{RESET}")
+    """Run all Phase 2 regression tests"""
+    print("\n" + "="*80)
+    print("PHASE 2 BACKEND REGRESSION TESTS")
+    print("="*80)
+    print(f"Backend URL: {BASE_URL}")
+    print(f"API URL: {API_URL}")
+    print("="*80)
     
-    results = {}
+    # Test 1: Platform admin login
+    platform_token = test_platform_admin_login()
     
-    # Test 1: Grant Pro Access
-    print(f"\n{BLUE}{'='*80}{RESET}")
-    print(f"{BLUE}TEST SUITE 1: GRANT PRO ACCESS{RESET}")
-    print(f"{BLUE}{'='*80}{RESET}")
+    # Test 2: Salon admin login
+    salon_token, salon_id = test_salon_admin_login()
     
-    results["1a_duration_days"] = test_grant_pro_duration_days()
-    results["1b_duration_months"] = test_grant_pro_duration_months()
-    results["1c_combined_duration"] = test_grant_pro_combined_duration()
-    results["1d_no_duration"] = test_grant_pro_no_duration()
-    results["1e_large_months"] = test_grant_pro_large_months()
+    # Test 3: Grant Pro Access (requires platform token and salon_id)
+    if platform_token and salon_id:
+        test_grant_pro_access(platform_token, salon_id)
     
-    # Test 2: Services scoping
-    print(f"\n{BLUE}{'='*80}{RESET}")
-    print(f"{BLUE}TEST SUITE 2: SERVICES SCOPING{RESET}")
-    print(f"{BLUE}{'='*80}{RESET}")
+    # Test 4: NEW salon → empty services list
+    test_new_salon_empty_services()
     
-    results["2a_new_salon_empty"] = test_new_salon_empty_services()
-    results["2b_existing_salon_services"] = test_existing_salon_has_services()
-    results["2c_create_service_salon_id"] = test_create_service_with_salon_id()
+    # Test 5: Salon creates service → tagged with salon_id
+    if salon_token and salon_id:
+        test_salon_creates_service(salon_token, salon_id)
     
-    # Summary
-    print(f"\n{BLUE}{'='*80}{RESET}")
-    print(f"{BLUE}TEST SUMMARY{RESET}")
-    print(f"{BLUE}{'='*80}{RESET}")
+    # Test 6: Regression - salon-booking still works
+    if salon_token and salon_id:
+        test_salon_booking_regression(salon_token, salon_id)
     
-    passed = sum(1 for v in results.values() if v)
-    total = len(results)
+    # Test 7: Regression - direct-invoice still works
+    if salon_token and salon_id:
+        test_direct_invoice_regression(salon_token, salon_id)
     
-    for test_name, result in results.items():
-        status = f"{GREEN}✅ PASS{RESET}" if result else f"{RED}❌ FAIL{RESET}"
-        print(f"{test_name}: {status}")
+    # Test 8: Regression - home-kpis with date_mode=today
+    if salon_token and salon_id:
+        test_home_kpis_regression(salon_token, salon_id)
     
-    print(f"\n{BLUE}{'='*80}{RESET}")
-    if passed == total:
-        print(f"{GREEN}ALL TESTS PASSED: {passed}/{total}{RESET}")
-    else:
-        print(f"{RED}SOME TESTS FAILED: {passed}/{total} passed{RESET}")
-    print(f"{BLUE}{'='*80}{RESET}\n")
+    # Print summary
+    print("\n" + "="*80)
+    print("TEST SUMMARY")
+    print("="*80)
+    for result in test_results:
+        print(result)
     
-    return passed == total
+    print("\n" + "="*80)
+    print(f"TOTAL: {passed_tests}/{total_tests} tests passed ({int(passed_tests/total_tests*100) if total_tests > 0 else 0}%)")
+    print("="*80)
+    
+    # Exit with appropriate code
+    sys.exit(0 if passed_tests == total_tests else 1)
+
 
 if __name__ == "__main__":
-    try:
-        success = main()
-        exit(0 if success else 1)
-    except Exception as e:
-        print(f"\n{RED}{'='*80}{RESET}")
-        print(f"{RED}FATAL ERROR: {e}{RESET}")
-        print(f"{RED}{'='*80}{RESET}\n")
-        import traceback
-        traceback.print_exc()
-        exit(1)
+    main()

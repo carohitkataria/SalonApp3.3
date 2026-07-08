@@ -7,7 +7,7 @@ import requests
 import json
 from datetime import datetime
 
-BASE_URL = "https://salon-dashboard-pro-6.preview.emergentagent.com"
+BASE_URL = "https://jovial-mcclintock-6.preview.emergentagent.com"
 ADMIN_IDENTIFIER = "admin"
 ADMIN_PASSWORD = "salon123"
 

@@ -18,7 +18,7 @@ import string
 from datetime import datetime, date, timedelta
 
 # Configuration
-BASE_URL = "https://salon-dashboard-pro-6.preview.emergentagent.com/api"
+BASE_URL = "https://jovial-mcclintock-6.preview.emergentagent.com/api"
 ADMIN_CREDENTIALS = {"identifier": "admin", "password": "salon123"}
 
 # Test state

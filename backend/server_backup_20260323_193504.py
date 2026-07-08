@@ -553,7 +553,7 @@ async def complete_token(token_id: str, admin=Depends(get_current_admin)):
 
 @api_router.get("/qr-code")
 async def generate_qr_code(admin=Depends(get_current_admin)):
-    frontend_url = os.environ.get('FRONTEND_URL', 'https://salon-dashboard-pro-6.preview.emergentagent.com')
+    frontend_url = os.environ.get('FRONTEND_URL', 'https://jovial-mcclintock-6.preview.emergentagent.com')
     
     # QR code is permanent - no date/time in URL
     # Frontend will auto-fill current date/time when scanned
