@@ -161,9 +161,6 @@ async def onboard_payment_vendor(
     """
     _check_salon_admin_for_salon(current_user, salon_id)
 
-    if not cashfree_service.is_configured():
-        raise HTTPException(status_code=503, detail="Payment gateway is not configured.")
-
     salon = await _db.salons.find_one({"id": salon_id}, {"_id": 0})
     if not salon:
         raise HTTPException(status_code=404, detail="Salon not found")
@@ -186,6 +183,9 @@ async def onboard_payment_vendor(
             status_code=400,
             detail="Provide either a UPI ID or a bank account — not both.",
         )
+
+    if not cashfree_service.is_configured():
+        raise HTTPException(status_code=503, detail="Payment gateway is not configured.")
 
     method = "upi" if upi else "bank"
     vendor_id = _vendor_id_for(salon_id)
