@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import axios from 'axios';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -2057,13 +2057,42 @@ function TemplateEditorDialog({ salonId, getAuthHeaders, initial, providers, onC
     body: initial?.body || '',
     header_text: initial?.header_text || '',
     footer_text: initial?.footer_text || '',
+    example_values: initial?.example_values || {}, // { "1": "Riya", "2": "Style Studio" }
   });
   const [saving, setSaving] = useState(false);
+
+  // Extract placeholders {{1}}, {{2}} … from body/header/footer whenever they change.
+  const placeholders = React.useMemo(() => {
+    const blob = `${form.body || ''} ${form.header_text || ''} ${form.footer_text || ''}`;
+    const set = new Set();
+    (blob.match(/\{\{\s*(\d+)\s*\}\}/g) || []).forEach((m) => {
+      const n = m.replace(/[^0-9]/g, '');
+      if (n) set.add(Number(n));
+    });
+    return Array.from(set).sort((a, b) => a - b);
+  }, [form.body, form.header_text, form.footer_text]);
+
+  // Suggested example strings for common placeholder positions.
+  const EXAMPLE_HINTS = {
+    1: 'Riya Sharma',
+    2: 'Style Studio Connaught Place',
+    3: 'https://salonhub.in/book/8c1a4d',
+    4: 'Sun, 12 Oct at 4:00 PM',
+    5: 'WELCOME10',
+  };
 
   const save = async () => {
     if (!form.name.trim()) return toast.error('Name required');
     if (!/^[a-z0-9_]+$/.test(form.name)) return toast.error('Name must be lowercase letters, digits, underscores');
     if (!form.body.trim()) return toast.error('Body required');
+    // Enforce example values on the client before the round-trip.
+    const missing = placeholders.filter((n) => !(form.example_values?.[String(n)] || '').trim());
+    if (missing.length) {
+      return toast.error(
+        `Please add example value(s) for placeholder(s): ${missing.map((n) => `{{${n}}}`).join(', ')}. ` +
+        `WhatsApp needs an example for each variable before it can approve the template.`,
+      );
+    }
     try {
       setSaving(true);
       await axios.post(`${API}/salons/${salonId}/marketing/templates/draft`, form, { headers: getAuthHeaders() });
@@ -2085,6 +2114,19 @@ function TemplateEditorDialog({ salonId, getAuthHeaders, initial, providers, onC
               <div className="p-3 rounded-lg bg-background/50 border border-border whitespace-pre-wrap text-sm">
                 {initial.body || <span className="text-muted-foreground">(no body)</span>}
               </div>
+              {initial.example_values && Object.keys(initial.example_values).length > 0 && (
+                <div className="p-3 rounded-lg border border-amber-500/40 bg-amber-500/5">
+                  <p className="text-[11px] font-bold text-amber-700 dark:text-amber-400 mb-1.5">Example values (sent to WhatsApp reviewer)</p>
+                  <div className="space-y-1">
+                    {Object.entries(initial.example_values).map(([k, v]) => (
+                      <div key={k} className="flex items-center gap-2 text-xs">
+                        <span className="font-mono w-14 shrink-0 text-amber-700 dark:text-amber-400">{`{{${k}}}`}</span>
+                        <span className="text-foreground">{v}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
               <div className="grid grid-cols-2 gap-2 text-xs">
                 <p><span className="text-muted-foreground">Provider:</span> {initial.provider || '—'}</p>
                 <p><span className="text-muted-foreground">Status:</span> {initial.approval_status || '—'}</p>
@@ -2131,9 +2173,76 @@ function TemplateEditorDialog({ salonId, getAuthHeaders, initial, providers, onC
                   Use <code>{'{{1}}'}</code>, <code>{'{{2}}'}</code>, … for positional parameters (Twilio/Meta convention).
                 </p>
               </div>
+
+              {/* Example values (Twilio + Meta requirement) — visible ONLY when
+                  the body has placeholders. WhatsApp reviewers use these to
+                  render a preview; templates without examples are rejected. */}
+              {placeholders.length > 0 && (
+                <div className="rounded-lg border border-amber-500/40 bg-amber-500/5 p-3 space-y-2">
+                  <div className="flex items-start gap-2">
+                    <div className="w-6 h-6 shrink-0 rounded-md bg-amber-500 text-white flex items-center justify-center text-xs font-bold">!</div>
+                    <div className="text-xs">
+                      <p className="font-bold text-foreground">Example values (required for WhatsApp approval)</p>
+                      <p className="text-muted-foreground">
+                        WhatsApp reviewers see a preview built from these examples. If you leave any blank, Twilio/Meta will
+                        auto-reject the template. Use realistic sample values (a real name, salon, URL).
+                      </p>
+                    </div>
+                  </div>
+                  <div className="space-y-1.5" data-testid="template-example-values">
+                    {placeholders.map((n) => (
+                      <div key={n} className="flex items-center gap-2">
+                        <span className="text-xs font-mono w-14 shrink-0 text-amber-700 dark:text-amber-400">{`{{${n}}}`}</span>
+                        <Input
+                          value={form.example_values?.[String(n)] || ''}
+                          onChange={(e) => setForm({
+                            ...form,
+                            example_values: { ...(form.example_values || {}), [String(n)]: e.target.value },
+                          })}
+                          placeholder={EXAMPLE_HINTS[n] || `example for {{${n}}}`}
+                          data-testid={`template-example-${n}`}
+                          className="h-8 text-sm"
+                        />
+                      </div>
+                    ))}
+                  </div>
+                  <div className="flex items-center justify-between pt-1">
+                    <p className="text-[10px] text-muted-foreground">
+                      Preview: <span className="italic">
+                        {(() => {
+                          let preview = form.body || '';
+                          placeholders.forEach((n) => {
+                            const v = (form.example_values?.[String(n)] || '').trim() || `{{${n}}}`;
+                            preview = preview.replace(new RegExp(`\\{\\{\\s*${n}\\s*\\}\\}`, 'g'), v);
+                          });
+                          return preview.length > 120 ? preview.slice(0, 120) + '…' : preview;
+                        })()}
+                      </span>
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const filled = { ...(form.example_values || {}) };
+                        placeholders.forEach((n) => {
+                          if (!(filled[String(n)] || '').trim()) filled[String(n)] = EXAMPLE_HINTS[n] || `Sample ${n}`;
+                        });
+                        setForm({ ...form, example_values: filled });
+                      }}
+                      className="text-[11px] text-amber-700 dark:text-amber-400 font-semibold hover:underline"
+                    >
+                      Fill sensible defaults
+                    </button>
+                  </div>
+                </div>
+              )}
               <div className="p-3 rounded-lg border border-border bg-background/50">
                 <p className="text-[11px] text-muted-foreground">
-                  After saving as draft, use <b>Submit → Twilio</b> or <b>Submit → Meta</b> in the list to send it for WhatsApp approval.
+                  {placeholders.length > 0 ? (
+                    <>Fill in an example value for every placeholder above (Twilio &amp; Meta reject templates without them).
+                     After saving as draft, use <b>Submit → Twilio</b> or <b>Submit → Meta</b> in the list to send it for WhatsApp approval.</>
+                  ) : (
+                    <>After saving as draft, use <b>Submit → Twilio</b> or <b>Submit → Meta</b> in the list to send it for WhatsApp approval.</>
+                  )}
                   {providers?.find(p => p.id === 'meta')?.connected === false && ' (Meta is not connected yet — only Twilio will be available.)'}
                 </p>
               </div>

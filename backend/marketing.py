@@ -36,7 +36,7 @@ from typing import Any, Dict, List, Optional
 from bson import ObjectId
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import PlainTextResponse
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 logger = logging.getLogger(__name__)
 
@@ -1769,6 +1769,12 @@ class TemplateCreateIn(BaseModel):
     header_text: Optional[str] = None
     footer_text: Optional[str] = None
     buttons: Optional[List[Dict[str, Any]]] = None   # [{type:"URL"|"QUICK_REPLY", text, url?}]
+    # {{N}} placeholder → example value. Required by both Twilio (Content API
+    # `variables` field) and Meta (template `components[].example.body_text`)
+    # to render a preview for the WhatsApp reviewer. Without examples the
+    # template is auto-rejected. Keys are the placeholder index as a string
+    # ("1", "2", "3"); values are the example strings.
+    example_values: Optional[Dict[str, str]] = None
 
     @field_validator("name")
     @classmethod
@@ -1785,6 +1791,34 @@ class TemplateCreateIn(BaseModel):
         if v2 not in TEMPLATE_CATEGORIES:
             raise ValueError("category must be one of: utility, marketing, authentication")
         return v2
+
+    @model_validator(mode="after")
+    def _check_examples_cover_placeholders(self):
+        """Every `{{N}}` in body/header/footer/buttons must have an example."""
+        text_blob = " ".join(filter(None, [
+            self.body or "",
+            self.header_text or "",
+            self.footer_text or "",
+            " ".join((b.get("text") or "") + " " + (b.get("url") or "")
+                     for b in (self.buttons or [])),
+        ]))
+        placeholders = sorted({int(m) for m in _re.findall(r"\{\{\s*(\d+)\s*\}\}", text_blob)})
+        if not placeholders:
+            # No placeholders → examples not required; ignore whatever was sent.
+            self.example_values = None
+            return self
+        provided = self.example_values or {}
+        missing = [str(p) for p in placeholders if not (provided.get(str(p)) or "").strip()]
+        if missing:
+            raise ValueError(
+                f"Provide example values for placeholder(s): {', '.join('{{'+m+'}}' for m in missing)}. "
+                f"WhatsApp needs an example for each variable before approving the template."
+            )
+        # Keep only the examples that map to real placeholders, in order.
+        self.example_values = {
+            str(p): (provided.get(str(p)) or "").strip() for p in placeholders
+        }
+        return self
 
 
 async def _twilio_content_get(path: str, params: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
@@ -1986,13 +2020,36 @@ async def submit_template_for_approval(salon_id: str, tid: str, body: TemplateSu
         # 1) Create Content template if not created yet
         sid = t.get("provider_sid")
         if not sid:
-            create_payload = {
+            body_text = t.get("body") or ""
+            create_payload: Dict[str, Any] = {
                 "friendly_name": t.get("friendly_name") or t.get("name"),
                 "language": t.get("lang_code") or "en",
                 "types": {
-                    "twilio/text": {"body": t.get("body") or ""}
+                    "twilio/text": {"body": body_text}
                 },
             }
+            # Twilio REQUIRES `variables` (example values) for every {{N}} in the
+            # body when the template is submitted for WhatsApp approval. Without
+            # them the WhatsApp reviewer can't render a preview and the template
+            # is rejected. The keys must be strings ("1", "2", ...); values must
+            # be non-empty strings.
+            examples = t.get("example_values") or {}
+            placeholders = sorted({int(m) for m in _re.findall(r"\{\{\s*(\d+)\s*\}\}", body_text)})
+            if placeholders:
+                variables_payload = {}
+                for p in placeholders:
+                    v = (examples.get(str(p)) or "").strip()
+                    if not v:
+                        raise HTTPException(
+                            status_code=400,
+                            detail=(
+                                f"Missing example value for {{{{{p}}}}}. WhatsApp needs an "
+                                f"example for every placeholder before approving the template. "
+                                f"Edit the template and fill in the 'Example values' fields."
+                            ),
+                        )
+                    variables_payload[str(p)] = v
+                create_payload["variables"] = variables_payload
             created = await _twilio_content_post("/Content", create_payload)
             if "error" in created:
                 raise HTTPException(status_code=502, detail=f"Twilio create failed: {created.get('error')}")
@@ -2021,11 +2078,33 @@ async def submit_template_for_approval(salon_id: str, tid: str, body: TemplateSu
         if not (waba_id and token):
             raise HTTPException(status_code=400, detail="Meta credentials not configured")
         api_ver = os.environ.get("META_WA_API_VERSION") or "v21.0"
+        body_text = t.get("body") or ""
+        # Meta also needs example values embedded per-component to render the
+        # preview. Reference:
+        # https://developers.facebook.com/docs/whatsapp/business-management-api/message-templates
+        # `components[].example.body_text` is an array-of-array of strings.
+        examples = t.get("example_values") or {}
+        placeholders = sorted({int(m) for m in _re.findall(r"\{\{\s*(\d+)\s*\}\}", body_text)})
+        body_component: Dict[str, Any] = {"type": "BODY", "text": body_text}
+        if placeholders:
+            example_row = []
+            for p in placeholders:
+                v = (examples.get(str(p)) or "").strip()
+                if not v:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=(
+                            f"Missing example value for {{{{{p}}}}}. WhatsApp needs an "
+                            f"example for every placeholder before approving the template."
+                        ),
+                    )
+                example_row.append(v)
+            body_component["example"] = {"body_text": [example_row]}
         payload = {
             "name": t.get("name"),
             "language": t.get("lang_code") or "en_US",
             "category": (t.get("category") or "UTILITY").upper(),
-            "components": [{"type": "BODY", "text": t.get("body") or ""}],
+            "components": [body_component],
         }
         url = f"https://graph.facebook.com/{api_ver}/{waba_id}/message_templates"
         async with httpx.AsyncClient(timeout=15.0) as client:
