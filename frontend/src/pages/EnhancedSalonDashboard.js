@@ -29,6 +29,7 @@ import SubscriptionBadge from '@/components/SubscriptionBadge';
 import StaffSettingsContent from '@/components/staff/StaffSettingsContent';
 import { InventoryView } from '@/pages/salon/SalonInventoryPage';
 import SalonHomeNew from '@/pages/salon/SalonHomeNew';
+import SalonHomeV2 from '@/pages/salon/SalonHomeV2';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { SubscriptionProvider } from '@/contexts/SubscriptionContext';
 import { getSession, clearSession } from '@/utils/sessionManager';
@@ -1200,6 +1201,20 @@ export default function EnhancedSalonDashboard() {
 
   return (
     <SubscriptionProvider salonId={salonId}>
+    {/* Home tab uses its own full-viewport shell (rail + ribbon). Render outside
+        the legacy header/max-w-7xl wrapper so the new design isn't constrained. */}
+    {activeTab === 'home' ? (
+      <SalonHomeV2
+        salon={salon}
+        salonId={salonId}
+        tokens={tokens}
+        barbers={barbers}
+        goToTab={goToTab}
+        getAuthHeaders={getAuthHeaders}
+        handleCallToken={handleCallToken}
+        handleCompleteToken={handleCompleteToken}
+      />
+    ) : (
     <div className="min-h-screen bg-background relative overflow-hidden">
       {/* Background Image with Overlay */}
       <div className="fixed inset-0 z-0">
@@ -1375,41 +1390,7 @@ export default function EnhancedSalonDashboard() {
 
         <div className="max-w-7xl mx-auto p-4">
 
-        {/* ===== HOME DASHBOARD ===== */}
-        {activeTab === 'home' && (
-          <SalonHomeNew
-            salon={salon}
-            salonId={salonId}
-            tokens={tokens}
-            barbers={barbers}
-            dateMode={dateMode}
-            setDateMode={setDateMode}
-            dateFrom={dateFrom}
-            setDateFrom={setDateFrom}
-            dateTo={dateTo}
-            setDateTo={setDateTo}
-            dailySales={dailySales}
-            goToTab={goToTab}
-            navigate={navigate}
-            getAuthHeaders={getAuthHeaders}
-            handleCallToken={handleCallToken}
-            handleCompleteToken={handleCompleteToken}
-            handleOpenManualBooking={handleOpenManualBooking}
-            checkIsAdmin={checkIsAdmin}
-            checkIsBranchManager={checkIsBranchManager}
-            checkHasPermission={checkHasPermission}
-            salonUser={(() => {
-              let su = salonUser;
-              if (!su?.staffId) {
-                try {
-                  const raw = localStorage.getItem('salon_user_auth');
-                  if (raw) su = JSON.parse(raw);
-                } catch (e) { /* noop */ }
-              }
-              return su;
-            })()}
-          />
-        )}
+        {/* ===== HOME DASHBOARD (rendered separately outside this wrapper) ===== */}
 
         {activeTab === 'queue' && (
           <div className="space-y-6">
@@ -2839,6 +2820,7 @@ export default function EnhancedSalonDashboard() {
       </Dialog>
       </div>
     </div>
+    )}
     <SubscriptionPaywallModal />
     </SubscriptionProvider>
   );

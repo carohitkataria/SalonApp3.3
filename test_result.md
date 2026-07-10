@@ -6045,3 +6045,44 @@ agent_communication:
       message: "Completed the WhatsApp template example-values feature end-to-end. Backend: TemplateCreateIn enforces one example per {{N}}; Twilio submit sends `variables`, Meta sends components[].example.body_text. Frontend: per-placeholder inputs + preview in composer, values shown in view mode. .env files were missing on session resume — restored from git (backend/.env with Twilio keys, frontend/.env with REACT_APP_BACKEND_URL). Installed missing python packages (python-socketio, APScheduler). Backend + frontend now running clean. Please test the backend flow described in the task status_history: draft validation, draft persistence, submit-shape, and no-placeholder passthrough."
     - agent: "testing"
       message: "✅ WHATSAPP TEMPLATE EXAMPLE_VALUES TESTING COMPLETE - ALL TESTS PASSED (6/6): Comprehensive backend testing completed successfully with 100% pass rate. All test cases from the review request have been verified: (A) Draft validation with missing example_values returns 422 mentioning both placeholders, (B) Partial example_values returns 422 mentioning missing placeholder, (C) Full example_values returns 200 with correct persistence, (D) No-placeholder templates correctly ignore/strip example_values, (E) Twilio submit successfully sends variables field and returns 200 with sid and approval_status, (G) Duplicate name detection returns 409. All 4 test templates cleaned up successfully. The feature is production-ready and working exactly as specified. NOTE: External URL (https://get-code-3.preview.emergentagent.com/api) returns 404 for all endpoints - this appears to be a Kubernetes ingress routing issue, not a code issue. Testing was performed using localhost:8001 which works perfectly."
+
+backend:
+  - task: "Home v2 — new KPI endpoints (customer_count, staff_attendance, marketing_perf, booking_links) + send-booking-link + staff attendance toggle"
+    implemented: true
+    working: true
+    file: "/app/backend/server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+        - working: true
+          agent: "main"
+          comment: "Home page rebuild: extended GET /api/salons/{sid}/home-kpis to add customer_count.by_source (online|qr|owner|direct), staff_attendance (per active barber with in|late|out), marketing_perf (aggregated from marketing_messages + marketing_campaigns), booking_links (book_url/home_url/menu_url using PUBLIC_APP_URL env var). Added POST /api/salons/{sid}/send-booking-link (WhatsApp send with 3 link types + phone normalisation + optional save_as_lead) and POST /api/salons/{sid}/home/staff-attendance/toggle. Also patched POST /api/salons/{sid}/customers to preserve incoming `source` field. Manual smoke-tests (curl) all green: home-kpis returns all new keys with correct shape, booking_links URLs use PUBLIC_APP_URL, send-booking-link returns 200 with delivery_status='sent' for valid phones and 400 for invalid, staff toggle in→out flow round-trips correctly."
+
+frontend:
+  - task: "Home v2 — Zenoti-style redesign with rail + ribbon + drawers"
+    implemented: true
+    working: true
+    file: "/app/frontend/src/pages/salon/SalonHomeV2.js"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: true
+    status_history:
+        - working: true
+          agent: "main"
+          comment: "Complete home redesign shipped: fixed left icon RAIL (preserves all existing hamburger items — Home, Queue, Staff, Services, Finance, Guests, Analytics, Shop, Stock, Gallery, Settings, Exit), fixed right RIBBON (New Appointment, Add Guest, Retail Sale, Search, Messages, Notifications, Help), sticky topbar with branch chip, reactive Today/Yesterday/Range filter driving every metric. KPI grid = 5 cols × 2 rows with a 2×2 Upcoming Queue block (queue rows preserve existing Call & Mark-Complete actions). New chips: Customer Count with 4-bar breakdown (Online/QR/Owner/Direct) and Staff Check-in with one-tap In/Out toggle. Secondary strip: Appointments · Reminders Sent · Waitlist · compact Send-booking-link chip (input + Send button + triangle dropdown with 3 options: Send booking / homepage / menu link + separate copy button — same footprint per user override). Marketing Performance panel wired to real backend data (sent/delivered/click/redeemed/revenue + top 4 campaigns + channel mix bar). Row B: Targets chip has a per-barber filter dropdown at top-right per user override. Reviews + Payment Mix + Revenue sparkline + Top Services + Busy Hours all wired to real data. Two right-slide drawers: (1) AppointmentDrawer (~75vw) with SMALLER 3-mode chip picker (Walk-in default per user override, Schedule, Direct invoice), guest picker with autocomplete + inline '+ New guest', services in chips + category filter + open section, products in collapsible section, stylist NOT auto-selected but mandatory (blocks save with clear error), schedule mode auto-selects current 15-min time slot, full billing block (coupon, discount %, tip, sell membership, payment mode) with live grand-total calc. (2) CustomerDrawer for Add Guest — also opens as a stacked sub-drawer on top of appointment drawer with 0.3s smooth close+auto-select on save per user override. Existing SalonHomeNew.js kept for reference but no longer wired. Screenshots taken and verified visually: rail+ribbon, all metric widgets, drawers, sub-drawer stacking, WhatsApp send-link dropdown. Backend curl smoke tests green. NOT YET E2E TESTED via testing agent (agent timed out) — please invoke deep_testing_backend_v2 for full contract-level tests when convenient; frontend testing to be requested on user's go-ahead."
+
+metadata:
+  updated: "2026-07-10"
+
+test_plan:
+  current_focus:
+    - "Home v2 — Zenoti-style redesign with rail + ribbon + drawers"
+    - "Home v2 — new KPI endpoints (customer_count, staff_attendance, marketing_perf, booking_links) + send-booking-link + staff attendance toggle"
+  stuck_tasks: []
+  test_all: false
+  test_priority: "high_first"
+
+agent_communication:
+    - agent: "main"
+      message: "Home page fully rebuilt as per attached mock + all 7 user overrides. Backend curl smoke tests all green. Screenshots verified. Existing hamburger items preserved as rail entries. Existing queue action buttons preserved. Add booking/customer drawers slide from right at ~75vw. New-guest sub-drawer stacks on top with 0.3s smooth auto-select. Send-booking-link chip is compact (same footprint) with triangle dropdown of 3 link types + copy icon. Appointment drawer: 3-mode compact chips (Walk-in auto-selected), services as chips with category filter (OPEN), products collapsible, stylist mandatory (not preselected), schedule auto-selects current time, full billing block wired. Targets chip has per-barber filter at top-right. All metrics react to Today/Yesterday/Range filter. Backend testing agent timed out — invoke it when convenient to run the full contract tests. Frontend testing pending user go-ahead."

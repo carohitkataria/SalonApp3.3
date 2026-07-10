@@ -6464,8 +6464,12 @@ async def add_salon_customer(salon_id: str, body: dict, current_user=Depends(get
         "name": name,
         "phone": phone or None,
         "gender": gender,
+        "email": body.get("email") or None,
+        "tags": body.get("tags") or [],
+        "notes": body.get("notes") or "",
         "created_at": datetime.now(timezone.utc).isoformat(),
-        "source": "manual"
+        # source enum: online|qr|owner|direct  (legacy value "manual" also allowed)
+        "source": (body.get("source") or "owner"),
     }
     
     await db.salon_customers.insert_one(customer)
@@ -11557,8 +11561,154 @@ async def get_salon_home_kpis(
         except Exception:
             continue
 
+    # ---- Customer count by source (new home page KPI) ------------------------
+    # customers.source enum: online | qr | owner | direct
+    #   online = booked from customer website / app
+    #   qr     = walked in via QR scan
+    #   owner  = booked by salon owner from admin panel
+    #   direct = direct invoice (walk-out, no queue)
+    # Falls back to token.source when customers doc is missing.
+    source_map = {"online": 0, "qr": 0, "owner": 0, "direct": 0}
+    _phone_source_cache: Dict[str, str] = {}
+    for t in tokens_basis:
+        # Prefer explicit source stored on the token, otherwise look up the
+        # customer's stored source, otherwise infer from token metadata.
+        src = (t.get("source") or "").lower().strip()
+        if src not in source_map:
+            ph = (t.get("phone") or "").strip()
+            if ph:
+                if ph not in _phone_source_cache:
+                    cust = await db.customers.find_one(
+                        {"phone": ph}, {"_id": 0, "source": 1}
+                    )
+                    _phone_source_cache[ph] = ((cust or {}).get("source") or "").lower().strip()
+                src = _phone_source_cache[ph]
+        if src not in source_map:
+            # Heuristic fallback: booking_type or direct_invoice flag
+            if t.get("is_direct_invoice") or t.get("booking_type") == "direct":
+                src = "direct"
+            elif t.get("booking_type") == "walk_in" or t.get("via_qr"):
+                src = "qr"
+            elif t.get("created_via_admin") or t.get("booking_type") == "admin":
+                src = "owner"
+            else:
+                src = "online"
+        source_map[src] = source_map.get(src, 0) + 1
+    customer_count_by_source = source_map
+    customer_count_total = sum(source_map.values())
+
+    # ---- Staff attendance (In / Late / Out for today) -------------------------
+    # attendance_mode.py stores docs in db.staff_attendance
+    #   {barber_id, salon_id, date, check_in_at, check_out_at, status}
+    attendance_today: List[Dict[str, Any]] = []
+    try:
+        att_rows = await db.staff_attendance.find(
+            {"salon_id": salon_id, "date": today.isoformat()},
+            {"_id": 0}
+        ).to_list(500)
+        att_by_barber = {a.get("barber_id"): a for a in att_rows}
+        # Build per-barber row from all active barbers so admin can toggle
+        for b in barbers:
+            a = att_by_barber.get(b.get("id")) or {}
+            ci = a.get("check_in_at")
+            co = a.get("check_out_at")
+            if co:
+                status = "out"
+            elif ci:
+                status = "in"
+            else:
+                status = "late"
+            attendance_today.append({
+                "barber_id": b.get("id"),
+                "name": b.get("name") or "Staff",
+                "status": status,
+                "check_in_at": ci,
+                "check_out_at": co,
+            })
+    except Exception:
+        attendance_today = []
+
+    # ---- Marketing performance for the period --------------------------------
+    marketing_perf: Dict[str, Any] = {
+        "sent": 0, "delivered": 0, "clicked": 0, "redeemed": 0, "revenue": 0.0,
+        "delivered_pct": 0.0, "click_pct": 0.0,
+        "campaigns": [], "channels": {},
+    }
+    try:
+        mm_query = {
+            "salon_id": salon_id,
+            "sent_at": {"$gte": date_start_iso, "$lte": date_end_iso + "T23:59:59Z"},
+        }
+        mm_docs = await db.marketing_messages.find(mm_query, {"_id": 0}).to_list(50000)
+        sent = len(mm_docs)
+        delivered = sum(1 for m in mm_docs if m.get("status") in ("delivered", "read", "clicked"))
+        clicked = sum(1 for m in mm_docs if m.get("clicked_at") or m.get("status") == "clicked")
+        redeemed = sum(1 for m in mm_docs if m.get("redeemed_at"))
+        revenue = sum(float(m.get("attributed_revenue") or 0) for m in mm_docs)
+        marketing_perf["sent"] = sent
+        marketing_perf["delivered"] = delivered
+        marketing_perf["clicked"] = clicked
+        marketing_perf["redeemed"] = redeemed
+        marketing_perf["revenue"] = round(revenue, 2)
+        marketing_perf["delivered_pct"] = round((delivered * 100.0 / sent), 1) if sent else 0.0
+        marketing_perf["click_pct"] = round((clicked * 100.0 / sent), 1) if sent else 0.0
+        # Channel mix (WhatsApp / SMS / Email)
+        chans: Dict[str, int] = {}
+        for m in mm_docs:
+            ch = (m.get("channel") or m.get("provider") or "WhatsApp").capitalize()
+            chans[ch] = chans.get(ch, 0) + 1
+        marketing_perf["channels"] = chans
+        # Active campaigns list (rolled up)
+        camp_rollup: Dict[str, Dict[str, Any]] = {}
+        for m in mm_docs:
+            cid = m.get("campaign_id") or "adhoc"
+            row = camp_rollup.setdefault(cid, {
+                "id": cid, "name": None, "channel": (m.get("channel") or "WhatsApp").capitalize(),
+                "sent": 0, "delivered": 0, "redeemed": 0, "revenue": 0.0
+            })
+            row["sent"] += 1
+            if m.get("status") in ("delivered", "read", "clicked"):
+                row["delivered"] += 1
+            if m.get("redeemed_at"):
+                row["redeemed"] += 1
+            row["revenue"] += float(m.get("attributed_revenue") or 0)
+        # Fetch campaign names
+        camp_ids = [c for c in camp_rollup.keys() if c != "adhoc"]
+        if camp_ids:
+            camp_docs = await db.marketing_campaigns.find(
+                {"id": {"$in": camp_ids}}, {"_id": 0, "id": 1, "name": 1, "channel": 1}
+            ).to_list(200)
+            for cd in camp_docs:
+                if cd["id"] in camp_rollup:
+                    camp_rollup[cd["id"]]["name"] = cd.get("name")
+                    camp_rollup[cd["id"]]["channel"] = (cd.get("channel") or camp_rollup[cd["id"]]["channel"]).capitalize()
+        for cid, row in camp_rollup.items():
+            if not row["name"]:
+                row["name"] = "Ad-hoc messages" if cid == "adhoc" else "Campaign"
+            row["revenue"] = round(row["revenue"], 2)
+        marketing_perf["campaigns"] = sorted(
+            camp_rollup.values(), key=lambda r: r["sent"], reverse=True
+        )[:6]
+    except Exception:
+        pass
+
+    # ---- Booking link URLs (used by the compact Send booking link chip) ------
+    # These are the 3 links the salon can share with a customer via WhatsApp.
+    frontend_origin = os.environ.get("PUBLIC_APP_URL") or (
+        # Fall back to REACT_APP_BACKEND_URL sans /api since ingress rewrites /api → :8001.
+        # The customer routes live at /(salons/:id), /(salons/:id/menu), /(salons/:id/book).
+        ""
+    )
+    salon_slug = salon_id  # keep simple; salons/{id} routes work everywhere
+    booking_links = {
+        "book_url":  f"{frontend_origin}/salons/{salon_slug}/book"  if frontend_origin else f"/salons/{salon_slug}/book",
+        "home_url":  f"{frontend_origin}/salons/{salon_slug}"       if frontend_origin else f"/salons/{salon_slug}",
+        "menu_url":  f"{frontend_origin}/salons/{salon_slug}/menu"  if frontend_origin else f"/salons/{salon_slug}/menu",
+    }
+
     return {
         "date_basis": basis_date,
+        "date_range": {"from": date_start_iso, "to": date_end_iso},
         "primary": {
             "today_sales": today_sales,
             "avg_ticket": avg_ticket,
@@ -11566,6 +11716,13 @@ async def get_salon_home_kpis(
             "no_show_rate": no_show_rate,
             "chair_utilization": chair_utilization,
         },
+        "customer_count": {
+            "total": customer_count_total,
+            "by_source": customer_count_by_source,
+        },
+        "staff_attendance": attendance_today,
+        "marketing_perf": marketing_perf,
+        "booking_links": booking_links,
         "secondary": {
             "appointments_count": total_ct,
             "new_clients_count": new_clients_count,
@@ -11589,6 +11746,138 @@ async def get_salon_home_kpis(
         "top_services": top_services,
         "busy_hours": busy_hours,
     }
+
+
+# ---------------------------------------------------------------------------
+# Send booking link — used by the compact "Send booking link" chip on Home.
+#   Sends one of 3 links (booking page / salon home / menu) to a guest via
+#   WhatsApp. Accepts either a saved customer's phone or a raw 10-digit mobile.
+# ---------------------------------------------------------------------------
+class SendBookingLinkIn(BaseModel):
+    phone: str                # 10-digit or +91-prefixed
+    link_type: str = "book"   # book | home | menu
+    name: Optional[str] = None
+    save_as_lead: Optional[bool] = False
+
+
+@api_router.post("/salons/{salon_id}/send-booking-link")
+async def send_booking_link(
+    salon_id: str,
+    body: SendBookingLinkIn,
+    current_salon=Depends(get_current_salon_user),
+):
+    salon = await db.salons.find_one({"id": salon_id}, {"_id": 0})
+    if not salon:
+        raise HTTPException(status_code=404, detail="Salon not found")
+    # Normalize phone → +91 prefix (India only for now)
+    raw = (body.phone or "").strip().replace(" ", "").replace("-", "")
+    if not raw:
+        raise HTTPException(status_code=400, detail="Phone is required")
+    if not raw.startswith("+"):
+        digits = "".join(c for c in raw if c.isdigit())
+        if len(digits) < 10:
+            raise HTTPException(status_code=400, detail="Enter a valid 10-digit phone")
+        raw = f"+91{digits[-10:]}"
+
+    salon_name = salon.get("salon_name") or salon.get("name") or "our salon"
+    frontend_origin = os.environ.get("PUBLIC_APP_URL") or ""
+    kind = (body.link_type or "book").lower()
+    if kind not in ("book", "home", "menu"):
+        raise HTTPException(status_code=400, detail="link_type must be book|home|menu")
+    path_by_kind = {
+        "book": f"/salons/{salon_id}/book",
+        "home": f"/salons/{salon_id}",
+        "menu": f"/salons/{salon_id}/menu",
+    }
+    link_url = f"{frontend_origin}{path_by_kind[kind]}" if frontend_origin else path_by_kind[kind]
+    template = {
+        "book": f"Hi{(' ' + body.name) if body.name else ''}, book your next visit at {salon_name} here: {link_url}",
+        "home": f"Hi{(' ' + body.name) if body.name else ''}, check out {salon_name}: {link_url}",
+        "menu": f"Hi{(' ' + body.name) if body.name else ''}, here's our service menu at {salon_name}: {link_url}",
+    }
+    message = template[kind]
+
+    # Optionally record as a lead for later marketing
+    if body.save_as_lead:
+        try:
+            await db.customers.update_one(
+                {"phone": raw},
+                {"$setOnInsert": {
+                    "id": str(uuid.uuid4()),
+                    "phone": raw,
+                    "name": body.name or "",
+                    "source": "owner",
+                    "created_at": datetime.now(timezone.utc).isoformat(),
+                }},
+                upsert=True,
+            )
+        except Exception:
+            pass
+
+    # Send via WhatsApp
+    try:
+        from whatsapp_service import send_whatsapp_message
+        result = await send_whatsapp_message(raw, text=message)
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"WhatsApp send failed: {exc}")
+    if isinstance(result, dict) and result.get("error"):
+        # Not fatal for UX — surface but 200 with delivery_status so the UI can show a hint
+        return {"ok": False, "sent_to": raw, "link_url": link_url, "delivery_status": "failed", "note": result.get("error")}
+    return {"ok": True, "sent_to": raw, "link_url": link_url, "delivery_status": "sent"}
+
+
+# ---------------------------------------------------------------------------
+# Home-page staff attendance toggle — one-tap Check-in / Check-out per staff.
+#   POST /api/salons/{salon_id}/home/staff-attendance/toggle
+#   body = {barber_id: str, action: "in" | "out"}
+#   Wraps attendance_mode's data model so the Home chip can flip presence
+#   without geo-fencing (admin override).
+# ---------------------------------------------------------------------------
+@api_router.post("/salons/{salon_id}/home/staff-attendance/toggle")
+async def home_toggle_attendance(
+    salon_id: str,
+    body: dict,
+    current_salon=Depends(get_current_salon_user),
+):
+    barber_id = (body or {}).get("barber_id")
+    action = ((body or {}).get("action") or "in").lower()
+    if not barber_id:
+        raise HTTPException(status_code=400, detail="barber_id required")
+    if action not in ("in", "out"):
+        raise HTTPException(status_code=400, detail="action must be in|out")
+    today_iso = datetime.now(timezone.utc).date().isoformat()
+    now_iso = datetime.now(timezone.utc).isoformat()
+    doc = await db.staff_attendance.find_one(
+        {"salon_id": salon_id, "barber_id": barber_id, "date": today_iso},
+        {"_id": 0}
+    )
+    if action == "in":
+        if doc and doc.get("check_in_at"):
+            return {"ok": True, "already_in": True, "check_in_at": doc.get("check_in_at")}
+        await db.staff_attendance.update_one(
+            {"salon_id": salon_id, "barber_id": barber_id, "date": today_iso},
+            {"$set": {"check_in_at": now_iso, "status": "in",
+                      "salon_id": salon_id, "barber_id": barber_id, "date": today_iso}},
+            upsert=True,
+        )
+        return {"ok": True, "check_in_at": now_iso, "status": "in"}
+    # action == "out"
+    if not doc or not doc.get("check_in_at"):
+        # allow "out" without a previous in — record it as an explicit absence toggle
+        await db.staff_attendance.update_one(
+            {"salon_id": salon_id, "barber_id": barber_id, "date": today_iso},
+            {"$set": {"check_out_at": now_iso, "status": "out",
+                      "salon_id": salon_id, "barber_id": barber_id, "date": today_iso}},
+            upsert=True,
+        )
+        return {"ok": True, "check_out_at": now_iso, "status": "out"}
+    await db.staff_attendance.update_one(
+        {"salon_id": salon_id, "barber_id": barber_id, "date": today_iso},
+        {"$set": {"check_out_at": now_iso, "status": "out"}},
+    )
+    return {"ok": True, "check_out_at": now_iso, "status": "out"}
+
+
 
 
 @api_router.post("/salons/{salon_id}/direct-invoice")
