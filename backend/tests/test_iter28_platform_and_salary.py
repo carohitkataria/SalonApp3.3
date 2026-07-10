@@ -8,7 +8,7 @@ import time
 import pytest
 import requests
 
-BASE_URL = os.environ.get("REACT_APP_BACKEND_URL", "https://jovial-mcclintock-6.preview.emergentagent.com").rstrip("/")
+BASE_URL = os.environ.get("REACT_APP_BACKEND_URL", "https://brave-hopper-11.preview.emergentagent.com").rstrip("/")
 API = f"{BASE_URL}/api"
 
 OWNER_MOBILE = os.environ.get("TEST_PLATFORM_MOBILE", "7503070727")

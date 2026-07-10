@@ -1,442 +1,525 @@
 #!/usr/bin/env python3
 """
-Cashfree Easy Split Payment Module - Backend Test Suite
-Tests 7 specific checks for payment-vendor and service-payments endpoints
+Backend test for WhatsApp Template example_values flow.
+Tests draft validation, persistence, submit shape, and cleanup.
 """
 
-import asyncio
-import httpx
+import requests
 import json
-from datetime import datetime, timedelta
+import random
+import string
+from typing import Dict, Any, Optional
 
 # Configuration
-BASE_URL = "https://1075d602-59d4-41bc-a76b-036ee0647a4f.preview.emergentagent.com/api"
+BASE_URL = "http://localhost:8001/api"
 ADMIN_IDENTIFIER = "admin"
 ADMIN_PASSWORD = "salon123"
-SALON_ID = "a6c8d793-56ed-438f-8386-da5eac4a71fa"
 
-# Test results storage
-test_results = []
+# Global state
+access_token: Optional[str] = None
+salon_id: Optional[str] = None
+created_template_ids = []
 
 
-def log_result(check_num, status, http_status, description, details=""):
-    """Log test result"""
-    result = {
-        "check": check_num,
-        "status": status,
-        "http_status": http_status,
-        "description": description,
-        "details": details
+def random_suffix(length=4) -> str:
+    """Generate random alphanumeric suffix for unique names."""
+    return ''.join(random.choices(string.ascii_lowercase + string.digits, k=length))
+
+
+def login_admin() -> Dict[str, Any]:
+    """Login as admin and capture access_token and salon_id."""
+    global access_token, salon_id
+    
+    print("\n" + "="*80)
+    print("AUTHENTICATION - Admin Login")
+    print("="*80)
+    
+    url = f"{BASE_URL}/salon/users/login"
+    payload = {
+        "identifier": ADMIN_IDENTIFIER,
+        "password": ADMIN_PASSWORD
     }
-    test_results.append(result)
-    status_icon = "✅" if status == "PASS" else "❌"
-    print(f"\n{status_icon} CHECK {check_num}: {description}")
-    print(f"   HTTP {http_status} - {details}")
-
-
-async def get_admin_token():
-    """Login as admin and get bearer token"""
-    async with httpx.AsyncClient(timeout=30.0) as client:
-        response = await client.post(
-            f"{BASE_URL}/salon/users/login",
-            json={"identifier": ADMIN_IDENTIFIER, "password": ADMIN_PASSWORD}
-        )
-        if response.status_code == 200:
-            data = response.json()
-            return data.get("access_token")
-        else:
-            print(f"❌ Admin login failed: {response.status_code} - {response.text}")
-            return None
-
-
-async def check_1_payment_vendor_status_initial(token):
-    """
-    CHECK 1: GET /api/salons/{salon_id}/payment-vendor/status
-    Expect 200 with onboarded=false, in_app_payment_enabled=false, status=null
-    """
-    async with httpx.AsyncClient(timeout=30.0) as client:
-        response = await client.get(
-            f"{BASE_URL}/salons/{SALON_ID}/payment-vendor/status",
-            headers={"Authorization": f"Bearer {token}"}
-        )
+    
+    print(f"POST {url}")
+    print(f"Body: {json.dumps(payload, indent=2)}")
+    
+    try:
+        resp = requests.post(url, json=payload, timeout=15)
+        print(f"Status: {resp.status_code}")
+        print(f"Response: {resp.text[:500]}")
         
-        if response.status_code == 200:
-            data = response.json()
-            onboarded = data.get("onboarded")
-            in_app_enabled = data.get("in_app_payment_enabled")
-            status = data.get("status")
-            
-            if onboarded == False and in_app_enabled == False and status is None:
-                log_result(1, "PASS", 200, "Initial payment-vendor status check",
-                          f"onboarded={onboarded}, in_app_payment_enabled={in_app_enabled}, status={status}")
+        if resp.status_code == 200:
+            data = resp.json()
+            access_token = data.get("access_token")
+            salon_id = data.get("salon_id")
+            print(f"✅ Login successful")
+            print(f"   Access Token: {access_token[:20]}...")
+            print(f"   Salon ID: {salon_id}")
+            return {"success": True, "data": data}
+        else:
+            print(f"❌ Login failed with status {resp.status_code}")
+            return {"success": False, "status": resp.status_code, "body": resp.text}
+    except Exception as e:
+        print(f"❌ Login exception: {e}")
+        return {"success": False, "error": str(e)}
+
+
+def get_headers() -> Dict[str, str]:
+    """Get authorization headers."""
+    if not access_token:
+        raise ValueError("Not authenticated - call login_admin() first")
+    return {
+        "Authorization": f"Bearer {access_token}",
+        "Content-Type": "application/json"
+    }
+
+
+def test_a_draft_missing_examples():
+    """A) DRAFT VALIDATION — missing example_values"""
+    print("\n" + "="*80)
+    print("TEST A) DRAFT VALIDATION — missing example_values")
+    print("="*80)
+    
+    name = f"qa_examples_missing_{random_suffix()}"
+    url = f"{BASE_URL}/salons/{salon_id}/marketing/templates/draft"
+    payload = {
+        "name": name,
+        "category": "utility",
+        "lang_code": "en",
+        "body": "Hi {{1}}, your appointment at {{2}} is confirmed."
+    }
+    
+    print(f"POST {url}")
+    print(f"Body: {json.dumps(payload, indent=2)}")
+    
+    try:
+        resp = requests.post(url, json=payload, headers=get_headers(), timeout=15)
+        print(f"Status: {resp.status_code}")
+        print(f"Response: {resp.text[:500]}")
+        
+        if resp.status_code == 422:
+            body = resp.json()
+            detail = str(body.get("detail", ""))
+            if "{{1}}" in detail and "{{2}}" in detail:
+                print(f"✅ PASS: Got 422 with error mentioning both {{{{1}}}} and {{{{2}}}}")
+                return {"pass": True, "status": resp.status_code, "body": resp.text[:300]}
             else:
-                log_result(1, "FAIL", 200, "Initial payment-vendor status check",
-                          f"Expected onboarded=False, in_app_payment_enabled=False, status=None. Got: {data}")
+                print(f"⚠️  PARTIAL: Got 422 but error doesn't mention both placeholders")
+                print(f"   Detail: {detail}")
+                return {"pass": False, "status": resp.status_code, "body": resp.text[:300], "reason": "Error message incomplete"}
         else:
-            log_result(1, "FAIL", response.status_code, "Initial payment-vendor status check",
-                      f"Unexpected status code. Response: {response.text}")
+            print(f"❌ FAIL: Expected 422, got {resp.status_code}")
+            return {"pass": False, "status": resp.status_code, "body": resp.text[:300]}
+    except Exception as e:
+        print(f"❌ FAIL: Exception - {e}")
+        return {"pass": False, "error": str(e)}
 
 
-async def check_2_onboard_with_invalid_creds(token):
-    """
-    CHECK 2: POST /api/salons/{salon_id}/payment-vendor/onboard with valid payload
-    Expect 502 with detail mentioning "onboard" or "Cashfree" (Cashfree 401s on fake creds)
-    Confirm vendor row is NOT persisted (status still returns onboarded=false)
-    """
-    async with httpx.AsyncClient(timeout=30.0) as client:
-        # Try to onboard with valid payload structure
-        response = await client.post(
-            f"{BASE_URL}/salons/{SALON_ID}/payment-vendor/onboard",
-            headers={"Authorization": f"Bearer {token}"},
-            json={
-                "upi_vpa": "testsalon@okhdfcbank",
-                "account_holder": "Test",
-                "pan": "ABCDE1234F"
-            }
-        )
+def test_b_draft_partial_examples():
+    """B) DRAFT VALIDATION — partial example_values"""
+    print("\n" + "="*80)
+    print("TEST B) DRAFT VALIDATION — partial example_values")
+    print("="*80)
+    
+    name = f"qa_examples_partial_{random_suffix()}"
+    url = f"{BASE_URL}/salons/{salon_id}/marketing/templates/draft"
+    payload = {
+        "name": name,
+        "category": "utility",
+        "lang_code": "en",
+        "body": "Hi {{1}}, your appointment at {{2}} is confirmed.",
+        "example_values": {"1": "Riya"}
+    }
+    
+    print(f"POST {url}")
+    print(f"Body: {json.dumps(payload, indent=2)}")
+    
+    try:
+        resp = requests.post(url, json=payload, headers=get_headers(), timeout=15)
+        print(f"Status: {resp.status_code}")
+        print(f"Response: {resp.text[:500]}")
         
-        if response.status_code == 502:
-            try:
-                detail = response.json().get("detail", "")
-            except:
-                detail = response.text
+        if resp.status_code == 422:
+            body = resp.json()
+            detail = str(body.get("detail", ""))
+            if "{{2}}" in detail or "2" in detail:
+                print(f"✅ PASS: Got 422 with error mentioning {{{{2}}}} (missing)")
+                return {"pass": True, "status": resp.status_code, "body": resp.text[:300]}
+            else:
+                print(f"⚠️  PARTIAL: Got 422 but error doesn't mention missing {{{{2}}}}")
+                print(f"   Detail: {detail}")
+                return {"pass": False, "status": resp.status_code, "body": resp.text[:300], "reason": "Error message incomplete"}
+        else:
+            print(f"❌ FAIL: Expected 422, got {resp.status_code}")
+            return {"pass": False, "status": resp.status_code, "body": resp.text[:300]}
+    except Exception as e:
+        print(f"❌ FAIL: Exception - {e}")
+        return {"pass": False, "error": str(e)}
+
+
+def test_c_draft_full_examples():
+    """C) DRAFT SUCCESS — full example_values"""
+    print("\n" + "="*80)
+    print("TEST C) DRAFT SUCCESS — full example_values")
+    print("="*80)
+    
+    name = f"qa_examples_ok_{random_suffix()}"
+    url = f"{BASE_URL}/salons/{salon_id}/marketing/templates/draft"
+    payload = {
+        "name": name,
+        "category": "utility",
+        "lang_code": "en",
+        "body": "Hi {{1}}, your appointment at {{2}} is confirmed.",
+        "example_values": {"1": "Riya Sharma", "2": "Style Studio CP"}
+    }
+    
+    print(f"POST {url}")
+    print(f"Body: {json.dumps(payload, indent=2)}")
+    
+    try:
+        resp = requests.post(url, json=payload, headers=get_headers(), timeout=15)
+        print(f"Status: {resp.status_code}")
+        print(f"Response: {resp.text[:500]}")
+        
+        if resp.status_code == 200:
+            body = resp.json()
+            template_id = body.get("id")
+            example_values = body.get("example_values")
             
-            # Accept 502 even if Cloudflare wraps it in HTML - the backend is working correctly
-            if "onboard" in detail.lower() or "cashfree" in detail.lower() or "502" in detail:
-                log_result(2, "PASS", 502, "Onboard with invalid Cashfree creds",
-                          f"Correctly returned 502 (Cashfree 401 surfaced as 502)")
+            if template_id:
+                created_template_ids.append(template_id)
+                print(f"   Template ID: {template_id}")
+            
+            if example_values and "1" in example_values and "2" in example_values:
+                print(f"✅ PASS: Got 200 with example_values containing keys '1' and '2'")
+                print(f"   example_values: {example_values}")
+                return {"pass": True, "status": resp.status_code, "body": resp.text[:300], "template_id": template_id}
+            else:
+                print(f"⚠️  PARTIAL: Got 200 but example_values structure incorrect")
+                print(f"   example_values: {example_values}")
+                return {"pass": False, "status": resp.status_code, "body": resp.text[:300], "reason": "example_values missing keys"}
+        else:
+            print(f"❌ FAIL: Expected 200, got {resp.status_code}")
+            return {"pass": False, "status": resp.status_code, "body": resp.text[:300]}
+    except Exception as e:
+        print(f"❌ FAIL: Exception - {e}")
+        return {"pass": False, "error": str(e)}
+
+
+def test_d_no_placeholder():
+    """D) NO-PLACEHOLDER — example_values ignored/allowed empty"""
+    print("\n" + "="*80)
+    print("TEST D) NO-PLACEHOLDER — example_values ignored/allowed empty")
+    print("="*80)
+    
+    name = f"qa_no_ph_{random_suffix()}"
+    url = f"{BASE_URL}/salons/{salon_id}/marketing/templates/draft"
+    payload = {
+        "name": name,
+        "category": "utility",
+        "lang_code": "en",
+        "body": "Thanks for booking with us!"
+    }
+    
+    print(f"POST {url}")
+    print(f"Body: {json.dumps(payload, indent=2)}")
+    
+    try:
+        resp = requests.post(url, json=payload, headers=get_headers(), timeout=15)
+        print(f"Status: {resp.status_code}")
+        print(f"Response: {resp.text[:500]}")
+        
+        if resp.status_code == 200:
+            body = resp.json()
+            template_id = body.get("id")
+            example_values = body.get("example_values")
+            
+            if template_id:
+                created_template_ids.append(template_id)
+                print(f"   Template ID: {template_id}")
+            
+            if example_values is None or example_values == {}:
+                print(f"✅ PASS: Got 200 with example_values null or empty")
+                print(f"   example_values: {example_values}")
+            else:
+                print(f"⚠️  NOTE: example_values is {example_values} (expected null/empty)")
+            
+            # Test with example_values sent but should be stripped
+            print("\n   Testing with example_values={'1':'x'} (should be stripped)...")
+            name2 = f"qa_no_ph_with_ex_{random_suffix()}"
+            payload2 = {
+                "name": name2,
+                "category": "utility",
+                "lang_code": "en",
+                "body": "Thanks for booking with us!",
+                "example_values": {"1": "x"}
+            }
+            resp2 = requests.post(url, json=payload2, headers=get_headers(), timeout=15)
+            print(f"   Status: {resp2.status_code}")
+            
+            if resp2.status_code == 200:
+                body2 = resp2.json()
+                template_id2 = body2.get("id")
+                example_values2 = body2.get("example_values")
                 
-                # Verify vendor row NOT persisted
-                status_response = await client.get(
-                    f"{BASE_URL}/salons/{SALON_ID}/payment-vendor/status",
-                    headers={"Authorization": f"Bearer {token}"}
-                )
-                if status_response.status_code == 200:
-                    status_data = status_response.json()
-                    if status_data.get("onboarded") == False:
-                        print(f"   ✓ Verified: vendor row NOT persisted (onboarded=false)")
-                    else:
-                        print(f"   ⚠ Warning: vendor row may have been persisted: {status_data}")
-            else:
-                log_result(2, "FAIL", 502, "Onboard with invalid Cashfree creds",
-                          f"Got 502 but unexpected response format")
-        else:
-            log_result(2, "FAIL", response.status_code, "Onboard with invalid Cashfree creds",
-                      f"Expected 502. Response: {response.text}")
-
-
-async def check_3_onboard_fallback_to_salon_upi(token):
-    """
-    CHECK 3: POST /api/salons/{salon_id}/payment-vendor/onboard with empty body
-    Expected to fall back to salon's on-file upi_id, then try to onboard and hit Cashfree
-    Expect 502 (NOT 400) if salon has upi_id on file
-    """
-    async with httpx.AsyncClient(timeout=30.0) as client:
-        response = await client.post(
-            f"{BASE_URL}/salons/{SALON_ID}/payment-vendor/onboard",
-            headers={"Authorization": f"Bearer {token}"},
-            json={}
-        )
-        
-        if response.status_code == 502:
-            try:
-                detail = response.json().get("detail", "")
-            except:
-                detail = response.text
-            log_result(3, "PASS", 502, "Onboard with empty body (fallback to salon UPI)",
-                      f"Correctly returned 502 (salon has UPI on file, Cashfree failed): {detail}")
-        elif response.status_code == 400:
-            try:
-                detail = response.json().get("detail", "")
-            except:
-                detail = response.text
-            log_result(3, "NOTE", 400, "Onboard with empty body (fallback to salon UPI)",
-                      f"Got 400 - salon may not have upi_id on file: {detail}")
-        else:
-            log_result(3, "FAIL", response.status_code, "Onboard with empty body (fallback to salon UPI)",
-                      f"Unexpected status. Response: {response.text}")
-
-
-async def check_4_onboard_both_upi_and_bank(token):
-    """
-    CHECK 4: POST /api/salons/{salon_id}/payment-vendor/onboard with BOTH UPI and bank account
-    Expect 400 with message "Provide either a UPI ID or a bank account — not both."
-    """
-    async with httpx.AsyncClient(timeout=30.0) as client:
-        response = await client.post(
-            f"{BASE_URL}/salons/{SALON_ID}/payment-vendor/onboard",
-            headers={"Authorization": f"Bearer {token}"},
-            json={
-                "upi_vpa": "a@b",
-                "bank_account_number": "123456",
-                "bank_ifsc": "HDFC0001234"
-            }
-        )
-        
-        if response.status_code == 400:
-            detail = response.json().get("detail", "")
-            if "either" in detail.lower() and "not both" in detail.lower():
-                log_result(4, "PASS", 400, "Onboard with both UPI and bank account",
-                          f"Correctly rejected: {detail}")
-            else:
-                log_result(4, "FAIL", 400, "Onboard with both UPI and bank account",
-                          f"Got 400 but wrong message: {detail}")
-        else:
-            log_result(4, "FAIL", response.status_code, "Onboard with both UPI and bank account",
-                      f"Expected 400. Response: {response.text}")
-
-
-async def check_5_service_payments_available():
-    """
-    CHECK 5: GET /api/service-payments/salon/{salon_id}/available (no auth)
-    Expect 200 with in_app_payment_enabled=false
-    """
-    async with httpx.AsyncClient(timeout=30.0) as client:
-        response = await client.get(
-            f"{BASE_URL}/service-payments/salon/{SALON_ID}/available"
-        )
-        
-        if response.status_code == 200:
-            data = response.json()
-            in_app_enabled = data.get("in_app_payment_enabled")
-            if in_app_enabled == False:
-                log_result(5, "PASS", 200, "Service payments available check (no auth)",
-                          f"in_app_payment_enabled={in_app_enabled}")
-            else:
-                log_result(5, "FAIL", 200, "Service payments available check (no auth)",
-                          f"Expected in_app_payment_enabled=false. Got: {data}")
-        else:
-            log_result(5, "FAIL", response.status_code, "Service payments available check (no auth)",
-                      f"Unexpected status. Response: {response.text}")
-
-
-async def check_6_create_order_without_vendor(token):
-    """
-    CHECK 6: POST /api/service-payments/create-order with a valid token_id
-    Setup: Create a fresh booking, then try to create payment order
-    Expect 409 with detail "This salon isn't set up for in-app payment yet..."
-    """
-    async with httpx.AsyncClient(timeout=30.0) as client:
-        # First, get an active barber
-        barbers_response = await client.get(
-            f"{BASE_URL}/salons/{SALON_ID}/barbers",
-            headers={"Authorization": f"Bearer {token}"}
-        )
-        
-        if barbers_response.status_code != 200:
-            log_result(6, "FAIL", barbers_response.status_code, "Create order without vendor setup",
-                      f"Failed to fetch barbers: {barbers_response.text}")
-            return
-        
-        barbers = barbers_response.json()
-        active_barbers = [b for b in barbers if b.get("is_active")]
-        if not active_barbers:
-            log_result(6, "FAIL", 200, "Create order without vendor setup",
-                      "No active barbers found")
-            return
-        
-        barber_id = active_barbers[0]["id"]
-        
-        # Get a service from /services/all (as instructed, not /services/enabled)
-        services_response = await client.get(
-            f"{BASE_URL}/salons/{SALON_ID}/services/all",
-            headers={"Authorization": f"Bearer {token}"}
-        )
-        
-        if services_response.status_code != 200:
-            log_result(6, "FAIL", services_response.status_code, "Create order without vendor setup",
-                      f"Failed to fetch services: {services_response.text}")
-            return
-        
-        services = services_response.json()
-        if not services:
-            log_result(6, "FAIL", 200, "Create order without vendor setup",
-                      "No services found")
-            return
-        
-        service_id = services[0]["id"]
-        
-        # Create a booking
-        today = datetime.now().strftime("%Y-%m-%d")
-        booking_payload = {
-            "customer_name": "PayTest",
-            "phone": "9999900011",
-            "gender": "Men",
-            "barber_id": barber_id,
-            "selected_services": [service_id],
-            "date": today,
-            "shift": "Morning",
-            "payment_mode": "pay_at_salon"
-        }
-        
-        booking_response = await client.post(
-            f"{BASE_URL}/salons/{SALON_ID}/salon-booking",
-            headers={"Authorization": f"Bearer {token}"},
-            json=booking_payload
-        )
-        
-        if booking_response.status_code != 200:
-            log_result(6, "FAIL", booking_response.status_code, "Create order without vendor setup",
-                      f"Failed to create booking: {booking_response.text}")
-            return
-        
-        booking_data = booking_response.json()
-        token_id = booking_data.get("id")
-        
-        if not token_id:
-            log_result(6, "FAIL", 200, "Create order without vendor setup",
-                      f"No token_id in booking response: {booking_data}")
-            return
-        
-        print(f"   Created booking with token_id: {token_id}")
-        
-        # Now try to create payment order (NO auth header as per spec)
-        order_response = await client.post(
-            f"{BASE_URL}/service-payments/create-order",
-            json={"token_id": token_id}
-        )
-        
-        if order_response.status_code == 409:
-            detail = order_response.json().get("detail", "")
-            if "isn't set up for in-app payment" in detail.lower():
-                log_result(6, "PASS", 409, "Create order without vendor setup",
-                          f"Correctly rejected: {detail}")
-            else:
-                log_result(6, "FAIL", 409, "Create order without vendor setup",
-                          f"Got 409 but wrong message: {detail}")
-        else:
-            log_result(6, "FAIL", order_response.status_code, "Create order without vendor setup",
-                      f"Expected 409. Response: {order_response.text}")
-
-
-async def check_7_subscription_create_order_regression(token):
-    """
-    CHECK 7: POST /api/subscriptions/create-order with valid plan_id
-    Regression check - ensure create_order() signature extension didn't break subscription flow
-    Expect either 200 OR a 4xx/5xx with helpful message (NOT a 500 crash)
-    """
-    async with httpx.AsyncClient(timeout=30.0) as client:
-        # Get available plans
-        plans_response = await client.get(f"{BASE_URL}/subscription-plans")
-        
-        if plans_response.status_code != 200:
-            log_result(7, "FAIL", plans_response.status_code, "Subscription create-order regression",
-                      f"Failed to fetch plans: {plans_response.text}")
-            return
-        
-        plans = plans_response.json()
-        if not plans:
-            log_result(7, "FAIL", 200, "Subscription create-order regression",
-                      "No subscription plans found")
-            return
-        
-        plan_id = plans[0]["id"]
-        
-        # Try to create subscription order
-        order_response = await client.post(
-            f"{BASE_URL}/salons/{SALON_ID}/subscription/create-order",
-            headers={"Authorization": f"Bearer {token}"},
-            json={"plan_id": plan_id}
-        )
-        
-        # Accept 200, 4xx, or 5xx with helpful message - just NOT a 500 crash
-        if order_response.status_code == 200:
-            log_result(7, "PASS", 200, "Subscription create-order regression",
-                      "Successfully created subscription order (unlikely with placeholder creds)")
-        elif order_response.status_code == 502:
-            # 502 is expected with placeholder Cashfree creds - not a crash
-            log_result(7, "PASS", 502, "Subscription create-order regression",
-                      "Returned 502 (Cashfree auth failed with placeholder creds) - not a crash")
-        elif 400 <= order_response.status_code < 600:
-            try:
-                detail = order_response.json().get("detail", "")
-                if detail and len(detail) > 0:
-                    log_result(7, "PASS", order_response.status_code, "Subscription create-order regression",
-                              f"Returned helpful error (not a crash): {detail}")
+                if template_id2:
+                    created_template_ids.append(template_id2)
+                
+                if example_values2 is None or example_values2 == {}:
+                    print(f"   ✅ PASS: example_values correctly stripped to null/empty")
+                    return {"pass": True, "status": resp.status_code, "body": resp.text[:300]}
                 else:
-                    log_result(7, "FAIL", order_response.status_code, "Subscription create-order regression",
-                              f"Error response has no detail: {order_response.text}")
-            except:
-                # HTML error page is also acceptable for 502
-                if order_response.status_code == 502:
-                    log_result(7, "PASS", 502, "Subscription create-order regression",
-                              "Returned 502 (Cloudflare wrapped) - not a crash")
-                else:
-                    log_result(7, "FAIL", order_response.status_code, "Subscription create-order regression",
-                              f"Error response not JSON: {order_response.text[:200]}")
+                    print(f"   ⚠️  NOTE: example_values not stripped: {example_values2}")
+                    return {"pass": True, "status": resp.status_code, "body": resp.text[:300], "note": "example_values not stripped but no placeholders exist"}
+            else:
+                print(f"   ⚠️  Got {resp2.status_code} when sending example_values with no placeholders")
+                return {"pass": True, "status": resp.status_code, "body": resp.text[:300], "note": "First test passed"}
         else:
-            log_result(7, "FAIL", order_response.status_code, "Subscription create-order regression",
-                      f"Unexpected status: {order_response.text}")
+            print(f"❌ FAIL: Expected 200, got {resp.status_code}")
+            return {"pass": False, "status": resp.status_code, "body": resp.text[:300]}
+    except Exception as e:
+        print(f"❌ FAIL: Exception - {e}")
+        return {"pass": False, "error": str(e)}
 
 
-async def main():
-    """Run all 7 checks"""
-    print("=" * 80)
-    print("CASHFREE EASY SPLIT PAYMENT MODULE - BACKEND TEST SUITE")
-    print("=" * 80)
+def test_e_submit_twilio(template_id: Optional[str] = None):
+    """E) SUBMIT SHAPE (Twilio) — should send variables field"""
+    print("\n" + "="*80)
+    print("TEST E) SUBMIT SHAPE (Twilio) — should send variables field")
+    print("="*80)
+    
+    if not template_id and created_template_ids:
+        template_id = created_template_ids[0]
+    
+    if not template_id:
+        print("⚠️  SKIP: No template_id available from test C")
+        return {"pass": False, "reason": "No template_id available"}
+    
+    url = f"{BASE_URL}/salons/{salon_id}/marketing/templates/{template_id}/submit"
+    payload = {"provider": "twilio"}
+    
+    print(f"POST {url}")
+    print(f"Body: {json.dumps(payload, indent=2)}")
+    print(f"Template ID: {template_id}")
+    
+    try:
+        resp = requests.post(url, json=payload, headers=get_headers(), timeout=20)
+        print(f"Status: {resp.status_code}")
+        print(f"Response: {resp.text[:500]}")
+        
+        # We expect either:
+        # - 200 with provider="twilio", sid, approval_status (if Twilio succeeds)
+        # - 502 with "Twilio create failed" or "Twilio approval submit failed" (if Twilio API fails)
+        # - NOT 400 from our own code saying "Missing example value"
+        # - NOT 500 (internal server error)
+        
+        if resp.status_code == 200:
+            body = resp.json()
+            provider = body.get("provider")
+            sid = body.get("sid")
+            approval_status = body.get("approval_status")
+            
+            if provider == "twilio" and sid and approval_status:
+                print(f"✅ PASS: Got 200 with provider='twilio', sid={sid}, approval_status={approval_status}")
+                print(f"   This means example_values were persisted and sent to Twilio")
+                return {"pass": True, "status": resp.status_code, "body": resp.text[:300]}
+            else:
+                print(f"⚠️  PARTIAL: Got 200 but response structure incomplete")
+                print(f"   provider={provider}, sid={sid}, approval_status={approval_status}")
+                return {"pass": False, "status": resp.status_code, "body": resp.text[:300], "reason": "Response structure incomplete"}
+        
+        elif resp.status_code == 502:
+            body_text = resp.text
+            if "Twilio create failed" in body_text or "Twilio approval submit failed" in body_text:
+                print(f"✅ PASS: Got 502 with Twilio error (expected in sandbox)")
+                print(f"   This means our code sent the request correctly but Twilio rejected it")
+                print(f"   Importantly, we did NOT get 400 'Missing example value' from our code")
+                return {"pass": True, "status": resp.status_code, "body": resp.text[:300], "note": "Twilio API error (expected)"}
+            else:
+                print(f"⚠️  Got 502 but error message unexpected")
+                return {"pass": False, "status": resp.status_code, "body": resp.text[:300], "reason": "Unexpected 502 error"}
+        
+        elif resp.status_code == 400:
+            body_text = resp.text
+            if "Missing example value" in body_text:
+                print(f"❌ FAIL: Got 400 'Missing example value' from our own code")
+                print(f"   This means example_values weren't persisted or weren't sent to Twilio")
+                return {"pass": False, "status": resp.status_code, "body": resp.text[:300], "reason": "example_values not persisted"}
+            else:
+                print(f"⚠️  Got 400 with different error: {body_text[:200]}")
+                return {"pass": False, "status": resp.status_code, "body": resp.text[:300], "reason": "Unexpected 400 error"}
+        
+        elif resp.status_code == 500:
+            print(f"❌ FAIL: Got 500 Internal Server Error")
+            return {"pass": False, "status": resp.status_code, "body": resp.text[:300], "reason": "Internal server error"}
+        
+        else:
+            print(f"⚠️  Got unexpected status {resp.status_code}")
+            return {"pass": False, "status": resp.status_code, "body": resp.text[:300], "reason": f"Unexpected status {resp.status_code}"}
+    
+    except Exception as e:
+        print(f"❌ FAIL: Exception - {e}")
+        return {"pass": False, "error": str(e)}
+
+
+def test_g_duplicate_name():
+    """G) DUPLICATE NAME — should return 409"""
+    print("\n" + "="*80)
+    print("TEST G) DUPLICATE NAME — should return 409")
+    print("="*80)
+    
+    # First create a template
+    name = f"qa_duplicate_{random_suffix()}"
+    url = f"{BASE_URL}/salons/{salon_id}/marketing/templates/draft"
+    payload = {
+        "name": name,
+        "category": "utility",
+        "lang_code": "en",
+        "body": "Test duplicate name"
+    }
+    
+    print(f"Creating first template with name: {name}")
+    print(f"POST {url}")
+    print(f"Body: {json.dumps(payload, indent=2)}")
+    
+    try:
+        resp1 = requests.post(url, json=payload, headers=get_headers(), timeout=15)
+        print(f"Status: {resp1.status_code}")
+        print(f"Response: {resp1.text[:300]}")
+        
+        if resp1.status_code != 200:
+            print(f"⚠️  SKIP: First template creation failed with {resp1.status_code}")
+            return {"pass": False, "reason": "First template creation failed"}
+        
+        body1 = resp1.json()
+        template_id = body1.get("id")
+        if template_id:
+            created_template_ids.append(template_id)
+        
+        print(f"✓ First template created with ID: {template_id}")
+        
+        # Now try to create another with the same name
+        print(f"\nAttempting to create duplicate template with same name: {name}")
+        resp2 = requests.post(url, json=payload, headers=get_headers(), timeout=15)
+        print(f"Status: {resp2.status_code}")
+        print(f"Response: {resp2.text[:300]}")
+        
+        if resp2.status_code == 409:
+            body2_text = resp2.text
+            if "Template name already exists" in body2_text or "already exists" in body2_text:
+                print(f"✅ PASS: Got 409 with 'Template name already exists for this salon'")
+                return {"pass": True, "status": resp2.status_code, "body": resp2.text[:300]}
+            else:
+                print(f"⚠️  PARTIAL: Got 409 but error message unexpected")
+                return {"pass": False, "status": resp2.status_code, "body": resp2.text[:300], "reason": "Error message unexpected"}
+        else:
+            print(f"❌ FAIL: Expected 409, got {resp2.status_code}")
+            return {"pass": False, "status": resp2.status_code, "body": resp2.text[:300]}
+    
+    except Exception as e:
+        print(f"❌ FAIL: Exception - {e}")
+        return {"pass": False, "error": str(e)}
+
+
+def cleanup_templates():
+    """Cleanup: DELETE all templates created during testing"""
+    print("\n" + "="*80)
+    print("CLEANUP - Deleting all created templates")
+    print("="*80)
+    
+    if not created_template_ids:
+        print("No templates to clean up")
+        return {"deleted": 0}
+    
+    deleted_count = 0
+    failed_count = 0
+    
+    for template_id in created_template_ids:
+        url = f"{BASE_URL}/salons/{salon_id}/marketing/templates/v2/{template_id}"
+        print(f"\nDELETE {url}")
+        
+        try:
+            resp = requests.delete(url, headers=get_headers(), timeout=15)
+            print(f"Status: {resp.status_code}")
+            
+            if resp.status_code == 200:
+                print(f"✓ Deleted template {template_id}")
+                deleted_count += 1
+            elif resp.status_code == 404:
+                print(f"⚠️  Template {template_id} not found (may have been deleted already)")
+                deleted_count += 1
+            else:
+                print(f"❌ Failed to delete template {template_id}: {resp.status_code}")
+                print(f"   Response: {resp.text[:200]}")
+                failed_count += 1
+        except Exception as e:
+            print(f"❌ Exception deleting template {template_id}: {e}")
+            failed_count += 1
+    
+    print(f"\n{'='*80}")
+    print(f"Cleanup Summary: {deleted_count} deleted, {failed_count} failed")
+    print(f"{'='*80}")
+    
+    return {"deleted": deleted_count, "failed": failed_count}
+
+
+def main():
+    """Run all tests"""
+    print("\n" + "="*80)
+    print("WHATSAPP TEMPLATE EXAMPLE_VALUES FLOW - BACKEND TESTING")
+    print("="*80)
     print(f"Base URL: {BASE_URL}")
-    print(f"Salon ID: {SALON_ID}")
-    print(f"Admin: {ADMIN_IDENTIFIER}")
-    print("=" * 80)
+    print(f"Admin Identifier: {ADMIN_IDENTIFIER}")
     
-    # Get admin token
-    print("\n🔐 Logging in as admin...")
-    token = await get_admin_token()
+    results = {}
     
-    if not token:
-        print("\n❌ FATAL: Could not obtain admin token. Aborting tests.")
+    # Step 1: Login
+    login_result = login_admin()
+    if not login_result.get("success"):
+        print("\n❌ CRITICAL: Admin login failed - cannot proceed with tests")
         return
     
-    print(f"✅ Admin token obtained: {token[:20]}...")
+    # Step 2: Run all test cases
+    results["A_missing_examples"] = test_a_draft_missing_examples()
+    results["B_partial_examples"] = test_b_draft_partial_examples()
+    results["C_full_examples"] = test_c_draft_full_examples()
+    results["D_no_placeholder"] = test_d_no_placeholder()
     
-    # Run all checks
-    print("\n" + "=" * 80)
-    print("RUNNING CHECKS")
-    print("=" * 80)
+    # Test E uses template from test C
+    template_id_for_submit = None
+    if results["C_full_examples"].get("pass") and results["C_full_examples"].get("template_id"):
+        template_id_for_submit = results["C_full_examples"]["template_id"]
+    results["E_submit_twilio"] = test_e_submit_twilio(template_id_for_submit)
     
-    await check_1_payment_vendor_status_initial(token)
-    await check_2_onboard_with_invalid_creds(token)
-    await check_3_onboard_fallback_to_salon_upi(token)
-    await check_4_onboard_both_upi_and_bank(token)
-    await check_5_service_payments_available()
-    await check_6_create_order_without_vendor(token)
-    await check_7_subscription_create_order_regression(token)
+    results["G_duplicate_name"] = test_g_duplicate_name()
     
-    # Summary
-    print("\n" + "=" * 80)
-    print("TEST SUMMARY")
-    print("=" * 80)
+    # Step 3: Cleanup
+    cleanup_result = cleanup_templates()
     
-    passed = sum(1 for r in test_results if r["status"] == "PASS")
-    failed = sum(1 for r in test_results if r["status"] == "FAIL")
-    notes = sum(1 for r in test_results if r["status"] == "NOTE")
-    total = len(test_results)
+    # Step 4: Summary
+    print("\n" + "="*80)
+    print("FINAL SUMMARY")
+    print("="*80)
     
-    print(f"\nTotal Checks: {total}")
-    print(f"✅ Passed: {passed}")
-    print(f"❌ Failed: {failed}")
-    print(f"📝 Notes: {notes}")
+    passed = sum(1 for r in results.values() if r.get("pass"))
+    total = len(results)
     
-    print("\n" + "=" * 80)
-    print("DETAILED RESULTS")
-    print("=" * 80)
+    print(f"\nTest Results: {passed}/{total} PASSED\n")
     
-    for result in test_results:
-        status_icon = "✅" if result["status"] == "PASS" else ("❌" if result["status"] == "FAIL" else "📝")
-        print(f"\n{status_icon} CHECK {result['check']}: {result['description']}")
-        print(f"   Status: {result['status']} | HTTP {result['http_status']}")
-        print(f"   Details: {result['details']}")
+    for test_name, result in results.items():
+        status = "✅ PASS" if result.get("pass") else "❌ FAIL"
+        print(f"{status} - {test_name}")
+        if not result.get("pass") and result.get("reason"):
+            print(f"       Reason: {result['reason']}")
+        if result.get("note"):
+            print(f"       Note: {result['note']}")
     
-    print("\n" + "=" * 80)
+    print(f"\nCleanup: {cleanup_result.get('deleted', 0)} templates deleted")
     
-    # Exit code
-    if failed > 0:
-        print(f"\n❌ {failed} check(s) failed")
-        exit(1)
-    else:
-        print(f"\n✅ All {passed} checks passed!")
-        exit(0)
+    print("\n" + "="*80)
+    print("TESTING COMPLETE")
+    print("="*80)
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    main()
