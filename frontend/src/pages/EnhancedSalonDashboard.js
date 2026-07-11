@@ -31,6 +31,7 @@ import { InventoryView } from '@/pages/salon/SalonInventoryPage';
 import SalonHomeNew from '@/pages/salon/SalonHomeNew';
 import SalonHomeV2 from '@/pages/salon/SalonHomeV2';
 import HomeV2Shell from '@/pages/salon/home_v2/HomeV2Shell';
+import QueueTabV2 from '@/pages/salon/home_v2/QueueTabV2';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { SubscriptionProvider } from '@/contexts/SubscriptionContext';
 import { getSession, clearSession } from '@/utils/sessionManager';
@@ -1401,353 +1402,31 @@ export default function EnhancedSalonDashboard() {
         {/* ===== HOME DASHBOARD (rendered separately outside this wrapper) ===== */}
 
         {activeTab === 'queue' && (
-          <div className="space-y-6">
-            {/* Date Toggle: Today / Yesterday / Range */}
-            <div className="flex items-center justify-between flex-wrap gap-3">
-              <div className="flex items-center gap-2 flex-wrap">
-                <div className="inline-flex rounded-lg border border-border bg-card p-1">
-                  <button
-                    onClick={() => setDateMode('today')}
-                    className={`px-4 py-1.5 text-sm font-semibold rounded-md transition-colors ${
-                      dateMode === 'today' ? 'bg-gold text-black' : 'text-foreground hover:bg-muted'
-                    }`}
-                  >
-                    Today
-                  </button>
-                  <button
-                    onClick={() => setDateMode('yesterday')}
-                    className={`px-4 py-1.5 text-sm font-semibold rounded-md transition-colors ${
-                      dateMode === 'yesterday' ? 'bg-gold text-black' : 'text-foreground hover:bg-muted'
-                    }`}
-                  >
-                    Yesterday
-                  </button>
-                  <button
-                    onClick={() => setDateMode('range')}
-                    className={`px-4 py-1.5 text-sm font-semibold rounded-md transition-colors ${
-                      dateMode === 'range' ? 'bg-gold text-black' : 'text-foreground hover:bg-muted'
-                    }`}
-                  >
-                    Range
-                  </button>
-                </div>
-                {dateMode === 'range' && (
-                  <div className="inline-flex gap-1 items-center text-xs">
-                    <input type="date" value={dateFrom || ''} onChange={(e) => setDateFrom(e.target.value)} className="h-8 px-2 rounded-md border border-border bg-background" />
-                    <span className="text-muted-foreground">→</span>
-                    <input type="date" value={dateTo || ''} onChange={(e) => setDateTo(e.target.value)} className="h-8 px-2 rounded-md border border-border bg-background" />
-                  </div>
-                )}
-              </div>
-              <div className="text-xs text-muted-foreground">
-                Viewing bookings for <span className="font-semibold text-foreground">
-                  {dateMode === 'range'
-                    ? `${dateFrom || '—'} to ${dateTo || '—'}`
-                    : new Date(date).toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric', month: 'short' })}
-                </span>
-              </div>
-            </div>
-            {/* Barber Filter */}
-            <div className="flex items-center space-x-2 overflow-x-auto pb-2 scrollbar-hide">
-              <button
-                onClick={() => setSelectedBarber('all')}
-                className={`px-3 md:px-4 py-1.5 md:py-2 rounded-lg whitespace-nowrap text-sm ${
-                  selectedBarber === 'all'
-                    ? 'bg-gold text-black'
-                    : 'bg-card border border-border text-foreground'
-                }`}
-              >
-                All Barbers
-              </button>
-              {barbers.map(barber => (
-                <button
-                  key={barber.id}
-                  onClick={() => setSelectedBarber(barber.id)}
-                  className={`px-3 md:px-4 py-1.5 md:py-2 rounded-lg whitespace-nowrap text-sm ${
-                    selectedBarber === barber.id
-                      ? 'bg-gold text-black'
-                      : 'bg-card border border-border text-foreground'
-                  }`}
-                >
-                  {barber.name}
-                </button>
-              ))}
-            </div>
-
-            {/* Single Call Next Button Based on Selected Barber */}
-            <div className="flex flex-row gap-2">
-              <Button
-                onClick={() => handleCallNext(selectedBarber === 'all' ? null : selectedBarber)}
-                className="bg-gold text-black hover:bg-gold/90 px-3 md:px-8 py-3 text-xs md:text-lg w-[60%] md:flex-1"
-                disabled={!tokens.some(t => t.status === 'waiting')}
-              >
-                <ChevronRight className="mr-1 md:mr-2 w-4 md:w-5 h-4 md:h-5" /> 
-                Call Next {selectedBarber !== 'all' && `(${barbers.find(b => b.id === selectedBarber)?.name})`}
-              </Button>
-              <Button
-                onClick={() => navigate('/salon/dashboard/new-booking?return=queue')}
-                variant="outline"
-                className="border-gold text-gold hover:bg-gold/10 px-3 md:px-6 py-3 text-xs md:text-lg w-[40%] md:flex-none"
-                data-testid="queue-add-booking-btn"
-              >
-                <Plus className="mr-1 md:mr-2 w-4 md:w-5 h-4 md:h-5" />
-                <span className="hidden md:inline">Add Booking</span>
-                <span className="md:hidden">Add</span>
-              </Button>
-            </div>
-
-            {/* Status Filters */}
-            <div className="flex space-x-2 overflow-x-auto pb-1 scrollbar-hide">
-              {['all', 'waiting', 'called', 'completed', 'skipped', 'cancelled'].map((f) => (
-                <button
-                  key={f}
-                  onClick={() => setFilter(f)}
-                  className={`px-3 md:px-4 py-1.5 md:py-2 rounded uppercase text-xs md:text-sm font-bold whitespace-nowrap ${
-                    filter === f
-                      ? 'bg-gold text-black'
-                      : 'bg-card border border-border text-foreground'
-                  }`}
-                >
-                  {f === 'all' ? 'All' : f.charAt(0).toUpperCase() + f.slice(1)}
-                </button>
-              ))}
-            </div>
-
-            {/* Token List */}
-            <div className="space-y-3">
-              {tokens.map((token, index) => (
-                <motion.div
-                  key={token.id}
-                  initial={{ opacity: 0, y: 20 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ delay: index * 0.05 }}
-                  className={`bg-card/90 backdrop-blur-sm border-2 ${getStatusColor(token.status)} rounded-xl p-3 md:p-4 hover:shadow-xl transition-all`}
-                >
-                  {/* Token Info Row */}
-                  <div className="flex items-start gap-3">
-                    <div className="text-2xl md:text-3xl font-bebas text-gold min-w-[48px] md:min-w-[60px] text-center bg-gold/10 rounded-lg p-1.5 md:p-2 border border-gold/30 flex-shrink-0">
-                      {token.token_number || 'TBA'}
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <p className="text-foreground font-bold flex items-center space-x-2 text-sm md:text-base">
-                        <User className="w-3 h-3 flex-shrink-0" />
-                        <span className="truncate">{token.customer_name}</span>
-                      </p>
-                      <p className="text-muted-foreground text-xs flex items-center space-x-2">
-                        <Phone className="w-3 h-3 flex-shrink-0" />
-                        <a href={`tel:${token.phone}`} className="hover:text-gold">
-                          {token.phone}
-                        </a>
-                      </p>
-                      <p className="text-muted-foreground text-xs truncate">
-                        {token.barber_name} • {token.shift || token.time_slot} • ₹{token.total_amount}
-                        {token.payment_confirmed && <span className="text-green-500 ml-1">• ✓ {(token.payment_mode || 'paid').toUpperCase()}</span>}
-                        {!token.payment_confirmed && token.status !== 'completed' && <span className="text-yellow-500 ml-1">• ⏳ Unpaid</span>}
-                      </p>
-                      <p className="text-muted-foreground text-xs flex items-center space-x-1 mt-0.5">
-                        <Calendar className="w-3 h-3 flex-shrink-0" />
-                        <span className="truncate">{new Date(token.date).toLocaleDateString('en-IN')} at {token.created_at ? new Date(token.created_at).toLocaleTimeString('en-IN', {hour: '2-digit', minute: '2-digit'}) : token.shift || token.time_slot}</span>
-                      </p>
-                    </div>
-                    {/* Status Badge - always visible */}
-                    <div className="flex items-center gap-1.5 flex-shrink-0">
-                      {/* Direct-dial call button (#4a) — opens the phone
-                          dialer with the customer's number pre-filled so the
-                          salon can call them from the dashboard in one tap. */}
-                      {token.phone && (
-                        <a
-                          href={`tel:${token.phone}`}
-                          onClick={(e) => e.stopPropagation()}
-                          className="inline-flex items-center justify-center w-8 h-8 rounded-full bg-green-500/15 border border-green-500/40 text-green-600 hover:bg-green-500 hover:text-white transition-colors"
-                          title={`Call ${token.customer_name || 'customer'} — ${token.phone}`}
-                          data-testid={`token-call-customer-${token.id}`}
-                        >
-                          <Phone className="w-4 h-4" />
-                        </a>
-                      )}
-                      <div className={`flex items-center space-x-1 px-2 md:px-3 py-1 rounded-full ${
-                      token.status === 'called' ? 'bg-blue-500/20 border border-blue-500' :
-                      token.status === 'completed' ? 'bg-green-500/20 border border-green-500' :
-                      token.status === 'skipped' ? 'bg-red-500/20 border border-red-500' :
-                      'bg-muted border border-border'
-                    }`}>
-                      {getStatusIcon(token.status)}
-                      <span className="text-xs uppercase font-bold">
-                        {token.status === 'called' ? 'Called' : 
-                         token.status === 'waiting' ? 'Waiting' :
-                         token.status === 'completed' ? 'Done' :
-                         token.status === 'skipped' ? 'Skip' : token.status}
-                      </span>
-                      {token.recall_count > 0 && (
-                        <span className="text-xs text-muted-foreground">
-                          ({token.recall_count}x)
-                        </span>
-                      )}
-                      </div>
-                    </div>
-                  </div>
-                    
-                  {/* Action Buttons - Below info, wrap on mobile */}
-                  <div className="flex flex-wrap gap-1.5 mt-2 pt-2 border-t border-border/50">
-                      {/* Waiting Status Actions */}
-                      {token.status === 'waiting' && (
-                        <>
-                          <Button 
-                            size="sm" 
-                            onClick={() => handleCallToken(token.id)} 
-                            className="bg-blue-600 hover:bg-blue-700 h-8 text-xs px-2.5"
-                            title="Call this customer now"
-                          >
-                            <ChevronRight className="w-3 h-3 mr-1" />
-                            Call
-                          </Button>
-                          <Button 
-                            size="sm" 
-                            onClick={() => handleOpenAddServices(token)} 
-                            className="bg-purple-600 hover:bg-purple-700 h-8 text-xs px-2.5"
-                            title="Modify booking"
-                          >
-                            <Edit className="w-3 h-3 mr-1" />
-                            Modify
-                          </Button>
-                          <Button 
-                            size="sm" 
-                            onClick={() => handleSendNotification(token.id)} 
-                            className="bg-gray-600 hover:bg-gray-700 h-8 text-xs px-2"
-                            title="Send notification"
-                          >
-                            <Bell className="w-3 h-3" />
-                          </Button>
-                          <Button 
-                            size="sm" 
-                            onClick={() => handleSkipToken(token.id)} 
-                            className="bg-orange-600 hover:bg-orange-700 text-white h-8 text-xs px-2"
-                            title="Skip this customer"
-                          >
-                            <SkipForward className="w-3 h-3" />
-                          </Button>
-                          <Button 
-                            size="sm" 
-                            onClick={() => handleCancelToken(token.id)} 
-                            variant="outline"
-                            className="border-red-500 text-red-500 hover:bg-red-500 hover:text-white h-8 text-xs px-2"
-                            title="Cancel token"
-                          >
-                            <XCircle className="w-3 h-3" />
-                          </Button>
-                        </>
-                      )}
-                      
-                      {/* Called Status Actions */}
-                      {token.status === 'called' && (
-                        <>
-                          <Button 
-                            size="sm" 
-                            onClick={() => handleCompleteToken(token.id)} 
-                            className="bg-green-600 hover:bg-green-700 text-white h-8 text-xs px-2.5"
-                            title="Mark as completed"
-                          >
-                            <CheckCircle className="w-3 h-3 mr-1" />
-                            Complete
-                          </Button>
-                          <Button 
-                            size="sm" 
-                            onClick={() => handleOpenAddServices(token)} 
-                            className="bg-purple-600 hover:bg-purple-700 text-white h-8 text-xs px-2.5"
-                            title="Modify booking"
-                          >
-                            <Edit className="w-3 h-3 mr-1" />
-                            Modify
-                          </Button>
-                          <Button 
-                            size="sm" 
-                            onClick={() => handleRecallToken(token.id)} 
-                            className="bg-blue-600 hover:bg-blue-700 text-white h-8 text-xs px-2.5"
-                            title="Re-call customer"
-                          >
-                            <RotateCcw className="w-3 h-3 mr-1" />
-                            Re-call
-                          </Button>
-                          <Button 
-                            size="sm" 
-                            onClick={() => handleSkipToken(token.id)} 
-                            className="bg-red-600 hover:bg-red-700 text-white h-8 text-xs px-2"
-                            title="Skip customer"
-                          >
-                            <SkipForward className="w-3 h-3" />
-                          </Button>
-                        </>
-                      )}
-                      
-                      {/* Skipped Status Actions */}
-                      {token.status === 'skipped' && (
-                        <>
-                          <Button 
-                            size="sm" 
-                            onClick={() => handleRecallToken(token.id)} 
-                            className="bg-blue-600 hover:bg-blue-700 h-8 text-xs px-2.5"
-                            title="Recall this customer"
-                          >
-                            <RotateCcw className="w-3 h-3 mr-1" />
-                            Recall
-                          </Button>
-                          <Button 
-                            size="sm" 
-                            onClick={() => handleCancelToken(token.id)} 
-                            className="bg-red-600 hover:bg-red-700 text-white h-8 text-xs px-2.5"
-                            title="Cancel this booking"
-                          >
-                            <XCircle className="w-3 h-3 mr-1" />
-                            Cancel
-                          </Button>
-                        </>
-                      )}
-                      
-                      {/* Completed Status Actions */}
-                      {token.status === 'completed' && token.invoice_id && (
-                        <>
-                          <Button 
-                            size="sm" 
-                            onClick={() => window.open(`${API}/invoices/${token.invoice_id}/view`, '_blank')} 
-                            className="bg-purple-600 hover:bg-purple-700 text-white h-8 text-xs px-2.5"
-                            title="View invoice"
-                          >
-                            <FileText className="w-3 h-3 mr-1" />
-                            Invoice
-                          </Button>
-                          <Button 
-                            size="sm" 
-                            onClick={() => {
-                              const link = document.createElement('a');
-                              link.href = `${API}/invoices/${token.invoice_id}/download`;
-                              link.download = `invoice_${token.token_number}.pdf`;
-                              link.click();
-                            }}
-                            className="bg-green-600 hover:bg-green-700 text-white h-8 text-xs px-2.5"
-                            title="Download invoice"
-                          >
-                            <Download className="w-3 h-3 mr-1" />
-                            Download
-                          </Button>
-                        </>
-                      )}
-
-                      {/* No actions for cancelled/future */}
-                      {['cancelled', 'future'].includes(token.status) && (
-                        <span className="text-xs text-muted-foreground italic px-1">No actions</span>
-                      )}
-                  </div>
-                </motion.div>
-              ))}
-
-              {tokens.length === 0 && (
-                <div className="text-center py-12 bg-card border border-border rounded-lg">
-                  <Clock className="w-16 h-16 text-muted-foreground mx-auto mb-4" />
-                  <p className="text-muted-foreground">No tokens found</p>
-                </div>
-              )}
-            </div>
-          </div>
+          <QueueTabV2
+            date={date}
+            dateMode={dateMode}
+            setDateMode={setDateMode}
+            dateFrom={dateFrom}
+            setDateFrom={setDateFrom}
+            dateTo={dateTo}
+            setDateTo={setDateTo}
+            barbers={barbers}
+            selectedBarber={selectedBarber}
+            setSelectedBarber={setSelectedBarber}
+            tokens={tokens}
+            filter={filter}
+            setFilter={setFilter}
+            handleCallNext={handleCallNext}
+            handleCallToken={handleCallToken}
+            handleCompleteToken={handleCompleteToken}
+            handleRecallToken={handleRecallToken}
+            handleSkipToken={handleSkipToken}
+            handleCancelToken={handleCancelToken}
+            handleSendNotification={handleSendNotification}
+            handleOpenAddServices={handleOpenAddServices}
+            API={API}
+            navigate={navigate}
+          />
         )}
 
         {activeTab === 'staff' && salonId && (() => {

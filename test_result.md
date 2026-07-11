@@ -6184,3 +6184,24 @@ agent_communication:
     - agent: "main"
       message: "Pending #2 shipped. Created /app/frontend/src/pages/salon/home_v2/HomeV2Shell.js — reusable shell (rail + ribbon + topbar + global New Appointment / Add Guest drawers). EnhancedSalonDashboard now wraps its non-Home layout with <HomeV2Shell activeTab={activeTab}>. Rail correctly highlights the current tab. Screenshot-verified all 10 tabs (Home, Queue, Staff, Services, Finance, Guests, Analytics, Shop, Stock, Marketing, Settings) — legacy content renders inside the shell without the duplicate header/hamburger. Only #4 (marketing tracking depth) and #6 (Cashfree credentials) remain from the pending list."
 
+
+frontend:
+  - task: "Queue tab — full Zenoti-style re-skin (first per-tab content re-skin)"
+    implemented: true
+    working: true
+    file: "/app/frontend/src/pages/salon/home_v2/QueueTabV2.js, /app/frontend/src/pages/EnhancedSalonDashboard.js"
+    stuck_count: 0
+    priority: "medium"
+    needs_retesting: true
+    status_history:
+        - working: true
+          agent: "main"
+          comment: "Created QueueTabV2.js (~500 LoC, isolated) and swapped it in for the 350-line legacy Queue JSX in EnhancedSalonDashboard.js. All handlers are passed through as props — behaviour identical, only visual layer changed. New styling: (a) topbar card with Today/Yesterday/Range segmented control + view-date label; (b) purple-gradient Call Next primary CTA + purple-ghost Add Booking secondary CTA; (c) status filter pill group with live counts per status (All(3) / Waiting(1) / Called(1) / Done(1) etc.) plus separate barber-pill row; (d) rich token cards — colored left accent bar per status, big rounded gradient token chip (E1/E2/E3 with 'TOKEN' label) also color-coded per status, name+phone-icon+barber•slot•₹amount+paid/unpaid, date/time; (e) right side has direct-dial green pill button, status pill, and contextual action buttons: waiting → Call/Modify/Bell/Skip/Cancel, called → Complete/Modify/Re-call/Skip, skipped → Recall/Cancel, completed → Invoice/PDF; (f) friendly empty state with clock icon + helpful copy. All button colors match status intent (blue call, green complete, purple modify/recall, orange skip, pink cancel, green paid, amber unpaid). Screenshot-verified with 3 tokens in waiting/called/completed states — all render correctly."
+
+metadata:
+  updated: "2026-07-11 (4)"
+
+agent_communication:
+    - agent: "main"
+      message: "Queue tab fully re-skinned in Zenoti style (matches Home v2 look). New file: /app/frontend/src/pages/salon/home_v2/QueueTabV2.js. Swapped into EnhancedSalonDashboard replacing 349 lines of legacy JSX with a clean prop-driven component. All handlers (handleCallNext, handleCallToken, handleCompleteToken, handleRecallToken, handleSkipToken, handleCancelToken, handleSendNotification, handleOpenAddServices) plumbed through unchanged. Seeded 3 walk-in tokens (E1/E2/E3) and mutated their statuses to verify all 4 primary states render correctly (waiting/called/completed each with unique color-coded accent bar, token chip, status pill and contextual action buttons). Frontend compiles clean. Ready for user to click through the new UI."
+
