@@ -6,7 +6,7 @@ Test to check sold-memberships endpoint for pending memberships
 import requests
 import json
 
-BASE_URL = "https://brave-hopper-11.preview.emergentagent.com/api"
+BASE_URL = "https://slot-scheduling-wip.preview.emergentagent.com/api"
 SALON_ID = "a356c4e6-274f-40e7-9a37-66d3a4613d17"
 ADMIN_PHONE = "+917503070727"
 ADMIN_PASSWORD = "salon123"

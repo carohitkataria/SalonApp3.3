@@ -408,6 +408,19 @@ export const HOME_V2_CSS = `
 .shv2-drawer .cd-badge.mem{background:#F1EEFF;color:#6C4FE0}
 .shv2-drawer .cd-badge.wallet{background:#E4F6F3;color:#12A594}
 
+/* Guest details card (top of book-right, above Order Details) */
+.shv2-drawer .gd-card{background:#FFFFFF;border:1px solid #ECECF3;border-radius:14px;padding:12px 14px;margin-bottom:14px;box-shadow:0 6px 20px rgba(30,32,50,.05)}
+.shv2-drawer .gd-h{display:flex;align-items:center;justify-content:space-between;gap:8px;padding-bottom:8px;margin-bottom:6px;border-bottom:1px solid #F3F3F8}
+.shv2-drawer .gd-h b{font-family:'Plus Jakarta Sans';font-size:13px;font-weight:800;color:#23252F;letter-spacing:.2px}
+.shv2-drawer .gd-full{font-size:10.5px;font-weight:800;color:#6C4FE0;background:#F1EEFF;border:1px solid #E7E2FF;padding:4px 8px;border-radius:8px;cursor:pointer;transition:.15s}
+.shv2-drawer .gd-full:hover{background:#6C4FE0;color:#fff;border-color:#6C4FE0}
+.shv2-drawer .gd-sec{padding:6px 0;border-top:1px dashed #F3F3F8}
+.shv2-drawer .gd-sec:first-of-type{border-top:none;padding-top:2px}
+.shv2-drawer .gd-row{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:2px 0;font-size:11.5px;line-height:1.5}
+.shv2-drawer .gd-row .k{color:#7C8092;font-weight:600;flex:none}
+.shv2-drawer .gd-row .v{color:#23252F;font-weight:700;text-align:right;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:170px}
+.shv2-drawer .gd-empty{font-size:11.5px;color:#9A9EAE;text-align:center;padding:10px 0;font-weight:600}
+
 /* Full guest profile modal (opened via "View full details") */
 .shv2-profile-back{position:fixed;inset:0;background:rgba(28,26,54,.5);backdrop-filter:blur(2px);opacity:0;visibility:hidden;transition:.24s;z-index:90}
 .shv2-profile-back.open{opacity:1;visibility:visible}

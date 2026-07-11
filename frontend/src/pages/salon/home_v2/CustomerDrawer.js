@@ -193,7 +193,6 @@ export default function CustomerDrawer({
             </div>
             <div className="pt">
               <b>Profile photo</b>
-              <span>Optional · JPG/PNG under 3 MB</span>
               <div>
                 <input ref={fileRef} type="file" accept="image/*" hidden onChange={handleFile} />
                 <button onClick={() => fileRef.current?.click()}>{form.photo_url ? 'Change photo' : 'Upload photo'}</button>
@@ -208,12 +207,12 @@ export default function CustomerDrawer({
             <div className="field">
               <label>First name <span className="req">*</span></label>
               <input ref={firstNameRef} value={form.first} onChange={e => setForm({ ...form, first: e.target.value })}
-                     className={errors.first ? 'err' : ''} placeholder="e.g. Priya" />
+                     className={errors.first ? 'err' : ''} placeholder="First name" />
               {errors.first && <span className="msg show">{errors.first}</span>}
             </div>
             <div className="field">
               <label>Last name</label>
-              <input value={form.last} onChange={e => setForm({ ...form, last: e.target.value })} placeholder="e.g. Sharma" />
+              <input value={form.last} onChange={e => setForm({ ...form, last: e.target.value })} placeholder="Last name" />
             </div>
 
             {/* Row 1 — Mobile number | Email */}
@@ -223,7 +222,7 @@ export default function CustomerDrawer({
                 <select value={form.code} onChange={e => setForm({ ...form, code: e.target.value })}>
                   <option>+91</option><option>+1</option><option>+44</option>
                 </select>
-                <input inputMode="numeric" placeholder="98765 43210"
+                <input inputMode="numeric" placeholder="10-digit mobile"
                        value={form.phone} onChange={e => setForm({ ...form, phone: e.target.value })}
                        className={errors.phone ? 'err' : ''} />
               </div>
@@ -231,7 +230,7 @@ export default function CustomerDrawer({
             </div>
             <div className="field">
               <label>Email</label>
-              <input type="email" value={form.email} onChange={e => setForm({ ...form, email: e.target.value })} placeholder="priya@email.com" />
+              <input type="email" value={form.email} onChange={e => setForm({ ...form, email: e.target.value })} placeholder="Email address" />
             </div>
 
             {/* Row 2 — Date of birth | Anniversary */}
@@ -278,7 +277,7 @@ export default function CustomerDrawer({
                   <span style={{ display: 'inline-flex', gap: 4, alignItems: 'center' }}>
                     <input autoFocus value={newTag} onChange={e => setNewTag(e.target.value)}
                            onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); addCustomTag(); } if (e.key === 'Escape') setAddingTag(false); }}
-                           placeholder="new tag" maxLength={24}
+                           maxLength={24}
                            style={{ fontSize: 12, padding: '5px 10px', border: '1px solid #ECECF3', borderRadius: 20, width: 110, outline: 'none' }} />
                     <button className="tag on" style={{ padding: '5px 10px' }} onClick={addCustomTag}>Add</button>
                   </span>
@@ -291,17 +290,16 @@ export default function CustomerDrawer({
             {/* Socials */}
             <div className="field">
               <label>Instagram ID</label>
-              <input value={form.instagram_id} onChange={e => setForm({ ...form, instagram_id: e.target.value })} placeholder="@priya.sharma" />
+              <input value={form.instagram_id} onChange={e => setForm({ ...form, instagram_id: e.target.value })} placeholder="Instagram handle" />
             </div>
             <div className="field">
               <label>Facebook ID</label>
-              <input value={form.facebook_id} onChange={e => setForm({ ...form, facebook_id: e.target.value })} placeholder="fb.me/priya" />
+              <input value={form.facebook_id} onChange={e => setForm({ ...form, facebook_id: e.target.value })} placeholder="Facebook profile" />
             </div>
 
             <div className="field full">
               <label>Notes</label>
-              <textarea value={form.notes} onChange={e => setForm({ ...form, notes: e.target.value })}
-                        placeholder="Allergies, preferences…" />
+              <textarea value={form.notes} onChange={e => setForm({ ...form, notes: e.target.value })} />
             </div>
           </div>
         </div>
