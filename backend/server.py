@@ -6405,6 +6405,7 @@ async def get_salon_customers(salon_id: str, branch_id: Optional[str] = None, cu
                 "user_id": None,
                 "gender": mc.get('gender', 'Men'),
                 "date_of_birth": mc.get('date_of_birth') or mc.get('dob'),
+                "anniversary": mc.get('anniversary'),
                 "source": mc.get('source') or "manual",
                 "photo_url": mc.get('photo_url'),
                 "instagram_id": mc.get('instagram_id'),
@@ -6420,6 +6421,8 @@ async def get_salon_customers(salon_id: str, branch_id: Optional[str] = None, cu
                 cust['gender'] = mc.get('gender', 'Men')
             if not cust.get('date_of_birth'):
                 cust['date_of_birth'] = mc.get('date_of_birth') or mc.get('dob')
+            if not cust.get('anniversary'):
+                cust['anniversary'] = mc.get('anniversary')
             if not cust.get('photo_url') and mc.get('photo_url'):
                 cust['photo_url'] = mc.get('photo_url')
             cust.setdefault('instagram_id', mc.get('instagram_id'))
@@ -6498,6 +6501,7 @@ async def add_salon_customer(salon_id: str, body: dict, current_user=Depends(get
         # Extended master fields (added for Home v2 New Guest drawer)
         "photo_url": body.get("photo_url") or None,   # data-URL or CDN URL
         "dob": body.get("dob") or None,               # ISO date "YYYY-MM-DD"
+        "anniversary": body.get("anniversary") or None,  # ISO date "YYYY-MM-DD"
         "preferred_barber_id": body.get("preferred_barber_id") or None,
         "instagram_id": (body.get("instagram_id") or "").strip() or None,
         "facebook_id":  (body.get("facebook_id")  or "").strip() or None,
@@ -11910,6 +11914,118 @@ async def home_toggle_attendance(
         {"$set": {"check_out_at": now_iso, "status": "out"}},
     )
     return {"ok": True, "check_out_at": now_iso, "status": "out"}
+
+
+# ---------------------------------------------------------------------------
+# Guest profile aggregate — used by the New-Appointment drawer's right-hand
+# customer details panel and by the "View full details" popup.
+#   Returns: base master + last_visit / last_barber_name / last_invoice /
+#            membership_active / membership_name / wallet_balance /
+#            total_visits / total_spend / history (last 20 tokens)
+# ---------------------------------------------------------------------------
+@api_router.get("/salons/{salon_id}/customers/profile")
+async def get_customer_profile(
+    salon_id: str,
+    phone: str,
+    current_salon=Depends(get_current_salon_user),
+):
+    ph = (phone or "").strip()
+    if not ph:
+        raise HTTPException(status_code=400, detail="phone query param required")
+    alt = ph
+    if not ph.startswith("+"):
+        d = "".join(c for c in ph if c.isdigit())
+        if len(d) >= 10:
+            alt = f"+91{d[-10:]}"
+    or_phones = list({ph, alt})
+
+    master = await db.salon_customers.find_one(
+        {"salon_id": salon_id, "phone": {"$in": or_phones}}, {"_id": 0}
+    ) or {}
+
+    tks = await db.tokens.find(
+        {"salon_id": salon_id, "phone": {"$in": or_phones}},
+        {"_id": 0}
+    ).sort("created_at", -1).to_list(500)
+
+    total_visits = len(tks)
+    total_spend = 0.0
+    last_visit_iso = None
+    last_barber_id = None
+    last_barber_name = None
+    last_invoice_amount = None
+    last_invoice_date = None
+    for t in tks:
+        try:
+            total_spend += float(t.get("total_amount") or t.get("total") or 0)
+        except Exception:
+            pass
+        dt = t.get("date") or t.get("created_at") or ""
+        if isinstance(dt, str) and dt and (not last_visit_iso or dt > last_visit_iso):
+            last_visit_iso = dt
+            last_barber_id = t.get("barber_id")
+            last_barber_name = t.get("barber_name")
+            last_invoice_amount = t.get("total_amount") or t.get("total")
+            last_invoice_date = dt
+
+    wallet_doc = await db.salon_wallets.find_one(
+        {"salon_id": salon_id, "phone": {"$in": or_phones}}, {"_id": 0, "balance": 1}
+    ) or {}
+    wallet_balance = float(wallet_doc.get("balance") or 0)
+
+    mem = await db.customer_memberships.find_one(
+        {"salon_id": salon_id, "phone": {"$in": or_phones}, "status": {"$in": ["active", "Active"]}},
+        {"_id": 0}
+    )
+    membership_active = bool(mem)
+    membership_name = None
+    membership_expires = None
+    if mem:
+        plan_id = mem.get("plan_id")
+        if plan_id:
+            plan = await db.membership_plans.find_one({"id": plan_id}, {"_id": 0, "name": 1})
+            if plan:
+                membership_name = plan.get("name")
+        membership_expires = mem.get("expires_at") or mem.get("valid_till")
+
+    history_tokens = [{
+        "id": t.get("id"),
+        "date": t.get("date") or t.get("created_at"),
+        "barber_name": t.get("barber_name"),
+        "services_count": len(t.get("selected_services") or []),
+        "total": float(t.get("total_amount") or t.get("total") or 0),
+        "status": t.get("status"),
+    } for t in tks[:20]]
+
+    return {
+        "phone": master.get("phone") or (or_phones[0] if or_phones else ph),
+        "name": master.get("name") or (tks[0].get("customer_name") if tks else None),
+        "gender": master.get("gender"),
+        "email": master.get("email"),
+        "dob": master.get("dob") or master.get("date_of_birth"),
+        "anniversary": master.get("anniversary"),
+        "tags": master.get("tags") or [],
+        "notes": master.get("notes"),
+        "photo_url": master.get("photo_url"),
+        "instagram_id": master.get("instagram_id"),
+        "facebook_id": master.get("facebook_id"),
+        "preferred_barber_id": master.get("preferred_barber_id"),
+        "source": master.get("source"),
+        "last_visit": last_visit_iso,
+        "last_barber_id": last_barber_id,
+        "last_barber_name": last_barber_name,
+        "last_invoice_amount": last_invoice_amount,
+        "last_invoice_date": last_invoice_date,
+        "wallet_balance": wallet_balance,
+        "membership_active": membership_active,
+        "membership_name": membership_name,
+        "membership_expires": membership_expires,
+        "total_visits": total_visits,
+        "total_spend": round(total_spend, 2),
+        "history_tokens": history_tokens,
+    }
+
+
 
 
 

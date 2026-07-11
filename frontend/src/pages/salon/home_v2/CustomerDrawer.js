@@ -1,14 +1,20 @@
 /**
- * Add Guest / Customer drawer for the Home v2 page.
+ * CustomerDrawer — Add / Edit Guest.
  *
- * Features added in v1.1:
- * - Profile photo upload (data-URL preview, synced to salon_customers.photo_url).
- *   If the guest later uploads a photo from the customer-app, it's already
- *   available on the salon side because we surface user.profile_photo → photo_url
- *   in GET /customers.
- * - Date of birth, Preferred staff (dropdown from active barbers).
- * - Custom tags — click "+" to add a new one; system tags (VIP/New/Regular) stay.
- * - Instagram + Facebook IDs — persisted to support future targeted ads.
+ * Design tweaks (v1.2):
+ *   - No clarification labels (labels are self-explanatory).
+ *   - Fields laid out in 3 grid rows:
+ *       Row 1: Mobile number  |  Email
+ *       Row 2: Date of birth  |  Anniversary
+ *       Row 3: Gender         |  Preferred staff
+ *   - Custom tag "+" chip (no help text) still supported.
+ *
+ * Bug fix:
+ *   Previously the state-reset useEffect depended on `getAuthHeaders` and
+ *   `salonId` — both change reference on every parent re-render, which
+ *   silently wiped the form while the user was typing.  Reset now only
+ *   fires on `open` transitions (opening the drawer), and barbers load
+ *   uses refs so the fetch has current callbacks without triggering resets.
  */
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import axios from 'axios';
@@ -24,18 +30,16 @@ export default function CustomerDrawer({
   presetName = '',
   presetPhone = '',
   source = 'owner',
+  initial = null,           // pass an existing customer to edit; null = create
 }) {
   const [form, setForm] = useState({
     first: '', last: '', code: '+91', phone: '',
     email: '', gender: 'Female',
-    tags: [],                         // combined system + custom
-    customTags: [],                   // only the user-added ones
+    tags: [], customTags: [],
     notes: '',
-    photo_url: '',                    // data-URL preview
-    dob: '',                          // YYYY-MM-DD
+    photo_url: '', dob: '', anniversary: '',
     preferred_barber_id: '',
-    instagram_id: '',
-    facebook_id: '',
+    instagram_id: '', facebook_id: '',
   });
   const [barbers, setBarbers] = useState([]);
   const [saving, setSaving] = useState(false);
@@ -45,32 +49,45 @@ export default function CustomerDrawer({
   const firstNameRef = useRef(null);
   const fileRef = useRef(null);
 
-  // Reset & prefill when opened
+  // Keep parent callbacks in a ref so they don't trigger the reset effect.
+  const authRef = useRef(getAuthHeaders);
+  const salonRef = useRef(salonId);
+  useEffect(() => { authRef.current = getAuthHeaders; }, [getAuthHeaders]);
+  useEffect(() => { salonRef.current = salonId; }, [salonId]);
+
+  // Reset & prefill ONLY when `open` flips true. Any parent re-render is a no-op.
   useEffect(() => {
     if (!open) return;
-    const parts = (presetName || '').trim().split(/\s+/);
+    const src = initial || {};
+    const parts = ((src.name || presetName) || '').trim().split(/\s+/);
     setForm({
       first: parts[0] || '',
       last: parts.slice(1).join(' ') || '',
       code: '+91',
-      phone: (presetPhone || '').replace(/^\+?91/, '').trim(),
-      email: '', gender: 'Female',
-      tags: [], customTags: [],
-      notes: '',
-      photo_url: '', dob: '', preferred_barber_id: '',
-      instagram_id: '', facebook_id: '',
+      phone: ((src.phone || presetPhone) || '').replace(/^\+?91/, '').trim(),
+      email: src.email || '',
+      gender: src.gender || 'Female',
+      tags: src.tags || [],
+      customTags: (src.tags || []).filter(t => !SYSTEM_TAGS.includes(t)),
+      notes: src.notes || '',
+      photo_url: src.photo_url || '',
+      dob: src.dob || src.date_of_birth || '',
+      anniversary: src.anniversary || '',
+      preferred_barber_id: src.preferred_barber_id || '',
+      instagram_id: src.instagram_id || '',
+      facebook_id: src.facebook_id || '',
     });
     setErrors({}); setAddingTag(false); setNewTag('');
     setTimeout(() => firstNameRef.current?.focus(), 350);
-    // Load barbers for Preferred staff dropdown
     (async () => {
       try {
-        const res = await axios.get(`${API}/salons/${salonId}/barbers`, { headers: getAuthHeaders() });
+        const res = await axios.get(`${API}/salons/${salonRef.current}/barbers`, { headers: authRef.current() });
         const list = Array.isArray(res.data) ? res.data : (res.data?.barbers || []);
         setBarbers(list.filter(b => b.is_active !== false));
       } catch (_) { setBarbers([]); }
     })();
-  }, [open, presetName, presetPhone, salonId, getAuthHeaders]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
 
   const toggleTag = (t) => setForm(f => ({
     ...f, tags: f.tags.includes(t) ? f.tags.filter(x => x !== t) : [...f.tags, t],
@@ -91,7 +108,7 @@ export default function CustomerDrawer({
   const handleFile = (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    if (file.size > 3 * 1024 * 1024) { // 3MB cap for data-URL
+    if (file.size > 3 * 1024 * 1024) {
       setErrors(er => ({ ...er, photo: 'Photo must be under 3 MB' }));
       return;
     }
@@ -122,18 +139,23 @@ export default function CustomerDrawer({
         source,
         photo_url: form.photo_url || null,
         dob: form.dob || null,
+        anniversary: form.anniversary || null,
         preferred_barber_id: form.preferred_barber_id || null,
         instagram_id: form.instagram_id || null,
         facebook_id: form.facebook_id || null,
       };
       const res = await axios.post(
-        `${API}/salons/${salonId}/customers`,
+        `${API}/salons/${salonRef.current}/customers`,
         payload,
-        { headers: getAuthHeaders() },
+        { headers: authRef.current() },
       );
       const cust = res.data?.customer || res.data || {};
       setTimeout(() => {
-        onSaved?.({ ...cust, phone: fullPhone, name: payload.name, photo_url: form.photo_url });
+        onSaved?.({
+          ...cust, phone: fullPhone, name: payload.name,
+          photo_url: form.photo_url, dob: form.dob, anniversary: form.anniversary,
+          preferred_barber_id: form.preferred_barber_id,
+        });
       }, 300);
       onClose?.();
     } catch (e) {
@@ -143,6 +165,7 @@ export default function CustomerDrawer({
   };
 
   const nameInitial = ((form.first || 'G')[0] || 'G').toUpperCase();
+  const isEdit = !!initial?.phone;
 
   return (
     <>
@@ -153,7 +176,7 @@ export default function CustomerDrawer({
             <div className="ic">
               <svg viewBox="0 0 24 24"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><line x1="19" y1="8" x2="19" y2="14"/><line x1="22" y1="11" x2="16" y2="11"/></svg>
             </div>
-            <div><h3>Add New Guest</h3><p>Create a customer profile</p></div>
+            <div><h3>{isEdit ? 'Edit Guest' : 'Add New Guest'}</h3><p>{isEdit ? 'Update guest profile' : 'Create a customer profile'}</p></div>
           </div>
           <button className="drawer__close" onClick={onClose} aria-label="Close">
             <svg viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
@@ -170,7 +193,7 @@ export default function CustomerDrawer({
             </div>
             <div className="pt">
               <b>Profile photo</b>
-              <span>Optional · JPG/PNG under 3 MB · syncs with guest's own profile</span>
+              <span>Optional · JPG/PNG under 3 MB</span>
               <div>
                 <input ref={fileRef} type="file" accept="image/*" hidden onChange={handleFile} />
                 <button onClick={() => fileRef.current?.click()}>{form.photo_url ? 'Change photo' : 'Upload photo'}</button>
@@ -180,7 +203,7 @@ export default function CustomerDrawer({
             </div>
           </div>
 
-          <div className="fs-title">Basic details</div>
+          {/* Name */}
           <div className="grid2">
             <div className="field">
               <label>First name <span className="req">*</span></label>
@@ -192,7 +215,9 @@ export default function CustomerDrawer({
               <label>Last name</label>
               <input value={form.last} onChange={e => setForm({ ...form, last: e.target.value })} placeholder="e.g. Sharma" />
             </div>
-            <div className="field full">
+
+            {/* Row 1 — Mobile number | Email */}
+            <div className="field">
               <label>Mobile number <span className="req">*</span></label>
               <div className="phone">
                 <select value={form.code} onChange={e => setForm({ ...form, code: e.target.value })}>
@@ -208,11 +233,19 @@ export default function CustomerDrawer({
               <label>Email</label>
               <input type="email" value={form.email} onChange={e => setForm({ ...form, email: e.target.value })} placeholder="priya@email.com" />
             </div>
+
+            {/* Row 2 — Date of birth | Anniversary */}
             <div className="field">
               <label>Date of birth</label>
               <input type="date" value={form.dob} onChange={e => setForm({ ...form, dob: e.target.value })} />
             </div>
-            <div className="field full">
+            <div className="field">
+              <label>Anniversary</label>
+              <input type="date" value={form.anniversary} onChange={e => setForm({ ...form, anniversary: e.target.value })} />
+            </div>
+
+            {/* Row 3 — Gender | Preferred staff */}
+            <div className="field">
               <label>Gender</label>
               <div className="seg-pick">
                 {['Female', 'Male', 'Other'].map(g => (
@@ -221,15 +254,17 @@ export default function CustomerDrawer({
                 ))}
               </div>
             </div>
-            <div className="field full">
+            <div className="field">
               <label>Preferred staff</label>
               <select value={form.preferred_barber_id} onChange={e => setForm({ ...form, preferred_barber_id: e.target.value })}>
                 <option value="">— No preference —</option>
                 {barbers.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
               </select>
             </div>
+
+            {/* Tags */}
             <div className="field full">
-              <label>Tags <span style={{ color: '#7C8092', fontWeight: 500, fontSize: 11 }}>· click + to add custom</span></label>
+              <label>Tags</label>
               <div className="tags">
                 {SYSTEM_TAGS.map(t => (
                   <button key={t} type="button" className={`tag ${form.tags.includes(t) ? 'on' : ''}`}
@@ -248,18 +283,21 @@ export default function CustomerDrawer({
                     <button className="tag on" style={{ padding: '5px 10px' }} onClick={addCustomTag}>Add</button>
                   </span>
                 ) : (
-                  <button className="tag" style={{ background: '#F1EEFF', color: '#6C4FE0', borderColor: '#E7E2FF', fontWeight: 800 }} onClick={() => setAddingTag(true)}>+ Add tag</button>
+                  <button className="tag" style={{ background: '#F1EEFF', color: '#6C4FE0', borderColor: '#E7E2FF', fontWeight: 800 }} onClick={() => setAddingTag(true)}>+</button>
                 )}
               </div>
             </div>
+
+            {/* Socials */}
             <div className="field">
-              <label>Instagram ID <span style={{ color: '#7C8092', fontWeight: 500, fontSize: 11 }}>· for ad targeting</span></label>
+              <label>Instagram ID</label>
               <input value={form.instagram_id} onChange={e => setForm({ ...form, instagram_id: e.target.value })} placeholder="@priya.sharma" />
             </div>
             <div className="field">
               <label>Facebook ID</label>
               <input value={form.facebook_id} onChange={e => setForm({ ...form, facebook_id: e.target.value })} placeholder="fb.me/priya" />
             </div>
+
             <div className="field full">
               <label>Notes</label>
               <textarea value={form.notes} onChange={e => setForm({ ...form, notes: e.target.value })}
@@ -272,7 +310,7 @@ export default function CustomerDrawer({
           <div className="acts">
             <button className="btn-ghost" onClick={onClose}>Cancel</button>
             <button className="btn-primary" disabled={saving} onClick={save}>
-              {saving ? 'Saving…' : 'Save guest'}
+              {saving ? 'Saving…' : (isEdit ? 'Update guest' : 'Save guest')}
             </button>
           </div>
         </div>

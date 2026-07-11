@@ -386,6 +386,64 @@ export const HOME_V2_CSS = `
 .shv2 .kpi__lbl{font-weight:800}
 .shv2 .brand h1{font-weight:800}
 
+/* Right-column customer detail card (top of book-right) */
+.shv2-drawer .cd{background:#FFFFFF;border:1px solid #ECECF3;border-radius:14px;padding:14px;margin-bottom:14px;box-shadow:0 6px 22px rgba(30,32,50,.06)}
+.shv2-drawer .cd__h{display:flex;align-items:center;gap:10px;padding-bottom:12px;border-bottom:1px solid #F3F3F8;margin-bottom:10px}
+.shv2-drawer .cd__h .av{width:42px;height:42px;border-radius:50%;background:#F1EEFF;color:#6C4FE0;display:grid;place-items:center;font-family:'Plus Jakarta Sans';font-weight:800;font-size:16px;background-size:cover;background-position:center;flex:none}
+.shv2-drawer .cd__h .who{flex:1;min-width:0}
+.shv2-drawer .cd__h .who b{font-family:'Plus Jakarta Sans';font-size:14.5px;font-weight:800;color:#23252F;display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.shv2-drawer .cd__h .who span{font-size:11.5px;color:#7C8092;font-weight:600}
+.shv2-drawer .cd__view{font-size:11px;font-weight:700;color:#6C4FE0;background:#F1EEFF;border:1px solid #E7E2FF;padding:5px 9px;border-radius:8px;cursor:pointer;transition:.15s;flex:none}
+.shv2-drawer .cd__view:hover{background:#6C4FE0;color:#fff;border-color:#6C4FE0}
+.shv2-drawer .cd-sec{padding:8px 0;border-top:1px dashed #F3F3F8}
+.shv2-drawer .cd-sec:first-of-type{border-top:none;padding-top:0}
+.shv2-drawer .cd-sec .lb{font-size:10px;font-weight:800;letter-spacing:.4px;text-transform:uppercase;color:#9A9EAE;margin-bottom:5px}
+.shv2-drawer .cd-line{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:3px 0;font-size:12px}
+.shv2-drawer .cd-line .k{color:#7C8092;font-weight:600}
+.shv2-drawer .cd-line .v{color:#23252F;font-weight:700;text-align:right;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:170px}
+.shv2-drawer .cd-line .v.money{font-family:'Plus Jakarta Sans';color:#2FA96A}
+.shv2-drawer .cd-line .v.warn{color:#E8952B}
+.shv2-drawer .cd-empty{font-size:11.5px;color:#9A9EAE;text-align:center;padding:12px 0;font-weight:600}
+.shv2-drawer .cd-badge{display:inline-flex;align-items:center;gap:5px;font-size:10.5px;font-weight:800;padding:3px 8px;border-radius:20px;letter-spacing:.2px}
+.shv2-drawer .cd-badge.mem{background:#F1EEFF;color:#6C4FE0}
+.shv2-drawer .cd-badge.wallet{background:#E4F6F3;color:#12A594}
+
+/* Full guest profile modal (opened via "View full details") */
+.shv2-profile-back{position:fixed;inset:0;background:rgba(28,26,54,.5);backdrop-filter:blur(2px);opacity:0;visibility:hidden;transition:.24s;z-index:90}
+.shv2-profile-back.open{opacity:1;visibility:visible}
+.shv2-profile{position:fixed;top:50%;left:50%;transform:translate(-50%,-50%) scale(.96);z-index:100;background:#FFFFFF;width:min(920px,92vw);max-height:88vh;border-radius:16px;overflow:hidden;box-shadow:0 30px 80px rgba(28,26,54,.35);opacity:0;visibility:hidden;transition:.28s cubic-bezier(.22,.61,.36,1);display:flex;flex-direction:column;font-family:'Inter',system-ui,sans-serif;color:#23252F}
+.shv2-profile.open{opacity:1;visibility:visible;transform:translate(-50%,-50%) scale(1)}
+.shv2-profile *{box-sizing:border-box}
+.shv2-profile h3,.shv2-profile h4{font-family:'Plus Jakarta Sans',sans-serif;font-weight:800}
+.shv2-profile__h{padding:18px 22px;border-bottom:1px solid #ECECF3;display:flex;align-items:center;gap:14px}
+.shv2-profile__h .av{width:56px;height:56px;border-radius:50%;background:#F1EEFF;color:#6C4FE0;display:grid;place-items:center;font-family:'Plus Jakarta Sans';font-weight:800;font-size:22px;background-size:cover;background-position:center;flex:none}
+.shv2-profile__h .who{flex:1;min-width:0}
+.shv2-profile__h h3{font-size:20px}
+.shv2-profile__h p{font-size:13px;color:#7C8092;font-weight:600}
+.shv2-profile__close{width:36px;height:36px;border-radius:10px;background:#F3F3F8;color:#7C8092;border:none;display:grid;place-items:center;cursor:pointer}
+.shv2-profile__close:hover{background:#FCEAF1;color:#E45C86}
+.shv2-profile__close svg{width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:2.2}
+.shv2-profile__body{padding:20px 22px;overflow-y:auto;flex:1;background:#FAFAFF}
+.shv2-profile .p-grid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-bottom:16px}
+.shv2-profile .p-card{background:#FFFFFF;border:1px solid #ECECF3;border-radius:12px;padding:12px 14px}
+.shv2-profile .p-card .lb{font-size:10px;font-weight:800;letter-spacing:.4px;text-transform:uppercase;color:#9A9EAE;margin-bottom:6px}
+.shv2-profile .p-card .val{font-family:'Plus Jakarta Sans';font-weight:800;font-size:17px;color:#23252F}
+.shv2-profile .p-card .sub{font-size:11px;color:#7C8092;font-weight:600;margin-top:2px}
+.shv2-profile h4{font-size:14px;margin:6px 0 10px;color:#3C3F4E}
+.shv2-profile .p-details{display:grid;grid-template-columns:1fr 1fr;gap:6px 20px;background:#FFFFFF;border:1px solid #ECECF3;border-radius:12px;padding:14px;margin-bottom:16px}
+.shv2-profile .p-details .k{font-size:11px;font-weight:700;color:#7C8092}
+.shv2-profile .p-details .v{font-size:13px;font-weight:600;color:#23252F;margin-bottom:4px}
+.shv2-profile .hist{background:#FFFFFF;border:1px solid #ECECF3;border-radius:12px;overflow:hidden}
+.shv2-profile .hist .row{display:grid;grid-template-columns:100px 1fr 80px 90px 90px;gap:10px;align-items:center;padding:10px 14px;border-bottom:1px solid #F3F3F8;font-size:12.5px;font-weight:600}
+.shv2-profile .hist .row.head{background:#F6F6FB;font-size:10.5px;font-weight:800;letter-spacing:.3px;text-transform:uppercase;color:#7C8092}
+.shv2-profile .hist .row:last-child{border-bottom:none}
+.shv2-profile .hist .badge{font-size:10px;font-weight:800;padding:2px 8px;border-radius:20px;text-transform:uppercase;letter-spacing:.2px;justify-self:start}
+.shv2-profile .hist .badge.completed{background:#E7F6ED;color:#2FA96A}
+.shv2-profile .hist .badge.cancelled{background:#FCEAF1;color:#E45C86}
+.shv2-profile .hist .badge.pending{background:#FDF3E4;color:#E8952B}
+.shv2-profile .hist .money{font-family:'Plus Jakarta Sans';font-weight:800;color:#23252F;text-align:right}
+.shv2-profile__f{padding:12px 22px;border-top:1px solid #ECECF3;display:flex;justify-content:space-between;align-items:center;gap:10px;background:#FFFFFF}
+
 @media(max-width:1150px){
   .shv2 .kgrid{grid-template-columns:repeat(2,1fr)}
   .shv2 .queue{grid-column:1/3 !important;grid-row:auto !important}
