@@ -30,6 +30,7 @@ import StaffSettingsContent from '@/components/staff/StaffSettingsContent';
 import { InventoryView } from '@/pages/salon/SalonInventoryPage';
 import SalonHomeNew from '@/pages/salon/SalonHomeNew';
 import SalonHomeV2 from '@/pages/salon/SalonHomeV2';
+import HomeV2Shell from '@/pages/salon/home_v2/HomeV2Shell';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { SubscriptionProvider } from '@/contexts/SubscriptionContext';
 import { getSession, clearSession } from '@/utils/sessionManager';
@@ -1215,6 +1216,13 @@ export default function EnhancedSalonDashboard() {
         handleCompleteToken={handleCompleteToken}
       />
     ) : (
+    <HomeV2Shell
+      salon={salon}
+      salonId={salonId}
+      getAuthHeaders={getAuthHeaders}
+      activeTab={activeTab}
+      onSaved={() => { try { fetchTokens?.(); fetchBarbers?.(); } catch (_) {} }}
+    >
     <div className="min-h-screen bg-background relative overflow-hidden">
       {/* Background Image with Overlay */}
       <div className="fixed inset-0 z-0">
@@ -2820,6 +2828,7 @@ export default function EnhancedSalonDashboard() {
       </Dialog>
       </div>
     </div>
+    </HomeV2Shell>
     )}
     <SubscriptionPaywallModal />
     </SubscriptionProvider>

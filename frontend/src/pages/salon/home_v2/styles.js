@@ -427,6 +427,21 @@ export const HOME_V2_CSS = `
 .shv2-drawer .gd-row .v{color:#23252F;font-weight:700;text-align:right;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:170px}
 .shv2-drawer .gd-empty{font-size:11.5px;color:#9A9EAE;text-align:center;padding:10px 0;font-weight:600}
 
+/* Tab host — hosts non-Home tab pages inside the shell. Neutralises legacy
+   fixed backgrounds and full-viewport wrappers so the shell layout owns the
+   space between rail (left) and ribbon (right). */
+.shv2 .shv2-tabhost{padding:0;min-height:calc(100vh - 68px);background:var(--bg);position:relative;overflow-x:hidden}
+.shv2 .shv2-tabhost > .min-h-screen{min-height:auto !important;background:transparent !important;overflow:visible !important}
+/* Kill the legacy fixed background/gradient overlay (first child of min-h-screen). */
+.shv2 .shv2-tabhost > .min-h-screen > .fixed.inset-0{display:none !important}
+/* Hide the legacy header (Salon Dashboard / hamburger / branch chip) — shell topbar replaces it entirely. */
+.shv2 .shv2-tabhost > .min-h-screen > .relative.z-10 > div:first-child{display:none !important}
+.shv2 .shv2-tabhost > .min-h-screen > .relative.z-10 > .backdrop-blur-xl{display:none !important}
+.shv2 .shv2-tabhost .max-w-7xl{max-width:none;margin:0;padding:14px 24px 40px}
+.shv2 .shv2-tabhost .container{max-width:none}
+/* Hide the hamburger sidebar (the rail replaces it). */
+.shv2 .shv2-tabhost aside[class*="fixed"][class*="left-0"][class*="top-0"][class*="bottom-0"]{display:none !important}
+
 /* Full guest profile modal (opened via "View full details") */
 .shv2-profile-back{position:fixed;inset:0;background:rgba(28,26,54,.5);backdrop-filter:blur(2px);opacity:0;visibility:hidden;transition:.24s;z-index:90}
 .shv2-profile-back.open{opacity:1;visibility:visible}

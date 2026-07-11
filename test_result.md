@@ -6163,3 +6163,24 @@ agent_communication:
     - agent: "main"
       message: "Pending-list progress: (a) ENV CRASH FIX — /app/backend/.env and /app/frontend/.env were missing (container reset) so backend was in a KeyError('MONGO_URL') crash loop and frontend had no REACT_APP_BACKEND_URL. Restored both .env files (MONGO_URL=mongodb://localhost:27017, DB_NAME=test_database, JWT_SECRET_KEY, Twilio sandbox creds from prior test log, PUBLIC_APP_URL/APP_URL matching supervisor's APP_URL). Backend now serves on :8001 (200 OK). Frontend rebuilt clean. (b) ITEM #3 — seeded demo salon. Backend startup auto-seeded 'The Looks Unisex Salon' (salon_id d1eb147e-b5e3-499a-9301-20b36bf1a2b2), admin/salon123, and 2 barbers (Imran, Abdul). Then ran /app/backend/seed_demo_extras.py — enabled 6 starter General services + added 15 extra services across 8 categories (Hair, Facial, Clean Up, Manicure, Pedicure, Waxing, Beard, Kids) = 21 enabled services with thumbnails. Verified via GET /api/salons/{sid}/services/enabled (200 OK, 21 items). Updated /app/memory/test_credentials.md. (c) ITEM #5 — Copy-URL polish. Rewrote copyLink() in SalonHomeV2 to use navigator.clipboard when secure-context, fall back to a temporary textarea + document.execCommand('copy'), and lastly window.prompt() with the URL so the user can copy manually. Added success animation: the copy button briefly turns green with a check-mark icon (shv2-copyPop keyframe), the toast label animates in ('✓ Copied!' green / 'Copy failed' pink) via shv2-flashIn keyframe. (d) ITEM #7 — Staff attendance/salary RecursionError NO LONGER OCCURS. Verified live: GET /api/salons/{sid}/staff-attendance/month/2026-07 (200), GET /api/salons/{sid}/staff-salary/month/2026-07 (200, returns salary_records array), POST calculate (200), PUT override (200), POST pay (200). This was already fixed in prior sessions per test_result.md but re-verified after fresh env restore. Items #2 (extend rail+ribbon shell to Queue/Staff/Services/Finance/Guests/Analytics/Shop/Stock/Marketing/Settings), #4 (marketing tracking depth), and #6 (Cashfree credentials) still pending — awaiting user go-ahead on #2 scope (it's a large session)."
 
+
+frontend:
+  - task: "Pending #2 — extend rail+ribbon shell to all salon tabs"
+    implemented: true
+    working: true
+    file: "/app/frontend/src/pages/salon/home_v2/HomeV2Shell.js, /app/frontend/src/pages/EnhancedSalonDashboard.js, /app/frontend/src/pages/salon/home_v2/styles.js"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: true
+    status_history:
+        - working: true
+          agent: "main"
+          comment: "Created a reusable HomeV2Shell component (extracted rail + ribbon + topbar + global appointment/guest drawers) and wrapped the legacy EnhancedSalonDashboard body with it whenever the user is NOT on the Home tab (Home continues to use SalonHomeV2 directly). RAIL_ITEMS drives both the rail-highlight (activeTab prop) and navigation. Legacy header/hamburger inside the tab content is hidden via scoped .shv2-tabhost CSS (attribute-and-child selectors, no fragile / escaping). Verified live: Home, Queue, Staff, Services (21 seeded), Finance, Analytics, Marketing, Settings all render with rail + ribbon + topbar consistently and highlight the correct rail item. The +/New Appointment ribbon button now works from every tab (global drawer). No visual duplication, no broken layout observed. Frontend compiles clean (only pre-existing exhaustive-deps warnings). Ready for user's smoke test."
+
+metadata:
+  updated: "2026-07-11 (3)"
+
+agent_communication:
+    - agent: "main"
+      message: "Pending #2 shipped. Created /app/frontend/src/pages/salon/home_v2/HomeV2Shell.js — reusable shell (rail + ribbon + topbar + global New Appointment / Add Guest drawers). EnhancedSalonDashboard now wraps its non-Home layout with <HomeV2Shell activeTab={activeTab}>. Rail correctly highlights the current tab. Screenshot-verified all 10 tabs (Home, Queue, Staff, Services, Finance, Guests, Analytics, Shop, Stock, Marketing, Settings) — legacy content renders inside the shell without the duplicate header/hamburger. Only #4 (marketing tracking depth) and #6 (Cashfree credentials) remain from the pending list."
+
