@@ -190,9 +190,15 @@ export const HOME_V2_CSS = `
 .shv2 .cust-menu .empty{font-size:12px;color:var(--muted);padding:16px;text-align:center;font-weight:600}
 .shv2 .wa-send{background:var(--wa);color:#fff;border-radius:9px;padding:0 14px;display:flex;align-items:center;gap:6px;font-size:12.5px;font-weight:800;flex:none}
 .shv2 .wa-send svg{width:14px;height:14px;fill:currentColor;stroke:none}
-.shv2 .wa-copy{background:var(--line-2);color:var(--ink-soft);border-radius:9px;padding:0 10px;display:grid;place-items:center;transition:.15s;flex:none;border:1px solid var(--line)}
+.shv2 .wa-copy{background:var(--line-2);color:var(--ink-soft);border-radius:9px;padding:0 10px;display:grid;place-items:center;transition:.2s cubic-bezier(.22,.61,.36,1);flex:none;border:1px solid var(--line)}
 .shv2 .wa-copy:hover{background:var(--primary-050);color:var(--primary);border-color:var(--primary-100)}
 .shv2 .wa-copy svg{width:14px;height:14px;fill:none;stroke:currentColor;stroke-width:2}
+.shv2 .wa-copy.copied{background:#E7F6ED;color:#2FA96A;border-color:#B9E5C8;animation:shv2-copyPop .34s ease-out}
+@keyframes shv2-copyPop{0%{transform:scale(.85)}55%{transform:scale(1.15)}100%{transform:scale(1)}}
+.shv2 .copy-flash{font-size:11px;font-weight:800;margin-top:2px;letter-spacing:.2px;animation:shv2-flashIn .28s ease-out}
+.shv2 .copy-flash.ok{color:#2FA96A}
+.shv2 .copy-flash.err{color:#E45C86}
+@keyframes shv2-flashIn{0%{opacity:0;transform:translateY(4px)}100%{opacity:1;transform:translateY(0)}}
 
 /* SECTIONS */
 .shv2 .row{display:grid;gap:18px;margin-bottom:18px}

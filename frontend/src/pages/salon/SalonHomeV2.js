@@ -276,9 +276,32 @@ export default function SalonHomeV2({ salon, salonId, tokens = [], barbers = [],
   const copyLink = async () => {
     const url = links?.[`${linkType}_url`] || '';
     if (!url) { toast.error('Link not ready yet'); return; }
-    try { await navigator.clipboard.writeText(url); setCopyToast('Link copied'); }
-    catch { setCopyToast('Copy failed'); }
-    setTimeout(() => setCopyToast(''), 1600);
+    // Modern clipboard API when available, textarea fallback for older browsers / non-HTTPS contexts.
+    let ok = false;
+    try {
+      if (navigator.clipboard && window.isSecureContext) {
+        await navigator.clipboard.writeText(url);
+        ok = true;
+      } else {
+        const ta = document.createElement('textarea');
+        ta.value = url;
+        ta.setAttribute('readonly', '');
+        ta.style.position = 'fixed'; ta.style.top = '0'; ta.style.left = '0'; ta.style.opacity = '0';
+        document.body.appendChild(ta);
+        ta.focus(); ta.select();
+        ok = document.execCommand && document.execCommand('copy');
+        document.body.removeChild(ta);
+      }
+    } catch { ok = false; }
+    if (ok) {
+      setCopyToast('✓ Copied!');
+      setTimeout(() => setCopyToast(''), 1800);
+    } else {
+      // Ultimate fallback — show URL so user can copy manually.
+      setCopyToast('Copy failed');
+      try { window.prompt('Copy this link:', url); } catch (_) { /* noop */ }
+      setTimeout(() => setCopyToast(''), 2200);
+    }
   };
 
   // Staff attendance toggle
@@ -580,9 +603,15 @@ export default function SalonHomeV2({ salon, salonId, tokens = [], barbers = [],
                 <button className="wa-send" onClick={sendBookingLink} disabled={linkSending}>
                   <I.send /> {linkSending ? '…' : 'Send'}
                 </button>
-                <button className="wa-copy" onClick={copyLink} title={`Copy ${linkType} link`}><I.copy /></button>
+                <button className={`wa-copy ${copyToast.startsWith('✓') ? 'copied' : ''}`} onClick={copyLink} title={`Copy ${linkType} link`}>
+                  {copyToast.startsWith('✓')
+                    ? (<svg viewBox="0 0 24 24" style={{width:14,height:14,fill:'none',stroke:'currentColor',strokeWidth:2.5,strokeLinecap:'round',strokeLinejoin:'round'}}><polyline points="20 6 9 17 4 12"/></svg>)
+                    : (<I.copy />)}
+                </button>
               </div>
-              {copyToast && <div style={{ fontSize: 11, color: '#2FA96A', fontWeight: 700 }}>{copyToast}</div>}
+              {copyToast && (
+                <div className={`copy-flash ${copyToast.startsWith('✓') ? 'ok' : 'err'}`}>{copyToast}</div>
+              )}
             </div>
           </div>
 
