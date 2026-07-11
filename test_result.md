@@ -6086,3 +6086,44 @@ test_plan:
 agent_communication:
     - agent: "main"
       message: "Home page fully rebuilt as per attached mock + all 7 user overrides. Backend curl smoke tests all green. Screenshots verified. Existing hamburger items preserved as rail entries. Existing queue action buttons preserved. Add booking/customer drawers slide from right at ~75vw. New-guest sub-drawer stacks on top with 0.3s smooth auto-select. Send-booking-link chip is compact (same footprint) with triangle dropdown of 3 link types + copy icon. Appointment drawer: 3-mode compact chips (Walk-in auto-selected), services as chips with category filter (OPEN), products collapsible, stylist mandatory (not preselected), schedule auto-selects current time, full billing block wired. Targets chip has per-barber filter at top-right. All metrics react to Today/Yesterday/Range filter. Backend testing agent timed out — invoke it when convenient to run the full contract tests. Frontend testing pending user go-ahead."
+
+backend:
+  - task: "Customer master extended fields — photo_url, dob, preferred_barber_id, instagram_id, facebook_id, last_visit surfaced"
+    implemented: true
+    working: true
+    file: "/app/backend/server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+        - working: true
+          agent: "main"
+          comment: "Extended POST /api/salons/{sid}/customers to persist 5 new fields for the redesigned New Guest drawer (photo_url as data-URL or CDN URL, dob YYYY-MM-DD, preferred_barber_id, instagram_id, facebook_id — the socials power future ad targeting). GET /api/salons/{sid}/customers now returns these fields plus last_visit (max date across tokens per phone) and pulls photo_url from users.profile_photo when the guest owns a customer-app account (auto-sync). Smoke test round-trips all fields (curl create + list + delete)."
+
+frontend:
+  - task: "Home v2 — polish pass: font load, Gallery→Marketing rail, wider send-link chip with tabbed link-type + customer picker at phone, appointment 2-column layout, new guest fields, bolder typography"
+    implemented: true
+    working: true
+    file: "/app/frontend/src/pages/salon/SalonHomeV2.js"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: true
+    status_history:
+        - working: true
+          agent: "main"
+          comment: "Second pass on Home v2 addressing all 7 user requests: (1) Rail: Gallery renamed to Marketing, links to /salon/dashboard?tab=marketing (paper-plane icon). (2) Fonts: Plus Jakarta Sans (500-800) + Inter (400-800) added to Google Fonts <link> in public/index.html so the mock's typography is faithful. Body weight raised to 500, headings to 800, KPI labels to 800. (3) Casing preserved from mock — KPI labels UPPER, values Title Case, greetings 'Good afternoon' etc. (4) Send-booking-link chip redesigned: (a) grid columns changed to 0.8fr×3 + 1.9fr so the WA chip is wider and Appointments/Reminders/Waitlist are narrower; (b) link-type is now a 3-tab segmented control (Booking/Homepage/Menu) inside the chip header — replaces the send-button dropdown; (c) phone input has a chevron button opening a picker of EXISTING guests with avatar/name/number/last-visit; (d) copy icon retained on the right. (5.1) New Guest drawer: profile photo upload with dashed-border preview (data-URL, 3MB cap, syncs from users.profile_photo). (5.2) New Guest drawer: DOB, Preferred staff dropdown (barbers), custom tags via '+ Add tag' inline input (system tags VIP/New/Regular preserved), Instagram + Facebook fields. (6) Appointment drawer split into 2 columns: LEFT wider column has all form fields (booking-type chips, guest, services chips, products collapsible, stylist, schedule, billing inputs); RIGHT narrower sticky column shows live 'Order details' with service list, product list, discount/tip/membership lines, and a prominent violet Grand Total block + mode hint. (7) Typography boldened site-wide inside .shv2. Screenshots verified. Backend curl confirmed all new customer fields round-trip. NOT tested via testing_agent yet (awaiting user go-ahead)."
+
+metadata:
+  updated: "2026-07-11"
+
+test_plan:
+  current_focus:
+    - "Home v2 — polish pass"
+    - "Customer master extended fields"
+  stuck_tasks: []
+  test_all: false
+  test_priority: "high_first"
+
+agent_communication:
+    - agent: "main"
+      message: "Second pass on Home v2 complete. All 7 requested changes shipped and verified visually + via backend curl. Gallery→Marketing done. Fonts loaded (Plus Jakarta Sans + Inter) and bolded per mock. Send-link chip is wider, has 3 link-type tabs and a customer picker at the phone field. New Guest has photo upload, DOB, preferred staff, custom tags via '+', and Instagram/Facebook IDs. Appointment is 2-column with sticky Order Details on the right. Pending list item #5 (copy fallback polish) still open — waiting for your go-ahead. Item #2 (extending shell to other tabs) is a MUCH bigger effort; recommend a separate session."

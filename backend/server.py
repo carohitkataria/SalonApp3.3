@@ -6357,27 +6357,35 @@ async def get_salon_customers(salon_id: str, branch_id: Optional[str] = None, cu
         tokens_query["branch_id"] = branch_id
     tokens = await db.tokens.find(
         tokens_query,
-        {"_id": 0, "user_id": 1, "customer_name": 1, "phone": 1}
+        {"_id": 0, "user_id": 1, "customer_name": 1, "phone": 1, "created_at": 1, "date": 1}
     ).to_list(10000)
-    
-    # Group by phone to get unique customers
+
+    # Group by phone to get unique customers + track last visit date
     customers_map = {}
+    last_visit_by_phone: Dict[str, str] = {}
     for token in tokens:
         phone = token.get('phone')
-        if phone and phone not in customers_map:
-            # Get user details if user_id exists
+        if not phone:
+            continue
+        visit_dt = token.get('date') or token.get('created_at') or ''
+        if isinstance(visit_dt, str) and visit_dt:
+            prev = last_visit_by_phone.get(phone, '')
+            if visit_dt > prev:
+                last_visit_by_phone[phone] = visit_dt
+        if phone not in customers_map:
             user_data = None
             if token.get('user_id'):
                 user_data = await db.users.find_one({"id": token['user_id']}, {"_id": 0})
-            
             customers_map[phone] = {
                 "phone": phone,
                 "name": token.get('customer_name'),
                 "user_id": token.get('user_id'),
                 "gender": user_data.get('gender') if user_data else None,
                 "date_of_birth": user_data.get('date_of_birth') if user_data else None,
+                # Pull profile photo from user account if guest uploaded via customer app
+                "photo_url": (user_data or {}).get('profile_photo') or (user_data or {}).get('photo_url'),
             }
-    
+
     # Also include manually added customers
     manual_query = {"salon_id": salon_id, "status": {"$ne": "deleted"}}
     if branch_id:
@@ -6385,24 +6393,44 @@ async def get_salon_customers(salon_id: str, branch_id: Optional[str] = None, cu
     manual_customers = await db.salon_customers.find(
         manual_query, {"_id": 0}
     ).to_list(10000)
-    
+
     for mc in manual_customers:
         phone = mc.get('phone')
-        if phone and phone not in customers_map:
+        if not phone:
+            continue
+        if phone not in customers_map:
             customers_map[phone] = {
                 "phone": phone,
                 "name": mc.get('name'),
                 "user_id": None,
                 "gender": mc.get('gender', 'Men'),
-                "date_of_birth": mc.get('date_of_birth'),
-                "source": "manual"
+                "date_of_birth": mc.get('date_of_birth') or mc.get('dob'),
+                "source": mc.get('source') or "manual",
+                "photo_url": mc.get('photo_url'),
+                "instagram_id": mc.get('instagram_id'),
+                "facebook_id": mc.get('facebook_id'),
+                "preferred_barber_id": mc.get('preferred_barber_id'),
+                "tags": mc.get('tags') or [],
+                "id": mc.get('id'),
             }
-        elif phone and phone in customers_map:
-            # Update gender / DOB if not already set
-            if not customers_map[phone].get('gender'):
-                customers_map[phone]['gender'] = mc.get('gender', 'Men')
-            if not customers_map[phone].get('date_of_birth') and mc.get('date_of_birth'):
-                customers_map[phone]['date_of_birth'] = mc.get('date_of_birth')
+        else:
+            # Merge — salon-master fields take priority when the token record was thin.
+            cust = customers_map[phone]
+            if not cust.get('gender'):
+                cust['gender'] = mc.get('gender', 'Men')
+            if not cust.get('date_of_birth'):
+                cust['date_of_birth'] = mc.get('date_of_birth') or mc.get('dob')
+            if not cust.get('photo_url') and mc.get('photo_url'):
+                cust['photo_url'] = mc.get('photo_url')
+            cust.setdefault('instagram_id', mc.get('instagram_id'))
+            cust.setdefault('facebook_id', mc.get('facebook_id'))
+            cust.setdefault('preferred_barber_id', mc.get('preferred_barber_id'))
+            cust.setdefault('tags', mc.get('tags') or [])
+            cust.setdefault('id', mc.get('id'))
+
+    # Attach last visit date computed from tokens
+    for phone, cust in customers_map.items():
+        cust['last_visit'] = last_visit_by_phone.get(phone)
     
     # Attach active wallet balance for each customer (if any active membership)
     if customers_map:
@@ -6467,6 +6495,12 @@ async def add_salon_customer(salon_id: str, body: dict, current_user=Depends(get
         "email": body.get("email") or None,
         "tags": body.get("tags") or [],
         "notes": body.get("notes") or "",
+        # Extended master fields (added for Home v2 New Guest drawer)
+        "photo_url": body.get("photo_url") or None,   # data-URL or CDN URL
+        "dob": body.get("dob") or None,               # ISO date "YYYY-MM-DD"
+        "preferred_barber_id": body.get("preferred_barber_id") or None,
+        "instagram_id": (body.get("instagram_id") or "").strip() or None,
+        "facebook_id":  (body.get("facebook_id")  or "").strip() or None,
         "created_at": datetime.now(timezone.utc).isoformat(),
         # source enum: online|qr|owner|direct  (legacy value "manual" also allowed)
         "source": (body.get("source") or "owner"),

@@ -44,7 +44,7 @@ const RAIL_ITEMS = [
   { id: 'analytics',  label: 'Analytics', route: '/salon/dashboard?tab=analytics' },
   { id: 'marketplace',label: 'Shop',      route: '/salon/marketplace' },
   { id: 'inventory',  label: 'Stock',     route: '/salon/dashboard?tab=inventory' },
-  { id: 'gallery',    label: 'Gallery',   route: '/salon/dashboard?tab=gallery' },
+  { id: 'marketing',  label: 'Marketing', route: '/salon/dashboard?tab=marketing' },
   { id: 'salon',      label: 'Settings',  route: '/salon/dashboard?tab=salon' },
 ];
 
@@ -151,10 +151,12 @@ export default function SalonHomeV2({ salon, salonId, tokens = [], barbers = [],
   // Send-booking-link chip state
   const [linkPhone, setLinkPhone] = useState('');
   const [linkType, setLinkType] = useState('book'); // book | home | menu
-  const [linkMenuOpen, setLinkMenuOpen] = useState(false);
+  const [custMenuOpen, setCustMenuOpen] = useState(false);
+  const [custQuery, setCustQuery] = useState('');
+  const [existingCustomers, setExistingCustomers] = useState([]);
   const [linkSending, setLinkSending] = useState(false);
   const [copyToast, setCopyToast] = useState('');
-  const linkMenuRef = useRef(null);
+  const custMenuRef = useRef(null);
 
   // Drawers
   const [apptOpen, setApptOpen] = useState(false);
@@ -170,14 +172,35 @@ export default function SalonHomeV2({ salon, salonId, tokens = [], barbers = [],
     document.head.appendChild(el);
   }, []);
 
-  // Close send-link dropdown on outside click
+  // Close send-link customer picker on outside click
   useEffect(() => {
     const onDoc = (e) => {
-      if (linkMenuRef.current && !linkMenuRef.current.contains(e.target)) setLinkMenuOpen(false);
+      if (custMenuRef.current && !custMenuRef.current.contains(e.target)) setCustMenuOpen(false);
     };
     document.addEventListener('mousedown', onDoc);
     return () => document.removeEventListener('mousedown', onDoc);
   }, []);
+
+  // Load existing customers for the send-link picker (name + phone + photo + last visit)
+  useEffect(() => {
+    (async () => {
+      try {
+        const res = await axios.get(`${API}/salons/${salonId}/customers?limit=2000`, { headers: getAuthHeaders() });
+        const list = Array.isArray(res.data) ? res.data : (res.data?.customers || []);
+        setExistingCustomers(list);
+      } catch (_) { setExistingCustomers([]); }
+    })();
+  }, [salonId, getAuthHeaders]);
+
+  // Filter customer list for the picker
+  const filteredExistingCustomers = useMemo(() => {
+    const q = (custQuery || '').trim().toLowerCase();
+    if (!q) return existingCustomers.slice(0, 30);
+    return existingCustomers.filter(c => (
+      (c.name || '').toLowerCase().includes(q) ||
+      (c.phone || '').includes(q)
+    )).slice(0, 30);
+  }, [existingCustomers, custQuery]);
 
   // Fetch home KPIs whenever filter changes (drives EVERY metric).
   const fetchKpis = async () => {
@@ -293,7 +316,7 @@ export default function SalonHomeV2({ salon, salonId, tokens = [], barbers = [],
               {it.id === 'analytics' && <I.chart />}
               {it.id === 'marketplace' && <I.cart />}
               {it.id === 'inventory' && <I.tag />}
-              {it.id === 'gallery' && <I.star />}
+              {it.id === 'marketing' && <I.send />}
               {it.id === 'salon' && <I.gear />}
               <span>{it.label}</span>
             </button>
@@ -498,40 +521,68 @@ export default function SalonHomeV2({ salon, salonId, tokens = [], barbers = [],
               <div><b>{secondary.waitlist_count || 0}</b><span>Waitlist</span></div>
             </div>
 
-            {/* Send booking link — compact */}
+            {/* Send booking link — wider chip with 3 link-type tabs + customer picker */}
             <div className="wacard">
               <div className="wah">
-                <div className="wic"><I.wa /></div>
-                <span>Send booking link (WhatsApp)</span>
+                <div className="l">
+                  <div className="wic"><I.wa /></div>
+                  <span>Send booking link (WhatsApp)</span>
+                </div>
+                <div className="link-seg">
+                  {[
+                    { id: 'book', label: 'Booking' },
+                    { id: 'home', label: 'Homepage' },
+                    { id: 'menu', label: 'Menu' },
+                  ].map(o => (
+                    <button key={o.id} className={linkType === o.id ? 'on' : ''} onClick={() => setLinkType(o.id)}>{o.label}</button>
+                  ))}
+                </div>
               </div>
               <div className="wa-input">
-                <input
-                  placeholder="Guest name or 10-digit mobile"
-                  value={linkPhone}
-                  onChange={e => setLinkPhone(e.target.value)}
-                />
-                <div className="wa-btn-group" ref={linkMenuRef}>
-                  <button className="wa-send" onClick={sendBookingLink} disabled={linkSending} title={linkType === 'home' ? 'Send salon homepage' : linkType === 'menu' ? 'Send menu' : 'Send booking link'}>
-                    <I.send /> {linkSending ? '…' : 'Send'}
+                <div className="phone-wrap" ref={custMenuRef}>
+                  <input
+                    placeholder="Enter mobile or pick a guest"
+                    value={linkPhone}
+                    onChange={e => { setLinkPhone(e.target.value); }}
+                    onFocus={() => { /* no auto-open — arrow controls list */ }}
+                  />
+                  <button className="cust-drop" onClick={() => setCustMenuOpen(v => !v)} title="Pick from existing guests">
+                    <svg viewBox="0 0 24 24"><polyline points="6 9 12 15 18 9"/></svg>
                   </button>
-                  <button className="wa-drop" onClick={() => setLinkMenuOpen(v => !v)} title="Choose link type"><I.triDown /></button>
-                  {linkMenuOpen && (
-                    <div className="wa-menu">
-                      {[
-                        { id: 'book', label: 'Send booking link' },
-                        { id: 'home', label: 'Send salon homepage link' },
-                        { id: 'menu', label: 'Send menu link' },
-                      ].map(o => (
-                        <button key={o.id} className={linkType === o.id ? 'on' : ''} onClick={() => { setLinkType(o.id); setLinkMenuOpen(false); }}>
-                          {o.label}
-                        </button>
-                      ))}
+                  {custMenuOpen && (
+                    <div className="cust-menu">
+                      <div className="cs">
+                        <input autoFocus placeholder="Search name or number…" value={custQuery} onChange={e => setCustQuery(e.target.value)} />
+                      </div>
+                      {filteredExistingCustomers.length === 0 && <div className="empty">No matching guests</div>}
+                      {filteredExistingCustomers.map((c) => {
+                        const initial = ((c.name || 'G')[0] || 'G').toUpperCase();
+                        const lv = c.last_visit ? new Date(c.last_visit).toLocaleDateString('en-IN', { day: '2-digit', month: 'short' }) : '—';
+                        return (
+                          <div key={(c.id || '') + c.phone} className="cust-row" onClick={() => {
+                            setLinkPhone((c.phone || '').replace(/^\+?91/, ''));
+                            setCustMenuOpen(false); setCustQuery('');
+                          }}>
+                            <div className="av" style={c.photo_url ? { backgroundImage: `url(${c.photo_url})` } : {}}>
+                              {!c.photo_url && initial}
+                            </div>
+                            <div className="info">
+                              <b>{c.name || 'Unknown'}</b>
+                              <span>{c.phone || 'No phone'}</span>
+                            </div>
+                            <div className="lv"><small>Last visit</small>{lv}</div>
+                          </div>
+                        );
+                      })}
                     </div>
                   )}
                 </div>
+                <button className="wa-send" onClick={sendBookingLink} disabled={linkSending}>
+                  <I.send /> {linkSending ? '…' : 'Send'}
+                </button>
                 <button className="wa-copy" onClick={copyLink} title={`Copy ${linkType} link`}><I.copy /></button>
               </div>
-              {copyToast && <div style={{ fontSize: 11, color: '#2FA96A', fontWeight: 600 }}>{copyToast}</div>}
+              {copyToast && <div style={{ fontSize: 11, color: '#2FA96A', fontWeight: 700 }}>{copyToast}</div>}
             </div>
           </div>
 
