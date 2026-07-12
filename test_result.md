@@ -6199,9 +6199,37 @@ frontend:
           comment: "Created QueueTabV2.js (~500 LoC, isolated) and swapped it in for the 350-line legacy Queue JSX in EnhancedSalonDashboard.js. All handlers are passed through as props — behaviour identical, only visual layer changed. New styling: (a) topbar card with Today/Yesterday/Range segmented control + view-date label; (b) purple-gradient Call Next primary CTA + purple-ghost Add Booking secondary CTA; (c) status filter pill group with live counts per status (All(3) / Waiting(1) / Called(1) / Done(1) etc.) plus separate barber-pill row; (d) rich token cards — colored left accent bar per status, big rounded gradient token chip (E1/E2/E3 with 'TOKEN' label) also color-coded per status, name+phone-icon+barber•slot•₹amount+paid/unpaid, date/time; (e) right side has direct-dial green pill button, status pill, and contextual action buttons: waiting → Call/Modify/Bell/Skip/Cancel, called → Complete/Modify/Re-call/Skip, skipped → Recall/Cancel, completed → Invoice/PDF; (f) friendly empty state with clock icon + helpful copy. All button colors match status intent (blue call, green complete, purple modify/recall, orange skip, pink cancel, green paid, amber unpaid). Screenshot-verified with 3 tokens in waiting/called/completed states — all render correctly."
 
 metadata:
-  updated: "2026-07-11 (4)"
+  updated: "2026-07-12 (marketing+guests-v2)"
 
 agent_communication:
     - agent: "main"
       message: "Queue tab fully re-skinned in Zenoti style (matches Home v2 look). New file: /app/frontend/src/pages/salon/home_v2/QueueTabV2.js. Swapped into EnhancedSalonDashboard replacing 349 lines of legacy JSX with a clean prop-driven component. All handlers (handleCallNext, handleCallToken, handleCompleteToken, handleRecallToken, handleSkipToken, handleCancelToken, handleSendNotification, handleOpenAddServices) plumbed through unchanged. Seeded 3 walk-in tokens (E1/E2/E3) and mutated their statuses to verify all 4 primary states render correctly (waiting/called/completed each with unique color-coded accent bar, token chip, status pill and contextual action buttons). Frontend compiles clean. Ready for user to click through the new UI."
+    - agent: "main"
+      message: "Marketing + Guests page V2 redesigns delivered per user-provided mocks (salon_marketing.html / salon_customers.html). Sidebar rail and right ribbon remain intact via HomeV2Shell wrapper. New files: /app/frontend/src/pages/salon/v2_pages/styles_v2.js (scoped .shv2 style extensions), MarketingV2.js (~880 LoC), CustomersV2.js (~500 LoC). EnhancedSalonDashboard.js updated: (a) menu label 'Customer Master' → 'Guests', (b) MarketingV2 replaces old MarketingTab block (activeTab==='marketing'), (c) CustomersV2 replaces old CustomerMaster block (activeTab==='customer-master'), (d) legacy imports removed. Marketing has 8 sub-tabs: Overview (6-KPI + active campaigns + channel mix + segment cards), Campaigns (list + Launch/Pause), Automations (toggle rows + PUT to flip active), Templates (bubble cards + Twilio approval tip), Offers & Perks (coupon strips + loyalty stats), Reputation (seeded demo with 'Coming soon' badge), Media (photos/video upload via existing salon PUT + social media 'coming soon' tiles), Settings (Twilio provider + DLT + quiet hours). Every 'New' action (New campaign / automation / template / coupon / guest) opens a right-side drawer using the existing .shv2-drawer + .shv2-overlay classes — same UX pattern as home. Wired to existing endpoints: GET/POST /salons/{id}/marketing/{overview,campaigns,automations,templates,segments,segments/preview,settings}, POST /salons/{id}/marketing/campaigns/{cid}/{launch,pause}, PUT /salons/{id}/marketing/automations/{aid}, GET/POST /salons/{id}/coupons, GET/POST /salons/{id}/customers, GET /salons/{id}/customers/{phone}/bookings|membership, PUT /salons/{id}/customers/{phone}. Guests page shows 6-KPI strip + filter chips (All/VIP/New/Lapsed/Members/Birthday this month with live counts) + Zenoti-style table + right-side profile drawer with Overview/Visits & invoices/Messages/Notes tabs (visits pulled from /bookings endpoint, notes persisted via PUT). Font: Inter + Plus Jakarta Sans kept from existing .shv2 tokens (matches attached HTML mocks). Frontend compiles cleanly (webpack 1 pre-existing eslint warning only). Seeded data untouched. Ready for testing."
+
+
+frontend:
+  - task: "Marketing page V2 re-design (matches salon_marketing.html mock)"
+    implemented: true
+    working: true
+    file: "/app/frontend/src/pages/salon/v2_pages/MarketingV2.js, /app/frontend/src/pages/salon/v2_pages/styles_v2.js, /app/frontend/src/pages/EnhancedSalonDashboard.js"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: true
+    status_history:
+        - working: true
+          agent: "main"
+          comment: "Replaces legacy MarketingTab.js. 8 sub-tabs (Overview/Campaigns/Automations/Templates/Offers & Perks/Reputation/Media/Settings). All 'New' clicks (Campaign, Automation, Template, Coupon) open right-side drawers using existing .shv2-drawer + .shv2-overlay. Wired to existing marketing endpoints; templates panel includes Twilio approval sample-values input; Reputation shows seeded demo reviews with 'Coming soon' badge; Media panel replaces gallery — uses existing PUT /salons/{id} with photo_gallery array and adds social media (Instagram/YouTube/Facebook/TikTok) coming-soon tiles."
+
+  - task: "Guests page V2 re-design (matches salon_customers.html mock, renamed from Customer Master)"
+    implemented: true
+    working: true
+    file: "/app/frontend/src/pages/salon/v2_pages/CustomersV2.js, /app/frontend/src/pages/salon/v2_pages/styles_v2.js, /app/frontend/src/pages/EnhancedSalonDashboard.js"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: true
+    status_history:
+        - working: true
+          agent: "main"
+          comment: "Menu label renamed 'Customer Master' → 'Guests'. Header + search + 'Add guest' CTA (opens right drawer). 6-KPI strip (total / new this month / active 90d / lapsed 60d+ / avg spend / with membership). Filter chip row with live counts (VIP/New/Lapsed/Members/Birthday this month). Zenoti-style table with computed tags (auto-derived: VIP if spend ≥₹5k or ≥20 visits; New if ≤2 visits & ≤30d; Lapsed if ≥60d since last visit; Member if membership_name; Regular otherwise). Row click opens right-side profile drawer with Overview/Visits & invoices/Messages/Notes tabs. Visits pulled from GET /salons/{id}/customers/{phone}/bookings. Notes editable via PUT /salons/{id}/customers/{phone}. CSV export supported."
 

@@ -15,12 +15,10 @@ import BarberManagement from '@/components/BarberManagement';
 import StaffCheckInWidget from '@/components/StaffCheckInWidget';
 import BranchManagement from '@/components/BranchManagement';
 import BranchSelector from '@/components/BranchSelector';
-import CustomerMaster from '@/components/CustomerMaster';
 import OfferingsModule from '@/components/OfferingsModule';
 import FinancialsModule from '@/components/FinancialsModule';
 import MyProfile from '@/components/MyProfile';
 import PaymentVendorSetup from '@/components/PaymentVendorSetup';
-import MarketingTab from '@/components/MarketingTab';
 import SalonNotificationSettings from '@/components/SalonNotificationSettings';
 import OperationalHoursModule from '@/components/OperationalHoursModule';
 import Analytics from '@/components/Analytics';
@@ -32,6 +30,8 @@ import SalonHomeNew from '@/pages/salon/SalonHomeNew';
 import SalonHomeV2 from '@/pages/salon/SalonHomeV2';
 import HomeV2Shell from '@/pages/salon/home_v2/HomeV2Shell';
 import QueueTabV2 from '@/pages/salon/home_v2/QueueTabV2';
+import MarketingV2 from '@/pages/salon/v2_pages/MarketingV2';
+import CustomersV2 from '@/pages/salon/v2_pages/CustomersV2';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { SubscriptionProvider } from '@/contexts/SubscriptionContext';
 import { getSession, clearSession } from '@/utils/sessionManager';
@@ -1171,7 +1171,7 @@ export default function EnhancedSalonDashboard() {
     { id: 'staff', label: 'Staff Management', icon: Users, show: checkIsAdmin() || checkIsBranchManager() || checkHasPermission('can_access_staff') },
     { id: 'services', label: 'Services & Offerings', icon: Scissors, show: checkIsAdmin() || checkIsBranchManager() || checkHasPermission('can_access_services') },
     { id: 'financials', label: 'Financials', icon: DollarSign, show: checkIsAdmin() || checkIsBranchManager() || checkHasPermission('can_access_financials') },
-    { id: 'customer-master', label: 'Customer Master', icon: Database, show: true },
+    { id: 'customer-master', label: 'Guests', icon: Database, show: true },
     { id: 'analytics', label: 'Analytics', icon: TrendingUp, show: checkIsAdmin() || checkIsBranchManager() || checkHasPermission('can_access_analytics') },
     { id: 'marketplace', label: 'Marketplace', icon: ShoppingBag, show: checkIsAdmin(), route: '/salon/marketplace' },
     { id: 'inventory', label: 'Inventory', icon: Boxes, show: checkIsAdmin() || checkIsBranchManager() },
@@ -1470,22 +1470,14 @@ export default function EnhancedSalonDashboard() {
         })()}
 
         {activeTab === 'customer-master' && (
-          <CustomerMaster salonId={salonId} getAuthHeaders={getAuthHeaders} />
+          <CustomersV2 salonId={salonId} getAuthHeaders={getAuthHeaders} salon={salon} />
         )}
 
         {activeTab === 'financials' && salonId && (
           <FinancialsModule salonId={salonId} getAuthHeaders={getAuthHeaders} />
         )}
 
-        {activeTab === 'customer-master' && (
-          <div className="bg-card border border-border rounded-lg p-8 text-center">
-            <Database className="w-16 h-16 text-gold mx-auto mb-4" />
-            <h3 className="text-2xl font-bold mb-2">Customer Master</h3>
-            <p className="text-muted-foreground">
-              Customer database, history, and preferences management coming soon.
-            </p>
-          </div>
-        )}
+        {/* Legacy customer-master placeholder removed — replaced by CustomersV2 above */}
 
         {activeTab === 'services' && (
           <OfferingsModule 
@@ -1505,186 +1497,7 @@ export default function EnhancedSalonDashboard() {
         )}
 
         {activeTab === 'marketing' && (
-          <MarketingTab
-            salonId={salonId}
-            getAuthHeaders={getAuthHeaders}
-          >
-            {/* Gallery panel is rendered as a child so the existing photo
-                gallery keeps working under the "Gallery" sub-tab. */}
-          <div className="space-y-6">
-            <div className="bg-card/50 backdrop-blur-sm border border-gold/20 rounded-2xl p-6 shadow-xl">
-              <h2 className="text-2xl font-playfair font-bold text-foreground mb-4 flex items-center">
-                <FileText className="w-6 h-6 mr-3 text-gold" />
-                Salon Photo Gallery
-              </h2>
-              <p className="text-muted-foreground mb-6">
-                Showcase your salon's ambiance, services, and style. Upload photos to attract more customers.
-              </p>
-
-              {/* Upload Section */}
-              <div className="mb-6 p-4 bg-background/50 rounded-lg border border-border">
-                <Label className="mb-2 block font-semibold">Add Photos &amp; Videos</Label>
-                <Input
-                  type="file"
-                  accept="image/*,video/*"
-                  multiple
-                  onChange={async (e) => {
-                    const files = Array.from(e.target.files);
-                    if (files.length === 0) return;
-                    
-                    const PHOTO_MAX = 5 * 1024 * 1024;   // 5 MB
-                    const VIDEO_MAX = 25 * 1024 * 1024;  // 25 MB
-                    
-                    const newPhotos = [];
-                    for (const file of files) {
-                      const isVideo = (file.type || '').startsWith('video/');
-                      const limit = isVideo ? VIDEO_MAX : PHOTO_MAX;
-                      const limitLabel = isVideo ? '25MB (video)' : '5MB (photo)';
-                      if (file.size > limit) {
-                        toast.error(`${file.name} is too large (max ${limitLabel})`);
-                        continue;
-                      }
-                      const reader = new FileReader();
-                      await new Promise((resolve) => {
-                        reader.onloadend = () => {
-                          newPhotos.push(reader.result);
-                          resolve();
-                        };
-                        reader.readAsDataURL(file);
-                      });
-                    }
-                    
-                    if (newPhotos.length > 0) {
-                      const updatedGallery = [...(salon.photo_gallery || []), ...newPhotos];
-                      try {
-                        await axios.put(
-                          `${API}/salons/${salonId}`,
-                          { photo_gallery: updatedGallery },
-                          { headers: getAuthHeaders() }
-                        );
-                        setSalon({ ...salon, photo_gallery: updatedGallery });
-                        toast.success(`${newPhotos.length} file(s) added!`);
-                      } catch (error) {
-                        toast.error('Failed to upload media');
-                      }
-                    }
-                    // Reset input so the same file can be re-selected
-                    try { e.target.value = ''; } catch (err) { /* ignore */ }
-                  }}
-                  className="mb-2"
-                />
-                <p className="text-xs text-muted-foreground">Photos up to 5MB each • Videos up to 25MB each</p>
-              </div>
-
-              {/* Social Media Integration (Coming Soon) */}
-              <div className="mb-6 p-4 bg-gradient-to-br from-purple-500/5 via-pink-500/5 to-amber-500/5 rounded-lg border border-gold/20">
-                <div className="flex items-start justify-between flex-wrap gap-2 mb-3">
-                  <div>
-                    <Label className="font-semibold flex items-center gap-2">
-                      Connect Social Media
-                      <span className="text-[10px] uppercase tracking-wide bg-amber-500/20 text-amber-700 dark:text-amber-300 border border-amber-500/40 px-2 py-0.5 rounded-full font-bold">
-                        Coming Soon
-                      </span>
-                    </Label>
-                    <p className="text-xs text-muted-foreground mt-1">
-                      Auto-import posts from your Instagram, YouTube and Facebook into your gallery.
-                    </p>
-                  </div>
-                </div>
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-                  {[
-                    { name: 'Instagram', color: 'from-pink-500 to-purple-600', emoji: '\uD83D\uDCF8', hint: 'Pull latest posts &amp; reels' },
-                    { name: 'YouTube',   color: 'from-red-500 to-red-700',     emoji: '\u25B6',     hint: 'Embed channel videos' },
-                    { name: 'Facebook',  color: 'from-blue-500 to-blue-700',   emoji: '\uD83D\uDC4D', hint: 'Sync page posts' },
-                    { name: 'TikTok',    color: 'from-gray-700 to-black',      emoji: '\uD83C\uDFB5', hint: 'Bring TikTok videos' },
-                  ].map((sm) => (
-                    <button
-                      key={sm.name}
-                      type="button"
-                      disabled
-                      title={`${sm.name} integration — Coming Soon`}
-                      onClick={() => toast.info(`${sm.name} integration is coming soon!`)}
-                      className={`group relative overflow-hidden rounded-xl p-3 text-left bg-gradient-to-br ${sm.color} text-white shadow-md opacity-80 cursor-not-allowed border border-white/10`}
-                    >
-                      <div className="flex items-center gap-2">
-                        <span className="text-xl">{sm.emoji}</span>
-                        <span className="font-bold text-sm">{sm.name}</span>
-                      </div>
-                      <p className="text-[10px] mt-1 opacity-90 leading-tight">{sm.hint}</p>
-                      <span className="absolute top-1 right-1 text-[8px] uppercase font-bold bg-black/40 px-1.5 py-0.5 rounded">
-                        Soon
-                      </span>
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              {/* Gallery Grid */}
-              {salon?.photo_gallery && salon.photo_gallery.length > 0 ? (
-                <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
-                  {salon.photo_gallery.map((url, index) => {
-                    const isVideo = typeof url === 'string' && (url.startsWith('data:video') || /\.(mp4|webm|mov|ogg)(\?|$)/i.test(url));
-                    return (
-                    <motion.div
-                      key={`${url}-${index}`}
-                      initial={{ opacity: 0, scale: 0.9 }}
-                      animate={{ opacity: 1, scale: 1 }}
-                      transition={{ delay: index * 0.05 }}
-                      className="relative group aspect-square rounded-lg overflow-hidden border border-gold/20 shadow-lg hover:shadow-2xl transition-all bg-black"
-                    >
-                      {isVideo ? (
-                        <video
-                          src={url}
-                          className="w-full h-full object-cover"
-                          muted
-                          playsInline
-                          controls
-                          preload="metadata"
-                        />
-                      ) : (
-                        <img 
-                          src={url} 
-                          alt={`Gallery ${index + 1}`} 
-                          className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-300"
-                        />
-                      )}
-                      <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none" />
-                      <button
-                        onClick={async () => {
-                          const updatedGallery = salon.photo_gallery.filter((_, i) => i !== index);
-                          try {
-                            await axios.put(
-                              `${API}/salons/${salonId}`,
-                              { photo_gallery: updatedGallery },
-                              { headers: getAuthHeaders() }
-                            );
-                            setSalon({ ...salon, photo_gallery: updatedGallery });
-                            toast.success('Item removed');
-                          } catch (error) {
-                            toast.error('Failed to remove item');
-                          }
-                        }}
-                        className="absolute top-2 right-2 p-2 bg-red-500 text-white rounded-full opacity-0 group-hover:opacity-100 transition-opacity hover:bg-red-600 shadow-lg z-10"
-                      >
-                        <X className="w-4 h-4" />
-                      </button>
-                      <div className="absolute bottom-2 left-2 right-2 text-white text-xs font-semibold opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none">
-                        {isVideo ? `Video ${index + 1}` : `Photo ${index + 1}`}
-                      </div>
-                    </motion.div>
-                    );
-                  })}
-                </div>
-              ) : (
-                <div className="text-center py-12 bg-background/50 rounded-lg border border-dashed border-gold/30">
-                  <FileText className="w-16 h-16 text-gold/50 mx-auto mb-4" />
-                  <p className="text-muted-foreground mb-2">No photos or videos yet</p>
-                  <p className="text-sm text-muted-foreground">Upload media to showcase your salon!</p>
-                </div>
-              )}
-            </div>
-          </div>
-          </MarketingTab>
+          <MarketingV2 salonId={salonId} getAuthHeaders={getAuthHeaders} salon={salon} />
         )}
 
         {activeTab === 'analytics' && (
