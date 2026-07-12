@@ -17,7 +17,8 @@
  *   POST /api/salons/{id}/coupons
  *   GET  /api/salons/{id}/marketing/segments
  */
-import React, { useEffect, useMemo, useState, useCallback } from 'react';
+import React, { useEffect, useMemo, useState, useCallback, useRef } from 'react';
+import ReactDOM from 'react-dom';
 import axios from 'axios';
 import { toast } from 'sonner';
 import { V2_PAGES_CSS } from './styles_v2';
@@ -70,13 +71,17 @@ function useV2Styles() {
   }, []);
 }
 
-// ---------------------- Right-side drawer helper ----------------------
+// ---------------------- Right-side drawer helper (React portal) ----------------------
+// Portal is critical — the salon dashboard content is wrapped in a Tailwind
+// `<div class="relative z-10">` which creates a stacking context that traps
+// the drawer BELOW the right-side ribbon. Portaling to document.body makes
+// the drawer + overlay sit above every shell element.
 function Drawer({ open, onClose, title, subtitle, iconFn, children, footer }) {
   const IcFn = iconFn || Ico.send;
-  return (
+  const node = (
     <>
-      <div className={`shv2-overlay ${open ? 'open' : ''}`} onClick={onClose} />
-      <aside className={`shv2-drawer v2-narrow ${open ? 'open' : ''}`}>
+      <div className={`shv2-overlay ${open ? 'open' : ''}`} onClick={onClose} style={{ zIndex: 9060 }} />
+      <aside className={`shv2-drawer v2-narrow ${open ? 'open' : ''}`} style={{ zIndex: 9070 }}>
         <div className="v2-dh">
           <div className="tt">
             <div className="ic"><IcFn /></div>
@@ -92,6 +97,7 @@ function Drawer({ open, onClose, title, subtitle, iconFn, children, footer }) {
       </aside>
     </>
   );
+  return ReactDOM.createPortal(node, document.body);
 }
 
 // ============================================================
@@ -114,14 +120,18 @@ export default function MarketingV2({ salonId, getAuthHeaders, salon }) {
   const [automationDrawer, setAutomationDrawer] = useState(false);
   const [templateDrawer, setTemplateDrawer] = useState(false);
   const [couponDrawer, setCouponDrawer] = useState(false);
+  const [membershipDrawer, setMembershipDrawer] = useState(false);
 
+  // Stable auth reference so background auto-refresh doesn't recreate fetchAll
+  const authRef = useRef(getAuthHeaders);
+  useEffect(() => { authRef.current = getAuthHeaders; }, [getAuthHeaders]);
   const authHeaders = useCallback(() => {
-    try { return getAuthHeaders?.() || {}; } catch { return {}; }
-  }, [getAuthHeaders]);
+    try { return (authRef.current && authRef.current()) || {}; } catch { return {}; }
+  }, []);
 
-  const fetchAll = useCallback(async () => {
+  const fetchAll = useCallback(async (opts = { silent: false }) => {
     if (!salonId) return;
-    setLoading(true);
+    if (!opts.silent) setLoading(true);
     try {
       const [ov, cp, at, tp, cop, sg] = await Promise.allSettled([
         axios.get(`${API}/salons/${salonId}/marketing/overview`, { headers: authHeaders() }),
@@ -137,10 +147,22 @@ export default function MarketingV2({ salonId, getAuthHeaders, salon }) {
       setTemplates(tp.status === 'fulfilled' ? (tp.value.data.templates || []) : []);
       setCoupons(cop.status === 'fulfilled' ? (cop.value.data.coupons || []) : []);
       setSegments(sg.status === 'fulfilled' ? (sg.value.data.segments || []) : []);
-    } finally { setLoading(false); }
+    } finally { if (!opts.silent) setLoading(false); }
   }, [salonId, authHeaders]);
 
   useEffect(() => { fetchAll(); }, [fetchAll]);
+
+  // Silent auto-refresh — every 60s. Never toggles the loading skeleton
+  // (prevents the page-jump the user reported).
+  useEffect(() => {
+    if (!salonId) return undefined;
+    const tick = () => {
+      if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return;
+      fetchAll({ silent: true });
+    };
+    const id = setInterval(tick, 60000);
+    return () => clearInterval(id);
+  }, [salonId, fetchAll]);
 
   // Derive KPIs
   const kpi = useMemo(() => {
@@ -206,7 +228,6 @@ export default function MarketingV2({ salonId, getAuthHeaders, salon }) {
       <div className="phead">
         <div>
           <h2><span className="hic"><Ico.send /></span>Marketing</h2>
-          <p>Campaigns · Automations · Templates · Offers &amp; Perks · Media · Settings</p>
         </div>
         <button className="btn-primary" onClick={() => setCampaignDrawer(true)}>
           <Ico.plus /> New campaign
@@ -453,7 +474,7 @@ export default function MarketingV2({ salonId, getAuthHeaders, salon }) {
           <div className="card">
             <div className="card__h">
               <div className="t"><Ico.star /> Loyalty &amp; Memberships</div>
-              <button className="btn-ghost" onClick={() => toast.info('Membership creation moves to Services tab')}><Ico.plus />New</button>
+              <button className="btn-ghost" onClick={() => setMembershipDrawer(true)}><Ico.plus />New</button>
             </div>
             <div style={{display:'flex', flexDirection:'column', gap:14}}>
               <StatLine k="Points program" v={<span style={{color:'var(--green)'}}>Active · 1pt / ₹100</span>} />
@@ -543,6 +564,13 @@ export default function MarketingV2({ salonId, getAuthHeaders, salon }) {
         salonId={salonId}
         authHeaders={authHeaders}
         onSaved={() => { setCouponDrawer(false); fetchAll(); }}
+      />
+      <NewMembershipDrawer
+        open={membershipDrawer}
+        onClose={() => setMembershipDrawer(false)}
+        salonId={salonId}
+        authHeaders={authHeaders}
+        onSaved={() => { setMembershipDrawer(false); fetchAll(); }}
       />
     </div>
   );
@@ -946,50 +974,166 @@ function NewAutomationDrawer({ open, onClose, templates, salonId, authHeaders, o
 
 // -------------------- Drawer: New Template --------------------
 function NewTemplateDrawer({ open, onClose, salonId, authHeaders, onSaved }) {
+  // Variable metadata — salons pick a "sample variable" for each placeholder
+  // so we know EXACTLY what data to substitute at send-time. The `key` is
+  // matched by the backend when rendering the template body for outbound
+  // WhatsApp messages.
+  const VAR_LIBRARY = [
+    { key: 'customer_name',    label: 'Customer name',      sample: 'Priya' },
+    { key: 'customer_phone',   label: 'Customer phone',     sample: '9876543210' },
+    { key: 'salon_name',       label: 'Salon name',         sample: 'The Looks Unisex Salon' },
+    { key: 'token_number',     label: 'Queue token number', sample: 'M12' },
+    { key: 'tokens_ahead',     label: 'Tokens ahead of guest', sample: '3' },
+    { key: 'service_name',     label: 'Service name',       sample: 'Haircut' },
+    { key: 'barber_name',      label: 'Staff name',         sample: 'Imran' },
+    { key: 'appointment_date', label: 'Appointment date',   sample: '14 Jul' },
+    { key: 'appointment_time', label: 'Appointment time',   sample: '5:30 PM' },
+    { key: 'booking_link',     label: 'Booking / reschedule link', sample: 'https://book.thelooks.in/s/aB12' },
+    { key: 'cancel_link',      label: 'Cancel link',        sample: 'https://book.thelooks.in/c/aB12' },
+    { key: 'amount',           label: 'Amount (₹)',         sample: '450' },
+    { key: 'coupon_code',      label: 'Coupon code',        sample: 'GLOW20' },
+    { key: 'custom',           label: 'Custom (fill sample)', sample: '' },
+  ];
+
+  const DEFAULT_BODY = 'Hi {{1}}, your token {{2}} at {{3}} is approaching. You are {{4}} away. Reply STOP to opt out.';
   const [name, setName] = useState('');
   const [category, setCategory] = useState('utility');
-  const [body, setBody] = useState('Hi {{1}}, book at {{2}}: {{3}}');
-  const [langCode, setLangCode] = useState('en_US');
-  const [samples, setSamples] = useState('Priya | The Looks | https://book.thelooks.in/s/aB12');
+  const [langCode, setLangCode] = useState('en');
+  const [body, setBody] = useState(DEFAULT_BODY);
+  // varMap[placeholderIndex] = { key: 'customer_name', sample: 'Priya' }
+  const [varMap, setVarMap] = useState({
+    1: { key: 'customer_name', sample: 'Priya' },
+    2: { key: 'token_number',  sample: 'M12' },
+    3: { key: 'salon_name',    sample: 'The Looks Unisex Salon' },
+    4: { key: 'tokens_ahead',  sample: '3' },
+  });
   const [saving, setSaving] = useState(false);
+  const [submittingId, setSubmittingId] = useState(null);
+
+  // Placeholders detected in the current body ({{1}}, {{2}}, …)
+  const placeholders = useMemo(() => {
+    const found = Array.from(body.matchAll(/\{\{\s*(\d+)\s*\}\}/g)).map(m => Number(m[1]));
+    const unique = Array.from(new Set(found)).sort((a, b) => a - b);
+    return unique;
+  }, [body]);
 
   useEffect(() => {
-    if (!open) { setName(''); setCategory('utility'); setBody('Hi {{1}}, book at {{2}}: {{3}}'); setLangCode('en_US'); setSamples('Priya | The Looks | https://book.thelooks.in/s/aB12'); }
+    if (!open) {
+      setName(''); setCategory('utility'); setLangCode('en');
+      setBody(DEFAULT_BODY);
+      setVarMap({
+        1: { key: 'customer_name', sample: 'Priya' },
+        2: { key: 'token_number',  sample: 'M12' },
+        3: { key: 'salon_name',    sample: 'The Looks Unisex Salon' },
+        4: { key: 'tokens_ahead',  sample: '3' },
+      });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
 
-  const submit = async () => {
-    if (!name.trim()) { toast.error('Name required'); return; }
+  const setVarField = (idx, field, val) => {
+    setVarMap((m) => {
+      const cur = m[idx] || { key: 'customer_name', sample: '' };
+      const next = { ...cur, [field]: val };
+      if (field === 'key' && val !== 'custom') {
+        const libItem = VAR_LIBRARY.find(v => v.key === val);
+        if (libItem) next.sample = libItem.sample;
+      }
+      return { ...m, [idx]: next };
+    });
+  };
+
+  // Preview: {{N}} replaced by sample values
+  const preview = useMemo(() => {
+    let s = body;
+    placeholders.forEach((p) => {
+      const val = (varMap[p]?.sample) || '';
+      s = s.replace(new RegExp(`\\{\\{\\s*${p}\\s*\\}\\}`, 'g'), val || `{{${p}}}`);
+    });
+    return s;
+  }, [body, placeholders, varMap]);
+
+  const insertVariable = (idx) => {
+    // Insert {{N}} at end of body if not present
+    const marker = `{{${idx}}}`;
+    if (!body.includes(marker)) setBody((b) => b + (b.endsWith(' ') ? '' : ' ') + marker);
+  };
+
+  const saveDraft = async () => {
+    if (!name.trim()) { toast.error('Template name required'); return null; }
+    if (!/^[a-z0-9_]+$/.test(name.trim())) {
+      toast.error('Template name: lowercase letters, digits and underscores only');
+      return null;
+    }
+    // Build example_values dict {"1": sample, ...}
+    const example_values = {};
+    for (const p of placeholders) {
+      const s = (varMap[p]?.sample || '').trim();
+      if (!s) {
+        toast.error(`Sample value required for {{${p}}} before saving`);
+        return null;
+      }
+      example_values[String(p)] = s;
+    }
+    // Build variables meta (which app field feeds each placeholder)
+    const variables_meta = {};
+    for (const p of placeholders) {
+      variables_meta[String(p)] = varMap[p]?.key || 'custom';
+    }
     setSaving(true);
     try {
-      // Extract variables like {{1}}, {{2}}
-      const vars = Array.from(new Set((body.match(/\{\{[^}]+\}\}/g) || []).map(v => v.replace(/[{}]/g, ''))));
-      const sampleValues = samples.split('|').map(s => s.trim()).filter(Boolean);
-      await axios.post(`${API}/salons/${salonId}/marketing/templates`, {
+      const res = await axios.post(`${API}/salons/${salonId}/marketing/templates/draft`, {
         name: name.trim(),
+        friendly_name: name.trim().replace(/_/g, ' '),
         category,
-        body,
-        variables: vars,
         lang_code: langCode,
-        meta_status: 'draft',
-        sample_values: sampleValues,
+        body,
+        example_values,
+        // extras (backend ignores unknown fields via ConfigDict extra=ignore)
+        variables_meta,
       }, { headers: authHeaders() });
-      toast.success('Template saved as draft. Submit from Templates list to send to Twilio.');
+      toast.success('Draft saved');
       onSaved?.();
-    } catch (e) { toast.error(e.response?.data?.detail || 'Save failed'); }
-    finally { setSaving(false); }
+      return res.data;
+    } catch (e) {
+      const detail = e.response?.data?.detail;
+      toast.error(typeof detail === 'string' ? detail : 'Save failed');
+      return null;
+    } finally { setSaving(false); }
+  };
+
+  const saveAndSubmit = async () => {
+    const draft = await saveDraft();
+    if (!draft?.id) return;
+    setSubmittingId(draft.id);
+    try {
+      const res = await axios.post(
+        `${API}/salons/${salonId}/marketing/templates/${draft.id}/submit`,
+        { provider: 'twilio' },
+        { headers: authHeaders() }
+      );
+      toast.success(`Submitted to Twilio · Status: ${res.data?.approval_status || 'pending'}`);
+      onSaved?.();
+    } catch (e) {
+      const detail = e.response?.data?.detail;
+      toast.error(typeof detail === 'string' ? detail : 'Twilio submission failed. Check TWILIO_API_KEY_SID / SECRET in backend .env.');
+    } finally { setSubmittingId(null); }
   };
 
   return (
-    <Drawer open={open} onClose={onClose} title="New Template" subtitle="WhatsApp template — Twilio-ready" iconFn={Ico.chat}
+    <Drawer open={open} onClose={onClose} title="New WhatsApp Template" subtitle="Body + variables · sent to Twilio for Meta approval" iconFn={Ico.chat}
       footer={
         <>
           <button className="btn-ghost" onClick={onClose}>Cancel</button>
-          <button className="btn-primary" disabled={saving} onClick={submit}><Ico.check /> Save draft</button>
+          <button className="btn-ghost" disabled={saving || submittingId} onClick={saveDraft}>{saving ? 'Saving…' : 'Save draft'}</button>
+          <button className="btn-primary" disabled={saving || submittingId} onClick={saveAndSubmit}>
+            <Ico.check /> {submittingId ? 'Submitting…' : 'Save & submit to Twilio'}
+          </button>
         </>
       }
     >
-      <div className="v2-field"><label>Template name</label>
-        <input placeholder="e.g. Appointment reminder" value={name} onChange={(e) => setName(e.target.value)} />
+      <div className="v2-field"><label>Template name (lowercase, no spaces)</label>
+        <input placeholder="e.g. queue_turn_approaching" value={name} onChange={(e) => setName(e.target.value.toLowerCase().replace(/[^a-z0-9_]/g, '_'))} />
       </div>
       <div className="v2-field"><label>Category</label>
         <select value={category} onChange={(e) => setCategory(e.target.value)}>
@@ -1000,20 +1144,128 @@ function NewTemplateDrawer({ open, onClose, salonId, authHeaders, onSaved }) {
       </div>
       <div className="v2-field"><label>Language</label>
         <select value={langCode} onChange={(e) => setLangCode(e.target.value)}>
-          <option value="en_US">English (US)</option>
-          <option value="en_IN">English (India)</option>
-          <option value="hi_IN">Hindi</option>
+          <option value="en">English (en)</option>
+          <option value="en_US">English (en_US)</option>
+          <option value="en_IN">English (en_IN)</option>
+          <option value="hi">Hindi (hi)</option>
         </select>
       </div>
-      <div className="v2-field"><label>Body (use {`{{1}}`}, {`{{2}}`}…)</label>
-        <textarea value={body} onChange={(e) => setBody(e.target.value)} />
+      <div className="v2-field"><label>Body — use {'{{1}}'}, {'{{2}}'}, {'{{3}}'} …</label>
+        <textarea rows={4} value={body} onChange={(e) => setBody(e.target.value)} />
+        <div style={{fontSize:11, color:'var(--muted-2)', marginTop:6}}>Detected placeholders: {placeholders.length ? placeholders.map(p => `{{${p}}}`).join(' ') : '—'}</div>
       </div>
+
+      {/* Variable → app data mapping */}
       <div className="v2-field">
-        <label>Sample values (Twilio requirement, separate with " | ")</label>
-        <input value={samples} onChange={(e) => setSamples(e.target.value)} />
+        <label>Variable mapping · pick what value the app should send to Twilio for each placeholder</label>
+        <div style={{display:'flex', flexDirection:'column', gap:8}}>
+          {placeholders.length === 0 && (
+            <div style={{fontSize:12, color:'var(--muted-2)'}}>Add {'{{1}}'} … to the body to configure variables.</div>
+          )}
+          {placeholders.map((p) => {
+            const v = varMap[p] || { key: 'customer_name', sample: '' };
+            return (
+              <div key={p} style={{display:'grid', gridTemplateColumns:'50px 1fr 1fr', gap:8, alignItems:'center', padding:'8px 10px', background:'var(--line-2)', borderRadius:10}}>
+                <b style={{fontFamily:'monospace'}}>{'{{'}{p}{'}}'}</b>
+                <select value={v.key} onChange={(e) => setVarField(p, 'key', e.target.value)}>
+                  {VAR_LIBRARY.map(o => <option key={o.key} value={o.key}>{o.label}</option>)}
+                </select>
+                <input
+                  placeholder="Sample value (required by WhatsApp)"
+                  value={v.sample}
+                  onChange={(e) => setVarField(p, 'sample', e.target.value)}
+                />
+              </div>
+            );
+          })}
+          <div style={{display:'flex', gap:6, flexWrap:'wrap'}}>
+            {[1,2,3,4,5,6].map(n => (
+              <button key={n} className="btn-ghost" style={{padding:'4px 10px', fontSize:12}} onClick={() => insertVariable(n)}>+ {`{{${n}}}`}</button>
+            ))}
+          </div>
+        </div>
       </div>
+
+      {/* Live preview */}
+      <div className="v2-field">
+        <label>Preview (what the customer will read)</label>
+        <div style={{
+          background:'var(--wa-bg)', border:'1px solid #CDEBD9', padding:'12px 14px',
+          borderRadius:12, fontSize:14, whiteSpace:'pre-wrap', color:'#0F5132'
+        }}>{preview || '—'}</div>
+      </div>
+
       <div style={{fontSize:12, color:'var(--muted)', background:'var(--wa-bg)', border:'1px solid #CDEBD9', padding:'10px 12px', borderRadius:10, lineHeight:1.5}}>
-        <b style={{color:'var(--wa)'}}>Twilio tip:</b> every variable must ship with an example value or the template is rejected. Fill these in Twilio Content Template Builder → "Sample content" too.
+        <b style={{color:'var(--wa)'}}>Twilio + WhatsApp workflow:</b> Save draft first if you want to preview.
+        Click <b>Save &amp; submit to Twilio</b> to create the Content template and submit it for WhatsApp/Meta
+        approval. Approval status appears on the Templates list. Every variable needs a sample value or
+        WhatsApp will reject the template.
+      </div>
+    </Drawer>
+  );
+}
+
+// -------------------- Drawer: New Membership plan (Marketing → Offers & Perks) --------------------
+function NewMembershipDrawer({ open, onClose, salonId, authHeaders, onSaved }) {
+  const [name, setName] = useState('');
+  const [amount, setAmount] = useState('1000');
+  const [credit, setCredit] = useState('1200');
+  const [validity, setValidity] = useState('12');
+  const [terms, setTerms] = useState('');
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    if (!open) {
+      setName(''); setAmount('1000'); setCredit('1200'); setValidity('12'); setTerms('');
+    }
+  }, [open]);
+
+  const submit = async () => {
+    if (!name.trim()) { toast.error('Membership name required'); return; }
+    const amt = Number(amount), cr = Number(credit), va = Number(validity);
+    if (!(amt > 0) || !(cr > 0) || !(va > 0)) { toast.error('Amount, credit and validity must be positive'); return; }
+    setSaving(true);
+    try {
+      await axios.post(`${API}/salons/${salonId}/membership-plans`, {
+        salon_id: salonId,
+        name: name.trim(),
+        amount: amt,
+        credit: cr,
+        validity_months: va,
+        terms_conditions: terms || '',
+      }, { headers: authHeaders() });
+      toast.success('Membership plan created');
+      onSaved?.();
+    } catch (e) {
+      const detail = e.response?.data?.detail;
+      toast.error(typeof detail === 'string' ? detail : 'Save failed');
+    } finally { setSaving(false); }
+  };
+
+  return (
+    <Drawer open={open} onClose={onClose} title="New Membership Plan" subtitle="Offers &amp; Perks · guest wallet + retention" iconFn={Ico.star}
+      footer={
+        <>
+          <button className="btn-ghost" onClick={onClose}>Cancel</button>
+          <button className="btn-primary" disabled={saving} onClick={submit}><Ico.check /> Create plan</button>
+        </>
+      }
+    >
+      <div className="v2-field"><label>Plan name</label>
+        <input placeholder="Gold Membership" value={name} onChange={(e) => setName(e.target.value)} />
+      </div>
+      <div className="v2-field"><label>Amount charged (₹)</label>
+        <input type="number" min="1" value={amount} onChange={(e) => setAmount(e.target.value)} />
+      </div>
+      <div className="v2-field"><label>Wallet credit given (₹)</label>
+        <input type="number" min="1" value={credit} onChange={(e) => setCredit(e.target.value)} />
+        <div style={{fontSize:11, color:'var(--muted-2)', marginTop:4}}>Give ₹{Math.max(0, Number(credit) - Number(amount)).toLocaleString('en-IN')} extra as bonus.</div>
+      </div>
+      <div className="v2-field"><label>Validity (months)</label>
+        <input type="number" min="1" value={validity} onChange={(e) => setValidity(e.target.value)} />
+      </div>
+      <div className="v2-field"><label>Terms &amp; conditions (optional)</label>
+        <textarea rows={3} value={terms} onChange={(e) => setTerms(e.target.value)} placeholder="Wallet can be used on all services. Non-refundable." />
       </div>
     </Drawer>
   );

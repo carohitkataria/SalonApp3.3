@@ -19,6 +19,7 @@
  *     form while user is typing.
  */
 import React, { useEffect, useMemo, useRef, useState } from 'react';
+import ReactDOM from 'react-dom';
 import axios from 'axios';
 import CustomerDrawer from './CustomerDrawer';
 import GuestProfileModal from './GuestProfileModal';
@@ -251,10 +252,10 @@ export default function AppointmentDrawer({
   const preferredBarberName = (barbers.find(b => b.id === gd.preferred_barber_id) || {}).name;
   const membershipLine = gd.membership_active ? (gd.membership_name || 'Active') : 'No membership';
 
-  return (
+  return ReactDOM.createPortal(
     <>
-      <div className={`shv2-overlay ${open ? 'open' : ''}`} onClick={onClose} />
-      <aside className={`shv2-drawer ${open ? 'open' : ''}`}>
+      <div className={`shv2-overlay ${open ? 'open' : ''}`} onClick={onClose} style={{ zIndex: 9060 }} />
+      <aside className={`shv2-drawer ${open ? 'open' : ''}`} style={{ zIndex: 9070 }}>
         <div className="drawer__h">
           <div className="tt">
             <div className="ic">
@@ -591,6 +592,7 @@ export default function AppointmentDrawer({
         salonId={salonId}
         getAuthHeaders={getAuthHeaders}
       />
-    </>
+    </>,
+    document.body
   );
 }

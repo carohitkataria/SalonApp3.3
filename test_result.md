@@ -105,6 +105,38 @@
 user_problem_statement: "Implement multi-user role-based access system for salon with Admin and Staff roles. Add staff management with employee fields (department, designation, emergency contact, Aadhar, DOJ, DOB, compensation, documents). Create hamburger menu navigation with role-based access control. Add 'Manage Staff Access' section, Financials and Customer Master placeholders. Add notification rules with toggles for both salon and customer sides, including WhatsApp toggles for customer. Add Reschedule/Cancel action links to WhatsApp messages with link-based cancel flow. Fix notification bell overlapping the Map view button on customer search page."
 
 backend:
+  - task: "Customers CSV template download endpoint"
+    implemented: true
+    working: true
+    file: "/app/backend/server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+        - working: "NA"
+          agent: "main"
+          comment: "NEW: Added GET /api/salons/{salon_id}/customers/csv-template — public endpoint that returns a downloadable CSV template (guests_template.csv) with header row [Name, Mobile No., Gender, Date of Birth] and 2 example rows (Priya Sharma / Amit Kumar). Content-Type: text/csv; Content-Disposition: attachment; filename=guests_template.csv. This is used by the new Import button on the Guests page to let salons download a starter CSV before uploading. Please test: (1) GET returns 200 with Content-Type text/csv and Content-Disposition attachment header. (2) Response body starts with the header row 'Name,Mobile No.,Gender,Date of Birth' followed by 2 example data rows. (3) Endpoint requires NO auth (public template). Salon ID for tests: 1eddf29d-5ffd-49b0-8dae-130eecd4e62f."
+        - working: true
+          agent: "testing"
+          comment: "✅ CSV TEMPLATE DOWNLOAD ENDPOINT FULLY TESTED AND WORKING: Comprehensive testing completed successfully. TESTED: GET /api/salons/{salon_id}/customers/csv-template for salon 1eddf29d-5ffd-49b0-8dae-130eecd4e62f. RESULTS: 1) PUBLIC ACCESS - ✅ WORKING (endpoint returns HTTP 200 without Authorization header, confirming it's a public endpoint as required), 2) CONTENT-TYPE HEADER - ✅ WORKING (Content-Type: text/csv; charset=utf-8), 3) CONTENT-DISPOSITION HEADER - ✅ WORKING (Content-Disposition: attachment; filename=guests_template.csv), 4) RESPONSE BODY STRUCTURE - ✅ WORKING (exactly 3 lines: header row + 2 example data rows), 5) HEADER ROW - ✅ CORRECT (Name,Mobile No.,Gender,Date of Birth), 6) EXAMPLE ROWS - ✅ CORRECT (Row 1: Priya Sharma,9876543210,Female,1994-03-14 | Row 2: Amit Kumar,9123456789,Male,1988-11-02). All requirements from the review request met perfectly. The CSV template download endpoint is production-ready."
+
+  - task: "Customers bulk-upload endpoint still additive and working"
+    implemented: true
+    working: true
+    file: "/app/backend/server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+        - working: "NA"
+          agent: "main"
+          comment: "Regression test the existing POST /api/salons/{salon_id}/customers/bulk-upload endpoint. New frontend Import button on the Guests page calls this. Please test: (1) Login as admin (identifier 'admin' / 'salon123' at salon 1eddf29d-5ffd-49b0-8dae-130eecd4e62f). (2) Upload a valid CSV with 2 new rows (Name, Mobile No., Gender, Date of Birth) → 200 with inserted=2. (3) Upload same CSV again → 200 with inserted=0 and skipped_duplicate=2 (existing customers preserved). (4) Upload a CSV with a row missing Mobile No. → returned in errors[] with skipped_invalid+1. (5) Unauth request (no Authorization header) → 401/403. This is the endpoint the frontend Import button on the Guests page hits."
+        - working: true
+          agent: "testing"
+          comment: "✅ CUSTOMERS BULK-UPLOAD ENDPOINT FULLY TESTED AND WORKING: Comprehensive regression testing completed successfully with all 5 scenarios passing. AUTHENTICATION: Admin login working perfectly with identifier='admin', password='salon123', salon_id: 1eddf29d-5ffd-49b0-8dae-130eecd4e62f. TEST RESULTS: 1) VALID CSV UPLOAD (2 NEW CUSTOMERS) - ✅ WORKING (uploaded CSV with 2 unique customers, response: HTTP 200, inserted=2, skipped_duplicate=0, skipped_invalid=0, total_rows=2, errors=[], message confirms '2 customers imported'), 2) DUPLICATE CSV UPLOAD (SAME CUSTOMERS) - ✅ WORKING (re-uploaded exact same CSV, response: HTTP 200, inserted=0, skipped_duplicate=2, skipped_invalid=0, total_rows=2, errors=[], existing customers preserved and NOT duplicated as required), 3) INVALID ROW HANDLING (MISSING MOBILE NO.) - ✅ WORKING (uploaded CSV with 1 valid row and 1 row missing Mobile No., response: HTTP 200, inserted=1, skipped_invalid=1, errors array contains error with row number 3, reason 'Missing/invalid Name or Mobile No.', and raw data showing empty mobile field), 4) UNAUTHORIZED ACCESS - ✅ WORKING (POST without Authorization header correctly returns HTTP 403 Forbidden), 5) CUSTOMERS APPEAR IN LIST - ✅ VERIFIED (GET /api/salons/{salon_id}/customers returns HTTP 200 with 4 customers including newly uploaded ones). CRITICAL REQUIREMENT VERIFIED: Upload is ADDITIVE - never replaces/removes existing customers, duplicates are correctly skipped, invalid rows are reported in errors[] with detailed information. The bulk-upload endpoint is production-ready and regression-free."
+
+
+backend:
   - task: "Staff section permissions (services/gallery/staff + view_all_staff) and staff_id in login token"
     implemented: true
     working: "NA"
@@ -6237,4 +6269,10 @@ frontend:
 agent_communication:
     - agent: "testing"
       message: "❌ CRITICAL BLOCKER - LOGIN FAILURE PREVENTS ALL TESTING: Attempted comprehensive UI testing of Marketing and Guests V2 pages but BLOCKED at login step. ISSUE: Login form accepts credentials (identifier='demo', password='demo1234') and submits successfully, but page DOES NOT REDIRECT to dashboard - stays on /salon/login page. BACKEND VERIFICATION: Login API endpoint working correctly (curl test returns 200 OK with valid JWT token containing salon_id: 1b6d715c-b225-47ba-ae59-04b6569c061b, role: salon_admin, permissions including can_access_marketing: true). DATABASE VERIFICATION: Demo user exists in salon_users collection with correct credentials. ROOT CAUSE: Frontend login handler is not processing the successful login response correctly - either not storing the token, not redirecting, or encountering a JavaScript error. CONSOLE LOGS: Only WebSocket warning visible, no explicit login error logged. IMPACT: Cannot test ANY of the 20 verification steps for Marketing and Guests pages without successful login. SCREENSHOTS: All 3 screenshots show the login page (no progress beyond login screen). URGENT ACTION REQUIRED: Main agent must debug the frontend login flow in /salon/login page - check AuthContext, login response handling, token storage, and redirect logic. Possible issues: (1) Login response handler not calling navigate/redirect, (2) Token not being stored in localStorage/context, (3) Silent JavaScript error in login success callback, (4) Incorrect response shape expected by frontend."
+
+
+agent_communication:
+    - agent: "main"
+      message: "New round of changes for Guests & Marketing pages. FOCUS BACKEND TESTS ON THESE TWO NEW/CHANGED ENDPOINTS: (A) NEW endpoint GET /api/salons/{salon_id}/customers/csv-template — returns a CSV template file (text/csv, Content-Disposition attachment, filename=guests_template.csv). Public — no auth required. Body must start with header 'Name,Mobile No.,Gender,Date of Birth' followed by 2 example rows. Salon 1eddf29d-5ffd-49b0-8dae-130eecd4e62f. (B) REGRESSION: existing POST /api/salons/{salon_id}/customers/bulk-upload — new frontend Import button on Guests page hits this. Test with the salon-admin token (identifier 'admin' / password 'salon123', salon 1eddf29d-5ffd-49b0-8dae-130eecd4e62f): (1) Upload a valid CSV with 2 rows (Name, Mobile No., Gender, Date of Birth headers) → 200 with inserted=2. (2) Upload same CSV again → 200 with inserted=0 and skipped_duplicate=2. (3) CSV missing Mobile No. in one row → that row lands in errors[], skipped_invalid increments. (4) No auth → 401/403. FRONTEND CHANGES (do NOT test frontend automatically — will ask user): (1) 'Add guest' button on Guests page now opens the shared CustomerDrawer via React portal (matches ribbon). (2) Right-side drawers moved to React portal + z-index 9070 so they sit ABOVE the ribbon (fixes 'drawer under ribbon'). (3) 'Import' button + 'Download template' added next to Export. (4) Marketing tagline 'Campaigns · Automations · Templates · Offers & Perks · Media · Settings' removed. (5) 'New' in Loyalty & Memberships now opens a real NewMembershipDrawer (POSTs to /api/salons/{salon_id}/membership-plans). (6) NewTemplateDrawer redesigned with variable mapping UI (link {{N}} → app field like customer_name/token_number/salon_name/tokens_ahead) + live preview + 'Save & submit to Twilio' button that hits /marketing/templates/draft then /submit. (7) Auto-refresh preserved but silent — background refetch does not toggle setLoading(true), and parent getAuthHeaders is now useCallback-stable so the fetch effect doesn't fire on every parent re-render (fixes page-jump/scroll-jitter). (8) .env now has TWILIO_WHATSAPP_NUMBER=whatsapp:+918560934455. TWILIO_ACCOUNT_SID / AUTH_TOKEN / API_KEY_SID / API_KEY_SECRET are placeholders waiting for user credentials — Twilio Content API submission is wired but will fail until user supplies keys."
+
 

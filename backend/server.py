@@ -7004,6 +7004,27 @@ async def bulk_upload_customers(
     }
 
 
+@api_router.get("/salons/{salon_id}/customers/csv-template")
+async def get_customers_csv_template(salon_id: str):
+    """Return a downloadable CSV template for the guest bulk-upload.
+    Public endpoint (safe – it's just a template with dummy rows)."""
+    import csv as _csv
+    buf = io.StringIO()
+    writer = _csv.writer(buf)
+    writer.writerow(["Name", "Mobile No.", "Gender", "Date of Birth"])
+    writer.writerow(["Priya Sharma", "9876543210", "Female", "1994-03-14"])
+    writer.writerow(["Amit Kumar", "9123456789", "Male", "1988-11-02"])
+    csv_bytes = buf.getvalue().encode("utf-8")
+    from fastapi.responses import Response as _Response
+    return _Response(
+        content=csv_bytes,
+        media_type="text/csv",
+        headers={"Content-Disposition": "attachment; filename=guests_template.csv"},
+    )
+
+
+
+
 # ============================================================================
 # MENU PARSING via OpenAI GPT-5 (Vision)
 # ============================================================================

@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useRef } from 'react';
+import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useWebSocket } from '@/contexts/WebSocketContext';
 import { useAuth } from '@/contexts/AuthContext';
@@ -397,7 +397,7 @@ export default function EnhancedSalonDashboard() {
     return () => clearInterval(interval);
   }, [salonId]);
 
-  const getAuthHeaders = () => {
+  const getAuthHeaders = useCallback(() => {
     // Try new multi-user auth first, fall back to legacy
     const salonUserAuth = localStorage.getItem('salon_user_auth');
     if (salonUserAuth) {
@@ -411,7 +411,7 @@ export default function EnhancedSalonDashboard() {
     
     const legacyToken = localStorage.getItem('salon_admin_token');
     return { Authorization: `Bearer ${legacyToken}` };
-  };
+  }, []);
 
   const fetchSalonData = async (id) => {
     try {

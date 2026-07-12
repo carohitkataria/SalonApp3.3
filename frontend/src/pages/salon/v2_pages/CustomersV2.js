@@ -1,19 +1,23 @@
 /**
- * CustomersV2.js — new Guests page redesign matching salon_customers.html mock.
- * Renders inside .shv2 shell (rail + ribbon from HomeV2Shell).
- * "Add guest" button and row-click both open a right-side drawer.
+ * CustomersV2.js — Guests page redesign.
  *
- * Wired to existing backend endpoints:
- *   GET  /api/salons/{id}/customers
- *   POST /api/salons/{id}/customers
- *   GET  /api/salons/{id}/customers/{phone}/bookings
- *   GET  /api/salons/{id}/customers/{phone}/wallet
- *   GET  /api/salons/{id}/customers/{phone}/membership
+ * Fixes:
+ *   • Right drawer no longer sits UNDER the ribbon — GuestProfileDrawer is
+ *     rendered via React portal so it escapes any parent stacking context.
+ *   • "Add guest" from the table header now opens the shared CustomerDrawer
+ *     (same form as the ribbon's + Add Guest, per user request).
+ *   • Import CSV + Download template buttons added next to Export.
+ *   • Auto-refresh preserved but no longer causes page jumps: authHeaders is
+ *     ref-based so parent re-renders don't recreate `fetchAll`; background
+ *     refreshes never toggle the loading spinner (which was resetting the
+ *     scroll / table layout every few seconds).
  */
-import React, { useEffect, useMemo, useState, useCallback } from 'react';
+import React, { useEffect, useMemo, useState, useRef, useCallback } from 'react';
+import ReactDOM from 'react-dom';
 import axios from 'axios';
 import { toast } from 'sonner';
 import { V2_PAGES_CSS } from './styles_v2';
+import CustomerDrawer from '../home_v2/CustomerDrawer';
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL || '';
 const API = `${BACKEND_URL}/api`;
@@ -32,6 +36,8 @@ const Ico = {
   chat: () => <svg viewBox="0 0 24 24"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>,
   send: () => <svg viewBox="0 0 24 24"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>,
   down: () => <svg viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>,
+  up:   () => <svg viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>,
+  file: () => <svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>,
   star: () => <svg viewBox="0 0 24 24"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>,
   time: () => <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>,
   trend:() => <svg viewBox="0 0 24 24"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>,
@@ -62,9 +68,13 @@ function useV2Styles() {
 // ============================================================
 export default function CustomersV2({ salonId, getAuthHeaders, salon }) {
   useV2Styles();
+
+  // ---- Stable auth reference (fixes auto-refresh page jumps) --------
+  const authRef = useRef(getAuthHeaders);
+  useEffect(() => { authRef.current = getAuthHeaders; }, [getAuthHeaders]);
   const authHeaders = useCallback(() => {
-    try { return getAuthHeaders?.() || {}; } catch { return {}; }
-  }, [getAuthHeaders]);
+    try { return (authRef.current && authRef.current()) || {}; } catch { return {}; }
+  }, []);
 
   const [customers, setCustomers] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -72,19 +82,33 @@ export default function CustomersV2({ salonId, getAuthHeaders, salon }) {
   const [filter, setFilter] = useState('all');
   const [selectedPhone, setSelectedPhone] = useState(null);
   const [addOpen, setAddOpen] = useState(false);
+  const importInputRef = useRef(null);
+  const [importing, setImporting] = useState(false);
 
-  const fetchAll = useCallback(async () => {
+  // Silent refetch — no `setLoading(true)` so table doesn't jump.
+  const fetchAll = useCallback(async (opts = { silent: false }) => {
     if (!salonId) return;
-    setLoading(true);
+    if (!opts.silent) setLoading(true);
     try {
       const res = await axios.get(`${API}/salons/${salonId}/customers`, { headers: authHeaders() });
       setCustomers(res.data?.customers || []);
     } catch (e) {
-      toast.error(e.response?.data?.detail || 'Failed to load guests');
-    } finally { setLoading(false); }
+      if (!opts.silent) toast.error(e.response?.data?.detail || 'Failed to load guests');
+    } finally { if (!opts.silent) setLoading(false); }
   }, [salonId, authHeaders]);
 
   useEffect(() => { fetchAll(); }, [fetchAll]);
+
+  // Auto-refresh every 45s in the background (silent), only when tab visible.
+  useEffect(() => {
+    if (!salonId) return undefined;
+    const tick = () => {
+      if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return;
+      fetchAll({ silent: true });
+    };
+    const id = setInterval(tick, 45000);
+    return () => clearInterval(id);
+  }, [salonId, fetchAll]);
 
   // Enrich customers with computed segments
   const enriched = useMemo(() => {
@@ -154,11 +178,13 @@ export default function CustomersV2({ salonId, getAuthHeaders, salon }) {
   }, [enriched, search, filter]);
 
   const exportCSV = () => {
-    const rows = [['Name','Mobile','Tags','Last visit','Visits','Total spend','Wallet']];
+    const rows = [['Name','Mobile No.','Gender','Date of Birth','Tags','Last visit','Visits','Total spend','Wallet']];
     filtered.forEach(c => {
       rows.push([
-        `${c._first} ${c._last}`,
+        `${c._first} ${c._last}`.trim(),
         c.phone || '',
+        c.gender || '',
+        c.date_of_birth || c.dob || '',
         c._tags.join('|'),
         c.last_visit ? new Date(c.last_visit).toLocaleDateString('en-IN') : '',
         c._visitCount,
@@ -173,6 +199,40 @@ export default function CustomersV2({ salonId, getAuthHeaders, salon }) {
     a.href = url; a.download = 'guests.csv'; a.click();
     URL.revokeObjectURL(url);
     toast.success('Exported CSV');
+  };
+
+  const downloadTemplate = async () => {
+    try {
+      const res = await axios.get(`${API}/salons/${salonId}/customers/csv-template`, { responseType: 'blob' });
+      const url = URL.createObjectURL(res.data);
+      const a = document.createElement('a');
+      a.href = url; a.download = 'guests_template.csv'; a.click();
+      URL.revokeObjectURL(url);
+      toast.success('Template downloaded');
+    } catch (e) {
+      toast.error('Failed to download template');
+    }
+  };
+
+  const handleImportFile = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    e.target.value = ''; // reset input so same file can be re-selected
+    setImporting(true);
+    try {
+      const form = new FormData();
+      form.append('file', file);
+      const res = await axios.post(
+        `${API}/salons/${salonId}/customers/bulk-upload`,
+        form,
+        { headers: { ...authHeaders(), 'Content-Type': 'multipart/form-data' } }
+      );
+      const d = res.data || {};
+      toast.success(`Imported ${d.inserted || 0} guests · ${d.skipped_duplicate || 0} duplicates · ${d.skipped_invalid || 0} invalid`);
+      fetchAll({ silent: true });
+    } catch (err) {
+      toast.error(err.response?.data?.detail || 'Import failed');
+    } finally { setImporting(false); }
   };
 
   const selected = useMemo(
@@ -224,7 +284,23 @@ export default function CustomersV2({ salonId, getAuthHeaders, salon }) {
           ))}
         </div>
         <div style={{flex:1}} />
-        <button className="btn-ghost" onClick={exportCSV}><Ico.down /> Export</button>
+        <button className="btn-ghost" onClick={exportCSV} title="Export CSV"><Ico.down /> Export</button>
+        <button
+          className="btn-ghost"
+          onClick={() => importInputRef.current?.click()}
+          disabled={importing}
+          title="Import guests from CSV / Excel"
+          style={{marginLeft:6}}
+        >
+          <Ico.up /> {importing ? 'Importing…' : 'Import'}
+        </button>
+        <input
+          ref={importInputRef}
+          type="file"
+          accept=".csv,.xlsx,.xls,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel"
+          onChange={handleImportFile}
+          style={{display:'none'}}
+        />
       </div>
 
       {/* TABLE */}
@@ -284,22 +360,23 @@ export default function CustomersV2({ salonId, getAuthHeaders, salon }) {
         </table>
       </div>
 
-      {/* GUEST PROFILE DRAWER */}
+      {/* GUEST PROFILE DRAWER (portal so it stacks above the ribbon) */}
       <GuestProfileDrawer
         guest={selected}
         salonId={salonId}
         authHeaders={authHeaders}
         onClose={() => setSelectedPhone(null)}
-        onChanged={fetchAll}
+        onChanged={() => fetchAll({ silent: true })}
       />
 
-      {/* ADD GUEST DRAWER */}
-      <AddGuestDrawer
+      {/* ADD GUEST — shared CustomerDrawer (same form as ribbon → Add Guest) */}
+      <CustomerDrawer
         open={addOpen}
         salonId={salonId}
-        authHeaders={authHeaders}
+        getAuthHeaders={authHeaders}
         onClose={() => setAddOpen(false)}
-        onSaved={() => { setAddOpen(false); fetchAll(); }}
+        onSaved={() => { setAddOpen(false); fetchAll({ silent: true }); toast.success('Guest saved'); }}
+        source="owner"
       />
     </div>
   );
@@ -325,7 +402,7 @@ function KpiTile({ chip, icon, val, label }) {
   );
 }
 
-// -------------------- Guest profile drawer --------------------
+// -------------------- Guest profile drawer (React portal) --------------------
 function GuestProfileDrawer({ guest, salonId, authHeaders, onClose, onChanged }) {
   const [tab, setTab] = useState('overview');
   const [bookings, setBookings] = useState([]);
@@ -349,232 +426,154 @@ function GuestProfileDrawer({ guest, salonId, authHeaders, onClose, onChanged })
     })();
   }, [guest, salonId, authHeaders]);
 
-  if (!guest) return (
+  const drawerContent = !guest ? (
     <>
-      <div className="shv2-overlay" onClick={onClose} />
-      <aside className="shv2-drawer v2-narrow" />
+      <div className="shv2-overlay" onClick={onClose} style={{ zIndex: 9060 }} />
+      <aside className="shv2-drawer v2-narrow" style={{ zIndex: 9070 }} />
     </>
-  );
+  ) : renderProfile();
 
-  const totalSpend = guest._totalSpend || 0;
-  const wallet = guest._walletBalance || 0;
-  const visitCount = guest._visitCount || 0;
-  const points = Math.floor(totalSpend / 100);
+  function renderProfile() {
+    const totalSpend = guest._totalSpend || 0;
+    const wallet = guest._walletBalance || 0;
+    const visitCount = guest._visitCount || 0;
+    const points = Math.floor(totalSpend / 100);
 
-  const saveNotes = async () => {
-    setSavingNotes(true);
-    try {
-      await axios.put(`${API}/salons/${salonId}/customers/${encodeURIComponent(guest.phone)}`, { notes }, { headers: authHeaders() });
-      toast.success('Note saved');
-      onChanged?.();
-    } catch (e) { toast.error(e.response?.data?.detail || 'Save failed'); }
-    finally { setSavingNotes(false); }
-  };
+    const saveNotes = async () => {
+      setSavingNotes(true);
+      try {
+        await axios.put(`${API}/salons/${salonId}/customers/${encodeURIComponent(guest.phone)}`, { notes }, { headers: authHeaders() });
+        toast.success('Note saved');
+        onChanged?.();
+      } catch (e) { toast.error(e.response?.data?.detail || 'Save failed'); }
+      finally { setSavingNotes(false); }
+    };
 
-  const bookingDisplay = (b) => {
-    const date = b.date || b.appointment_date || b.created_at;
-    let dd = '?';
-    let mm = '';
-    try {
-      const d = new Date(date);
-      dd = String(d.getDate()).padStart(2, '0');
-      mm = d.toLocaleDateString('en-IN', { month: 'short' });
-    } catch {}
-    const services = (b.services || b.service_names || []).map(s => typeof s === 'string' ? s : (s?.name || s?.service_name)).filter(Boolean).join(', ') || b.service_name || 'Service';
-    const barber = b.barber_name || b.staff_name || 'Staff';
-    const method = (b.payment_method || b.pay_method || '').toString() || 'paid';
-    const amount = b.total_amount || b.amount || b.bill_amount || 0;
-    return { dd, mm, services, barber, method, amount };
-  };
+    const bookingDisplay = (b) => {
+      const date = b.date || b.appointment_date || b.created_at;
+      let dd = '?';
+      let mm = '';
+      try {
+        const d = new Date(date);
+        dd = String(d.getDate()).padStart(2, '0');
+        mm = d.toLocaleDateString('en-IN', { month: 'short' });
+      } catch (_) { /* invalid date */ }
+      const services = (b.services || b.service_names || []).map(s => typeof s === 'string' ? s : (s?.name || s?.service_name)).filter(Boolean).join(', ') || b.service_name || 'Service';
+      const barber = b.barber_name || b.staff_name || 'Staff';
+      const method = (b.payment_method || b.pay_method || '').toString() || 'paid';
+      const amount = b.total_amount || b.amount || b.bill_amount || 0;
+      return { dd, mm, services, barber, method, amount };
+    };
 
-  return (
-    <>
-      <div className="shv2-overlay open" onClick={onClose} />
-      <aside className="shv2-drawer v2-narrow open" style={{width:'min(680px,96vw)'}}>
-        <div className="gp-head">
-          <button className="gp-close" onClick={onClose}><Ico.close /></button>
-          <div className="gp-top">
-            <div className="g-av"
-              style={guest.photo_url ? { backgroundImage:`url(${guest.photo_url})` } : { background: avColorFor(guest._first) }}
-            >
-              {!guest.photo_url && initials(guest._first, guest._last)}
-            </div>
-            <div>
-              <h3>{guest._first} {guest._last}</h3>
-              <div className="sub">
-                {guest.phone}
-                {guest._tags.map(t => (
-                  <span key={t} className={`pill ${t}`}>
-                    {t === 'vip' ? 'VIP' : t === 'reg' ? 'Regular' : t === 'lapsed' ? 'Lapsed' : t === 'mem' ? 'Member' : 'New'}
-                  </span>
-                ))}
+    return (
+      <>
+        <div className="shv2-overlay open" onClick={onClose} style={{ zIndex: 9060 }} />
+        <aside className="shv2-drawer v2-narrow open" style={{width:'min(680px,96vw)', zIndex: 9070}}>
+          <div className="gp-head">
+            <button className="gp-close" onClick={onClose}><Ico.close /></button>
+            <div className="gp-top">
+              <div className="g-av"
+                style={guest.photo_url ? { backgroundImage:`url(${guest.photo_url})` } : { background: avColorFor(guest._first) }}
+              >
+                {!guest.photo_url && initials(guest._first, guest._last)}
+              </div>
+              <div>
+                <h3>{guest._first} {guest._last}</h3>
+                <div className="sub">
+                  {guest.phone}
+                  {guest._tags.map(t => (
+                    <span key={t} className={`pill ${t}`}>
+                      {t === 'vip' ? 'VIP' : t === 'reg' ? 'Regular' : t === 'lapsed' ? 'Lapsed' : t === 'mem' ? 'Member' : 'New'}
+                    </span>
+                  ))}
+                </div>
               </div>
             </div>
-          </div>
-          <div className="gp-actions">
-            <button className="btn-wa" onClick={() => {
-              const num = String(guest.phone || '').replace(/[^0-9]/g,'');
-              if (num) window.open(`https://wa.me/${num}`, '_blank');
-            }}><Ico.wa /> WhatsApp</button>
-            <button className="btn-ghost" onClick={() => toast.info('Booking flow: open Home → New Appointment for this guest')}><Ico.cal /> Book</button>
-            <button className="btn-ghost" onClick={() => toast.info('Wallet top-up via UPI — coming soon')}><Ico.wallet /> Wallet</button>
-          </div>
-          <div className="gp-stats">
-            <div className="gp-stat"><b>{visitCount}</b><span>Visits</span></div>
-            <div className="gp-stat"><b>{rupee(totalSpend)}</b><span>Total spend</span></div>
-            <div className="gp-stat"><b>{rupee(wallet)}</b><span>Wallet</span></div>
-            <div className="gp-stat"><b>{points}</b><span>Points</span></div>
-          </div>
-        </div>
-
-        <div className="gp-tabs">
-          {[
-            {k:'overview', label:'Overview'},
-            {k:'visits', label:'Visits & invoices'},
-            {k:'comms', label:'Messages'},
-            {k:'notes', label:'Notes'},
-          ].map(t => (
-            <button key={t.k} className={`gp-tab ${tab === t.k ? 'on' : ''}`} onClick={() => setTab(t.k)}>{t.label}</button>
-          ))}
-        </div>
-
-        <div className="gp-body">
-          {tab === 'overview' && (
-            <div>
-              <div className="row-line"><span className="k">Mobile</span><span className="v">{guest.phone || '—'}</span></div>
-              <div className="row-line"><span className="k">Email</span><span className="v">{guest.email || '—'}</span></div>
-              <div className="row-line"><span className="k">Gender</span><span className="v">{guest.gender || '—'}</span></div>
-              <div className="row-line"><span className="k">Birthday</span><span className="v">{guest.date_of_birth ? new Date(guest.date_of_birth).toLocaleDateString('en-IN', {day:'numeric', month:'short'}) : '—'}</span></div>
-              <div className="row-line"><span className="k">Anniversary</span><span className="v">{guest.anniversary ? new Date(guest.anniversary).toLocaleDateString('en-IN', {day:'numeric', month:'short'}) : '—'}</span></div>
-              <div className="row-line"><span className="k">Membership</span><span className="v">{membership?.membership_name || guest.membership_name || '—'}</span></div>
-              <div className="row-line"><span className="k">Preferred staff</span><span className="v">{guest.preferred_barber_name || guest.preferred_barber_id || '—'}</span></div>
-              <div className="row-line"><span className="k">Source</span><span className="v">{guest.source || '—'}</span></div>
-              <div className="row-line"><span className="k">Consent (WhatsApp)</span><span className="v" style={{color:'var(--green)'}}>Opted in ✓</span></div>
+            <div className="gp-actions">
+              <button className="btn-wa" onClick={() => {
+                const num = String(guest.phone || '').replace(/[^0-9]/g,'');
+                if (num) window.open(`https://wa.me/${num}`, '_blank');
+              }}><Ico.wa /> WhatsApp</button>
+              <button className="btn-ghost" onClick={() => toast.info('Booking flow: open Home → New Appointment for this guest')}><Ico.cal /> Book</button>
+              <button className="btn-ghost" onClick={() => toast.info('Wallet top-up via UPI — coming soon')}><Ico.wallet /> Wallet</button>
             </div>
-          )}
+            <div className="gp-stats">
+              <div className="gp-stat"><b>{visitCount}</b><span>Visits</span></div>
+              <div className="gp-stat"><b>{rupee(totalSpend)}</b><span>Total spend</span></div>
+              <div className="gp-stat"><b>{rupee(wallet)}</b><span>Wallet</span></div>
+              <div className="gp-stat"><b>{points}</b><span>Points</span></div>
+            </div>
+          </div>
 
-          {tab === 'visits' && (
-            <div>
-              {bookings.length === 0 && <div style={{color:'var(--muted)', textAlign:'center', padding:20}}>No visits yet.</div>}
-              {bookings.slice(0, 20).map((b, i) => {
-                const bd = bookingDisplay(b);
-                return (
-                  <div className="visit" key={b.id || b.token_id || i}>
-                    <div className="vd"><b>{bd.dd}</b><span>{bd.mm}</span></div>
-                    <div className="vi"><b>{bd.services}</b><span>{bd.barber} · {bd.method}</span></div>
-                    <div className="vp">
-                      <b>{rupee(bd.amount)}</b>
-                      {b.invoice_pdf_url && <a href={b.invoice_pdf_url} target="_blank" rel="noopener noreferrer">GST invoice</a>}
-                      {!b.invoice_pdf_url && <a onClick={() => toast.info('Invoice PDF not generated yet')}>GST invoice</a>}
+          <div className="gp-tabs">
+            {[
+              {k:'overview', label:'Overview'},
+              {k:'visits', label:'Visits & invoices'},
+              {k:'comms', label:'Messages'},
+              {k:'notes', label:'Notes'},
+            ].map(t => (
+              <button key={t.k} className={`gp-tab ${tab === t.k ? 'on' : ''}`} onClick={() => setTab(t.k)}>{t.label}</button>
+            ))}
+          </div>
+
+          <div className="gp-body">
+            {tab === 'overview' && (
+              <div>
+                <div className="row-line"><span className="k">Mobile</span><span className="v">{guest.phone || '—'}</span></div>
+                <div className="row-line"><span className="k">Email</span><span className="v">{guest.email || '—'}</span></div>
+                <div className="row-line"><span className="k">Gender</span><span className="v">{guest.gender || '—'}</span></div>
+                <div className="row-line"><span className="k">Birthday</span><span className="v">{guest.date_of_birth ? new Date(guest.date_of_birth).toLocaleDateString('en-IN', {day:'numeric', month:'short'}) : '—'}</span></div>
+                <div className="row-line"><span className="k">Anniversary</span><span className="v">{guest.anniversary ? new Date(guest.anniversary).toLocaleDateString('en-IN', {day:'numeric', month:'short'}) : '—'}</span></div>
+                <div className="row-line"><span className="k">Membership</span><span className="v">{membership?.membership_name || guest.membership_name || '—'}</span></div>
+                <div className="row-line"><span className="k">Preferred staff</span><span className="v">{guest.preferred_barber_name || guest.preferred_barber_id || '—'}</span></div>
+                <div className="row-line"><span className="k">Source</span><span className="v">{guest.source || '—'}</span></div>
+                <div className="row-line"><span className="k">Consent (WhatsApp)</span><span className="v" style={{color:'var(--green)'}}>Opted in ✓</span></div>
+              </div>
+            )}
+
+            {tab === 'visits' && (
+              <div>
+                {bookings.length === 0 && <div style={{color:'var(--muted)', textAlign:'center', padding:20}}>No visits yet.</div>}
+                {bookings.slice(0, 20).map((b, i) => {
+                  const bd = bookingDisplay(b);
+                  return (
+                    <div className="visit" key={b.id || b.token_id || i}>
+                      <div className="vd"><b>{bd.dd}</b><span>{bd.mm}</span></div>
+                      <div className="vi"><b>{bd.services}</b><span>{bd.barber} · {bd.method}</span></div>
+                      <div className="vp">
+                        <b>{rupee(bd.amount)}</b>
+                        {b.invoice_pdf_url && <a href={b.invoice_pdf_url} target="_blank" rel="noopener noreferrer">GST invoice</a>}
+                        {!b.invoice_pdf_url && <a onClick={() => toast.info('Invoice PDF not generated yet')}>GST invoice</a>}
+                      </div>
                     </div>
-                  </div>
-                );
-              })}
-            </div>
-          )}
-
-          {tab === 'comms' && (
-            <div className="msg-log">
-              <div className="ml">
-                <div className="mi" style={{background:'var(--sky-bg)', color:'var(--sky)'}}><Ico.chat /></div>
-                <div className="mb">Message history syncs from Twilio WhatsApp + SMS webhooks. Send a broadcast or automation to see threads here.<div className="mt">System · Info</div></div>
+                  );
+                })}
               </div>
-            </div>
-          )}
+            )}
 
-          {tab === 'notes' && (
-            <div>
-              <div className="v2-field">
-                <label>Staff notes</label>
-                <textarea placeholder="Allergies, preferences, styling notes…" value={notes} onChange={(e) => setNotes(e.target.value)} />
+            {tab === 'comms' && (
+              <div className="msg-log">
+                <div className="ml">
+                  <div className="mi" style={{background:'var(--sky-bg)', color:'var(--sky)'}}><Ico.chat /></div>
+                  <div className="mb">Message history syncs from Twilio WhatsApp + SMS webhooks. Send a broadcast or automation to see threads here.<div className="mt">System · Info</div></div>
+                </div>
               </div>
-              <button className="btn-primary" disabled={savingNotes} onClick={saveNotes}><Ico.save /> Save note</button>
-            </div>
-          )}
-        </div>
-      </aside>
-    </>
-  );
-}
+            )}
 
-// -------------------- Add Guest drawer --------------------
-function AddGuestDrawer({ open, salonId, authHeaders, onClose, onSaved }) {
-  const [name, setName] = useState('');
-  const [phone, setPhone] = useState('');
-  const [gender, setGender] = useState('Men');
-  const [email, setEmail] = useState('');
-  const [dob, setDob] = useState('');
-  const [anniversary, setAnniversary] = useState('');
-  const [instagram, setInstagram] = useState('');
-  const [facebook, setFacebook] = useState('');
-  const [notes, setNotes] = useState('');
-  const [saving, setSaving] = useState(false);
-
-  useEffect(() => {
-    if (!open) {
-      setName(''); setPhone(''); setGender('Men'); setEmail(''); setDob('');
-      setAnniversary(''); setInstagram(''); setFacebook(''); setNotes('');
-    }
-  }, [open]);
-
-  const submit = async () => {
-    if (!name.trim()) { toast.error('Name required'); return; }
-    setSaving(true);
-    try {
-      await axios.post(`${API}/salons/${salonId}/customers`, {
-        name: name.trim(),
-        phone: phone.trim(),
-        gender,
-        email: email.trim() || undefined,
-        dob: dob || undefined,
-        anniversary: anniversary || undefined,
-        instagram_id: instagram.trim() || undefined,
-        facebook_id: facebook.trim() || undefined,
-        notes: notes.trim() || undefined,
-        source: 'owner',
-      }, { headers: authHeaders() });
-      toast.success('Guest added');
-      onSaved?.();
-    } catch (e) { toast.error(e.response?.data?.detail || 'Save failed'); }
-    finally { setSaving(false); }
-  };
-
-  return (
-    <>
-      <div className={`shv2-overlay ${open ? 'open' : ''}`} onClick={onClose} />
-      <aside className={`shv2-drawer v2-narrow ${open ? 'open' : ''}`}>
-        <div className="v2-dh">
-          <div className="tt">
-            <div className="ic"><Ico.userAdd /></div>
-            <div>
-              <h3>Add guest</h3>
-              <p>Create a new customer profile</p>
-            </div>
+            {tab === 'notes' && (
+              <div>
+                <div className="v2-field">
+                  <label>Staff notes</label>
+                  <textarea placeholder="Allergies, preferences, styling notes…" value={notes} onChange={(e) => setNotes(e.target.value)} />
+                </div>
+                <button className="btn-primary" disabled={savingNotes} onClick={saveNotes}><Ico.save /> Save note</button>
+              </div>
+            )}
           </div>
-          <button className="v2-close" onClick={onClose}><Ico.close /></button>
-        </div>
-        <div className="v2-db">
-          <div className="v2-field"><label>Full name *</label><input value={name} onChange={(e) => setName(e.target.value)} placeholder="Priya Sharma" /></div>
-          <div className="v2-field"><label>Mobile</label><input value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="+91 98765 43210" /></div>
-          <div className="v2-field"><label>Gender</label>
-            <select value={gender} onChange={(e) => setGender(e.target.value)}>
-              <option value="Men">Men</option>
-              <option value="Women">Women</option>
-              <option value="Other">Other</option>
-            </select>
-          </div>
-          <div className="v2-field"><label>Email</label><input value={email} onChange={(e) => setEmail(e.target.value)} placeholder="name@email.com" /></div>
-          <div className="v2-field"><label>Birthday</label><input type="date" value={dob} onChange={(e) => setDob(e.target.value)} /></div>
-          <div className="v2-field"><label>Anniversary</label><input type="date" value={anniversary} onChange={(e) => setAnniversary(e.target.value)} /></div>
-          <div className="v2-field"><label>Instagram handle</label><input value={instagram} onChange={(e) => setInstagram(e.target.value)} placeholder="@handle" /></div>
-          <div className="v2-field"><label>Facebook handle</label><input value={facebook} onChange={(e) => setFacebook(e.target.value)} placeholder="@handle" /></div>
-          <div className="v2-field"><label>Notes</label><textarea value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Allergies, preferences…" /></div>
-        </div>
-        <div className="v2-df">
-          <button className="btn-ghost" onClick={onClose}>Cancel</button>
-          <button className="btn-primary" disabled={saving} onClick={submit}><Ico.check /> Add guest</button>
-        </div>
-      </aside>
-    </>
-  );
+        </aside>
+      </>
+    );
+  }
+
+  return ReactDOM.createPortal(drawerContent, document.body);
 }

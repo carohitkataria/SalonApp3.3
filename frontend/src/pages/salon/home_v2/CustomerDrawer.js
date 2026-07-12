@@ -17,6 +17,7 @@
  *   uses refs so the fetch has current callbacks without triggering resets.
  */
 import React, { useEffect, useMemo, useRef, useState } from 'react';
+import ReactDOM from 'react-dom';
 import axios from 'axios';
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
@@ -167,10 +168,10 @@ export default function CustomerDrawer({
   const nameInitial = ((form.first || 'G')[0] || 'G').toUpperCase();
   const isEdit = !!initial?.phone;
 
-  return (
+  return ReactDOM.createPortal(
     <>
-      <div className={`shv2-overlay ${open ? 'open' : ''}`} onClick={onClose} style={{ zIndex: stacked ? 75 : 60 }} />
-      <aside className={`shv2-drawer ${stacked ? 'stacked' : 'narrow'} ${open ? 'open' : ''}`}>
+      <div className={`shv2-overlay ${open ? 'open' : ''}`} onClick={onClose} style={{ zIndex: stacked ? 9075 : 9060 }} />
+      <aside className={`shv2-drawer ${stacked ? 'stacked' : 'narrow'} ${open ? 'open' : ''}`} style={{ zIndex: stacked ? 9080 : 9070 }}>
         <div className="drawer__h">
           <div className="tt">
             <div className="ic">
@@ -313,6 +314,7 @@ export default function CustomerDrawer({
           </div>
         </div>
       </aside>
-    </>
+    </>,
+    document.body
   );
 }
