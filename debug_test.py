@@ -7,7 +7,7 @@ import requests
 import json
 from datetime import datetime
 
-BASE_URL = "https://slot-scheduling-wip.preview.emergentagent.com/api"
+BASE_URL = "https://side-panel-layout.preview.emergentagent.com/api"
 SALON_ID = "91a8e87d-d687-49ea-b3e5-460cc55cf3de"
 
 def log(message):

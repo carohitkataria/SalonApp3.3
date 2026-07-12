@@ -11,7 +11,7 @@ import string
 from datetime import datetime, timedelta
 
 # Configuration
-BASE_URL = "https://slot-scheduling-wip.preview.emergentagent.com/api"
+BASE_URL = "https://side-panel-layout.preview.emergentagent.com/api"
 ADMIN_IDENTIFIER = "admin"
 ADMIN_PASSWORD = "salon123"
 

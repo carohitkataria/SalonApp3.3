@@ -6,7 +6,7 @@ Extended Backend API Testing - Test with enabled services
 import requests
 import json
 
-BACKEND_URL = "https://slot-scheduling-wip.preview.emergentagent.com"
+BACKEND_URL = "https://side-panel-layout.preview.emergentagent.com"
 API_BASE = f"{BACKEND_URL}/api"
 
 def test_with_enabled_services():

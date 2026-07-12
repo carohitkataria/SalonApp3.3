@@ -6,7 +6,7 @@ Quick OTP authentication test
 import requests
 import time
 
-BASE_URL = "https://slot-scheduling-wip.preview.emergentagent.com/api"
+BASE_URL = "https://side-panel-layout.preview.emergentagent.com/api"
 ADMIN_PHONE = "+917503070727"
 
 def get_latest_otp():

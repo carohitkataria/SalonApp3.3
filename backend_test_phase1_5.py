@@ -10,7 +10,7 @@ import json
 from datetime import datetime, timedelta, timezone
 
 # Configuration
-BASE_URL = "https://slot-scheduling-wip.preview.emergentagent.com/api"
+BASE_URL = "https://side-panel-layout.preview.emergentagent.com/api"
 ADMIN_CREDENTIALS = {
     "identifier": "admin",
     "password": "salon123"
