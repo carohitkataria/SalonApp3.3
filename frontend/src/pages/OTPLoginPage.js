@@ -378,7 +378,6 @@ export default function OTPLoginPage() {
 
                 <Button 
                   type="submit" 
-                  onClick={handlePasswordLogin}
                   className="w-full bg-gold text-black hover:bg-gold/90 h-12"
                   disabled={loading}
                 >
