@@ -6413,6 +6413,10 @@ async def get_salon_customers(salon_id: str, branch_id: Optional[str] = None, cu
                 "preferred_barber_id": mc.get('preferred_barber_id'),
                 "tags": mc.get('tags') or [],
                 "id": mc.get('id'),
+                # Seed-friendly aggregate fields (used by Guests V2 page)
+                "visit_count": mc.get('visit_count'),
+                "total_spend": mc.get('total_spend'),
+                "notes": mc.get('notes'),
             }
         else:
             # Merge — salon-master fields take priority when the token record was thin.
@@ -6430,6 +6434,37 @@ async def get_salon_customers(salon_id: str, branch_id: Optional[str] = None, cu
             cust.setdefault('preferred_barber_id', mc.get('preferred_barber_id'))
             cust.setdefault('tags', mc.get('tags') or [])
             cust.setdefault('id', mc.get('id'))
+            # Prefer master-doc aggregates when present (seeded data / manual overrides)
+            if mc.get('visit_count') is not None:
+                cust['visit_count'] = mc.get('visit_count')
+            if mc.get('total_spend') is not None:
+                cust['total_spend'] = mc.get('total_spend')
+            if mc.get('notes'):
+                cust['notes'] = mc.get('notes')
+
+    # Compute visit_count + total_spend from tokens when master-doc value is missing
+    if customers_map:
+        phones_needing_agg = [p for p, c in customers_map.items() if c.get('visit_count') is None or c.get('total_spend') is None]
+        if phones_needing_agg:
+            token_agg_q = {"salon_id": salon_id, "phone": {"$in": phones_needing_agg}, "customer_status": {"$ne": "deleted"}}
+            if branch_id:
+                token_agg_q["branch_id"] = branch_id
+            agg_tokens = await db.tokens.find(token_agg_q, {"_id": 0, "phone": 1, "final_amount": 1, "total_amount": 1, "status": 1}).to_list(20000)
+            counts: Dict[str, int] = {}
+            spends: Dict[str, float] = {}
+            for t in agg_tokens:
+                p = t.get('phone')
+                if not p:
+                    continue
+                counts[p] = counts.get(p, 0) + 1
+                if t.get('status') in ('completed', 'complete'):
+                    amt = t.get('final_amount') or t.get('total_amount') or 0
+                    spends[p] = spends.get(p, 0.0) + float(amt)
+            for p, c in customers_map.items():
+                if c.get('visit_count') is None:
+                    c['visit_count'] = counts.get(p, 0)
+                if c.get('total_spend') is None:
+                    c['total_spend'] = spends.get(p, 0.0)
 
     # Attach last visit date computed from tokens
     for phone, cust in customers_map.items():
@@ -6452,8 +6487,18 @@ async def get_salon_customers(salon_id: str, branch_id: Optional[str] = None, cu
                 }
         for phone, cust in customers_map.items():
             info = wallet_by_phone.get(phone, {"wallet_balance": 0, "membership_name": ""})
+            # Membership overrides only when present
             cust["wallet_balance"] = info["wallet_balance"]
             cust["membership_name"] = info["membership_name"]
+
+        # Fill from master doc if endpoint's membership lookup returned empty (for seeded / manual data)
+        for mc in manual_customers:
+            p = mc.get('phone')
+            if p and p in customers_map:
+                if not customers_map[p].get("wallet_balance"):
+                    customers_map[p]["wallet_balance"] = float(mc.get("wallet_balance") or 0)
+                if not customers_map[p].get("membership_name"):
+                    customers_map[p]["membership_name"] = mc.get("membership_name") or ""
     
     return {"customers": list(customers_map.values())}
 
