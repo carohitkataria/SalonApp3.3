@@ -884,6 +884,29 @@ async def create_template(salon_id: str, body: TemplateIn, request: Request):
     return _clean(doc)
 
 
+@marketing_router.put("/salons/{salon_id}/marketing/templates/{tid}")
+async def update_template(salon_id: str, tid: str, body: TemplateIn, request: Request):
+    """Edit a template. Only DRAFT / REJECTED templates can be edited — approved
+    or pending-approval templates are immutable per Meta rules."""
+    user = await _require_admin(request)
+    _assert_salon_scope(user, salon_id)
+    existing = await _db.marketing_templates.find_one({"id": tid, "salon_id": salon_id})
+    if not existing:
+        raise HTTPException(status_code=404, detail="Template not found")
+    status = str(existing.get("meta_status") or existing.get("approval_status") or "draft").lower()
+    if status not in ("draft", "rejected", ""):
+        raise HTTPException(
+            status_code=409,
+            detail="Only draft or rejected templates can be edited. Delete and recreate for approved templates.",
+        )
+    updates = body.model_dump(exclude_unset=True)
+    updates["updated_at"] = _now_iso()
+    updates["updated_by"] = user.get("user_id")
+    await _db.marketing_templates.update_one({"id": tid, "salon_id": salon_id}, {"$set": updates})
+    doc = await _db.marketing_templates.find_one({"id": tid, "salon_id": salon_id})
+    return _clean(doc)
+
+
 @marketing_router.delete("/salons/{salon_id}/marketing/templates/{tid}")
 async def delete_template(salon_id: str, tid: str, request: Request):
     user = await _require_admin(request)

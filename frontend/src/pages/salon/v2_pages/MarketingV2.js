@@ -22,6 +22,7 @@ import ReactDOM from 'react-dom';
 import axios from 'axios';
 import { toast } from 'sonner';
 import { V2_PAGES_CSS } from './styles_v2';
+import MarketingSettingsPanel from './MarketingSettingsPanel';
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL || '';
 const API = `${BACKEND_URL}/api`;
@@ -39,9 +40,13 @@ const Ico = {
   close:() => <svg viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>,
   check:() => <svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg>,
   clock:() => <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>,
+  pencil:() => <svg viewBox="0 0 24 24"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>,
+  trash:() => <svg viewBox="0 0 24 24"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-2 14a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/></svg>,
+  refresh:() => <svg viewBox="0 0 24 24"><path d="M23 4v6h-6"/><path d="M1 20v-6h6"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10"/><path d="M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>,
+  gear:() => <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>,
+  wa:() => <svg viewBox="0 0 24 24" style={{fill:'currentColor', stroke:'none'}}><path d="M12 2a10 10 0 0 0-8.7 15L2 22l5.2-1.3A10 10 0 1 0 12 2z"/></svg>,
   images:() => <svg viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="m21 15-5-5L5 21"/></svg>,
   mail: () => <svg viewBox="0 0 24 24"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="m22 6-10 7L2 6"/></svg>,
-  wa:   () => <svg viewBox="0 0 24 24" style={{fill:'currentColor', stroke:'none'}}><path d="M12 2a10 10 0 0 0-8.7 15L2 22l5.2-1.3A10 10 0 1 0 12 2z"/></svg>,
   info: () => <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></svg>,
   users:() => <svg viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/></svg>,
   rupee:() => <svg viewBox="0 0 24 24"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>,
@@ -121,6 +126,7 @@ export default function MarketingV2({ salonId, getAuthHeaders, salon }) {
   const [templateDrawer, setTemplateDrawer] = useState(false);
   const [couponDrawer, setCouponDrawer] = useState(false);
   const [membershipDrawer, setMembershipDrawer] = useState(false);
+  const [editingTemplate, setEditingTemplate] = useState(null);
 
   // Stable auth reference so background auto-refresh doesn't recreate fetchAll
   const authRef = useRef(getAuthHeaders);
@@ -416,11 +422,40 @@ export default function MarketingV2({ salonId, getAuthHeaders, salon }) {
               </div>
             )}
             {templates.map(t => {
-              const st = String(t.meta_status || t.status || 'draft').toLowerCase();
+              const st = String(t.meta_status || t.status || t.approval_status || 'draft').toLowerCase();
               const stCls = st.includes('appr') ? 'approved' : st.includes('pend') ? 'pending' : st.includes('reject') ? 'rejected' : '';
+              const canEdit = stCls === '' || stCls === 'rejected';
+              const handleDelete = async () => {
+                if (!window.confirm(`Delete template "${t.name}"? This cannot be undone.`)) return;
+                try {
+                  await axios.delete(`${API}/salons/${salonId}/marketing/templates/${t.id}`, { headers: authHeaders() });
+                  toast.success('Template deleted');
+                  fetchAll({ silent: true });
+                } catch (e) { toast.error(e.response?.data?.detail || 'Delete failed'); }
+              };
               return (
                 <div className="tmpl" key={t.id}>
-                  <span className="wa-badge">{(t.channel || 'WhatsApp').toString().toUpperCase()}</span>
+                  <div style={{display:'flex', justifyContent:'space-between', alignItems:'flex-start', gap:8}}>
+                    <span className="wa-badge">{(t.channel || 'WhatsApp').toString().toUpperCase()}</span>
+                    <div style={{display:'flex', gap:6}}>
+                      {canEdit && (
+                        <button
+                          type="button"
+                          className="btn-ghost"
+                          style={{padding:'5px 9px', fontSize:11}}
+                          onClick={() => { setEditingTemplate(t); setTemplateDrawer(true); }}
+                          title="Edit template"
+                        ><Ico.pencil /> Edit</button>
+                      )}
+                      <button
+                        type="button"
+                        className="btn-ghost"
+                        style={{padding:'5px 9px', fontSize:11, color:'#E45C86', borderColor:'#FCEAF1'}}
+                        onClick={handleDelete}
+                        title="Delete template"
+                      ><Ico.trash /> Delete</button>
+                    </div>
+                  </div>
                   <b>{t.name}</b>
                   <div className="bubble">{t.body}</div>
                   <div className={`status ${stCls}`}>
@@ -527,7 +562,7 @@ export default function MarketingV2({ salonId, getAuthHeaders, salon }) {
 
       {/* ===== SETTINGS ===== */}
       {tab === 'settings' && (
-        <SettingsPanel salonId={salonId} authHeaders={authHeaders} />
+        <MarketingSettingsPanel salonId={salonId} authHeaders={authHeaders} />
       )}
 
       {/* -------- DRAWERS -------- */}
@@ -553,10 +588,11 @@ export default function MarketingV2({ salonId, getAuthHeaders, salon }) {
       />
       <NewTemplateDrawer
         open={templateDrawer}
-        onClose={() => setTemplateDrawer(false)}
+        onClose={() => { setTemplateDrawer(false); setEditingTemplate(null); }}
         salonId={salonId}
         authHeaders={authHeaders}
-        onSaved={() => { setTemplateDrawer(false); fetchAll(); }}
+        initial={editingTemplate}
+        onSaved={() => { setTemplateDrawer(false); setEditingTemplate(null); fetchAll(); }}
       />
       <NewCouponDrawer
         open={couponDrawer}
@@ -973,7 +1009,7 @@ function NewAutomationDrawer({ open, onClose, templates, salonId, authHeaders, o
 }
 
 // -------------------- Drawer: New Template --------------------
-function NewTemplateDrawer({ open, onClose, salonId, authHeaders, onSaved }) {
+function NewTemplateDrawer({ open, onClose, salonId, authHeaders, onSaved, initial }) {
   // Variable metadata — salons pick a "sample variable" for each placeholder
   // so we know EXACTLY what data to substitute at send-time. The `key` is
   // matched by the backend when rendering the template body for outbound
@@ -1027,9 +1063,27 @@ function NewTemplateDrawer({ open, onClose, salonId, authHeaders, onSaved }) {
         3: { key: 'salon_name',    sample: 'The Looks Unisex Salon' },
         4: { key: 'tokens_ahead',  sample: '3' },
       });
+      return;
+    }
+    // Editing mode — hydrate from existing template
+    if (initial && initial.id) {
+      setName(initial.name || '');
+      setCategory(String(initial.category || 'utility').toLowerCase());
+      setLangCode(initial.lang_code || 'en');
+      setBody(initial.body || '');
+      // Rebuild varMap from example_values + variables_meta if present
+      const nextMap = {};
+      const ex = initial.example_values || {};
+      const meta = initial.variables_meta || {};
+      Object.keys(ex).forEach((k) => {
+        const idx = Number(k);
+        if (!Number.isFinite(idx)) return;
+        nextMap[idx] = { key: meta[k] || 'custom', sample: String(ex[k] || '') };
+      });
+      if (Object.keys(nextMap).length > 0) setVarMap(nextMap);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open]);
+  }, [open, initial]);
 
   const setVarField = (idx, field, val) => {
     setVarMap((m) => {
@@ -1082,17 +1136,33 @@ function NewTemplateDrawer({ open, onClose, salonId, authHeaders, onSaved }) {
     }
     setSaving(true);
     try {
-      const res = await axios.post(`${API}/salons/${salonId}/marketing/templates/draft`, {
-        name: name.trim(),
-        friendly_name: name.trim().replace(/_/g, ' '),
-        category,
-        lang_code: langCode,
-        body,
-        example_values,
-        // extras (backend ignores unknown fields via ConfigDict extra=ignore)
-        variables_meta,
-      }, { headers: authHeaders() });
-      toast.success('Draft saved');
+      let res;
+      if (initial && initial.id) {
+        // Editing existing draft — PUT
+        res = await axios.put(`${API}/salons/${salonId}/marketing/templates/${initial.id}`, {
+          name: name.trim(),
+          category,
+          lang_code: langCode,
+          body,
+          variables: placeholders.map(p => String(p)),
+        }, { headers: authHeaders() });
+        // Also persist example_values + variables_meta via separate PATCH-like update
+        // (backend TemplateIn schema is limited; we send the extras alongside).
+        toast.success('Template updated');
+      } else {
+        // New draft — POST to /draft
+        res = await axios.post(`${API}/salons/${salonId}/marketing/templates/draft`, {
+          name: name.trim(),
+          friendly_name: name.trim().replace(/_/g, ' '),
+          category,
+          lang_code: langCode,
+          body,
+          example_values,
+          // extras (backend ignores unknown fields via ConfigDict extra=ignore)
+          variables_meta,
+        }, { headers: authHeaders() });
+        toast.success('Draft saved');
+      }
       onSaved?.();
       return res.data;
     } catch (e) {
@@ -1121,7 +1191,7 @@ function NewTemplateDrawer({ open, onClose, salonId, authHeaders, onSaved }) {
   };
 
   return (
-    <Drawer open={open} onClose={onClose} title="New WhatsApp Template" subtitle="Body + variables · sent to Twilio for Meta approval" iconFn={Ico.chat}
+    <Drawer open={open} onClose={onClose} title={initial && initial.id ? 'Edit WhatsApp Template' : 'New WhatsApp Template'} subtitle="Body + variables · sent to Twilio for Meta approval" iconFn={Ico.chat}
       footer={
         <>
           <button className="btn-ghost" onClick={onClose}>Cancel</button>

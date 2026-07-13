@@ -15972,6 +15972,15 @@ marketing_mod.init_marketing_router(
 )
 fastapi_app.include_router(marketing_mod.marketing_router)
 
+# Marketing Settings Module (Twilio sub-account, Cashfree wallet, DLT, email, sending windows)
+import salon_marketing_settings as mkt_settings_mod  # noqa: E402
+mkt_settings_mod.init_marketing_settings_router(
+    db=db,
+    get_current_salon_user=get_current_salon_user,
+    get_current_salon_admin=get_current_salon_admin,
+)
+fastapi_app.include_router(mkt_settings_mod.settings_router)
+
 # Register marketing scheduler jobs (M6 automations daily + M5 scheduled campaigns every 5m)
 try:
     marketing_mod.register_marketing_jobs(scheduler)
