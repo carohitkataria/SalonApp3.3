@@ -189,15 +189,25 @@ export const V2_PAGES_CSS = `
 .shv2 .ml .mb{flex:1;background:var(--line-2);border-radius:11px;padding:10px 12px;font-size:12.5px}
 .shv2 .ml .mb .mt{font-size:10.5px;color:var(--muted-2);margin-top:4px}
 .shv2 .ml.out .mb{background:var(--wa-bg)}
-.shv2 .v2-field{display:flex;flex-direction:column;gap:7px;margin-bottom:16px}
-.shv2 .v2-field label{font-size:12.5px;font-weight:600;color:var(--ink-soft)}
-.shv2 .v2-field input,.shv2 .v2-field select,.shv2 .v2-field textarea{font-size:13.5px;border:1px solid var(--line);border-radius:10px;padding:11px 13px;outline:none;width:100%;color:var(--ink);background:#fff;font-family:inherit;font-weight:600}
-.shv2 .v2-field textarea{resize:vertical;min-height:90px}
-.shv2 .v2-field input:focus,.shv2 .v2-field select:focus,.shv2 .v2-field textarea:focus{border-color:var(--primary);box-shadow:0 0 0 3px var(--primary-050)}
-.shv2 .ch-pick{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px}
-.shv2 .ch-pick button{border:1px solid var(--line);border-radius:10px;padding:11px;font-size:12.5px;font-weight:700;color:var(--muted);display:flex;flex-direction:column;align-items:center;gap:6px;background:var(--surface);cursor:pointer;font-family:inherit}
-.shv2 .ch-pick button svg{width:18px;height:18px}
-.shv2 .ch-pick button.on{border-color:var(--wa);background:var(--wa-bg);color:var(--wa)}
+.shv2 .v2-field,.shv2-drawer .v2-field{display:flex;flex-direction:column;gap:7px;margin-bottom:16px}
+.shv2 .v2-field label,.shv2-drawer .v2-field label{font-size:12.5px;font-weight:600;color:#3C3F4E}
+.shv2 .v2-field input,.shv2 .v2-field select,.shv2 .v2-field textarea,.shv2-drawer .v2-field input,.shv2-drawer .v2-field select,.shv2-drawer .v2-field textarea{font-size:13.5px;border:1px solid #ECECF3;border-radius:10px;padding:11px 13px;outline:none;width:100%;color:#23252F;background:#fff;font-family:inherit;font-weight:600;box-sizing:border-box}
+.shv2 .v2-field textarea,.shv2-drawer .v2-field textarea{resize:vertical;min-height:90px}
+.shv2 .v2-field input:focus,.shv2 .v2-field select:focus,.shv2 .v2-field textarea:focus,.shv2-drawer .v2-field input:focus,.shv2-drawer .v2-field select:focus,.shv2-drawer .v2-field textarea:focus{border-color:#6C4FE0;box-shadow:0 0 0 3px #F1EEFF}
+.shv2 .ch-pick,.shv2-drawer .ch-pick{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px}
+.shv2 .ch-pick button,.shv2-drawer .ch-pick button{border:1px solid #ECECF3;border-radius:10px;padding:11px;font-size:12.5px;font-weight:700;color:#7C8092;display:flex;flex-direction:column;align-items:center;gap:6px;background:#fff;cursor:pointer;font-family:inherit}
+.shv2 .ch-pick button svg,.shv2-drawer .ch-pick button svg{width:18px;height:18px}
+.shv2 .ch-pick button.on,.shv2-drawer .ch-pick button.on{border-color:#25D366;background:#E7F9EF;color:#25D366}
+
+/* Drawer buttons — reuse the same primary/ghost styling regardless of parent */
+.shv2 .btn-primary,.shv2-drawer .btn-primary{background:#6C4FE0;color:#fff;padding:10px 16px;border-radius:11px;font-weight:700;font-size:13.5px;display:inline-flex;align-items:center;gap:8px;border:none;cursor:pointer;font-family:inherit;transition:.15s}
+.shv2 .btn-primary:hover:not(:disabled),.shv2-drawer .btn-primary:hover:not(:disabled){background:#5B3FD1}
+.shv2 .btn-primary:disabled,.shv2-drawer .btn-primary:disabled{opacity:.55;cursor:not-allowed}
+.shv2 .btn-primary svg,.shv2-drawer .btn-primary svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:2}
+.shv2 .btn-ghost,.shv2-drawer .btn-ghost{background:#F3F3F8;color:#3C3F4E;padding:10px 14px;border-radius:11px;font-weight:700;font-size:13.5px;display:inline-flex;align-items:center;gap:8px;border:1px solid #ECECF3;cursor:pointer;font-family:inherit;transition:.15s}
+.shv2 .btn-ghost:hover:not(:disabled),.shv2-drawer .btn-ghost:hover:not(:disabled){background:#EFEBFE;color:#6C4FE0;border-color:#E7E2FF}
+.shv2 .btn-ghost:disabled,.shv2-drawer .btn-ghost:disabled{opacity:.55;cursor:not-allowed}
+.shv2 .btn-ghost svg,.shv2-drawer .btn-ghost svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:2}
 
 /* Right-side drawers (v2) - reuse the .shv2-drawer / .shv2-overlay from home_v2 styles */
 .shv2-drawer.v2-narrow{width:min(600px,95vw)}
