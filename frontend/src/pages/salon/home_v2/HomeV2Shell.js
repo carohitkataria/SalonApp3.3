@@ -91,6 +91,8 @@ export default function HomeV2Shell({
   activeTab = 'home',
   onSaved,          // callback fired when appointment or guest saved (parent refetches)
   showTopbar = true,
+  unreadNotifCount = 0,
+  onLogout,
   children,
 }) {
   const navigate = useNavigate();
@@ -139,7 +141,7 @@ export default function HomeV2Shell({
           <button
             className="navitem"
             style={{ height: 44 }}
-            onClick={() => { try { logout?.(); } catch (_) {} navigate('/'); }}
+            onClick={() => { try { onLogout?.(); logout?.(); } catch (_) {} navigate('/'); }}
             title="Logout"
           >
             <I.rotate /><span>Exit</span>
@@ -158,7 +160,12 @@ export default function HomeV2Shell({
         <div className="ribbon__sep" />
         <button className="ribbon__btn" data-tip="Search"><I.search /></button>
         <button className="ribbon__btn" data-tip="Messages" onClick={() => navigate('/salon/dashboard?tab=marketing')}><I.chat /></button>
-        <button className="ribbon__btn" data-tip="Notifications" onClick={() => navigate('/salon/dashboard?tab=analytics')}><I.bell /></button>
+        <button className="ribbon__btn" data-tip="Notifications" onClick={() => navigate('/salon/dashboard?tab=notifications')}>
+          <I.bell />
+          {unreadNotifCount > 0 && (
+            <span className="dot">{unreadNotifCount > 9 ? '9+' : unreadNotifCount}</span>
+          )}
+        </button>
         <div className="ribbon__sep" />
         <button className="ribbon__btn" data-tip="Help"><I.help /></button>
       </aside>

@@ -16131,6 +16131,14 @@ async def startup_event():
         salon_store_mod.start_sweeper()
     except Exception as e:
         logger.error(f"[STARTUP] salon_store sweeper failed: {e}")
+    # Jul 2026 (continuation) — auto-seed a few services, active barbers and
+    # 3 sample bookings for the admin salon so testers can immediately
+    # explore the UI. Safe & idempotent (see seed_test_data.py).
+    try:
+        from seed_test_data import main as seed_test_data_main
+        await seed_test_data_main()
+    except Exception as e:
+        logger.error(f"[STARTUP] seed_test_data failed: {e}")
     logger.info("Application started with multi-salon support")
 
 @fastapi_app.on_event("shutdown")

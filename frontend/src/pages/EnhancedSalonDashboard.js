@@ -1222,182 +1222,12 @@ export default function EnhancedSalonDashboard() {
       salonId={salonId}
       getAuthHeaders={getAuthHeaders}
       activeTab={activeTab}
+      unreadNotifCount={unreadNotifCount}
+      onLogout={handleLogout}
       onSaved={() => { try { fetchTokens?.(); fetchBarbers?.(); } catch (_) {} }}
     >
-    <div className="min-h-screen bg-background relative overflow-hidden">
-      {/* Background Image with Overlay */}
-      <div className="fixed inset-0 z-0">
-        <div 
-          className="absolute inset-0 bg-cover bg-center bg-no-repeat opacity-20"
-          style={{
-            backgroundImage: `url('https://images.pexels.com/photos/3993293/pexels-photo-3993293.jpeg?auto=compress&cs=tinysrgb&dpr=2&h=650&w=940')`
-          }}
-        />
-        <div className="absolute inset-0 bg-gradient-to-br from-background/95 via-background/90 to-gold/10" />
-      </div>
-
-      {/* Content */}
-      <div className="relative z-10">
-        {/* Header */}
-        <div className="backdrop-blur-xl bg-background/80 border-b border-gold/20 p-3 md:p-4 shadow-lg">
-          <div className="max-w-7xl mx-auto flex items-center justify-between gap-2">
-            <div className="flex items-center space-x-2 md:space-x-4 min-w-0">
-              {/* Hamburger Menu Button */}
-              <button
-                onClick={() => setMenuOpen(!menuOpen)}
-                className="p-2 hover:bg-gold/10 rounded-lg transition-colors flex-shrink-0"
-              >
-                <Menu className="w-6 h-6 text-gold" />
-              </button>
-              
-              <div 
-                className="hidden sm:block p-3 bg-gradient-to-br from-gold/20 to-gold/5 rounded-xl border border-gold/30 flex-shrink-0 cursor-pointer hover:bg-gold/30 transition-colors overflow-hidden"
-                onClick={() => goToTab('home')}
-                title="Go to Home"
-              >
-                {salon?.logo_url ? (
-                  <img src={salon.logo_url} alt="Salon Logo" className="w-8 h-8 object-cover rounded" />
-                ) : (
-                  <Scissors className="w-8 h-8 text-gold" />
-                )}
-              </div>
-              <div className="min-w-0">
-                <h1 className="text-lg md:text-2xl font-playfair font-bold text-foreground truncate">Salon Dashboard</h1>
-                <p className="text-xs md:text-sm text-gold truncate">{salon?.salon_name || 'Loading...'}</p>
-              </div>
-            </div>
-            <div className="flex items-center space-x-2 md:space-x-3 flex-shrink-0">
-              <BranchSelector compact />
-              <button
-                onClick={() => {
-                  goToTab('notifications');
-                  if (!menuPinned) setMenuOpen(false);
-                }}
-                className="relative p-2 hover:bg-gold/10 rounded-lg transition-colors"
-                title="Notifications"
-              >
-                <Bell className="w-5 h-5 text-gold" />
-                {unreadNotifCount > 0 && (
-                  <span className="absolute -top-1 -right-1 w-5 h-5 bg-red-500 text-white text-[10px] font-bold rounded-full flex items-center justify-center">
-                    {unreadNotifCount > 9 ? '9+' : unreadNotifCount}
-                  </span>
-                )}
-              </button>
-            </div>
-          </div>
-        </div>
-
-        {/* Hamburger Menu Sidebar */}
-        <AnimatePresence>
-          {(menuOpen || menuPinned) && (
-            <>
-              {/* Backdrop - only show if not pinned */}
-              {!menuPinned && (
-                <motion.div
-                  initial={{ opacity: 0 }}
-                  animate={{ opacity: 1 }}
-                  exit={{ opacity: 0 }}
-                  onClick={() => setMenuOpen(false)}
-                  className="fixed inset-0 bg-black/50 z-40"
-                />
-              )}
-              
-              {/* Sidebar */}
-              <motion.div
-                initial={{ x: -300 }}
-                animate={{ x: 0 }}
-                exit={{ x: -300 }}
-                transition={{ type: 'spring', damping: 20 }}
-                className={`fixed left-0 top-0 bottom-0 w-64 md:w-72 bg-card border-r border-border shadow-2xl z-50 overflow-y-auto ${
-                  menuPinned ? 'sticky' : ''
-                }`}
-              >
-                <div className="p-4 border-b border-border">
-                  <div className="flex items-center justify-between">
-                    <h2 className="text-lg font-semibold">Menu</h2>
-                    <div className="flex items-center gap-2">
-                      <button
-                        onClick={() => {
-                          const newPinned = !menuPinned;
-                          setMenuPinned(newPinned);
-                          localStorage.setItem('menu_pinned', newPinned);
-                          if (newPinned) setMenuOpen(true);
-                        }}
-                        className={`p-2 rounded-lg transition-colors ${
-                          menuPinned 
-                            ? 'bg-gold/20 text-gold hover:bg-gold/30' 
-                            : 'hover:bg-muted'
-                        }`}
-                        title={menuPinned ? 'Unpin menu' : 'Pin menu'}
-                      >
-                        {menuPinned ? <Pin className="w-5 h-5" /> : <PinOff className="w-5 h-5" />}
-                      </button>
-                      {!menuPinned && (
-                        <button
-                          onClick={() => setMenuOpen(false)}
-                          className="p-2 hover:bg-muted rounded-lg"
-                        >
-                          <X className="w-5 h-5" />
-                        </button>
-                      )}
-                    </div>
-                  </div>
-                  <p className="text-sm text-muted-foreground mt-1">
-                    {salonUser?.role === 'admin' ? 'Admin Access' : 'Staff Access'}
-                  </p>
-                </div>
-
-                <div className="p-2">
-                  {menuItems.map((item) => {
-                    const Icon = item.icon;
-                    return (
-                      <button
-                        key={item.id}
-                        data-testid={`nav-${item.id}`}
-                        onClick={() => {
-                          if (item.route) {
-                            // External-route menu items (e.g. Marketplace) — navigate
-                            // to a separate page rather than switching tabs.
-                            if (!menuPinned) setMenuOpen(false);
-                            navigate(item.route);
-                            return;
-                          }
-                          goToTab(item.id);
-                          if (!menuPinned) setMenuOpen(false);
-                        }}
-                        className={`w-full flex items-center space-x-3 px-4 py-3 rounded-lg transition-all ${
-                          activeTab === item.id
-                            ? 'bg-gold text-black font-semibold'
-                            : 'text-foreground hover:bg-muted'
-                        }`}
-                      >
-                        <Icon className="w-5 h-5" />
-                        <span>{item.label}</span>
-                      </button>
-                    );
-                  })}
-                </div>
-                
-                {/* Bottom section: Theme toggle and Logout */}
-                <div className="border-t border-border p-2 mt-2">
-                  <div className="flex items-center justify-between px-4 py-3">
-                    <span className="text-sm text-muted-foreground">Theme</span>
-                    <ThemeToggle />
-                  </div>
-                  <button
-                    onClick={handleLogout}
-                    className="w-full flex items-center space-x-3 px-4 py-3 rounded-lg text-red-500 hover:bg-red-500/10 transition-all"
-                  >
-                    <LogOut className="w-5 h-5" />
-                    <span>Logout</span>
-                  </button>
-                </div>
-              </motion.div>
-            </>
-          )}
-        </AnimatePresence>
-
-        <div className="max-w-7xl mx-auto p-4">
+    <div className="min-h-screen bg-background text-foreground">
+      <div className="w-full px-3 md:px-5 py-4">
 
         {/* ===== HOME DASHBOARD (rendered separately outside this wrapper) ===== */}
 
@@ -2319,7 +2149,6 @@ export default function EnhancedSalonDashboard() {
         </DialogContent>
       </Dialog>
       </div>
-    </div>
     </HomeV2Shell>
     )}
     <SubscriptionPaywallModal />
