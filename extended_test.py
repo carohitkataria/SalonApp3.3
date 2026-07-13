@@ -6,7 +6,7 @@ Extended Backend API Testing - Test with enabled services
 import requests
 import json
 
-BACKEND_URL = "https://test-salon-login.preview.emergentagent.com"
+BACKEND_URL = "https://ribbon-ui-adjust.preview.emergentagent.com"
 API_BASE = f"{BACKEND_URL}/api"
 
 def test_with_enabled_services():

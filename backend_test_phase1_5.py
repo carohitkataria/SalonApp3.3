@@ -10,7 +10,7 @@ import json
 from datetime import datetime, timedelta, timezone
 
 # Configuration
-BASE_URL = "https://test-salon-login.preview.emergentagent.com/api"
+BASE_URL = "https://ribbon-ui-adjust.preview.emergentagent.com/api"
 ADMIN_CREDENTIALS = {
     "identifier": "admin",
     "password": "salon123"

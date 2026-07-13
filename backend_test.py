@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Backend test script for Marketing Settings + Wallet + Cashfree + Template Edit endpoints.
-Tests salon_id=1eddf29d-5ffd-49b0-8dae-130eecd4e62f with admin login identifier='admin', password='salon123'.
+Tests salon_id=ribbon-ui-adjust with admin login identifier='admin', password='salon123'.
 """
 import requests
 import json
@@ -12,7 +12,7 @@ import base64
 import time
 
 # Configuration
-BASE_URL = "https://test-salon-login.preview.emergentagent.com/api"
+BASE_URL = "https://ribbon-ui-adjust.preview.emergentagent.com/api"
 SALON_ID = "1eddf29d-5ffd-49b0-8dae-130eecd4e62f"
 ADMIN_IDENTIFIER = "admin"
 ADMIN_PASSWORD = "salon123"
