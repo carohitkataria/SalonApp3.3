@@ -29,7 +29,7 @@ import { toast } from 'sonner';
 import { HOME_V2_CSS } from './home_v2/styles';
 import AppointmentDrawer from './home_v2/AppointmentDrawer';
 import CustomerDrawer from './home_v2/CustomerDrawer';
-import GlobalSearchOverlay from './home_v2/GlobalSearchOverlay';
+import GlobalSearchDropdown from './home_v2/GlobalSearchDropdown';
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
 const API = `${BACKEND_URL}/api`;
@@ -162,20 +162,6 @@ export default function SalonHomeV2({ salon, salonId, tokens = [], barbers = [],
   // Drawers
   const [apptOpen, setApptOpen] = useState(false);
   const [guestOpen, setGuestOpen] = useState(false);
-  const [searchOpen, setSearchOpen] = useState(false);
-
-  // Cmd/Ctrl+K anywhere → open global search
-  useEffect(() => {
-    const onKey = (e) => {
-      const isK = e.key && e.key.toLowerCase() === 'k';
-      if (isK && (e.metaKey || e.ctrlKey)) {
-        e.preventDefault();
-        setSearchOpen(true);
-      }
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, []);
 
   // Inject scoped stylesheet once.
   useEffect(() => {
@@ -376,12 +362,6 @@ export default function SalonHomeV2({ salon, salonId, tokens = [], barbers = [],
         <button className="ribbon__btn" data-tip="Add Guest" onClick={() => setGuestOpen(true)}><I.guestAdd /></button>
         <button className="ribbon__btn" data-tip="Retail Sale" onClick={() => navigate('/salon/dashboard?tab=inventory')}><I.cart /></button>
         <div className="ribbon__sep" />
-        <button
-          className="ribbon__btn"
-          data-tip="Search"
-          data-testid="ribbon-search-btn"
-          onClick={() => setSearchOpen(true)}
-        ><I.search /></button>
         <button className="ribbon__btn" data-tip="Messages" onClick={() => navigate('/salon/dashboard?tab=marketing')}>
           {mk.sent > 0 && <span className="dot">{Math.min(99, mk.sent)}</span>}
           <I.chat />
@@ -402,27 +382,8 @@ export default function SalonHomeV2({ salon, salonId, tokens = [], barbers = [],
             </div>
           </div>
           <div className="topbar__spacer" />
-          <div
-            className="searchbox"
-            role="button"
-            tabIndex={0}
-            onClick={() => setSearchOpen(true)}
-            onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') setSearchOpen(true); }}
-            style={{ cursor: 'pointer' }}
-            data-testid="topbar-search-open"
-          >
-            <I.search />
-            <input
-              placeholder="Search customers, services, products…"
-              readOnly
-              style={{ cursor: 'pointer', background: 'transparent' }}
-              onFocus={() => setSearchOpen(true)}
-            />
-            <kbd style={{
-              fontSize: 10, padding: '1px 6px', borderRadius: 5,
-              background: 'rgba(107,95,166,0.12)', color: '#6B5FA6',
-              border: '1px solid rgba(107,95,166,0.25)',
-            }}>⌘K</kbd>
+          <div className="searchbox" style={{ maxWidth: 460, padding: 0, background: 'transparent', border: 'none' }}>
+            <GlobalSearchDropdown salonId={salonId} getAuthHeaders={getAuthHeaders} />
           </div>
           <div className="branch"><I.branch /> {salon?.city || 'Main Branch'}</div>
         </header>
@@ -859,14 +820,6 @@ export default function SalonHomeV2({ salon, salonId, tokens = [], barbers = [],
         salonId={salonId}
         getAuthHeaders={getAuthHeaders}
         source="owner"
-      />
-
-      {/* Global search overlay — opens from ribbon Search or ⌘K */}
-      <GlobalSearchOverlay
-        open={searchOpen}
-        onClose={() => setSearchOpen(false)}
-        salonId={salonId}
-        getAuthHeaders={getAuthHeaders}
       />
     </div>
   );

@@ -257,3 +257,84 @@ async def global_search(
             logger.warning(f"[search] {coll_name} scan failed: {e}")
 
     return {"query": q, "results": results, "total": len(results)}
+
+
+# ---------------------------------------------------------------------------
+# Trending endpoint — for the empty-state of the dropdown ("what's popular")
+# ---------------------------------------------------------------------------
+
+@search_router.get("/{salon_id}/search/trending")
+async def trending(
+    salon_id: str,
+    current_user = Depends(_auth),
+):
+    """Return a small set of popular services + products for the dropdown's
+    empty-state.  We rank services by booking-count over the last 60 days
+    (falling back to any enabled service if no bookings) and products by
+    stored `popularity_score` / `view_count` if present, else the first N.
+    """
+    if _db is None:
+        raise HTTPException(status_code=500, detail="search_not_initialised")
+
+    # ---- Trending services ----
+    trending_services: List[Dict[str, Any]] = []
+    try:
+        pipeline = [
+            {"$match": {"salon_id": salon_id}},
+            {"$unwind": {"path": "$services", "preserveNullAndEmptyArrays": False}},
+            {"$group": {"_id": "$services.service_id", "bookings": {"$sum": 1}, "name": {"$first": "$services.service_name"}}},
+            {"$sort": {"bookings": -1}},
+            {"$limit": 5},
+        ]
+        async for row in _db.tokens.aggregate(pipeline):
+            sid = row.get("_id")
+            if not sid:
+                continue
+            svc = await _db.services.find_one({"id": sid}, {"_id": 0}) or {}
+            trending_services.append({
+                "type": "service",
+                "id": sid,
+                "title": svc.get("service_name") or row.get("name") or "Service",
+                "subtitle": f"{svc.get('category') or ''} · ₹{svc.get('base_price', svc.get('price', 0))}".strip(" ·"),
+                "route": f"/salon/dashboard?tab=services&service_id={sid}",
+                "bookings": int(row.get("bookings") or 0),
+            })
+    except Exception as e:
+        logger.warning(f"[search/trending] services aggregate failed: {e}")
+
+    if not trending_services:
+        # Fallback — any 4 active salon services
+        try:
+            async for s in _db.services.find({"salon_id": salon_id, "is_active": {"$ne": False}}, {"_id": 0}).limit(4):
+                trending_services.append({
+                    "type": "service",
+                    "id": s.get("id"),
+                    "title": s.get("service_name"),
+                    "subtitle": f"{s.get('category') or ''} · ₹{s.get('base_price', 0)}".strip(" ·"),
+                    "route": f"/salon/dashboard?tab=services&service_id={s.get('id')}",
+                    "bookings": 0,
+                })
+        except Exception as e:
+            logger.warning(f"[search/trending] services fallback failed: {e}")
+
+    # ---- Trending products (across catalog; not salon-specific) ----
+    trending_products: List[Dict[str, Any]] = []
+    try:
+        # Prefer view_count / popularity_score if the schema has them; else first N
+        cursor = _db.supplier_product_samples.find({}, {"_id": 0})
+        cursor = cursor.sort([("view_count", -1), ("popularity_score", -1)]).limit(5)
+        async for p in cursor:
+            trending_products.append({
+                "type": "product",
+                "id": p.get("id"),
+                "title": p.get("name"),
+                "subtitle": f"{p.get('brand') or p.get('category') or ''} · ₹{p.get('price', 0)}".strip(" ·"),
+                "route": f"/salon/marketplace?product_id={p.get('id') or ''}",
+            })
+    except Exception as e:
+        logger.warning(f"[search/trending] products cursor failed: {e}")
+
+    return {
+        "trending_services": trending_services,
+        "trending_products": trending_products,
+    }
