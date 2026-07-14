@@ -6440,3 +6440,87 @@ TEST CREDENTIALS UNCHANGED:
 
 NO BACKEND ENDPOINT CHANGES — no backend retesting requested from the testing agent this round."
 
+    - agent: "main"
+      message: "🔧 CONTINUATION_REQUEST bug fixes + polish (Jul 14 2026):
+
+1. **Right-ribbon shadow bug**: `.shv2-drawer` had a global `box-shadow: -20px 0 60px rgba(28,26,54,.22)` that stayed active even when the drawer was translated off-screen — so on every page (worst on Marketing where multiple drawers are mounted) the shadow bled leftward and painted a dark purple glow over the ribbon. Fix: moved the `box-shadow` onto `.shv2-drawer.open` so only the open state casts it.
+
+2. **Bell icon behaviour**: previously the Home page's ribbon bell navigated to `?tab=analytics`, and other pages to `?tab=notifications`. Now BOTH ribbons (Home's own + shell's) open a right-side `NotificationsDrawer` mounted globally. The drawer:
+   - Fetches `/api/notifications/salon/{id}` and shows the latest 50
+   - Header: bell icon + 'Notifications' + '# unread' + `Mark all as read` (top-right, disabled when unread=0) + close (×)
+   - Each row is clickable → expands in place to show all `data` fields; if the notification type has a canonical route (booking → queue, membership → memberships, review → analytics, payment → finance) an `Open related page` button appears
+   - Rows show a purple dot when unread, a green ✓ Read badge when read
+   - Footer: 'Showing X most recent' + `View all` → navigates to `/salon/dashboard?tab=notifications`
+   - ESC closes; auto-marks-as-read when a row is expanded
+
+3. **Hamburger reordered** in BOTH `HomeV2Shell.js` RAIL_ITEMS and `SalonHomeV2.js` RAIL_ITEMS: Home > Queue > Guests > Marketing > Inventory > Shop > Staff > Services > Finance > Analytics > Settings > (Exit at bottom).
+
+4. **Stock renamed to Inventory** — display label change only; the internal id/route remains `inventory` so backend endpoints (`/api/salons/{id}/inventory/...`) are untouched. No backend collections used the string 'Stock'.
+
+5. **First rail item — salon logo control**: replaced the static `.rail__logo` scissors mark with a new `SalonLogoControl` component. Shows the uploaded logo (from `salon.logo_url`) as an `<img>` if present, else the default gradient scissors. A small pencil badge on the bottom-right corner is always visible. Clicking the tile opens a mini popover with:
+   - 'Change logo…' → hidden `<input type=\"file\" accept=\"image/*\">`, base64-encoded and PUT to `/api/salons/{id}` (2 MB cap, image mime check)
+   - 'Remove logo' → PUT `logo_url: null` (confirm dialog)
+   Salon prop is refreshed via the parent's `onSaved` callback so the tile flips immediately.
+
+6. **Last rail item — Exit**: kept unchanged; it already fires `handleLogout()` and navigates to `/`.
+
+7. **Seed additions** — `seed_test_data.py` now also inserts 3 sample notifications (`new_booking` unread, `booking_completed` unread, `review_added` read) with proper `user_type='salon'` + `user_id=salon_id` fields so the notifications drawer has data on first load.
+
+Files touched:
+  - `/app/frontend/src/pages/salon/home_v2/HomeV2Shell.js` (rail order + logo control + notif drawer + bell wiring)
+  - `/app/frontend/src/pages/salon/SalonHomeV2.js` (same for the Home shell)
+  - New: `/app/frontend/src/pages/salon/home_v2/NotificationsDrawer.js`
+  - New: `/app/frontend/src/pages/salon/home_v2/SalonLogoControl.js`
+  - `/app/frontend/src/pages/salon/home_v2/styles.js` (moved drawer box-shadow to .open)
+  - `/app/backend/seed_test_data.py` (sample notifications)
+
+NO backend endpoint changes needed — existing `/api/notifications/*` and `PUT /api/salons/{id}` endpoints handle everything. Credentials unchanged: admin / salon123 (salon_id = c896b84b-f34a-4a23-a27b-a47909f8f834)."
+
+    - agent: "testing"
+      message: "✅ ALL 4 BUG FIXES VERIFIED AND WORKING (Jul 14 2026): Comprehensive UI testing completed successfully for all four bug fixes/feature changes on the salon-side app. Test credentials: identifier='admin', password='salon123', salon_id: c896b84b-f34a-4a23-a27b-a47909f8f834. Base URL: https://ebc28686-3405-4db7-8db3-e6f6f4d08323.preview.emergentagent.com
+
+TEST RESULTS SUMMARY:
+
+✅ TEST 1 - RIGHT-RIBBON SHADOW BUG (REGRESSION FIX): PASSED
+- Navigated to /salon/dashboard?tab=marketing
+- Verified all 8 .shv2-drawer elements WITHOUT 'open' class have box-shadow: none
+- NO dark purple/shadow bleeding from right onto ribbon area
+- Ribbon looks identical to other tabs (Home, Staff, Finance)
+- Visual inspection confirms no dark rectangular halo/glow behind ribbon icons
+- Screenshot: test1_marketing_ribbon.png
+
+✅ TEST 2 - NOTIFICATION BELL OPENS DRAWER ON EVERY PAGE: PASSED (11/11 TABS)
+- Tested on ALL tabs: home, queue, staff, services, financials, analytics, customer-master, marketplace (Shop), inventory, marketing, salon (Settings)
+- [data-testid='ribbon-notif-btn'] found and clickable on every page
+- Right-side drawer slides in (<aside role='dialog' aria-label='Notifications'>) on all pages
+- Drawer header shows: 'Notifications', unread count ('1 unread'), 'Mark all as read' button, close (×) button
+- Body shows 3 seeded notification rows with [data-testid='notif-drawer-item']
+- Row expansion works: clicking a row expands it in place showing key/value pairs (Token Number: M1, Customer: Rohit Sharma, Barber: Imran, Amount: 450)
+- 'Open related page' button appears in expanded panel for notifications with valid target routes
+- 'Mark all as read' button [data-testid='notif-drawer-mark-all-read'] present and functional
+- 'View all' button [data-testid='notif-drawer-view-all'] navigates to /salon/dashboard?tab=notifications
+- ESC key closes drawer
+- Click outside (scrim overlay) closes drawer
+- CRITICAL REQUIREMENT MET: Bell does NOT navigate away from current page - URL remains unchanged after opening/closing drawer on all 11 tabs
+- Screenshots: test2_notif_drawer_open.png, test2_notif_expanded.png
+
+✅ TEST 3 - HAMBURGER RAIL REORDER + STOCK→INVENTORY RENAME: PASSED
+- Rail items in EXACT correct order: 1. Home, 2. Queue, 3. Guests, 4. Marketing, 5. Inventory, 6. Shop, 7. Staff, 8. Services, 9. Finance, 10. Analytics, 11. Settings
+- 'Inventory' label confirmed (NOT 'Stock')
+- Clicking Inventory rail button navigates to /salon/dashboard?tab=inventory (backend route unchanged)
+- Exit button present in .rail__foot section below all nav items
+- Screenshot: test3_rail_order.png
+
+✅ TEST 4 - SALON LOGO CONTROL ON THE RAIL: PASSED
+- [data-testid='rail-logo-btn'] button found at top of rail
+- Purple pencil badge visible on bottom-right corner of logo tile
+- Clicking logo button opens popover menu next to rail
+- Popover contains two items: [data-testid='rail-logo-change'] ('Change logo…') and [data-testid='rail-logo-remove'] ('Remove logo')
+- Remove option correctly DISABLED when no logo is set (logo_url is null)
+- Clicking 'Change logo…' triggers hidden <input type='file'> - file chooser event confirmed
+- Click outside popover closes it
+- Screenshot: test4_logo_popover.png
+
+ALL REQUIREMENTS FROM REVIEW REQUEST MET. All four bug fixes are production-ready and working correctly. No code modifications were made during testing (test-only run as requested)."
+
+

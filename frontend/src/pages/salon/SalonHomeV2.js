@@ -30,23 +30,25 @@ import { HOME_V2_CSS } from './home_v2/styles';
 import AppointmentDrawer from './home_v2/AppointmentDrawer';
 import CustomerDrawer from './home_v2/CustomerDrawer';
 import GlobalSearchDropdown from './home_v2/GlobalSearchDropdown';
+import NotificationsDrawer from './home_v2/NotificationsDrawer';
+import SalonLogoControl from './home_v2/SalonLogoControl';
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
 const API = `${BACKEND_URL}/api`;
 
 // ---- Rail items — copies of existing hamburger menu ----
 const RAIL_ITEMS = [
-  { id: 'home',       label: 'Home',      route: '/salon/dashboard?tab=home' },
-  { id: 'queue',      label: 'Queue',     route: '/salon/dashboard?tab=queue' },
-  { id: 'staff',      label: 'Staff',     route: '/salon/dashboard?tab=staff' },
-  { id: 'services',   label: 'Services',  route: '/salon/dashboard?tab=services' },
-  { id: 'financials', label: 'Finance',   route: '/salon/dashboard?tab=financials' },
-  { id: 'customer-master', label: 'Guests', route: '/salon/dashboard?tab=customer-master' },
-  { id: 'analytics',  label: 'Analytics', route: '/salon/dashboard?tab=analytics' },
-  { id: 'marketplace',label: 'Shop',      route: '/salon/marketplace' },
-  { id: 'inventory',  label: 'Stock',     route: '/salon/dashboard?tab=inventory' },
-  { id: 'marketing',  label: 'Marketing', route: '/salon/dashboard?tab=marketing' },
-  { id: 'salon',      label: 'Settings',  route: '/salon/dashboard?tab=salon' },
+  { id: 'home',            label: 'Home',      route: '/salon/dashboard?tab=home' },
+  { id: 'queue',           label: 'Queue',     route: '/salon/dashboard?tab=queue' },
+  { id: 'customer-master', label: 'Guests',    route: '/salon/dashboard?tab=customer-master' },
+  { id: 'marketing',       label: 'Marketing', route: '/salon/dashboard?tab=marketing' },
+  { id: 'inventory',       label: 'Inventory', route: '/salon/dashboard?tab=inventory' },
+  { id: 'marketplace',     label: 'Shop',      route: '/salon/marketplace' },
+  { id: 'staff',           label: 'Staff',     route: '/salon/dashboard?tab=staff' },
+  { id: 'services',        label: 'Services',  route: '/salon/dashboard?tab=services' },
+  { id: 'financials',      label: 'Finance',   route: '/salon/dashboard?tab=financials' },
+  { id: 'analytics',       label: 'Analytics', route: '/salon/dashboard?tab=analytics' },
+  { id: 'salon',           label: 'Settings',  route: '/salon/dashboard?tab=salon' },
 ];
 
 const SOURCE_COLORS = { online: '#6C4FE0', qr: '#12A594', owner: '#E8952B', direct: '#3E93E8' };
@@ -162,6 +164,8 @@ export default function SalonHomeV2({ salon, salonId, tokens = [], barbers = [],
   // Drawers
   const [apptOpen, setApptOpen] = useState(false);
   const [guestOpen, setGuestOpen] = useState(false);
+  const [notifOpen, setNotifOpen] = useState(false);
+  const [notifCount, setNotifCount] = useState(0);
 
   // Inject scoped stylesheet once.
   useEffect(() => {
@@ -327,7 +331,12 @@ export default function SalonHomeV2({ salon, salonId, tokens = [], barbers = [],
     <div className="shv2">
       {/* ===== RAIL ===== */}
       <aside className="rail">
-        <div className="rail__logo"><I.scissors /></div>
+        <SalonLogoControl
+          salonId={salonId}
+          salon={salon}
+          getAuthHeaders={getAuthHeaders}
+          onLogoChanged={() => { /* parent refreshes via next tab open */ }}
+        />
         <nav className="rail__nav">
           {RAIL_ITEMS.map((it, idx) => (
             <button key={it.id} className={`navitem ${it.id === 'home' ? 'active' : ''}`} onClick={() => goRail(it)} title={it.label}>
@@ -366,7 +375,17 @@ export default function SalonHomeV2({ salon, salonId, tokens = [], barbers = [],
           {mk.sent > 0 && <span className="dot">{Math.min(99, mk.sent)}</span>}
           <I.chat />
         </button>
-        <button className="ribbon__btn" data-tip="Notifications" onClick={() => navigate('/salon/dashboard?tab=analytics')}><I.bell /></button>
+        <button
+          className="ribbon__btn"
+          data-tip="Notifications"
+          data-testid="ribbon-notif-btn"
+          onClick={() => setNotifOpen(true)}
+        >
+          <I.bell />
+          {notifCount > 0 && (
+            <span className="dot">{notifCount > 9 ? '9+' : notifCount}</span>
+          )}
+        </button>
         <div className="ribbon__sep" />
         <button className="ribbon__btn" data-tip="Help"><I.help /></button>
       </aside>
@@ -820,6 +839,14 @@ export default function SalonHomeV2({ salon, salonId, tokens = [], barbers = [],
         salonId={salonId}
         getAuthHeaders={getAuthHeaders}
         source="owner"
+      />
+
+      {/* Notifications side-drawer — opens from ribbon Bell */}
+      <NotificationsDrawer
+        open={notifOpen}
+        onClose={() => setNotifOpen(false)}
+        salonId={salonId}
+        onCountUpdate={setNotifCount}
       />
     </div>
   );

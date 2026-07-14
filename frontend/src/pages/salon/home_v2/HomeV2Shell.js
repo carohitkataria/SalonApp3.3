@@ -32,20 +32,22 @@ import { HOME_V2_CSS } from './styles';
 import AppointmentDrawer from './AppointmentDrawer';
 import CustomerDrawer from './CustomerDrawer';
 import GlobalSearchDropdown from './GlobalSearchDropdown';
+import NotificationsDrawer from './NotificationsDrawer';
+import SalonLogoControl from './SalonLogoControl';
 
 // ---- Rail items — copies of existing hamburger menu (kept in sync with SalonHomeV2) ----
 export const RAIL_ITEMS = [
-  { id: 'home',       label: 'Home',      route: '/salon/dashboard?tab=home' },
-  { id: 'queue',      label: 'Queue',     route: '/salon/dashboard?tab=queue' },
-  { id: 'staff',      label: 'Staff',     route: '/salon/dashboard?tab=staff' },
-  { id: 'services',   label: 'Services',  route: '/salon/dashboard?tab=services' },
-  { id: 'financials', label: 'Finance',   route: '/salon/dashboard?tab=financials' },
-  { id: 'customer-master', label: 'Guests', route: '/salon/dashboard?tab=customer-master' },
-  { id: 'analytics',  label: 'Analytics', route: '/salon/dashboard?tab=analytics' },
-  { id: 'marketplace',label: 'Shop',      route: '/salon/marketplace' },
-  { id: 'inventory',  label: 'Stock',     route: '/salon/dashboard?tab=inventory' },
-  { id: 'marketing',  label: 'Marketing', route: '/salon/dashboard?tab=marketing' },
-  { id: 'salon',      label: 'Settings',  route: '/salon/dashboard?tab=salon' },
+  { id: 'home',            label: 'Home',      route: '/salon/dashboard?tab=home' },
+  { id: 'queue',           label: 'Queue',     route: '/salon/dashboard?tab=queue' },
+  { id: 'customer-master', label: 'Guests',    route: '/salon/dashboard?tab=customer-master' },
+  { id: 'marketing',       label: 'Marketing', route: '/salon/dashboard?tab=marketing' },
+  { id: 'inventory',       label: 'Inventory', route: '/salon/dashboard?tab=inventory' },
+  { id: 'marketplace',     label: 'Shop',      route: '/salon/marketplace' },
+  { id: 'staff',           label: 'Staff',     route: '/salon/dashboard?tab=staff' },
+  { id: 'services',        label: 'Services',  route: '/salon/dashboard?tab=services' },
+  { id: 'financials',      label: 'Finance',   route: '/salon/dashboard?tab=financials' },
+  { id: 'analytics',       label: 'Analytics', route: '/salon/dashboard?tab=analytics' },
+  { id: 'salon',           label: 'Settings',  route: '/salon/dashboard?tab=salon' },
 ];
 
 // SVG icon set (matches SalonHomeV2 exactly for visual parity)
@@ -102,6 +104,9 @@ export default function HomeV2Shell({
   // Global drawers, mounted once per shell — accessible from any tab.
   const [apptOpen, setApptOpen] = useState(false);
   const [guestOpen, setGuestOpen] = useState(false);
+  const [notifOpen, setNotifOpen] = useState(false);
+  const [notifCount, setNotifCount] = useState(unreadNotifCount || 0);
+  useEffect(() => { setNotifCount(unreadNotifCount || 0); }, [unreadNotifCount]);
 
   // Inject scoped stylesheet once.
   useEffect(() => {
@@ -120,7 +125,12 @@ export default function HomeV2Shell({
     <div className="shv2">
       {/* ===== RAIL ===== */}
       <aside className="rail">
-        <div className="rail__logo"><I.scissors /></div>
+        <SalonLogoControl
+          salonId={salonId}
+          salon={salon}
+          getAuthHeaders={getAuthHeaders}
+          onLogoChanged={() => onSaved?.()}
+        />
         <nav className="rail__nav">
           {RAIL_ITEMS.map((it) => {
             const IconFn = RAIL_ICON[it.id] || I.gear;
@@ -160,10 +170,15 @@ export default function HomeV2Shell({
         <button className="ribbon__btn" data-tip="Retail Sale" onClick={() => navigate('/salon/dashboard?tab=inventory')}><I.cart /></button>
         <div className="ribbon__sep" />
         <button className="ribbon__btn" data-tip="Messages" onClick={() => navigate('/salon/dashboard?tab=marketing')}><I.chat /></button>
-        <button className="ribbon__btn" data-tip="Notifications" onClick={() => navigate('/salon/dashboard?tab=notifications')}>
+        <button
+          className="ribbon__btn"
+          data-tip="Notifications"
+          data-testid="ribbon-notif-btn"
+          onClick={() => setNotifOpen(true)}
+        >
           <I.bell />
-          {unreadNotifCount > 0 && (
-            <span className="dot">{unreadNotifCount > 9 ? '9+' : unreadNotifCount}</span>
+          {notifCount > 0 && (
+            <span className="dot">{notifCount > 9 ? '9+' : notifCount}</span>
           )}
         </button>
         <div className="ribbon__sep" />
@@ -212,6 +227,14 @@ export default function HomeV2Shell({
         onSaved={() => { setGuestOpen(false); onSaved?.(); toast.success('Guest saved'); }}
         getAuthHeaders={getAuthHeaders}
         salonId={salonId}
+      />
+
+      {/* Notifications side-drawer — opens from ribbon Bell on every page */}
+      <NotificationsDrawer
+        open={notifOpen}
+        onClose={() => setNotifOpen(false)}
+        salonId={salonId}
+        onCountUpdate={setNotifCount}
       />
     </div>
   );

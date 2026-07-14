@@ -229,6 +229,54 @@ async def main():
                 upsert=True,
             )
 
+    # ------------------------------------------------------------------
+    # 5) Sample notifications (idempotent — skip if any already exist)
+    # ------------------------------------------------------------------
+    notif_count = await db.notifications.count_documents({
+        "user_type": "salon", "user_id": salon_id,
+    })
+    if notif_count == 0:
+        sample_notifs = [
+            {
+                "id": str(uuid.uuid4()),
+                "user_type": "salon",
+                "user_id": salon_id,
+                "salon_id": salon_id,
+                "type": "new_booking",
+                "title": "New booking · M1",
+                "message": "Rohit Sharma booked 2 services with Imran (Men's Haircut + Beard Trim).",
+                "data": {"token_number": "M1", "customer": "Rohit Sharma", "barber": "Imran", "amount": 450},
+                "is_read": False,
+                "created_at": now,
+            },
+            {
+                "id": str(uuid.uuid4()),
+                "user_type": "salon",
+                "user_id": salon_id,
+                "salon_id": salon_id,
+                "type": "booking_completed",
+                "title": "Booking completed · M2",
+                "message": "Amit Kumar's Men's Haircut finished. ₹300 collected in cash.",
+                "data": {"token_number": "M2", "customer": "Amit Kumar", "amount": 300, "payment_mode": "cash"},
+                "is_read": False,
+                "created_at": now,
+            },
+            {
+                "id": str(uuid.uuid4()),
+                "user_type": "salon",
+                "user_id": salon_id,
+                "salon_id": salon_id,
+                "type": "review_added",
+                "title": "New 5\u2605 review",
+                "message": "\"Great haircut, will come back!\" — Priya V.",
+                "data": {"customer": "Priya Verma", "stars": 5},
+                "is_read": True,
+                "created_at": now,
+            },
+        ]
+        await db.notifications.insert_many(sample_notifs)
+        print(f"[SEED] Inserted {len(sample_notifs)} sample notifications")
+
     print("[SEED] Done")
 
 

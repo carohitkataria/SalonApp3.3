@@ -269,8 +269,8 @@ export const HOME_V2_CSS = `
 /* ===== DRAWERS ===== */
 .shv2-overlay{position:fixed;inset:0;background:rgba(28,26,54,.42);backdrop-filter:blur(2px);opacity:0;visibility:hidden;transition:.28s;z-index:60}
 .shv2-overlay.open{opacity:1;visibility:visible}
-.shv2-drawer{position:fixed;top:0;right:0;bottom:0;width:min(1100px,75vw);background:#FFFFFF;z-index:70;box-shadow:-20px 0 60px rgba(28,26,54,.22);transform:translateX(100%);transition:transform .32s cubic-bezier(.22,.61,.36,1);display:flex;flex-direction:column;font-family:'Inter',system-ui,sans-serif;color:#23252F}
-.shv2-drawer.open{transform:translateX(0)}
+.shv2-drawer{position:fixed;top:0;right:0;bottom:0;width:min(1100px,75vw);background:#FFFFFF;z-index:70;transform:translateX(100%);transition:transform .32s cubic-bezier(.22,.61,.36,1);display:flex;flex-direction:column;font-family:'Inter',system-ui,sans-serif;color:#23252F}
+.shv2-drawer.open{transform:translateX(0);box-shadow:-20px 0 60px rgba(28,26,54,.22)}
 .shv2-drawer.narrow{width:min(720px,60vw)}
 .shv2-drawer.stacked{z-index:80;width:min(720px,55vw)}
 .shv2-drawer h1,.shv2-drawer h2,.shv2-drawer h3,.shv2-drawer h4{font-family:'Plus Jakarta Sans','Inter',sans-serif}
