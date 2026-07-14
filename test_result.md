@@ -6419,7 +6419,7 @@ backend:
           comment: "✅ AUTH ENFORCEMENT FULLY TESTED AND WORKING: Comprehensive testing completed successfully with 3/3 tests passed. TESTED: Auth enforcement on wallet and marketing settings endpoints for salon 1eddf29d-5ffd-49b0-8dae-130eecd4e62f. RESULTS: 1) GET /wallet - no auth - ✅ WORKING (correctly rejected with HTTP 403 Forbidden), 2) POST /wallet/topup - no auth - ✅ WORKING (correctly rejected with HTTP 403 Forbidden), 3) POST /dlt - no auth - ✅ WORKING (correctly rejected with HTTP 403 Forbidden). CRITICAL SECURITY REQUIREMENT MET: All admin-required marketing settings and wallet endpoints correctly enforce authentication, returning 403 Forbidden when no Authorization header is provided. The auth enforcement is production-ready and secure."
 
 metadata:
-  updated: "2026-07-13 (shell-cleanup + shop-ribbons + seed-test-data)"
+  updated: "2026-07-14 (global-search-ribbon-magnifier)"
 
 agent_communication:
     - agent: "testing"

@@ -211,6 +211,24 @@ async def main():
         await db.tokens.insert_many(bookings)
         print(f"[SEED] Inserted {len(bookings)} test bookings for today ({today})")
 
+        # Also register these as customers so global search + Guests tab find them
+        for bk in bookings:
+            phone = bk.get("phone")
+            if not phone:
+                continue
+            await db.customers.update_one(
+                {"phone": phone},
+                {"$set": {
+                    "phone": phone,
+                    "name": bk.get("customer_name"),
+                    "gender": bk.get("gender"),
+                    "last_booking_salon_id": salon_id,
+                    "salon_id": salon_id,
+                    "updated_at": now,
+                }, "$setOnInsert": {"id": str(uuid.uuid4()), "created_at": now}},
+                upsert=True,
+            )
+
     print("[SEED] Done")
 
 

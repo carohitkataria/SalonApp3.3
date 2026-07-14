@@ -15892,6 +15892,11 @@ import marketplace as marketplace_mod  # noqa: E402
 marketplace_mod.init_marketplace_router(db=db, get_current_salon_user=get_current_salon_user)
 fastapi_app.include_router(marketplace_mod.marketplace_router)
 
+# Jul 2026 (continuation_request) — Global salon-side search (ribbon → magnifier)
+import salon_search as salon_search_mod  # noqa: E402
+salon_search_mod.init_search_router(db=db, get_current_salon_user=get_current_salon_user)
+fastapi_app.include_router(salon_search_mod.search_router)
+
 # Phase 10/11/12 — Salon Store (browse + cart + checkout + order lifecycle)
 import salon_store as salon_store_mod  # noqa: E402
 from supplier_auth import require_supplier as _require_supplier_dep  # noqa: E402
