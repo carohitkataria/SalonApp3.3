@@ -637,16 +637,21 @@ class BarberRatingSummary(BaseModel):
 # ============ SALON USER MODELS (Multi-User Access) ============
 
 class SalonUserPermissions(BaseModel):
+    # ---- LEGACY flat keys — kept for backward compatibility ----
     can_edit_salon: bool = False
     can_access_analytics: bool = False
     can_access_financials: bool = False
     can_delete_salon: bool = False
-    # New section-visibility permissions
     can_access_services: bool = False   # See Services & Offerings section
     can_access_gallery: bool = False    # See Gallery section
     can_access_staff: bool = False      # See Staff Management section (own profile by default)
     can_view_all_staff: bool = False    # When can_access_staff, see ALL staff (not just own)
     can_access_marketing: bool = False  # See Marketing section (campaigns/coupons/rewards)
+    # ---- NEW: Granular per-module action-level permissions ----
+    # Structure: { "staff": {"view": true, "edit": false, ...}, "financials": {...}, ... }
+    # If empty, we fall back to the legacy flat keys above (so old salon_users
+    # keep working unchanged). See has_module_permission() for canonical mapping.
+    modules: Dict[str, Dict[str, bool]] = {}
 
 class SalonUserCreate(BaseModel):
     salon_id: str
@@ -930,6 +935,146 @@ def check_permission(user_payload: dict, permission: str) -> bool:
     
     permissions = user_payload.get("permissions", {})
     return permissions.get(permission, False)
+
+
+# ---------------------------------------------------------------------------
+# Granular module-level permissions (view / create / edit / delete / …)
+#
+# The salon-user's `permissions.modules` dict is the authoritative source.
+# Example shape:
+#   {
+#     "staff":          {"view": True, "view_all": True, "edit": False, "delete": False,
+#                        "attendance": True, "salary_view": True, "salary_pay": False,
+#                        "documents": False, "access_control": False},
+#     "financials":     {"view_dashboard": True, "view_transactions": True,
+#                        "create_transaction": False, "edit_transaction": False,
+#                        "delete_transaction": False},
+#     "analytics":      {"view": True},
+#     "services":       {"view": True, "create": False, "edit": False, "delete": False,
+#                        "toggle": False, "upload_csv": False, "manage_categories": False,
+#                        "manage_packages": False, "manage_memberships": False},
+#     "gallery":        {"view": True, "upload": False, "delete": False},
+#     "marketing":      {"view": True, "create_campaign": False, "edit_campaign": False,
+#                        "delete_campaign": False, "manage_coupons": False,
+#                        "manage_loyalty": False},
+#     "salon_settings": {"view": True, "edit_profile": False, "edit_hours": False,
+#                        "edit_notifications": False, "edit_branches": False,
+#                        "manage_users": False, "manage_subscription": False},
+#     "delete_salon":   {"allowed": False},
+#   }
+#
+# has_module_permission() falls back to the legacy flat "can_access_*" keys
+# whenever the modules dict is empty for that action, so pre-existing
+# salon_users continue to work without any data migration.
+# ---------------------------------------------------------------------------
+
+# Map (module, action) -> legacy flat key that grants the same capability.
+_MODULE_LEGACY_MAP: Dict[str, Dict[str, str]] = {
+    "staff": {
+        "view": "can_access_staff",
+        "view_all": "can_view_all_staff",
+        "create": "can_access_staff",
+        "edit": "can_access_staff",
+        "delete": "can_access_staff",
+        "attendance": "can_access_staff",
+        "salary_view": "can_access_staff",
+        "salary_pay": "can_access_staff",
+        "documents": "can_access_staff",
+        "access_control": "can_access_staff",
+    },
+    "financials": {
+        "view_dashboard": "can_access_financials",
+        "view_transactions": "can_access_financials",
+        "create_transaction": "can_access_financials",
+        "edit_transaction": "can_access_financials",
+        "delete_transaction": "can_access_financials",
+    },
+    "analytics": {
+        "view": "can_access_analytics",
+    },
+    "services": {
+        "view": "can_access_services",
+        "create": "can_access_services",
+        "edit": "can_access_services",
+        "delete": "can_access_services",
+        "toggle": "can_access_services",
+        "upload_csv": "can_access_services",
+        "manage_categories": "can_access_services",
+        "manage_packages": "can_access_services",
+        "manage_memberships": "can_access_services",
+    },
+    "gallery": {
+        "view": "can_access_gallery",
+        "upload": "can_access_gallery",
+        "delete": "can_access_gallery",
+    },
+    "marketing": {
+        "view": "can_access_marketing",
+        "create_campaign": "can_access_marketing",
+        "edit_campaign": "can_access_marketing",
+        "delete_campaign": "can_access_marketing",
+        "manage_coupons": "can_access_marketing",
+        "manage_loyalty": "can_access_marketing",
+    },
+    "salon_settings": {
+        "view": "can_edit_salon",
+        "edit_profile": "can_edit_salon",
+        "edit_hours": "can_edit_salon",
+        "edit_notifications": "can_edit_salon",
+        "edit_branches": "can_edit_salon",
+        "manage_users": "can_edit_salon",
+        "manage_subscription": "can_edit_salon",
+    },
+    "delete_salon": {
+        "allowed": "can_delete_salon",
+    },
+}
+
+
+def has_module_permission(user_payload: dict, module: str, action: str) -> bool:
+    """
+    Check whether the current salon user has permission for a given
+    module action (e.g. `has_module_permission(u, "staff", "attendance")`).
+
+    Admins always pass. Branch managers get everything within their assigned
+    branches (branch scoping is enforced separately by enforce_branch_for_manager).
+    For staff, the granular `permissions.modules[module][action]` flag is
+    consulted first; if unset, we fall back to the legacy flat `can_access_*`
+    key so existing users don't lose access.
+    """
+    role = user_payload.get("role")
+    if role in ("salon_admin", "admin", "salon"):
+        return True
+    if role == "salon_branch_manager":
+        # Branch managers get admin-equivalent access inside their assigned branches.
+        return True
+
+    perms = user_payload.get("permissions") or {}
+    modules = perms.get("modules") or {}
+    module_perms = modules.get(module) or {}
+    if module_perms.get(action):
+        return True
+
+    # Legacy fallback — grants if the old flat "can_access_*" flag is true.
+    legacy_key = _MODULE_LEGACY_MAP.get(module, {}).get(action)
+    if legacy_key and perms.get(legacy_key):
+        return True
+    return False
+
+
+def require_module_permission(module: str, action: str = "view"):
+    """
+    FastAPI dependency factory. Returns a dependency that verifies the JWT
+    AND enforces the given module+action permission. 403 on failure.
+    """
+    async def _dep(current_user=Depends(get_current_salon_user)):
+        if not has_module_permission(current_user, module, action):
+            raise HTTPException(
+                status_code=403,
+                detail=f"Permission denied: {module}.{action}"
+            )
+        return current_user
+    return _dep
 
 
 def is_branch_manager(user_payload: dict) -> bool:
@@ -3476,6 +3621,11 @@ async def update_salon(salon_id: str, salon: SalonUpdate, current_user=Depends(g
     token_salon_id = current_user.get("salon_id") or current_user.get("sub")
     if token_salon_id != salon_id:
         raise HTTPException(status_code=403, detail="Not allowed for this salon")
+    # Enforce granular RBAC: even admin-tokens flow through this — legacy admin
+    # is fine, but staff-role admins with restricted salon_settings.edit_profile
+    # will be blocked here.
+    if not has_module_permission(current_user, "salon_settings", "edit_profile"):
+        raise HTTPException(status_code=403, detail="Permission denied: salon_settings.edit_profile")
 
     existing = await db.salons.find_one({"id": salon_id}, {"_id": 0})
     if not existing:
@@ -3977,7 +4127,7 @@ async def update_operational_hours(
                 # If salon_id is set on user, must match
                 if current_user.get("salon_id") == salon_id:
                     is_authorized = True
-        elif current_user.get("permissions", {}).get("can_edit_salon"):
+        elif has_module_permission(current_user, "salon_settings", "edit_hours"):
             if current_user.get("salon_id") == salon_id:
                 is_authorized = True
     
@@ -4322,6 +4472,9 @@ async def toggle_service_for_salon(
     payload = verify_token(token)
     if not payload:
         raise HTTPException(status_code=401, detail="Invalid authentication")
+    # RBAC: services.toggle
+    if not has_module_permission(payload, "services", "toggle"):
+        raise HTTPException(status_code=403, detail="Permission denied: services.toggle")
     
     # Upsert: ensure a single entry per (salon_id, service_id).
     # Clean up any pre-existing duplicates first.
@@ -4403,6 +4556,8 @@ async def bulk_delete_salon_services(
     Body: {"service_ids": ["...", "..."]}
     Returns: {ok, hard_deleted, disabled_for_salon, barber_links_removed}.
     """
+    if not has_module_permission(current_user, "services", "delete"):
+        raise HTTPException(status_code=403, detail="Permission denied: services.delete")
     ids = list((body or {}).get("service_ids") or [])
     if not ids:
         raise HTTPException(status_code=400, detail="service_ids is required")
@@ -4823,9 +4978,9 @@ async def create_barber(salon_id: str, barber: BarberCreate, current_user=Depend
 @api_router.put("/barbers/{barber_id}", response_model=Barber)
 async def update_barber(barber_id: str, barber_update: BarberUpdate, current_user=Depends(get_current_salon_user)):
     """Update barber details. Accepts both legacy salon admin token and multi-user salon-admin tokens."""
-    # Only admins/salon admins can edit barber records
-    if current_user.get("role") not in ["admin", "salon_admin", "salon"]:
-        raise HTTPException(status_code=403, detail="Admin access required")
+    # RBAC: staff.edit
+    if not has_module_permission(current_user, "staff", "edit"):
+        raise HTTPException(status_code=403, detail="Permission denied: staff.edit")
     existing = await db.barbers.find_one({"id": barber_id}, {"_id": 0})
     if not existing:
         raise HTTPException(status_code=404, detail="Barber not found")
@@ -4854,8 +5009,8 @@ async def delete_barber(
     PRESERVES financial history: financial_transactions, salary_records,
     incentive_payouts — for audit/accounting purposes.
     """
-    if current_user.get("role") not in ("salon", "salon_admin"):
-        raise HTTPException(status_code=403, detail="Admin access required to delete staff")
+    if not has_module_permission(current_user, "staff", "delete"):
+        raise HTTPException(status_code=403, detail="Permission denied: staff.delete")
 
     existing = await db.barbers.find_one({"id": barber_id}, {"_id": 0})
     if not existing:
@@ -10574,6 +10729,8 @@ async def get_financial_settings(salon_id: str, current_user=Depends(get_current
 @api_router.put("/salons/{salon_id}/financials/settings")
 async def update_financial_settings(salon_id: str, body: dict, current_user=Depends(get_current_salon_user)):
     """Update financial settings (opening balance)"""
+    if not has_module_permission(current_user, "financials", "edit_transaction"):
+        raise HTTPException(status_code=403, detail="Permission denied: financials.edit_transaction")
     opening_balance = body.get("opening_balance", 0)
     opening_balance_date = body.get("opening_balance_date", datetime.now(timezone.utc).strftime("%Y-%m-%d"))
     
@@ -10603,6 +10760,8 @@ async def get_financial_transactions(
     current_user=Depends(get_current_salon_user)
 ):
     """Get financial transactions with filters"""
+    if not has_module_permission(current_user, "financials", "view_transactions"):
+        raise HTTPException(status_code=403, detail="Permission denied: financials.view_transactions")
     if is_branch_manager(current_user):
         branch_id = enforce_branch_for_manager(current_user, branch_id)
     query = {"salon_id": salon_id}
@@ -10630,6 +10789,8 @@ async def get_financial_transactions(
 @api_router.post("/salons/{salon_id}/financials/transactions")
 async def create_financial_transaction(salon_id: str, txn: FinancialTransactionCreate, current_user=Depends(get_current_salon_user)):
     """Create a manual financial transaction (expense, withdrawal, deposit, adjustment)"""
+    if not has_module_permission(current_user, "financials", "create_transaction"):
+        raise HTTPException(status_code=403, detail="Permission denied: financials.create_transaction")
     txn_date = txn.date or datetime.now(timezone.utc).strftime("%Y-%m-%d")
     
     txn_data = {
@@ -10658,6 +10819,8 @@ async def create_financial_transaction(salon_id: str, txn: FinancialTransactionC
 @api_router.delete("/salons/{salon_id}/financials/transactions/{txn_id}")
 async def delete_financial_transaction(salon_id: str, txn_id: str, current_user=Depends(get_current_salon_user)):
     """Delete a manual financial transaction (admin only)"""
+    if not has_module_permission(current_user, "financials", "delete_transaction"):
+        raise HTTPException(status_code=403, detail="Permission denied: financials.delete_transaction")
     txn = await db.financial_transactions.find_one({"id": txn_id, "salon_id": salon_id}, {"_id": 0})
     if not txn:
         raise HTTPException(status_code=404, detail="Transaction not found")
@@ -10676,6 +10839,8 @@ async def get_financial_dashboard(
     current_user=Depends(get_current_salon_user)
 ):
     """Get financial dashboard data with cash in/out summary"""
+    if not has_module_permission(current_user, "financials", "view_dashboard"):
+        raise HTTPException(status_code=403, detail="Permission denied: financials.view_dashboard")
     if is_branch_manager(current_user):
         branch_id = enforce_branch_for_manager(current_user, branch_id)
     today = datetime.now(timezone.utc)
@@ -10931,6 +11096,8 @@ async def update_salon_notif_settings(
     current_user=Depends(get_current_salon_user),
 ):
     """Update salon notification preferences."""
+    if not has_module_permission(current_user, "salon_settings", "edit_notifications"):
+        raise HTTPException(status_code=403, detail="Permission denied: salon_settings.edit_notifications")
     update_doc = {k: bool(v) for k, v in body.items() if k in DEFAULT_SALON_NOTIFICATION_SETTINGS}
     update_doc["salon_id"] = salon_id
     update_doc["updated_at"] = datetime.now(timezone.utc).isoformat()
@@ -11934,8 +12101,19 @@ async def send_booking_link(
 # Home-page staff attendance toggle — one-tap Check-in / Check-out per staff.
 #   POST /api/salons/{salon_id}/home/staff-attendance/toggle
 #   body = {barber_id: str, action: "in" | "out"}
-#   Wraps attendance_mode's data model so the Home chip can flip presence
-#   without geo-fencing (admin override).
+#
+# RBAC:
+#   - Admins / branch_managers  → can toggle any staff (bypasses geo-fence).
+#   - Staff role with `staff.attendance` (module) + `staff.view_all` OR the
+#     legacy `can_view_all_staff` flag → can toggle any staff.
+#   - Staff role without `view_all` → can ONLY toggle their OWN linked staff_id
+#     (self check-in). Trying to toggle a peer returns 403.
+#   - Staff role without any staff-module access at all → 403 for everyone.
+#
+# Multi-session fix: after a full check-in → check-out, the same staff CAN
+# check in again the same day. We now maintain a `sessions[]` array (matching
+# attendance_mode.py) so a fresh "in" appends a new open session instead of
+# short-circuiting on `check_in_at`.
 # ---------------------------------------------------------------------------
 @api_router.post("/salons/{salon_id}/home/staff-attendance/toggle")
 async def home_toggle_attendance(
@@ -11949,37 +12127,81 @@ async def home_toggle_attendance(
         raise HTTPException(status_code=400, detail="barber_id required")
     if action not in ("in", "out"):
         raise HTTPException(status_code=400, detail="action must be in|out")
+
+    # ---- RBAC ----
+    role = current_salon.get("role")
+    is_admin_like = role in ("salon_admin", "admin", "salon", "salon_branch_manager")
+    if not is_admin_like:
+        # Must at least have staff.attendance access.
+        if not has_module_permission(current_salon, "staff", "attendance"):
+            raise HTTPException(status_code=403, detail="Permission denied: staff.attendance")
+        # If they don't have view_all, restrict to their OWN staff record.
+        can_toggle_others = has_module_permission(current_salon, "staff", "view_all")
+        if not can_toggle_others:
+            own_staff_id = current_salon.get("staff_id")
+            if not own_staff_id or own_staff_id != barber_id:
+                raise HTTPException(status_code=403, detail="You can only check in/out your own attendance.")
+
     today_iso = datetime.now(timezone.utc).date().isoformat()
     now_iso = datetime.now(timezone.utc).isoformat()
+
     doc = await db.staff_attendance.find_one(
         {"salon_id": salon_id, "barber_id": barber_id, "date": today_iso},
         {"_id": 0}
-    )
+    ) or {}
+
+    # Migrate legacy check_in_at / check_out_at (no sessions[]) into sessions[]
+    # so the multi-session logic works uniformly.
+    sessions = list(doc.get("sessions") or [])
+    if not sessions and (doc.get("check_in_at") or doc.get("check_out_at")):
+        sessions = [{
+            "ci": doc.get("check_in_at"),
+            "co": doc.get("check_out_at"),
+            "ci_method": doc.get("check_in_method") or "home_toggle",
+            "co_method": doc.get("check_out_method") or "home_toggle",
+        }]
+
+    last = sessions[-1] if sessions else None
+    has_open = bool(last and last.get("ci") and not last.get("co"))
+
     if action == "in":
-        if doc and doc.get("check_in_at"):
-            return {"ok": True, "already_in": True, "check_in_at": doc.get("check_in_at")}
+        if has_open:
+            # Already checked in and not yet out — idempotent no-op.
+            return {"ok": True, "already_in": True, "check_in_at": last.get("ci"), "sessions": sessions}
+        # Append a new open session (allows re-check-in after a check-out today).
+        sessions.append({"ci": now_iso, "co": None, "ci_method": "home_toggle"})
         await db.staff_attendance.update_one(
             {"salon_id": salon_id, "barber_id": barber_id, "date": today_iso},
-            {"$set": {"check_in_at": now_iso, "status": "in",
-                      "salon_id": salon_id, "barber_id": barber_id, "date": today_iso}},
+            {"$set": {
+                "check_in_at": now_iso,   # keep legacy field pointing at latest CI
+                "check_out_at": None,     # clear legacy CO because we're back "in"
+                "status": "in",
+                "sessions": sessions,
+                "salon_id": salon_id, "barber_id": barber_id, "date": today_iso,
+            }},
             upsert=True,
         )
-        return {"ok": True, "check_in_at": now_iso, "status": "in"}
+        return {"ok": True, "check_in_at": now_iso, "status": "in", "sessions": sessions}
+
     # action == "out"
-    if not doc or not doc.get("check_in_at"):
-        # allow "out" without a previous in — record it as an explicit absence toggle
+    if not has_open:
+        # No open session — record an "out" without altering sessions[] (defensive).
         await db.staff_attendance.update_one(
             {"salon_id": salon_id, "barber_id": barber_id, "date": today_iso},
             {"$set": {"check_out_at": now_iso, "status": "out",
                       "salon_id": salon_id, "barber_id": barber_id, "date": today_iso}},
             upsert=True,
         )
-        return {"ok": True, "check_out_at": now_iso, "status": "out"}
+        return {"ok": True, "check_out_at": now_iso, "status": "out", "sessions": sessions}
+
+    # Close the currently-open session.
+    sessions[-1]["co"] = now_iso
+    sessions[-1]["co_method"] = "home_toggle"
     await db.staff_attendance.update_one(
         {"salon_id": salon_id, "barber_id": barber_id, "date": today_iso},
-        {"$set": {"check_out_at": now_iso, "status": "out"}},
+        {"$set": {"check_out_at": now_iso, "status": "out", "sessions": sessions}},
     )
-    return {"ok": True, "check_out_at": now_iso, "status": "out"}
+    return {"ok": True, "check_out_at": now_iso, "status": "out", "sessions": sessions}
 
 
 # ---------------------------------------------------------------------------
@@ -13084,9 +13306,8 @@ async def get_reward_plan(salon_id: str, current_user=Depends(get_current_salon_
 @api_router.post("/salons/{salon_id}/reward-plan")
 async def save_reward_plan(salon_id: str, body: RewardPlanCreate, current_user=Depends(get_current_salon_user)):
     """Save the salon's reward plan configuration (admin only)."""
-    role = (current_user or {}).get("role")
-    if role not in ("admin", "salon", "salon_admin"):
-        raise HTTPException(status_code=403, detail="Only admin can configure reward plan")
+    if not has_module_permission(current_user, "staff", "access_control"):
+        raise HTTPException(status_code=403, detail="Permission denied: staff.access_control")
 
     if body.mode not in ("all", "individual", "partial"):
         raise HTTPException(status_code=400, detail="mode must be one of: all, individual, partial")
@@ -13169,10 +13390,9 @@ async def update_incentive_status(
     if body.status not in ("Pending", "Approved", "Paid", "Hold"):
         raise HTTPException(status_code=400, detail="Invalid status")
 
-    # Only admin may change status
-    role = (current_user or {}).get("role")
-    if role not in ("admin", "salon", "salon_admin"):
-        raise HTTPException(status_code=403, detail="Only admin can change payout status")
+    # RBAC: staff.salary_pay
+    if not has_module_permission(current_user, "staff", "salary_pay"):
+        raise HTTPException(status_code=403, detail="Permission denied: staff.salary_pay")
 
     payout = await db.incentive_payouts.find_one(
         {"salon_id": salon_id, "barber_id": barber_id, "month": month}, {"_id": 0}
@@ -14030,9 +14250,9 @@ async def calculate_daily_attendance(
     current_user=Depends(get_current_salon_user)
 ):
     """Calculate attendance for all barbers for a specific date based on completed bookings."""
-    # Verify admin (salon_admin or admin role)
-    if current_user.get("role") not in ["admin", "salon_admin"]:
-        raise HTTPException(status_code=403, detail="Admin access required")
+    # RBAC: staff.attendance
+    if not has_module_permission(current_user, "staff", "attendance"):
+        raise HTTPException(status_code=403, detail="Permission denied: staff.attendance")
     
     # Get all active barbers
     barbers = await db.barbers.find({
@@ -14105,9 +14325,9 @@ async def override_attendance(
     current_user=Depends(get_current_salon_user)
 ):
     """Admin override for attendance. Click on calendar date to change status."""
-    # Verify admin (legacy "salon" role is also treated as admin)
-    if current_user.get("role") not in ["admin", "salon_admin", "salon"]:
-        raise HTTPException(status_code=403, detail="Admin access required")
+    # RBAC: staff.attendance
+    if not has_module_permission(current_user, "staff", "attendance"):
+        raise HTTPException(status_code=403, detail="Permission denied: staff.attendance")
     
     # Validate status
     if body.status not in ["present", "half_day", "absent", "holiday", "on_leave"]:
@@ -14189,8 +14409,8 @@ async def clear_attendance_override(
     Used by the calendar's status cycle:
         present → half_day → absent → holiday → blank (this endpoint).
     """
-    if current_user.get("role") not in ["admin", "salon_admin", "salon"]:
-        raise HTTPException(status_code=403, detail="Admin access required")
+    if not has_module_permission(current_user, "staff", "attendance"):
+        raise HTTPException(status_code=403, detail="Permission denied: staff.attendance")
 
     # Module 4 — lock-on-paid.
     locked = await attendance_mode_mod.is_attendance_locked(db, salon_id, barber_id, date)
@@ -14794,9 +15014,9 @@ async def mark_salary_paid(
     current_user=Depends(get_current_salon_user)
 ):
     """Mark salary as paid and create financial transaction."""
-    # Verify admin
-    if current_user.get("role") not in ["admin", "salon_admin"]:
-        raise HTTPException(status_code=403, detail="Admin access required")
+    # RBAC: staff.salary_pay
+    if not has_module_permission(current_user, "staff", "salary_pay"):
+        raise HTTPException(status_code=403, detail="Permission denied: staff.salary_pay")
     
     if body.payment_method not in ["cash", "upi", "bank"]:
         raise HTTPException(status_code=400, detail="Invalid payment method. Use: cash, upi, bank")

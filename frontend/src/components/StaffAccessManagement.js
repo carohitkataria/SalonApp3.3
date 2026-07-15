@@ -6,13 +6,24 @@ import { Label } from '@/components/ui/label';
 import { Checkbox } from '@/components/ui/checkbox';
 import { toast } from 'sonner';
 import { 
-  UserPlus, Edit2, Eye, EyeOff, Users, Shield, X, Save, Building2, KeyRound, Ban, RotateCcw
+  UserPlus, Edit2, Eye, EyeOff, Users, Shield, X, Save, Building2, KeyRound, Ban, RotateCcw, Settings2, ChevronRight
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useAuth } from '@/contexts/AuthContext';
+import { MODULES, summariseModule, hydrateModulesFromLegacy, deriveLegacyFromModules } from '@/components/staff/ModulePermissionsConfig';
+import ModulePermissionsDrawer from '@/components/staff/ModulePermissionsDrawer';
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
 const API = `${BACKEND_URL}/api`;
+
+const emptyModules = () => {
+  const m = {};
+  MODULES.forEach(mod => {
+    m[mod.key] = {};
+    mod.actions.forEach(a => { m[mod.key][a.key] = false; });
+  });
+  return m;
+};
 
 export default function StaffAccessManagement() {
   const { getSalonUserHeaders, salonUser } = useAuth();
@@ -22,7 +33,10 @@ export default function StaffAccessManagement() {
   const [loading, setLoading] = useState(false);
   const [showAddForm, setShowAddForm] = useState(false);
   const [editingUser, setEditingUser] = useState(null);
-  
+
+  // Drawer state — which module's permissions drawer is open right now.
+  const [drawerModuleKey, setDrawerModuleKey] = useState(null);
+
   const [formData, setFormData] = useState({
     name: '',
     mobile: '',
@@ -31,16 +45,7 @@ export default function StaffAccessManagement() {
     role: 'staff',
     staff_id: '',
     assigned_branch_ids: [],
-    permissions: {
-      can_edit_salon: false,
-      can_access_analytics: false,
-      can_access_financials: false,
-      can_delete_salon: false,
-      can_access_services: false,
-      can_access_gallery: false,
-      can_access_staff: false,
-      can_view_all_staff: false
-    }
+    modules: emptyModules(),
   });
   
   const [showPassword, setShowPassword] = useState(false);
@@ -94,17 +99,23 @@ export default function StaffAccessManagement() {
   };
 
   const handlePermissionChange = (permission, checked) => {
+    // Legacy single-field toggle — retained for backward-compat but rarely
+    // used since the new drawer writes into `modules` directly.
     setFormData(prev => {
-      const nextPerms = {
-        ...prev.permissions,
-        [permission]: checked
-      };
-      // If staff-management access is turned off, also clear "view all staff".
-      if (permission === 'can_access_staff' && !checked) {
-        nextPerms.can_view_all_staff = false;
-      }
-      return { ...prev, permissions: nextPerms };
+      const nextMods = { ...(prev.modules || {}) };
+      return { ...prev, modules: nextMods };
     });
+  };
+
+  /**
+   * Called by ModulePermissionsDrawer after the admin saves changes for one
+   * module. Merges the new action map into formData.modules.
+   */
+  const applyModuleDrawer = (moduleKey, actionMap) => {
+    setFormData(prev => ({
+      ...prev,
+      modules: { ...(prev.modules || {}), [moduleKey]: actionMap || {} },
+    }));
   };
 
   // Safely turn any axios error into a renderable string (FastAPI 422 returns
@@ -180,6 +191,10 @@ export default function StaffAccessManagement() {
 
     try {
       const salonId = salonUser?.salonId || localStorage.getItem('salon_id');
+      // Compose the permissions payload: NEW granular modules + LEGACY flat
+      // keys derived from them so old endpoints keep working seamlessly.
+      const modules = formData.modules || {};
+      const permissions = { ...deriveLegacyFromModules(modules), modules };
       const payload = {
         salon_id: salonId,
         name: formData.name,
@@ -189,7 +204,7 @@ export default function StaffAccessManagement() {
         role: formData.role,
         staff_id: formData.staff_id || null,
         assigned_branch_ids: formData.role === 'branch_manager' ? formData.assigned_branch_ids : [],
-        permissions: formData.permissions
+        permissions,
       };
 
       if (editingUser) {
@@ -203,7 +218,7 @@ export default function StaffAccessManagement() {
             role: formData.role,
             staff_id: formData.staff_id || null,
             assigned_branch_ids: formData.role === 'branch_manager' ? formData.assigned_branch_ids : [],
-            permissions: formData.permissions
+            permissions,
           },
           { headers: getSalonUserHeaders() }
         );
@@ -226,8 +241,14 @@ export default function StaffAccessManagement() {
 
   const handleEdit = (user) => {
     setEditingUser(user);
-    // Normalize permissions object — ensure all keys are present (handles legacy users)
-    const perms = user.permissions || {};
+    // Hydrate granular modules[] from either the new field or the legacy flat
+    // keys so old users open in the editor with sensible defaults.
+    const hydratedModules = hydrateModulesFromLegacy(user.permissions || {});
+    // Ensure every MODULE key/action exists (default false) so drawer toggles work.
+    const modules = emptyModules();
+    Object.keys(hydratedModules).forEach(k => {
+      modules[k] = { ...(modules[k] || {}), ...hydratedModules[k] };
+    });
     setFormData({
       name: user.name,
       mobile: user.mobile,
@@ -236,16 +257,7 @@ export default function StaffAccessManagement() {
       role: user.role || 'staff',
       staff_id: user.staff_id || '',
       assigned_branch_ids: Array.isArray(user.assigned_branch_ids) ? user.assigned_branch_ids : [],
-      permissions: {
-        can_edit_salon: !!perms.can_edit_salon,
-        can_access_analytics: !!perms.can_access_analytics,
-        can_access_financials: !!perms.can_access_financials,
-        can_delete_salon: !!perms.can_delete_salon,
-        can_access_services: !!perms.can_access_services,
-        can_access_gallery: !!perms.can_access_gallery,
-        can_access_staff: !!perms.can_access_staff,
-        can_view_all_staff: !!perms.can_view_all_staff
-      }
+      modules,
     });
     setShowAddForm(true);
   };
@@ -259,16 +271,7 @@ export default function StaffAccessManagement() {
       role: 'staff',
       staff_id: '',
       assigned_branch_ids: [],
-      permissions: {
-        can_edit_salon: false,
-        can_access_analytics: false,
-        can_access_financials: false,
-        can_delete_salon: false,
-        can_access_services: false,
-        can_access_gallery: false,
-        can_access_staff: false,
-        can_view_all_staff: false
-      }
+      modules: emptyModules(),
     });
     setEditingUser(null);
     setShowAddForm(false);
@@ -473,121 +476,64 @@ export default function StaffAccessManagement() {
 
               {/* Permissions */}
               <div className="border-t border-border pt-4">
-                <h4 className="font-semibold mb-3">Permissions</h4>
-                <div className="space-y-3">
-                  <div className="flex items-center space-x-2">
-                    <Checkbox
-                      id="can_edit_salon"
-                      checked={formData.permissions.can_edit_salon}
-                      onCheckedChange={(checked) => handlePermissionChange('can_edit_salon', checked)}
-                      className="data-[state=checked]:bg-gold data-[state=checked]:border-gold"
-                    />
-                    <Label htmlFor="can_edit_salon" className="cursor-pointer">
-                      Can edit salon profile
-                    </Label>
+                <div className="flex items-center justify-between mb-3">
+                  <div>
+                    <h4 className="font-semibold flex items-center gap-2">
+                      <Shield className="w-4 h-4 text-gold" /> Module Permissions
+                    </h4>
+                    <p className="text-xs text-muted-foreground mt-0.5">
+                      Click a module to open the configuration drawer and pick exact actions.
+                    </p>
                   </div>
-
-                  <div className="flex items-center space-x-2">
-                    <Checkbox
-                      id="can_access_analytics"
-                      checked={formData.permissions.can_access_analytics}
-                      onCheckedChange={(checked) => handlePermissionChange('can_access_analytics', checked)}
-                      className="data-[state=checked]:bg-gold data-[state=checked]:border-gold"
-                    />
-                    <Label htmlFor="can_access_analytics" className="cursor-pointer">
-                      Can access analytics
-                    </Label>
-                  </div>
-
-                  <div className="flex items-center space-x-2">
-                    <Checkbox
-                      id="can_access_financials"
-                      checked={formData.permissions.can_access_financials}
-                      onCheckedChange={(checked) => handlePermissionChange('can_access_financials', checked)}
-                      className="data-[state=checked]:bg-gold data-[state=checked]:border-gold"
-                    />
-                    <Label htmlFor="can_access_financials" className="cursor-pointer">
-                      Can access financials
-                    </Label>
-                  </div>
-
-                  <div className="flex items-center space-x-2">
-                    <Checkbox
-                      id="can_delete_salon"
-                      checked={formData.permissions.can_delete_salon}
-                      onCheckedChange={(checked) => handlePermissionChange('can_delete_salon', checked)}
-                      className="data-[state=checked]:bg-gold data-[state=checked]:border-gold"
-                    />
-                    <Label htmlFor="can_delete_salon" className="cursor-pointer">
-                      Can delete salon
-                    </Label>
-                  </div>
-
-                  {/* Section visibility */}
-                  <div className="pt-3 mt-1 border-t border-border">
-                    <p className="text-sm font-semibold mb-2">Section access</p>
-                  </div>
-
-                  <div className="flex items-center space-x-2">
-                    <Checkbox
-                      id="can_access_services"
-                      checked={formData.permissions.can_access_services}
-                      onCheckedChange={(checked) => handlePermissionChange('can_access_services', checked)}
-                      className="data-[state=checked]:bg-gold data-[state=checked]:border-gold"
-                    />
-                    <Label htmlFor="can_access_services" className="cursor-pointer">
-                      Can see Services &amp; Offerings section
-                    </Label>
-                  </div>
-
-                  <div className="flex items-center space-x-2">
-                    <Checkbox
-                      id="can_access_gallery"
-                      checked={formData.permissions.can_access_gallery}
-                      onCheckedChange={(checked) => handlePermissionChange('can_access_gallery', checked)}
-                      className="data-[state=checked]:bg-gold data-[state=checked]:border-gold"
-                    />
-                    <Label htmlFor="can_access_gallery" className="cursor-pointer">
-                      Can see Gallery section
-                    </Label>
-                  </div>
-
-                  <div className="flex items-center space-x-2">
-                    <Checkbox
-                      id="can_access_staff"
-                      checked={formData.permissions.can_access_staff}
-                      onCheckedChange={(checked) => handlePermissionChange('can_access_staff', checked)}
-                      className="data-[state=checked]:bg-gold data-[state=checked]:border-gold"
-                    />
-                    <Label htmlFor="can_access_staff" className="cursor-pointer">
-                      Can see Staff Management section
-                    </Label>
-                  </div>
-
-                  {/* Nested: only show "view all staff" when staff-management access is granted */}
-                  {formData.permissions.can_access_staff && (
-                    <div className="flex items-start space-x-2 ml-6 pl-3 border-l-2 border-gold/30">
-                      <Checkbox
-                        id="can_view_all_staff"
-                        checked={formData.permissions.can_view_all_staff}
-                        onCheckedChange={(checked) => handlePermissionChange('can_view_all_staff', checked)}
-                        className="mt-0.5 data-[state=checked]:bg-gold data-[state=checked]:border-gold"
-                      />
-                      <Label htmlFor="can_view_all_staff" className="cursor-pointer">
-                        Can see all staff details
-                        <span className="block text-xs text-muted-foreground font-normal">
-                          If unchecked, this user can only see their own profile.
-                        </span>
-                      </Label>
-                    </div>
-                  )}
                 </div>
+
+                {/* Per-module access cards */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5" data-testid="module-access-grid">
+                  {MODULES.map((mod) => {
+                    const summary = summariseModule({ modules: formData.modules }, mod.key);
+                    const isFull = summary === 'Full';
+                    const isNone = summary === 'None';
+                    return (
+                      <button
+                        type="button"
+                        key={mod.key}
+                        onClick={() => setDrawerModuleKey(mod.key)}
+                        data-testid={`module-card-${mod.key}`}
+                        className="text-left rounded-lg border border-border bg-card hover:border-gold hover:shadow-sm transition p-3 flex items-center gap-3"
+                        style={{ borderLeftWidth: 4, borderLeftColor: mod.color }}
+                      >
+                        <div
+                          className="w-9 h-9 rounded-md flex items-center justify-center shrink-0"
+                          style={{ background: `${mod.color}1A`, color: mod.color }}
+                        >
+                          <Settings2 className="w-4 h-4" />
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <div className="text-sm font-semibold truncate">{mod.label}</div>
+                          <div className="text-[11px] text-muted-foreground truncate">{mod.description}</div>
+                        </div>
+                        <span
+                          className="text-[11px] font-semibold px-2 py-0.5 rounded-full whitespace-nowrap"
+                          style={{
+                            background: isNone ? '#F3F4F6' : (isFull ? `${mod.color}22` : `${mod.color}14`),
+                            color: isNone ? '#6B7280' : mod.color,
+                            border: `1px solid ${isNone ? '#E5E7EB' : mod.color + '55'}`,
+                          }}
+                          data-testid={`module-summary-${mod.key}`}
+                        >
+                          {summary}
+                        </span>
+                        <ChevronRight className="w-4 h-4 text-muted-foreground" />
+                      </button>
+                    );
+                  })}
+                </div>
+
                 <p className="text-xs text-muted-foreground mt-3">
                   By default, staff can view/update tokens and handle walk-ins.
-                  They cannot access Settings, Analytics, Financials, Reports, Services,
-                  Gallery, or Staff Management unless granted above.
-                  When "Staff Management" is granted without "view all staff", the user
-                  only sees their own linked profile.
+                  Every other capability must be granted explicitly through the
+                  drawers above. Granting &quot;Staff → attendance&quot; (without &quot;view all&quot;)
+                  lets a staff member self check-in only.
                 </p>
               </div>
 
@@ -625,7 +571,7 @@ export default function StaffAccessManagement() {
         <div className="divide-y divide-border">
           {staffUsers.length === 0 ? (
             <div className="p-8 text-center text-muted-foreground">
-              No staff users found. Click "Add Staff User" to create one.
+              No staff users found. Click &quot;Add Staff User&quot; to create one.
             </div>
           ) : (
             staffUsers.map(user => (
@@ -668,39 +614,30 @@ export default function StaffAccessManagement() {
                     </div>
 
                     {user.role === 'staff' && (
-                      <div className="mt-2 flex flex-wrap gap-2">
-                        {user.permissions?.can_edit_salon && (
-                          <span className="text-xs px-2 py-1 bg-muted rounded">Edit Salon</span>
-                        )}
-                        {user.permissions?.can_access_analytics && (
-                          <span className="text-xs px-2 py-1 bg-muted rounded">Analytics</span>
-                        )}
-                        {user.permissions?.can_access_financials && (
-                          <span className="text-xs px-2 py-1 bg-muted rounded">Financials</span>
-                        )}
-                        {user.permissions?.can_delete_salon && (
-                          <span className="text-xs px-2 py-1 bg-muted rounded">Delete Salon</span>
-                        )}
-                        {user.permissions?.can_access_services && (
-                          <span className="text-xs px-2 py-1 bg-muted rounded">Services</span>
-                        )}
-                        {user.permissions?.can_access_gallery && (
-                          <span className="text-xs px-2 py-1 bg-muted rounded">Gallery</span>
-                        )}
-                        {user.permissions?.can_access_staff && (
-                          <span className="text-xs px-2 py-1 bg-muted rounded">
-                            Staff {user.permissions?.can_view_all_staff ? '(All)' : '(Own)'}
-                          </span>
-                        )}
-                        {!user.permissions?.can_edit_salon &&
-                         !user.permissions?.can_access_analytics &&
-                         !user.permissions?.can_access_financials &&
-                         !user.permissions?.can_delete_salon &&
-                         !user.permissions?.can_access_services &&
-                         !user.permissions?.can_access_gallery &&
-                         !user.permissions?.can_access_staff && (
-                          <span className="text-xs text-muted-foreground">Default permissions only</span>
-                        )}
+                      <div className="mt-2 flex flex-wrap gap-1.5">
+                        {(() => {
+                          const chips = MODULES.map(mod => {
+                            const summary = summariseModule(user.permissions || {}, mod.key);
+                            if (summary === 'None') return null;
+                            return (
+                              <span
+                                key={mod.key}
+                                className="text-[11px] px-2 py-0.5 rounded-full font-medium"
+                                style={{
+                                  background: `${mod.color}14`,
+                                  color: mod.color,
+                                  border: `1px solid ${mod.color}55`,
+                                }}
+                              >
+                                {mod.label.replace(' Management', '').replace(' & Offerings', '')} · {summary}
+                              </span>
+                            );
+                          }).filter(Boolean);
+                          if (chips.length === 0) {
+                            return <span className="text-xs text-muted-foreground">Default permissions only</span>;
+                          }
+                          return chips;
+                        })()}
                       </div>
                     )}
                   </div>
@@ -744,6 +681,15 @@ export default function StaffAccessManagement() {
           )}
         </div>
       </div>
+
+      {/* Right-side drawer for granular module permissions */}
+      <ModulePermissionsDrawer
+        isOpen={!!drawerModuleKey}
+        moduleKey={drawerModuleKey}
+        value={drawerModuleKey ? (formData.modules?.[drawerModuleKey] || {}) : {}}
+        onSave={(actionMap) => applyModuleDrawer(drawerModuleKey, actionMap)}
+        onClose={() => setDrawerModuleKey(null)}
+      />
     </div>
   );
 }

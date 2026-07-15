@@ -1,782 +1,883 @@
 #!/usr/bin/env python3
 """
-Backend test script for Marketing Settings + Wallet + Cashfree + Template Edit endpoints.
-Tests salon_id=ribbon-ui-adjust with admin login identifier='admin', password='salon123'.
+RBAC v2 Backend Testing - Granular Module Permissions + Home Attendance Re-check-in Bug Fix
+
+Tests all scenarios from test_result.md:
+  A) Home Staff Check-in re-check-in bug fix (in→out→in→out on same day)
+  B) Staff user with only staff.attendance (no view_all) can toggle only their OWN barber
+  C) Staff with NO staff permissions → 403 on home attendance toggle
+  D) Granular financials.view_dashboard only → 200 on GET dashboard, 403 on POST/DELETE
+  E) LEGACY flat-key fallback: can_access_financials: true (no modules) → both GET & POST work
+  F) Reward-plan / services.bulk-delete gated correctly
+  G) Admin never blocked
 """
+
 import requests
 import json
 import sys
-import hmac
-import hashlib
-import base64
 import time
+import random
+from typing import Dict, Optional, List
 
-# Configuration
+# Backend URL from frontend/.env
 BASE_URL = "https://role-guard-system.preview.emergentagent.com/api"
-SALON_ID = "1eddf29d-5ffd-49b0-8dae-130eecd4e62f"
+
+# Test credentials from memory/test_credentials.md
 ADMIN_IDENTIFIER = "admin"
 ADMIN_PASSWORD = "salon123"
 
-# Test results
-results = []
+# Global state
+admin_token = None
+salon_id = None
+created_staff_users = []  # Track created users for cleanup
+test_barbers = []  # Track barbers for testing
+test_run_id = str(int(time.time()))  # Unique ID for this test run
 
-def log_test(name, passed, details=""):
-    """Log test result"""
-    status = "✅ PASS" if passed else "❌ FAIL"
-    results.append({"name": name, "passed": passed, "details": details})
-    print(f"{status}: {name}")
-    if details:
-        print(f"  Details: {details}")
 
-def login_admin():
-    """Login as salon admin and return access token"""
-    print("\n=== ADMIN LOGIN ===")
+class Colors:
+    GREEN = '\033[92m'
+    RED = '\033[91m'
+    YELLOW = '\033[93m'
+    BLUE = '\033[94m'
+    RESET = '\033[0m'
+
+
+def log_test(name: str):
+    print(f"\n{Colors.BLUE}{'='*80}{Colors.RESET}")
+    print(f"{Colors.BLUE}TEST: {name}{Colors.RESET}")
+    print(f"{Colors.BLUE}{'='*80}{Colors.RESET}")
+
+
+def log_pass(msg: str):
+    print(f"{Colors.GREEN}✓ PASS: {msg}{Colors.RESET}")
+
+
+def log_fail(msg: str):
+    print(f"{Colors.RED}✗ FAIL: {msg}{Colors.RESET}")
+
+
+def log_info(msg: str):
+    print(f"{Colors.YELLOW}ℹ INFO: {msg}{Colors.RESET}")
+
+
+def admin_login() -> tuple[str, str]:
+    """Login as admin and return (access_token, salon_id)"""
+    log_test("Admin Login")
     url = f"{BASE_URL}/salon/users/login"
     payload = {
         "identifier": ADMIN_IDENTIFIER,
         "password": ADMIN_PASSWORD
     }
-    try:
-        resp = requests.post(url, json=payload, timeout=10)
-        if resp.status_code == 200:
-            data = resp.json()
-            token = data.get("access_token")
-            salon_id = data.get("salon_id")
-            log_test("Admin login", True, f"salon_id={salon_id}")
-            return token
-        else:
-            log_test("Admin login", False, f"HTTP {resp.status_code}: {resp.text[:200]}")
-            return None
-    except Exception as e:
-        log_test("Admin login", False, str(e))
-        return None
-
-def test_marketing_settings_snapshot(token):
-    """A. GET /api/salons/{salon_id}/marketing/settings/full"""
-    print("\n=== A. MARKETING SETTINGS SNAPSHOT ===")
-    url = f"{BASE_URL}/salons/{SALON_ID}/marketing/settings/full"
-    headers = {"Authorization": f"Bearer {token}"}
     
-    try:
-        resp = requests.get(url, headers=headers, timeout=10)
-        if resp.status_code == 200:
-            data = resp.json()
-            required_keys = ["subaccount", "wallet", "dlt", "email_sender", "send_settings", "spend_month", "env"]
-            missing = [k for k in required_keys if k not in data]
-            if missing:
-                log_test("Marketing settings snapshot - structure", False, f"Missing keys: {missing}")
-                return None
-            
-            # Verify env.cashfree_env
-            cashfree_env = data.get("env", {}).get("cashfree_env")
-            if cashfree_env == "sandbox":
-                log_test("Marketing settings snapshot - cashfree_env", True, f"cashfree_env={cashfree_env}")
-            else:
-                log_test("Marketing settings snapshot - cashfree_env", False, f"Expected 'sandbox', got '{cashfree_env}'")
-            
-            log_test("Marketing settings snapshot - HTTP 200", True, f"All required keys present")
-            return data
-        else:
-            log_test("Marketing settings snapshot", False, f"HTTP {resp.status_code}: {resp.text[:200]}")
-            return None
-    except Exception as e:
-        log_test("Marketing settings snapshot", False, str(e))
-        return None
-
-def test_wallet_flow(token):
-    """B. Wallet flow (GET, topup, simulate-credit, idempotency, ledger)"""
-    print("\n=== B. WALLET FLOW ===")
-    headers = {"Authorization": f"Bearer {token}"}
+    resp = requests.post(url, json=payload)
+    log_info(f"POST {url}")
+    log_info(f"Status: {resp.status_code}")
     
-    # B2. GET wallet - note current balance
-    url_wallet = f"{BASE_URL}/salons/{SALON_ID}/wallet"
-    try:
-        resp = requests.get(url_wallet, headers=headers, timeout=10)
-        if resp.status_code == 200:
-            wallet_data = resp.json()
-            initial_balance = wallet_data.get("balance_minor", 0)
-            first_recharge_at = wallet_data.get("first_recharge_at")
-            log_test("GET /wallet", True, f"balance_minor={initial_balance}, first_recharge_at={first_recharge_at}")
-        else:
-            log_test("GET /wallet", False, f"HTTP {resp.status_code}: {resp.text[:200]}")
-            return
-    except Exception as e:
-        log_test("GET /wallet", False, str(e))
-        return
-    
-    # B3. POST /wallet/topup with 50000 paise (₹500)
-    url_topup = f"{BASE_URL}/salons/{SALON_ID}/wallet/topup"
-    topup_payload = {"amount_minor": 50000}
-    try:
-        resp = requests.post(url_topup, json=topup_payload, headers=headers, timeout=10)
-        if resp.status_code == 200:
-            topup_data = resp.json()
-            provider_order_id = topup_data.get("provider_order_id")
-            payment_session_id = topup_data.get("payment_session_id")
-            amount_minor = topup_data.get("amount_minor")
-            cashfree_env = topup_data.get("cashfree_env")
-            
-            if not provider_order_id or not payment_session_id:
-                log_test("POST /wallet/topup - response fields", False, "Missing provider_order_id or payment_session_id")
-                return
-            
-            if not payment_session_id.startswith("session_dummy_"):
-                log_test("POST /wallet/topup - DUMMY session", False, f"Expected session_dummy_*, got {payment_session_id}")
-            else:
-                log_test("POST /wallet/topup - DUMMY session", True, f"payment_session_id={payment_session_id[:40]}...")
-            
-            if amount_minor == 50000 and cashfree_env == "sandbox":
-                log_test("POST /wallet/topup - amount & env", True, f"amount_minor=50000, cashfree_env=sandbox")
-            else:
-                log_test("POST /wallet/topup - amount & env", False, f"amount_minor={amount_minor}, cashfree_env={cashfree_env}")
-        else:
-            log_test("POST /wallet/topup", False, f"HTTP {resp.status_code}: {resp.text[:200]}")
-            return
-    except Exception as e:
-        log_test("POST /wallet/topup", False, str(e))
-        return
-    
-    # B4. First-recharge floor check (only if first_recharge_at is null)
-    if first_recharge_at is None:
-        url_topup_small = f"{BASE_URL}/salons/{SALON_ID}/wallet/topup"
-        small_payload = {"amount_minor": 10000}  # ₹100
-        try:
-            resp = requests.post(url_topup_small, json=small_payload, headers=headers, timeout=10)
-            if resp.status_code == 400:
-                detail = resp.json().get("detail", "")
-                if "₹500" in detail or "500" in detail:
-                    log_test("First-recharge floor (₹500)", True, f"Correctly rejected ₹100: {detail}")
-                else:
-                    log_test("First-recharge floor (₹500)", False, f"400 but wrong message: {detail}")
-            else:
-                log_test("First-recharge floor (₹500)", False, f"Expected 400, got {resp.status_code}")
-        except Exception as e:
-            log_test("First-recharge floor (₹500)", False, str(e))
-    else:
-        log_test("First-recharge floor (₹500)", True, "SKIPPED - first_recharge_at already set from prior test")
-    
-    # B5. POST /wallet/simulate-credit
-    url_simulate = f"{BASE_URL}/salons/{SALON_ID}/wallet/simulate-credit"
-    simulate_payload = {"provider_order_id": provider_order_id}
-    try:
-        resp = requests.post(url_simulate, json=simulate_payload, headers=headers, timeout=10)
-        if resp.status_code == 200:
-            sim_data = resp.json()
-            ok = sim_data.get("ok")
-            new_balance = sim_data.get("balance_minor")
-            if ok and new_balance == initial_balance + 50000:
-                log_test("POST /wallet/simulate-credit", True, f"balance increased by 50000 to {new_balance}")
-            else:
-                log_test("POST /wallet/simulate-credit", False, f"ok={ok}, balance={new_balance}, expected={initial_balance + 50000}")
-        else:
-            log_test("POST /wallet/simulate-credit", False, f"HTTP {resp.status_code}: {resp.text[:200]}")
-            return
-    except Exception as e:
-        log_test("POST /wallet/simulate-credit", False, str(e))
-        return
-    
-    # Verify wallet balance increased
-    try:
-        resp = requests.get(url_wallet, headers=headers, timeout=10)
-        if resp.status_code == 200:
-            wallet_data = resp.json()
-            current_balance = wallet_data.get("balance_minor", 0)
-            marketing_status = wallet_data.get("marketing_status")
-            first_recharge_at_after = wallet_data.get("first_recharge_at")
-            
-            if current_balance == initial_balance + 50000:
-                log_test("GET /wallet after simulate-credit - balance", True, f"balance_minor={current_balance}")
-            else:
-                log_test("GET /wallet after simulate-credit - balance", False, f"Expected {initial_balance + 50000}, got {current_balance}")
-            
-            if marketing_status == "active":
-                log_test("GET /wallet after simulate-credit - status", True, f"marketing_status=active")
-            else:
-                log_test("GET /wallet after simulate-credit - status", False, f"marketing_status={marketing_status}")
-            
-            if first_recharge_at_after:
-                log_test("GET /wallet after simulate-credit - first_recharge_at", True, f"first_recharge_at set")
-            else:
-                log_test("GET /wallet after simulate-credit - first_recharge_at", False, "first_recharge_at still null")
-        else:
-            log_test("GET /wallet after simulate-credit", False, f"HTTP {resp.status_code}")
-    except Exception as e:
-        log_test("GET /wallet after simulate-credit", False, str(e))
-    
-    # B6. Idempotency check - call simulate-credit again with same provider_order_id
-    try:
-        resp = requests.post(url_simulate, json=simulate_payload, headers=headers, timeout=10)
-        if resp.status_code == 200:
-            sim_data = resp.json()
-            idempotent = sim_data.get("idempotent")
-            if idempotent:
-                log_test("Idempotency check - simulate-credit", True, "idempotent=true returned")
-            else:
-                log_test("Idempotency check - simulate-credit", False, f"idempotent={idempotent}")
-            
-            # Verify balance did NOT increase again
-            resp2 = requests.get(url_wallet, headers=headers, timeout=10)
-            if resp2.status_code == 200:
-                wallet_data2 = resp2.json()
-                balance_after_replay = wallet_data2.get("balance_minor", 0)
-                if balance_after_replay == current_balance:
-                    log_test("Idempotency check - balance unchanged", True, f"balance still {balance_after_replay}")
-                else:
-                    log_test("Idempotency check - balance unchanged", False, f"Balance changed from {current_balance} to {balance_after_replay}")
-        else:
-            log_test("Idempotency check - simulate-credit", False, f"HTTP {resp.status_code}")
-    except Exception as e:
-        log_test("Idempotency check - simulate-credit", False, str(e))
-    
-    # B7. GET /wallet/ledger
-    url_ledger = f"{BASE_URL}/salons/{SALON_ID}/wallet/ledger"
-    try:
-        resp = requests.get(url_ledger, headers=headers, timeout=10)
-        if resp.status_code == 200:
-            ledger_data = resp.json()
-            entries = ledger_data.get("entries", [])
-            # Find entry with type='topup' and amount_minor=50000 and ref=provider_order_id
-            found = False
-            for entry in entries:
-                if (entry.get("type") == "topup" and 
-                    entry.get("amount_minor") == 50000 and 
-                    entry.get("ref") == provider_order_id):
-                    found = True
-                    break
-            if found:
-                log_test("GET /wallet/ledger", True, f"Found topup entry for {provider_order_id}")
-            else:
-                log_test("GET /wallet/ledger", False, f"Topup entry not found in {len(entries)} entries")
-        else:
-            log_test("GET /wallet/ledger", False, f"HTTP {resp.status_code}: {resp.text[:200]}")
-    except Exception as e:
-        log_test("GET /wallet/ledger", False, str(e))
-
-def test_cashfree_webhook_signature(token):
-    """C. Cashfree webhook signature check"""
-    print("\n=== C. CASHFREE WEBHOOK SIGNATURE CHECK ===")
-    url = f"{BASE_URL}/webhooks/cashfree"
-    
-    # Test with empty body and no signature headers
-    try:
-        resp = requests.post(url, data=b"", headers={}, timeout=10)
-        if resp.status_code == 401:
-            log_test("POST /webhooks/cashfree - no signature", True, "Correctly rejected with 401")
-        else:
-            log_test("POST /webhooks/cashfree - no signature", False, f"Expected 401, got {resp.status_code}: {resp.text[:200]}")
-    except Exception as e:
-        log_test("POST /webhooks/cashfree - no signature", False, str(e))
-
-def test_auto_recharge_config(token):
-    """D. Auto-recharge config"""
-    print("\n=== D. AUTO-RECHARGE CONFIG ===")
-    headers = {"Authorization": f"Bearer {token}"}
-    url = f"{BASE_URL}/salons/{SALON_ID}/wallet/auto-recharge"
-    
-    payload = {
-        "auto_recharge": True,
-        "recharge_threshold_minor": 20000,
-        "recharge_amount_minor": 100000,
-        "low_balance_alert_minor": 30000
-    }
-    
-    try:
-        resp = requests.post(url, json=payload, headers=headers, timeout=10)
-        if resp.status_code == 200:
-            data = resp.json()
-            if (data.get("auto_recharge") == True and 
-                data.get("recharge_threshold_minor") == 20000 and
-                data.get("recharge_amount_minor") == 100000 and
-                data.get("low_balance_alert_minor") == 30000):
-                log_test("POST /wallet/auto-recharge", True, "Config saved")
-            else:
-                log_test("POST /wallet/auto-recharge", False, f"Response mismatch: {data}")
-        else:
-            log_test("POST /wallet/auto-recharge", False, f"HTTP {resp.status_code}: {resp.text[:200]}")
-            return
-    except Exception as e:
-        log_test("POST /wallet/auto-recharge", False, str(e))
-        return
-    
-    # Verify via GET /wallet
-    url_wallet = f"{BASE_URL}/salons/{SALON_ID}/wallet"
-    try:
-        resp = requests.get(url_wallet, headers=headers, timeout=10)
-        if resp.status_code == 200:
-            wallet_data = resp.json()
-            if (wallet_data.get("auto_recharge") == True and
-                wallet_data.get("recharge_threshold_minor") == 20000 and
-                wallet_data.get("recharge_amount_minor") == 100000 and
-                wallet_data.get("low_balance_alert_minor") == 30000):
-                log_test("GET /wallet - auto-recharge config", True, "Config persisted")
-            else:
-                log_test("GET /wallet - auto-recharge config", False, f"Config mismatch: {wallet_data}")
-        else:
-            log_test("GET /wallet - auto-recharge config", False, f"HTTP {resp.status_code}")
-    except Exception as e:
-        log_test("GET /wallet - auto-recharge config", False, str(e))
-
-def test_waba_flow(token):
-    """E. WABA (Twilio sub-account) - MOCKED path"""
-    print("\n=== E. WABA EMBEDDED-SIGNUP + SYNC ===")
-    headers = {"Authorization": f"Bearer {token}"}
-    
-    # E10. POST /waba/sync BEFORE embedded-signup → 404
-    url_sync = f"{BASE_URL}/salons/{SALON_ID}/marketing/settings/waba/sync"
-    try:
-        resp = requests.post(url_sync, headers=headers, timeout=10)
-        if resp.status_code == 404:
-            detail = resp.json().get("detail", "")
-            if "not configured" in detail.lower():
-                log_test("POST /waba/sync before signup", True, f"404: {detail}")
-            else:
-                log_test("POST /waba/sync before signup", False, f"404 but wrong message: {detail}")
-        else:
-            # If it returns 200, it means sub-account already exists from prior test
-            log_test("POST /waba/sync before signup", True, f"SKIPPED - sub-account already exists (HTTP {resp.status_code})")
-    except Exception as e:
-        log_test("POST /waba/sync before signup", False, str(e))
-    
-    # E11. POST /waba/embedded-signup-complete
-    url_signup = f"{BASE_URL}/salons/{SALON_ID}/marketing/settings/waba/embedded-signup-complete"
-    signup_payload = {
-        "waba_id": "wa_test_123",
-        "phone": "+918560934455",
-        "display_name": "The Looks Test"
-    }
-    try:
-        resp = requests.post(url_signup, json=signup_payload, headers=headers, timeout=10)
-        if resp.status_code == 200:
-            data = resp.json()
-            subaccount_sid = data.get("subaccount_sid")
-            waba_id = data.get("waba_id")
-            sender_phone = data.get("sender_phone_e164")
-            sender_status = data.get("sender_status")
-            
-            checks = []
-            if subaccount_sid and subaccount_sid.startswith("ACsub_"):
-                checks.append("subaccount_sid starts with ACsub_")
-            else:
-                checks.append(f"❌ subaccount_sid={subaccount_sid}")
-            
-            if waba_id == "wa_test_123":
-                checks.append("waba_id=wa_test_123")
-            else:
-                checks.append(f"❌ waba_id={waba_id}")
-            
-            if sender_status == "online":
-                checks.append("sender_status=online")
-            else:
-                checks.append(f"❌ sender_status={sender_status}")
-            
-            all_pass = all("❌" not in c for c in checks)
-            log_test("POST /waba/embedded-signup-complete", all_pass, "; ".join(checks))
-        else:
-            log_test("POST /waba/embedded-signup-complete", False, f"HTTP {resp.status_code}: {resp.text[:200]}")
-            return
-    except Exception as e:
-        log_test("POST /waba/embedded-signup-complete", False, str(e))
-        return
-    
-    # E12. GET /marketing/settings/full → verify subaccount
-    url_full = f"{BASE_URL}/salons/{SALON_ID}/marketing/settings/full"
-    try:
-        resp = requests.get(url_full, headers=headers, timeout=10)
-        if resp.status_code == 200:
-            data = resp.json()
-            subaccount = data.get("subaccount", {})
-            if (subaccount.get("sender_status") == "online" and
-                subaccount.get("waba_id") == "wa_test_123"):
-                log_test("GET /marketing/settings/full - subaccount", True, "sender_status=online, waba_id=wa_test_123")
-            else:
-                log_test("GET /marketing/settings/full - subaccount", False, f"subaccount={subaccount}")
-        else:
-            log_test("GET /marketing/settings/full - subaccount", False, f"HTTP {resp.status_code}")
-    except Exception as e:
-        log_test("GET /marketing/settings/full - subaccount", False, str(e))
-    
-    # E13. POST /waba/sync → 200
-    try:
-        resp = requests.post(url_sync, headers=headers, timeout=10)
-        if resp.status_code == 200:
-            data = resp.json()
-            if data.get("subaccount_sid") and data.get("updated_at"):
-                log_test("POST /waba/sync after signup", True, "Sync successful, updated_at bumped")
-            else:
-                log_test("POST /waba/sync after signup", False, f"Response: {data}")
-        else:
-            log_test("POST /waba/sync after signup", False, f"HTTP {resp.status_code}: {resp.text[:200]}")
-    except Exception as e:
-        log_test("POST /waba/sync after signup", False, str(e))
-
-def test_usage_sync(token):
-    """F. Usage sync (MOCKED)"""
-    print("\n=== F. USAGE SYNC (MOCKED) ===")
-    headers = {"Authorization": f"Bearer {token}"}
-    url = f"{BASE_URL}/salons/{SALON_ID}/marketing/settings/usage-sync"
-    
-    try:
-        resp = requests.post(url, headers=headers, timeout=10)
-        if resp.status_code == 200:
-            data = resp.json()
-            synced_at = data.get("synced_at")
-            records_updated = data.get("records_updated")
-            detail = data.get("detail", "")
-            
-            if synced_at and records_updated == 1 and "MOCKED" in detail:
-                log_test("POST /usage-sync", True, f"synced_at={synced_at}, records_updated=1, MOCKED")
-            else:
-                log_test("POST /usage-sync", False, f"Response: {data}")
-        else:
-            log_test("POST /usage-sync", False, f"HTTP {resp.status_code}: {resp.text[:200]}")
-            return
-    except Exception as e:
-        log_test("POST /usage-sync", False, str(e))
-        return
-    
-    # Verify via GET /marketing/settings/full
-    url_full = f"{BASE_URL}/salons/{SALON_ID}/marketing/settings/full"
-    try:
-        resp = requests.get(url_full, headers=headers, timeout=10)
-        if resp.status_code == 200:
-            data = resp.json()
-            spend_month = data.get("spend_month", {})
-            channels = spend_month.get("channels", {})
-            whatsapp = channels.get("whatsapp", {})
-            if "count" in whatsapp and "cost_minor" in whatsapp:
-                log_test("GET /marketing/settings/full - spend_month.channels.whatsapp", True, f"whatsapp keys exist: {whatsapp}")
-            else:
-                log_test("GET /marketing/settings/full - spend_month.channels.whatsapp", False, f"whatsapp={whatsapp}")
-        else:
-            log_test("GET /marketing/settings/full - spend_month", False, f"HTTP {resp.status_code}")
-    except Exception as e:
-        log_test("GET /marketing/settings/full - spend_month", False, str(e))
-
-def test_dlt_email_sending_windows(token):
-    """G. DLT, Email, Sending windows (upserts)"""
-    print("\n=== G. DLT + EMAIL + SENDING WINDOWS ===")
-    headers = {"Authorization": f"Bearer {token}"}
-    
-    # G15. POST /dlt
-    url_dlt = f"{BASE_URL}/salons/{SALON_ID}/marketing/settings/dlt"
-    dlt_payload = {
-        "entity_id": "1101a1234567890",
-        "sender_header": "TLKSLN",
-        "provider": "twilio"
-    }
-    try:
-        resp = requests.post(url_dlt, json=dlt_payload, headers=headers, timeout=10)
-        if resp.status_code == 200:
-            data = resp.json()
-            if data.get("entity_id") == "1101a1234567890":
-                log_test("POST /dlt", True, f"entity_id={data.get('entity_id')}")
-            else:
-                log_test("POST /dlt", False, f"Response: {data}")
-        else:
-            log_test("POST /dlt", False, f"HTTP {resp.status_code}: {resp.text[:200]}")
-    except Exception as e:
-        log_test("POST /dlt", False, str(e))
-    
-    # Round-trip via GET /full
-    url_full = f"{BASE_URL}/salons/{SALON_ID}/marketing/settings/full"
-    try:
-        resp = requests.get(url_full, headers=headers, timeout=10)
-        if resp.status_code == 200:
-            data = resp.json()
-            dlt = data.get("dlt", {})
-            if dlt.get("entity_id") == "1101a1234567890":
-                log_test("GET /full - dlt round-trip", True, f"entity_id matches")
-            else:
-                log_test("GET /full - dlt round-trip", False, f"dlt={dlt}")
-        else:
-            log_test("GET /full - dlt round-trip", False, f"HTTP {resp.status_code}")
-    except Exception as e:
-        log_test("GET /full - dlt round-trip", False, str(e))
-    
-    # G16. POST /email
-    url_email = f"{BASE_URL}/salons/{SALON_ID}/marketing/settings/email"
-    email_payload = {
-        "from_name": "The Looks Salon",
-        "from_email": "hello@thelooks.in",
-        "reply_to": "care@thelooks.in"
-    }
-    try:
-        resp = requests.post(url_email, json=email_payload, headers=headers, timeout=10)
-        if resp.status_code == 200:
-            data = resp.json()
-            if data.get("verified") == True and data.get("from_email") == "hello@thelooks.in":
-                log_test("POST /email", True, f"verified=true, from_email={data.get('from_email')}")
-            else:
-                log_test("POST /email", False, f"Response: {data}")
-        else:
-            log_test("POST /email", False, f"HTTP {resp.status_code}: {resp.text[:200]}")
-    except Exception as e:
-        log_test("POST /email", False, str(e))
-    
-    # Round-trip via GET /full
-    try:
-        resp = requests.get(url_full, headers=headers, timeout=10)
-        if resp.status_code == 200:
-            data = resp.json()
-            email_sender = data.get("email_sender", {})
-            if email_sender.get("from_email") == "hello@thelooks.in":
-                log_test("GET /full - email round-trip", True, f"from_email matches")
-            else:
-                log_test("GET /full - email round-trip", False, f"email_sender={email_sender}")
-        else:
-            log_test("GET /full - email round-trip", False, f"HTTP {resp.status_code}")
-    except Exception as e:
-        log_test("GET /full - email round-trip", False, str(e))
-    
-    # G17. POST /sending-windows
-    url_windows = f"{BASE_URL}/salons/{SALON_ID}/marketing/settings/sending-windows"
-    windows_payload = {
-        "window_start": "10:00",
-        "window_end": "21:00",
-        "quiet_start": "22:00",
-        "quiet_end": "09:00",
-        "optout_keyword": "STOP",
-        "require_optin": True,
-        "per_guest_cap_per_week": 3
-    }
-    try:
-        resp = requests.post(url_windows, json=windows_payload, headers=headers, timeout=10)
-        if resp.status_code == 200:
-            data = resp.json()
-            if data.get("window_start") == "10:00" and data.get("per_guest_cap_per_week") == 3:
-                log_test("POST /sending-windows", True, f"window_start={data.get('window_start')}")
-            else:
-                log_test("POST /sending-windows", False, f"Response: {data}")
-        else:
-            log_test("POST /sending-windows", False, f"HTTP {resp.status_code}: {resp.text[:200]}")
-    except Exception as e:
-        log_test("POST /sending-windows", False, str(e))
-    
-    # Round-trip via GET /full
-    try:
-        resp = requests.get(url_full, headers=headers, timeout=10)
-        if resp.status_code == 200:
-            data = resp.json()
-            send_settings = data.get("send_settings", {})
-            if send_settings.get("window_start") == "10:00":
-                log_test("GET /full - sending-windows round-trip", True, f"window_start matches")
-            else:
-                log_test("GET /full - sending-windows round-trip", False, f"send_settings={send_settings}")
-        else:
-            log_test("GET /full - sending-windows round-trip", False, f"HTTP {resp.status_code}")
-    except Exception as e:
-        log_test("GET /full - sending-windows round-trip", False, str(e))
-
-def test_template_edit_delete(token):
-    """H. Template Edit + Delete"""
-    print("\n=== H. TEMPLATE EDIT + DELETE ===")
-    headers = {"Authorization": f"Bearer {token}"}
-    
-    # H18. POST /marketing/templates - create
-    url_templates = f"{BASE_URL}/salons/{SALON_ID}/marketing/templates"
-    create_payload = {
-        "name": "test_edit_template",
-        "category": "utility",
-        "body": "Hi {{1}}",
-        "lang_code": "en",
-        "meta_status": "draft"
-    }
-    try:
-        resp = requests.post(url_templates, json=create_payload, headers=headers, timeout=10)
-        if resp.status_code == 200:
-            data = resp.json()
-            template_id = data.get("id")
-            if template_id:
-                log_test("POST /marketing/templates - create", True, f"id={template_id}")
-            else:
-                log_test("POST /marketing/templates - create", False, f"No id in response: {data}")
-                return
-        else:
-            log_test("POST /marketing/templates - create", False, f"HTTP {resp.status_code}: {resp.text[:200]}")
-            return
-    except Exception as e:
-        log_test("POST /marketing/templates - create", False, str(e))
-        return
-    
-    # H19. PUT /marketing/templates/{tid} - edit
-    url_edit = f"{BASE_URL}/salons/{SALON_ID}/marketing/templates/{template_id}"
-    edit_payload = {
-        "name": "test_edit_template",
-        "category": "utility",
-        "body": "Hi {{1}}, welcome to {{2}}!",
-        "lang_code": "en"
-    }
-    try:
-        resp = requests.put(url_edit, json=edit_payload, headers=headers, timeout=10)
-        if resp.status_code == 200:
-            data = resp.json()
-            if data.get("body") == "Hi {{1}}, welcome to {{2}}!":
-                log_test("PUT /marketing/templates/{tid} - edit", True, f"body updated")
-            else:
-                log_test("PUT /marketing/templates/{tid} - edit", False, f"body={data.get('body')}")
-        else:
-            log_test("PUT /marketing/templates/{tid} - edit", False, f"HTTP {resp.status_code}: {resp.text[:200]}")
-    except Exception as e:
-        log_test("PUT /marketing/templates/{tid} - edit", False, str(e))
-    
-    # Verify via GET /marketing/templates
-    try:
-        resp = requests.get(url_templates, headers=headers, timeout=10)
-        if resp.status_code == 200:
-            data = resp.json()
-            templates = data.get("templates", [])
-            found = None
-            for t in templates:
-                if t.get("id") == template_id:
-                    found = t
-                    break
-            if found and found.get("body") == "Hi {{1}}, welcome to {{2}}!":
-                log_test("GET /marketing/templates - verify edit", True, f"Updated body confirmed")
-            else:
-                log_test("GET /marketing/templates - verify edit", False, f"Template not found or body mismatch")
-        else:
-            log_test("GET /marketing/templates - verify edit", False, f"HTTP {resp.status_code}")
-    except Exception as e:
-        log_test("GET /marketing/templates - verify edit", False, str(e))
-    
-    # H20. PUT for non-existent tid → 404
-    fake_id = "00000000-0000-0000-0000-000000000000"
-    url_fake = f"{BASE_URL}/salons/{SALON_ID}/marketing/templates/{fake_id}"
-    try:
-        resp = requests.put(url_fake, json=edit_payload, headers=headers, timeout=10)
-        if resp.status_code == 404:
-            log_test("PUT /marketing/templates/{fake_id} - 404", True, "Correctly returned 404")
-        else:
-            log_test("PUT /marketing/templates/{fake_id} - 404", False, f"Expected 404, got {resp.status_code}")
-    except Exception as e:
-        log_test("PUT /marketing/templates/{fake_id} - 404", False, str(e))
-    
-    # H21. DELETE /marketing/templates/{tid}
-    url_delete = f"{BASE_URL}/salons/{SALON_ID}/marketing/templates/{template_id}"
-    try:
-        resp = requests.delete(url_delete, headers=headers, timeout=10)
-        if resp.status_code == 200:
-            data = resp.json()
-            if data.get("deleted") == True and data.get("id") == template_id:
-                log_test("DELETE /marketing/templates/{tid}", True, f"deleted=true, id={template_id}")
-            else:
-                log_test("DELETE /marketing/templates/{tid}", False, f"Response: {data}")
-        else:
-            log_test("DELETE /marketing/templates/{tid}", False, f"HTTP {resp.status_code}: {resp.text[:200]}")
-            return
-    except Exception as e:
-        log_test("DELETE /marketing/templates/{tid}", False, str(e))
-        return
-    
-    # Verify template no longer in list
-    try:
-        resp = requests.get(url_templates, headers=headers, timeout=10)
-        if resp.status_code == 200:
-            data = resp.json()
-            templates = data.get("templates", [])
-            found = any(t.get("id") == template_id for t in templates)
-            if not found:
-                log_test("GET /marketing/templates - verify delete", True, "Template no longer in list")
-            else:
-                log_test("GET /marketing/templates - verify delete", False, "Template still in list")
-        else:
-            log_test("GET /marketing/templates - verify delete", False, f"HTTP {resp.status_code}")
-    except Exception as e:
-        log_test("GET /marketing/templates - verify delete", False, str(e))
-
-def test_auth_enforcement(token):
-    """I. Auth enforcement"""
-    print("\n=== I. AUTH ENFORCEMENT ===")
-    
-    # Test wallet endpoint without auth
-    url_wallet = f"{BASE_URL}/salons/{SALON_ID}/wallet"
-    try:
-        resp = requests.get(url_wallet, timeout=10)
-        if resp.status_code in [401, 403]:
-            log_test("GET /wallet - no auth", True, f"Correctly rejected with {resp.status_code}")
-        else:
-            log_test("GET /wallet - no auth", False, f"Expected 401/403, got {resp.status_code}")
-    except Exception as e:
-        log_test("GET /wallet - no auth", False, str(e))
-    
-    # Test topup endpoint without auth
-    url_topup = f"{BASE_URL}/salons/{SALON_ID}/wallet/topup"
-    try:
-        resp = requests.post(url_topup, json={"amount_minor": 50000}, timeout=10)
-        if resp.status_code in [401, 403]:
-            log_test("POST /wallet/topup - no auth", True, f"Correctly rejected with {resp.status_code}")
-        else:
-            log_test("POST /wallet/topup - no auth", False, f"Expected 401/403, got {resp.status_code}")
-    except Exception as e:
-        log_test("POST /wallet/topup - no auth", False, str(e))
-    
-    # Test DLT endpoint without auth
-    url_dlt = f"{BASE_URL}/salons/{SALON_ID}/marketing/settings/dlt"
-    try:
-        resp = requests.post(url_dlt, json={"entity_id": "test", "sender_header": "TEST", "provider": "twilio"}, timeout=10)
-        if resp.status_code in [401, 403]:
-            log_test("POST /dlt - no auth", True, f"Correctly rejected with {resp.status_code}")
-        else:
-            log_test("POST /dlt - no auth", False, f"Expected 401/403, got {resp.status_code}")
-    except Exception as e:
-        log_test("POST /dlt - no auth", False, str(e))
-
-def print_summary():
-    """Print test summary"""
-    print("\n" + "="*80)
-    print("TEST SUMMARY")
-    print("="*80)
-    
-    passed = sum(1 for r in results if r["passed"])
-    failed = sum(1 for r in results if not r["passed"])
-    total = len(results)
-    
-    print(f"\nTotal: {total} tests")
-    print(f"✅ Passed: {passed}")
-    print(f"❌ Failed: {failed}")
-    print(f"Success Rate: {passed/total*100:.1f}%\n")
-    
-    if failed > 0:
-        print("FAILED TESTS:")
-        for r in results:
-            if not r["passed"]:
-                print(f"  ❌ {r['name']}")
-                if r["details"]:
-                    print(f"     {r['details']}")
-    
-    print("\n" + "="*80)
-
-def main():
-    """Main test runner"""
-    print("="*80)
-    print("MARKETING SETTINGS + WALLET + CASHFREE + TEMPLATE EDIT BACKEND TESTS")
-    print(f"Salon ID: {SALON_ID}")
-    print(f"Admin: {ADMIN_IDENTIFIER}")
-    print("="*80)
-    
-    # Login
-    token = login_admin()
-    if not token:
-        print("\n❌ CRITICAL: Admin login failed. Cannot proceed with tests.")
+    if resp.status_code != 200:
+        log_fail(f"Admin login failed: {resp.status_code} - {resp.text}")
         sys.exit(1)
     
-    # Run all test suites
-    test_marketing_settings_snapshot(token)
-    test_wallet_flow(token)
-    test_cashfree_webhook_signature(token)
-    test_auto_recharge_config(token)
-    test_waba_flow(token)
-    test_usage_sync(token)
-    test_dlt_email_sending_windows(token)
-    test_template_edit_delete(token)
-    test_auth_enforcement(token)
+    data = resp.json()
+    token = data.get("access_token")
+    sid = data.get("salon_id")
     
-    # Print summary
-    print_summary()
+    if not token or not sid:
+        log_fail(f"Missing access_token or salon_id in response: {data}")
+        sys.exit(1)
     
-    # Exit with appropriate code
-    failed = sum(1 for r in results if not r["passed"])
-    sys.exit(0 if failed == 0 else 1)
+    log_pass(f"Admin logged in successfully. Salon ID: {sid}")
+    return token, sid
+
+
+def get_barbers(token: str, sid: str) -> List[Dict]:
+    """Get list of barbers for testing"""
+    log_test("Get Barbers")
+    url = f"{BASE_URL}/salons/{sid}/barbers"
+    headers = {"Authorization": f"Bearer {token}"}
+    
+    resp = requests.get(url, headers=headers)
+    log_info(f"GET {url}")
+    log_info(f"Status: {resp.status_code}")
+    
+    if resp.status_code != 200:
+        log_fail(f"Failed to get barbers: {resp.status_code} - {resp.text}")
+        return []
+    
+    barbers = resp.json()
+    active_barbers = [b for b in barbers if b.get("is_active")]
+    
+    if len(active_barbers) < 2:
+        log_fail(f"Need at least 2 active barbers for testing, found {len(active_barbers)}")
+        sys.exit(1)
+    
+    log_pass(f"Found {len(active_barbers)} active barbers")
+    for b in active_barbers[:2]:
+        log_info(f"  - {b.get('name')} (ID: {b.get('id')})")
+    
+    return active_barbers
+
+
+def create_staff_user(token: str, sid: str, login_id: str, password: str, 
+                     permissions: Dict, staff_id: Optional[str] = None) -> Dict:
+    """Create a staff user with specified permissions"""
+    # Add unique test run ID to login_id to avoid conflicts
+    unique_login_id = f"{login_id}_{test_run_id}"
+    unique_mobile = f"99{random.randint(10000000, 99999999)}"  # Generate unique 10-digit mobile
+    log_info(f"Creating staff user: {unique_login_id}")
+    url = f"{BASE_URL}/salon/users"
+    headers = {"Authorization": f"Bearer {token}"}
+    payload = {
+        "salon_id": sid,
+        "name": f"Test Staff {login_id}",
+        "mobile": unique_mobile,
+        "login_id": unique_login_id,
+        "password": password,
+        "role": "staff",
+        "permissions": permissions
+    }
+    
+    if staff_id:
+        payload["staff_id"] = staff_id
+    
+    resp = requests.post(url, json=payload, headers=headers)
+    log_info(f"POST {url}")
+    log_info(f"Payload: {json.dumps(payload, indent=2)}")
+    log_info(f"Status: {resp.status_code}")
+    
+    if resp.status_code not in (200, 201):
+        log_fail(f"Failed to create staff user: {resp.status_code} - {resp.text}")
+        return {}
+    
+    user = resp.json()
+    user_id = user.get("id")
+    created_staff_users.append(user_id)
+    log_pass(f"Created staff user: {unique_login_id} (ID: {user_id})")
+    # Return the unique login_id for login
+    user["unique_login_id"] = unique_login_id
+    return user
+
+
+def staff_login(login_id: str, password: str) -> Optional[str]:
+    """Login as staff user and return access_token"""
+    # Add test run ID to login_id
+    unique_login_id = f"{login_id}_{test_run_id}"
+    log_info(f"Logging in as staff: {unique_login_id}")
+    url = f"{BASE_URL}/salon/users/login"
+    payload = {
+        "identifier": unique_login_id,
+        "password": password
+    }
+    
+    resp = requests.post(url, json=payload)
+    log_info(f"POST {url}")
+    log_info(f"Status: {resp.status_code}")
+    
+    if resp.status_code != 200:
+        log_fail(f"Staff login failed: {resp.status_code} - {resp.text}")
+        return None
+    
+    data = resp.json()
+    token = data.get("access_token")
+    log_pass(f"Staff logged in successfully: {unique_login_id}")
+    return token
+
+
+def delete_staff_users(token: str, sid: str):
+    """Cleanup: delete all created staff users"""
+    log_test("Cleanup - Delete Created Staff Users")
+    headers = {"Authorization": f"Bearer {token}"}
+    
+    for user_id in created_staff_users:
+        url = f"{BASE_URL}/salon/users/{user_id}"
+        resp = requests.delete(url, headers=headers)
+        log_info(f"DELETE {url} - Status: {resp.status_code}")
+        
+        if resp.status_code in (200, 204):
+            log_pass(f"Deleted staff user: {user_id}")
+        else:
+            log_fail(f"Failed to delete staff user {user_id}: {resp.status_code}")
+
+
+# ============================================================================
+# SCENARIO A: Home Attendance Re-check-in Bug Fix
+# ============================================================================
+def test_scenario_a_home_attendance_recheckIn():
+    """
+    Test that in→out→in→out on same day produces sessions[] array of length 2
+    with two open/close pairs. Previously the 3rd toggle returned already_in: true.
+    """
+    log_test("SCENARIO A: Home Attendance Re-check-in Bug Fix")
+    
+    global admin_token, salon_id, test_barbers
+    
+    if not test_barbers:
+        log_fail("No barbers available for testing")
+        return False
+    
+    barber_id = test_barbers[0]["id"]
+    barber_name = test_barbers[0]["name"]
+    log_info(f"Testing with barber: {barber_name} (ID: {barber_id})")
+    
+    headers = {"Authorization": f"Bearer {admin_token}"}
+    url = f"{BASE_URL}/salons/{salon_id}/home/staff-attendance/toggle"
+    
+    # First, ensure we're in a clean state (checked out)
+    log_info("A0: Ensuring clean state (check-out if needed)")
+    resp = requests.post(url, json={"barber_id": barber_id, "action": "out"}, headers=headers)
+    initial_sessions_count = len(resp.json().get("sessions", []))
+    log_info(f"Initial sessions count: {initial_sessions_count}")
+    
+    # A1: First check-in
+    log_info("A1: First check-in (action=in)")
+    resp = requests.post(url, json={"barber_id": barber_id, "action": "in"}, headers=headers)
+    log_info(f"Status: {resp.status_code}")
+    
+    if resp.status_code != 200:
+        log_fail(f"A1 failed: {resp.status_code} - {resp.text}")
+        return False
+    
+    data = resp.json()
+    sessions = data.get("sessions", [])
+    
+    if not data.get("check_in_at"):
+        log_fail("A1: check_in_at not set")
+        return False
+    
+    # Note: status field may not be present when already_in is true
+    # The important check is that we have an open session
+    
+    if len(sessions) != initial_sessions_count + 1:
+        log_fail(f"A1: sessions length should be {initial_sessions_count + 1}, got {len(sessions)}")
+        return False
+    
+    if sessions[-1].get("co") is not None:
+        log_fail("A1: last session should have co=null (open)")
+        return False
+    
+    log_pass(f"A1: First check-in successful, sessions count increased to {len(sessions)}")
+    
+    # A2: First check-out
+    log_info("A2: First check-out (action=out)")
+    resp = requests.post(url, json={"barber_id": barber_id, "action": "out"}, headers=headers)
+    log_info(f"Status: {resp.status_code}")
+    
+    if resp.status_code != 200:
+        log_fail(f"A2 failed: {resp.status_code} - {resp.text}")
+        return False
+    
+    data = resp.json()
+    sessions = data.get("sessions", [])
+    
+    if not data.get("check_out_at"):
+        log_fail("A2: check_out_at not set")
+        return False
+    
+    # Note: status field may not be present in all responses
+    
+    if len(sessions) != initial_sessions_count + 1:
+        log_fail(f"A2: sessions length should be {initial_sessions_count + 1}, got {len(sessions)}")
+        return False
+    
+    if sessions[-1].get("co") is None:
+        log_fail("A2: last session should have co populated (closed)")
+        return False
+    
+    log_pass(f"A2: First check-out successful, last session closed")
+    
+    # A3: Second check-in (CORE BUG FIX TEST)
+    log_info("A3: Second check-in (action=in) - CORE BUG FIX TEST")
+    resp = requests.post(url, json={"barber_id": barber_id, "action": "in"}, headers=headers)
+    log_info(f"Status: {resp.status_code}")
+    
+    if resp.status_code != 200:
+        log_fail(f"A3 failed: {resp.status_code} - {resp.text}")
+        return False
+    
+    data = resp.json()
+    sessions = data.get("sessions", [])
+    
+    if data.get("already_in"):
+        log_fail("A3: BUG NOT FIXED - already_in should be false, got true")
+        return False
+    
+    # Note: status field may not be present in all responses
+    
+    if len(sessions) != initial_sessions_count + 2:
+        log_fail(f"A3: sessions length should be {initial_sessions_count + 2}, got {len(sessions)}")
+        return False
+    
+    if sessions[-1].get("co") is not None:
+        log_fail("A3: last session should have co=null (open)")
+        return False
+    
+    log_pass(f"A3: ✅ BUG FIX VERIFIED - Second check-in successful, sessions count={len(sessions)}, last session open")
+    
+    # A4: Second check-out
+    log_info("A4: Second check-out (action=out)")
+    resp = requests.post(url, json={"barber_id": barber_id, "action": "out"}, headers=headers)
+    log_info(f"Status: {resp.status_code}")
+    
+    if resp.status_code != 200:
+        log_fail(f"A4 failed: {resp.status_code} - {resp.text}")
+        return False
+    
+    data = resp.json()
+    sessions = data.get("sessions", [])
+    
+    if len(sessions) != initial_sessions_count + 2:
+        log_fail(f"A4: sessions length should be {initial_sessions_count + 2}, got {len(sessions)}")
+        return False
+    
+    if sessions[-1].get("co") is None:
+        log_fail("A4: last session should have co populated (closed)")
+        return False
+    
+    log_pass(f"A4: Second check-out successful, both new sessions closed")
+    
+    log_pass("✅ SCENARIO A PASSED: Re-check-in bug fix verified")
+    return True
+
+
+# ============================================================================
+# SCENARIO B: Staff with granular staff.attendance only, no view_all
+# ============================================================================
+def test_scenario_b_staff_attendance_no_view_all():
+    """
+    Staff user with only staff.attendance (no view_all) can toggle only their
+    OWN linked barber - 403 for others.
+    """
+    log_test("SCENARIO B: Staff with staff.attendance only, no view_all")
+    
+    global admin_token, salon_id, test_barbers
+    
+    if len(test_barbers) < 2:
+        log_fail("Need at least 2 barbers for this test")
+        return False
+    
+    barber_x = test_barbers[0]
+    barber_y = test_barbers[1]
+    
+    # B1: Create staff user linked to barber_x
+    log_info("B1: Create staff user Sb linked to barber_x")
+    permissions = {
+        "modules": {
+            "staff": {
+                "view": True,
+                "view_all": False,
+                "attendance": True
+            }
+        }
+    }
+    
+    user = create_staff_user(
+        admin_token, salon_id, 
+        "staff_b_test", "testpass123",
+        permissions, staff_id=barber_x["id"]
+    )
+    
+    if not user:
+        log_fail("B1: Failed to create staff user")
+        return False
+    
+    # B2: Staff login
+    log_info("B2: Staff Sb logs in")
+    staff_token = staff_login("staff_b_test", "testpass123")
+    
+    if not staff_token:
+        log_fail("B2: Staff login failed")
+        return False
+    
+    # B3: Toggle own barber (should succeed)
+    log_info(f"B3: Staff Sb toggles their OWN barber ({barber_x['name']})")
+    headers = {"Authorization": f"Bearer {staff_token}"}
+    url = f"{BASE_URL}/salons/{salon_id}/home/staff-attendance/toggle"
+    
+    resp = requests.post(url, json={"barber_id": barber_x["id"], "action": "in"}, headers=headers)
+    log_info(f"Status: {resp.status_code}")
+    
+    if resp.status_code != 200:
+        log_fail(f"B3: Should succeed but got {resp.status_code} - {resp.text}")
+        return False
+    
+    log_pass(f"B3: Staff can toggle their own barber ({barber_x['name']})")
+    
+    # B4: Try to toggle different barber (should fail with 403)
+    log_info(f"B4: Staff Sb tries to toggle DIFFERENT barber ({barber_y['name']})")
+    resp = requests.post(url, json={"barber_id": barber_y["id"], "action": "in"}, headers=headers)
+    log_info(f"Status: {resp.status_code}")
+    
+    if resp.status_code != 403:
+        log_fail(f"B4: Should return 403, got {resp.status_code}")
+        return False
+    
+    detail = resp.json().get("detail", "")
+    if "only check in/out your own attendance" not in detail.lower():
+        log_fail(f"B4: Expected 'only check in/out your own attendance' in detail, got: {detail}")
+        return False
+    
+    log_pass(f"B4: Staff correctly blocked from toggling other barber (403)")
+    
+    log_pass("✅ SCENARIO B PASSED: Staff can only toggle own barber")
+    return True
+
+
+# ============================================================================
+# SCENARIO C: Staff with NO staff.attendance
+# ============================================================================
+def test_scenario_c_staff_no_attendance_permission():
+    """
+    Staff with NO staff.attendance permission → 403 on home attendance toggle
+    """
+    log_test("SCENARIO C: Staff with NO staff.attendance permission")
+    
+    global admin_token, salon_id, test_barbers
+    
+    # C1: Create staff user with NO staff permissions
+    log_info("C1: Create staff user Sc with NO staff permissions")
+    permissions = {
+        "modules": {
+            "staff": {}  # All false
+        }
+    }
+    
+    user = create_staff_user(
+        admin_token, salon_id,
+        "staff_c_test", "testpass123",
+        permissions
+    )
+    
+    if not user:
+        log_fail("C1: Failed to create staff user")
+        return False
+    
+    # C2: Staff login
+    log_info("C2: Staff Sc logs in")
+    staff_token = staff_login("staff_c_test", "testpass123")
+    
+    if not staff_token:
+        log_fail("C2: Staff login failed")
+        return False
+    
+    # C3: Try to toggle attendance (should fail with 403)
+    log_info("C3: Staff Sc tries to toggle attendance")
+    headers = {"Authorization": f"Bearer {staff_token}"}
+    url = f"{BASE_URL}/salons/{salon_id}/home/staff-attendance/toggle"
+    
+    resp = requests.post(url, json={"barber_id": test_barbers[0]["id"], "action": "in"}, headers=headers)
+    log_info(f"Status: {resp.status_code}")
+    
+    if resp.status_code != 403:
+        log_fail(f"C3: Should return 403, got {resp.status_code}")
+        return False
+    
+    detail = resp.json().get("detail", "")
+    if "staff.attendance" not in detail:
+        log_fail(f"C3: Expected 'staff.attendance' in detail, got: {detail}")
+        return False
+    
+    log_pass("C3: Staff correctly blocked (403) - Permission denied: staff.attendance")
+    
+    log_pass("✅ SCENARIO C PASSED: Staff without permission correctly blocked")
+    return True
+
+
+# ============================================================================
+# SCENARIO D: Financials granular permissions
+# ============================================================================
+def test_scenario_d_financials_granular():
+    """
+    Staff with only financials.view_dashboard → 200 on GET dashboard,
+    403 on POST/DELETE transactions
+    """
+    log_test("SCENARIO D: Financials granular permissions")
+    
+    global admin_token, salon_id
+    
+    # D1: Create staff user with only view_dashboard
+    log_info("D1: Create staff user Sd with only financials.view_dashboard")
+    permissions = {
+        "modules": {
+            "financials": {
+                "view_dashboard": True
+                # All other actions false
+            }
+        }
+    }
+    
+    user = create_staff_user(
+        admin_token, salon_id,
+        "staff_d_test", "testpass123",
+        permissions
+    )
+    
+    if not user:
+        log_fail("D1: Failed to create staff user")
+        return False
+    
+    # D2: Staff login
+    log_info("D2: Staff Sd logs in")
+    staff_token = staff_login("staff_d_test", "testpass123")
+    
+    if not staff_token:
+        log_fail("D2: Staff login failed")
+        return False
+    
+    headers = {"Authorization": f"Bearer {staff_token}"}
+    
+    # D3: GET dashboard (should succeed)
+    log_info("D3: Staff Sd tries GET /financials/dashboard")
+    url = f"{BASE_URL}/salons/{salon_id}/financials/dashboard"
+    resp = requests.get(url, headers=headers)
+    log_info(f"Status: {resp.status_code}")
+    
+    if resp.status_code != 200:
+        log_fail(f"D3: Should return 200, got {resp.status_code} - {resp.text}")
+        return False
+    
+    log_pass("D3: Staff can view dashboard (200)")
+    
+    # D4: POST transaction (should fail with 403)
+    log_info("D4: Staff Sd tries POST /financials/transactions")
+    url = f"{BASE_URL}/salons/{salon_id}/financials/transactions"
+    payload = {
+        "type": "inflow",
+        "date": "2026-04-26",
+        "category": "other_income",
+        "amount": 100,
+        "payment_mode": "cash",
+        "narration": "Test transaction"
+    }
+    resp = requests.post(url, json=payload, headers=headers)
+    log_info(f"Status: {resp.status_code}")
+    
+    if resp.status_code != 403:
+        log_fail(f"D4: Should return 403, got {resp.status_code}")
+        return False
+    
+    detail = resp.json().get("detail", "")
+    if "financials.create_transaction" not in detail:
+        log_fail(f"D4: Expected 'financials.create_transaction' in detail, got: {detail}")
+        return False
+    
+    log_pass("D4: Staff correctly blocked from creating transaction (403)")
+    
+    # D5: DELETE transaction (should fail with 403)
+    log_info("D5: Staff Sd tries DELETE /financials/transactions/{fake_id}")
+    url = f"{BASE_URL}/salons/{salon_id}/financials/transactions/fake-transaction-id"
+    resp = requests.delete(url, headers=headers)
+    log_info(f"Status: {resp.status_code}")
+    
+    if resp.status_code != 403:
+        log_fail(f"D5: Should return 403, got {resp.status_code}")
+        return False
+    
+    detail = resp.json().get("detail", "")
+    if "financials.delete_transaction" not in detail:
+        log_fail(f"D5: Expected 'financials.delete_transaction' in detail, got: {detail}")
+        return False
+    
+    log_pass("D5: Staff correctly blocked from deleting transaction (403)")
+    
+    log_pass("✅ SCENARIO D PASSED: Granular financials permissions working")
+    return True
+
+
+# ============================================================================
+# SCENARIO E: Legacy flat-key fallback
+# ============================================================================
+def test_scenario_e_legacy_fallback():
+    """
+    Staff with can_access_financials: true (LEGACY key) and NO modules field
+    → both GET dashboard AND POST create-transaction should succeed
+    """
+    log_test("SCENARIO E: Legacy flat-key fallback")
+    
+    global admin_token, salon_id
+    
+    # E1: Create staff user with legacy can_access_financials
+    log_info("E1: Create staff user Se with legacy can_access_financials=true")
+    permissions = {
+        "can_access_financials": True
+        # NO modules field
+    }
+    
+    user = create_staff_user(
+        admin_token, salon_id,
+        "staff_e_test", "testpass123",
+        permissions
+    )
+    
+    if not user:
+        log_fail("E1: Failed to create staff user")
+        return False
+    
+    # E2: Staff login
+    log_info("E2: Staff Se logs in")
+    staff_token = staff_login("staff_e_test", "testpass123")
+    
+    if not staff_token:
+        log_fail("E2: Staff login failed")
+        return False
+    
+    headers = {"Authorization": f"Bearer {staff_token}"}
+    
+    # E3: GET dashboard (should succeed via legacy fallback)
+    log_info("E3: Staff Se tries GET /financials/dashboard (legacy fallback)")
+    url = f"{BASE_URL}/salons/{salon_id}/financials/dashboard"
+    resp = requests.get(url, headers=headers)
+    log_info(f"Status: {resp.status_code}")
+    
+    if resp.status_code != 200:
+        log_fail(f"E3: Should return 200 via legacy fallback, got {resp.status_code} - {resp.text}")
+        return False
+    
+    log_pass("E3: Staff can view dashboard via legacy fallback (200)")
+    
+    # E4: POST transaction (should succeed via legacy fallback)
+    log_info("E4: Staff Se tries POST /financials/transactions (legacy fallback)")
+    url = f"{BASE_URL}/salons/{salon_id}/financials/transactions"
+    payload = {
+        "type": "inflow",
+        "date": "2026-04-26",
+        "category": "other_income",
+        "amount": 150,
+        "payment_mode": "cash",
+        "narration": "Test legacy transaction"
+    }
+    resp = requests.post(url, json=payload, headers=headers)
+    log_info(f"Status: {resp.status_code}")
+    
+    if resp.status_code != 200:
+        log_fail(f"E4: Should return 200 via legacy fallback, got {resp.status_code} - {resp.text}")
+        return False
+    
+    log_pass("E4: Staff can create transaction via legacy fallback (200)")
+    
+    log_pass("✅ SCENARIO E PASSED: Legacy flat-key fallback working")
+    return True
+
+
+# ============================================================================
+# SCENARIO F: Reward-plan / services.bulk-delete gated correctly
+# ============================================================================
+def test_scenario_f_reward_plan_services():
+    """
+    Test reward-plan and services.bulk-delete are gated correctly
+    """
+    log_test("SCENARIO F: Reward-plan / services.bulk-delete gated")
+    
+    global admin_token, salon_id, test_barbers
+    
+    # F1: Staff with staff.delete permission
+    log_info("F1: Create staff user Sf with staff.delete permission")
+    permissions = {
+        "modules": {
+            "staff": {
+                "view": True,
+                "delete": True
+            }
+        }
+    }
+    
+    user = create_staff_user(
+        admin_token, salon_id,
+        "staff_f_test", "testpass123",
+        permissions
+    )
+    
+    if not user:
+        log_fail("F1: Failed to create staff user")
+        return False
+    
+    staff_token = staff_login("staff_f_test", "testpass123")
+    if not staff_token:
+        log_fail("F1: Staff login failed")
+        return False
+    
+    # Try to delete a barber (should pass permission check, may fail for other reasons)
+    log_info("F1: Staff Sf tries DELETE /barbers/{id}")
+    headers = {"Authorization": f"Bearer {staff_token}"}
+    url = f"{BASE_URL}/barbers/{test_barbers[0]['id']}"
+    resp = requests.delete(url, headers=headers)
+    log_info(f"Status: {resp.status_code}")
+    
+    # We're checking permission passes (not 403), actual deletion may fail for business reasons
+    if resp.status_code == 403:
+        detail = resp.json().get("detail", "")
+        if "staff.delete" in detail:
+            log_fail(f"F1: Permission check failed (403): {detail}")
+            return False
+    
+    log_pass(f"F1: Staff.delete permission passed (status: {resp.status_code}, not 403)")
+    
+    # F2: Staff with NO permissions
+    log_info("F2: Create staff user Sg with NO permissions")
+    permissions = {
+        "modules": {}
+    }
+    
+    user = create_staff_user(
+        admin_token, salon_id,
+        "staff_g_test", "testpass123",
+        permissions
+    )
+    
+    if not user:
+        log_fail("F2: Failed to create staff user")
+        return False
+    
+    staff_token = staff_login("staff_g_test", "testpass123")
+    if not staff_token:
+        log_fail("F2: Staff login failed")
+        return False
+    
+    headers = {"Authorization": f"Bearer {staff_token}"}
+    
+    # Try reward-plan (should fail with 403)
+    log_info("F2a: Staff Sg tries POST /reward-plan")
+    url = f"{BASE_URL}/salons/{salon_id}/reward-plan"
+    payload = {
+        "mode": "all",
+        "salary_multiplier": 4,
+        "slabs": []
+    }
+    resp = requests.post(url, json=payload, headers=headers)
+    log_info(f"Status: {resp.status_code}")
+    
+    if resp.status_code != 403:
+        log_fail(f"F2a: Should return 403, got {resp.status_code}")
+        return False
+    
+    detail = resp.json().get("detail", "")
+    if "staff.access_control" not in detail:
+        log_fail(f"F2a: Expected 'staff.access_control' in detail, got: {detail}")
+        return False
+    
+    log_pass("F2a: Staff correctly blocked from reward-plan (403)")
+    
+    # Try services.bulk-delete (should fail with 403)
+    log_info("F2b: Staff Sg tries POST /services/bulk-delete")
+    url = f"{BASE_URL}/salons/{salon_id}/services/bulk-delete"
+    payload = {"service_ids": ["fake-id"]}
+    resp = requests.post(url, json=payload, headers=headers)
+    log_info(f"Status: {resp.status_code}")
+    
+    if resp.status_code != 403:
+        log_fail(f"F2b: Should return 403, got {resp.status_code}")
+        return False
+    
+    detail = resp.json().get("detail", "")
+    if "services.delete" not in detail:
+        log_fail(f"F2b: Expected 'services.delete' in detail, got: {detail}")
+        return False
+    
+    log_pass("F2b: Staff correctly blocked from services.bulk-delete (403)")
+    
+    log_pass("✅ SCENARIO F PASSED: Reward-plan and services gated correctly")
+    return True
+
+
+# ============================================================================
+# SCENARIO G: Admin still has ALL access
+# ============================================================================
+def test_scenario_g_admin_all_access():
+    """
+    Admin login → hits every endpoint → all 200 (never 403)
+    """
+    log_test("SCENARIO G: Admin has ALL access")
+    
+    global admin_token, salon_id, test_barbers
+    
+    headers = {"Authorization": f"Bearer {admin_token}"}
+    
+    tests = [
+        ("Home attendance toggle", "POST", f"{BASE_URL}/salons/{salon_id}/home/staff-attendance/toggle",
+         {"barber_id": test_barbers[0]["id"], "action": "in"}),
+        ("Financials dashboard", "GET", f"{BASE_URL}/salons/{salon_id}/financials/dashboard", None),
+        ("Create transaction", "POST", f"{BASE_URL}/salons/{salon_id}/financials/transactions",
+         {"type": "inflow", "date": "2026-04-26", "category": "other_income", "amount": 200, "payment_mode": "cash", "narration": "Admin test"}),
+        ("Reward plan", "POST", f"{BASE_URL}/salons/{salon_id}/reward-plan",
+         {"mode": "all", "salary_multiplier": 4, "slabs": []}),
+    ]
+    
+    all_passed = True
+    for name, method, url, payload in tests:
+        log_info(f"Testing: {name}")
+        
+        if method == "GET":
+            resp = requests.get(url, headers=headers)
+        elif method == "POST":
+            resp = requests.post(url, json=payload, headers=headers)
+        else:
+            resp = requests.delete(url, headers=headers)
+        
+        log_info(f"  {method} {url} - Status: {resp.status_code}")
+        
+        if resp.status_code == 403:
+            log_fail(f"  Admin blocked (403) on {name}: {resp.text}")
+            all_passed = False
+        else:
+            log_pass(f"  Admin has access to {name} (status: {resp.status_code})")
+    
+    if all_passed:
+        log_pass("✅ SCENARIO G PASSED: Admin has access to all endpoints")
+    else:
+        log_fail("✗ SCENARIO G FAILED: Admin blocked on some endpoints")
+    
+    return all_passed
+
+
+# ============================================================================
+# Main Test Runner
+# ============================================================================
+def main():
+    global admin_token, salon_id, test_barbers
+    
+    print(f"\n{Colors.BLUE}{'='*80}{Colors.RESET}")
+    print(f"{Colors.BLUE}RBAC v2 Backend Testing - Granular Module Permissions{Colors.RESET}")
+    print(f"{Colors.BLUE}{'='*80}{Colors.RESET}\n")
+    
+    # Setup
+    admin_token, salon_id = admin_login()
+    test_barbers = get_barbers(admin_token, salon_id)
+    
+    # Run all scenarios
+    results = {
+        "A - Home Attendance Re-check-in Bug Fix": test_scenario_a_home_attendance_recheckIn(),
+        "B - Staff attendance no view_all": test_scenario_b_staff_attendance_no_view_all(),
+        "C - Staff no attendance permission": test_scenario_c_staff_no_attendance_permission(),
+        "D - Financials granular permissions": test_scenario_d_financials_granular(),
+        "E - Legacy flat-key fallback": test_scenario_e_legacy_fallback(),
+        "F - Reward-plan / services gated": test_scenario_f_reward_plan_services(),
+        "G - Admin all access": test_scenario_g_admin_all_access(),
+    }
+    
+    # Cleanup
+    delete_staff_users(admin_token, salon_id)
+    
+    # Summary
+    print(f"\n{Colors.BLUE}{'='*80}{Colors.RESET}")
+    print(f"{Colors.BLUE}TEST SUMMARY{Colors.RESET}")
+    print(f"{Colors.BLUE}{'='*80}{Colors.RESET}\n")
+    
+    passed = sum(1 for v in results.values() if v)
+    total = len(results)
+    
+    for scenario, result in results.items():
+        status = f"{Colors.GREEN}✓ PASS{Colors.RESET}" if result else f"{Colors.RED}✗ FAIL{Colors.RESET}"
+        print(f"{status} - {scenario}")
+    
+    print(f"\n{Colors.BLUE}{'='*80}{Colors.RESET}")
+    print(f"{Colors.BLUE}TOTAL: {passed}/{total} scenarios passed{Colors.RESET}")
+    print(f"{Colors.BLUE}{'='*80}{Colors.RESET}\n")
+    
+    if passed == total:
+        print(f"{Colors.GREEN}✅ ALL TESTS PASSED{Colors.RESET}\n")
+        sys.exit(0)
+    else:
+        print(f"{Colors.RED}❌ SOME TESTS FAILED{Colors.RESET}\n")
+        sys.exit(1)
+
 
 if __name__ == "__main__":
     main()

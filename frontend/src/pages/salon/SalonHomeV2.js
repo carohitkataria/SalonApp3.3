@@ -142,7 +142,18 @@ function sparkAreaPath(vals, { w = 240, h = 60, pad = 4 } = {}) {
 
 export default function SalonHomeV2({ salon, salonId, tokens = [], barbers = [], goToTab, getAuthHeaders, handleCallToken, handleCompleteToken }) {
   const navigate = useNavigate();
-  const { logout } = useAuth?.() || { logout: null };
+  const auth = useAuth?.() || {};
+  const { logout, hasModulePermission, salonUser } = auth;
+  // RBAC gate: only users with staff.attendance may operate the Home
+  // Staff Check-in chip. Users WITHOUT staff.view_all can only toggle
+  // their own linked staff record (self check-in).
+  const canToggleAttendance = typeof hasModulePermission === 'function'
+    ? hasModulePermission('staff', 'attendance')
+    : true;
+  const canToggleOthers = typeof hasModulePermission === 'function'
+    ? hasModulePermission('staff', 'view_all')
+    : true;
+  const ownStaffId = salonUser?.staffId || null;
   const [kpis, setKpis] = useState(null);
   const [filter, setFilter] = useState('today'); // today | yesterday | range
   const [rangeFrom, setRangeFrom] = useState('');
@@ -312,6 +323,15 @@ export default function SalonHomeV2({ salon, salonId, tokens = [], barbers = [],
   // Staff attendance toggle
   const toggleAttendance = async (row) => {
     const action = row.status === 'in' ? 'out' : 'in';
+    // Client-side RBAC — mirrors backend enforcement so the UX matches.
+    if (!canToggleAttendance) {
+      toast.error("You don't have permission to check in/out staff");
+      return;
+    }
+    if (!canToggleOthers && ownStaffId && row.barber_id !== ownStaffId) {
+      toast.error('You can only check in/out your own attendance');
+      return;
+    }
     try {
       await axios.post(`${API}/salons/${salonId}/home/staff-attendance/toggle`,
         { barber_id: row.barber_id, action },
@@ -319,7 +339,10 @@ export default function SalonHomeV2({ salon, salonId, tokens = [], barbers = [],
       );
       fetchKpis();
       toast.success(`${row.name} checked ${action === 'in' ? 'in' : 'out'}`);
-    } catch (e) { toast.error('Attendance update failed'); }
+    } catch (e) {
+      const detail = e?.response?.data?.detail || 'Attendance update failed';
+      toast.error(detail);
+    }
   };
 
   // Trends (period-over-period)
@@ -356,7 +379,7 @@ export default function SalonHomeV2({ salon, salonId, tokens = [], barbers = [],
           ))}
         </nav>
         <div className="rail__foot">
-          <button className="navitem" style={{ height: 44 }} onClick={() => { try { logout?.(); } catch (_) {} navigate('/'); }} title="Logout">
+          <button className="navitem" style={{ height: 44 }} onClick={() => { try { logout?.(); } catch (_) { /* ignore */ } navigate('/'); }} title="Logout">
             <I.rotate /><span>Exit</span>
           </button>
           <div className="rail__avatar" title={salon?.salon_name}>
@@ -526,7 +549,9 @@ export default function SalonHomeV2({ salon, salonId, tokens = [], barbers = [],
               </div>
             </div>
 
-            {/* Staff Check-in chip */}
+            {/* Staff Check-in chip — RBAC: hide entirely for users w/o staff.attendance;
+                show only own row for users w/o staff.view_all. */}
+            {canToggleAttendance && (
             <div className="kpi" style={{ padding: '14px 16px' }}>
               <div className="schead">
                 <div className="lab"><I.users /> Staff Check-in</div>
@@ -535,19 +560,33 @@ export default function SalonHomeV2({ salon, salonId, tokens = [], barbers = [],
                 </div>
               </div>
               <div style={{ overflowY: 'auto', maxHeight: 92 }}>
-                {staffAtt.length === 0 && <div style={{ fontSize: 11, color: '#7C8092' }}>No staff yet</div>}
-                {staffAtt.slice(0, 3).map(a => (
-                  <div key={a.barber_id} className="sc-row">
-                    <div className="av" style={{ background: '#6C4FE0' }}>{(a.name || 'S').slice(0, 1).toUpperCase()}</div>
-                    <div className="nm">{a.name}</div>
-                    <span className={`st ${a.status}`}>{a.status}</span>
-                    <button className={`sc-btn ${a.status === 'in' ? 'out' : ''}`} onClick={() => toggleAttendance(a)}>
-                      {a.status === 'in' ? 'Out' : 'In'}
-                    </button>
-                  </div>
-                ))}
+                {(() => {
+                  const rows = canToggleOthers
+                    ? staffAtt.slice(0, 3)
+                    : staffAtt.filter(a => a.barber_id === ownStaffId);
+                  if (rows.length === 0) {
+                    return <div style={{ fontSize: 11, color: '#7C8092' }}>
+                      {canToggleOthers ? 'No staff yet' : 'No linked staff profile'}
+                    </div>;
+                  }
+                  return rows.map(a => (
+                    <div key={a.barber_id} className="sc-row">
+                      <div className="av" style={{ background: '#6C4FE0' }}>{(a.name || 'S').slice(0, 1).toUpperCase()}</div>
+                      <div className="nm">{a.name}</div>
+                      <span className={`st ${a.status}`}>{a.status}</span>
+                      <button
+                        className={`sc-btn ${a.status === 'in' ? 'out' : ''}`}
+                        onClick={() => toggleAttendance(a)}
+                        data-testid={`home-attendance-toggle-${a.barber_id}`}
+                      >
+                        {a.status === 'in' ? 'Out' : 'In'}
+                      </button>
+                    </div>
+                  ));
+                })()}
               </div>
             </div>
+            )}
           </div>
 
           {/* SECONDARY STRIP */}
