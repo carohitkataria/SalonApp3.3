@@ -16,13 +16,14 @@
 import React, { useEffect, useMemo, useState, useCallback } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import axios from 'axios';
-import { Briefcase, CalendarCheck, MapPin, CalendarRange, Loader2 } from 'lucide-react';
+import { Briefcase, CalendarCheck, MapPin, CalendarRange, Loader2, ShieldCheck } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { toast } from 'sonner';
 import EmployeeRewardPlan from '@/components/EmployeeRewardPlan';
 import LeaveConfigTab from '@/components/leave/LeaveConfigTab';
+import StaffAccessManagement from '@/components/StaffAccessManagement';
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
 const API = `${BACKEND_URL}/api`;
@@ -32,6 +33,7 @@ const TABS = [
   { id: 'leave',       label: 'Leave Configuration', icon: CalendarCheck },
   { id: 'attendance',  label: 'Attendance Rules',    icon: MapPin },
   { id: 'holidays',    label: 'Holiday Calendar',    icon: CalendarRange },
+  { id: 'access',      label: 'Manage Staff Access', icon: ShieldCheck },
 ];
 
 export default function StaffSettingsContent({
@@ -116,6 +118,10 @@ export default function StaffSettingsContent({
             <CalendarRange className="w-12 h-12 mx-auto opacity-40 mb-3" />
             Holiday calendar configuration is coming soon.
           </div>
+        )}
+
+        {activeTab === 'access' && (
+          <StaffAccessManagement />
         )}
       </div>
     </div>
