@@ -460,3 +460,57 @@ A multi-tenant salon management SaaS (React + FastAPI + MongoDB). Most recent fe
 - Modularize `server.py` (now 12.4k lines) — split into `routes/`, `models/`, `services/`.
 - Split `SupplierProductsPage.js` (605 lines) into ProductCatalog / ProductSamples / EditorModal / RestockModal / DeleteModal sub-components.
 - Optional: add `loggingOut` sentinel to SupplierAuthContext to eliminate the brief `/supplier/login` flash before `window.location.replace('/')` on logout (cosmetic, not user-visible).
+
+---
+
+## Session Δ — RBAC v2 (Granular Module Permissions + Home Check-in Fix)
+
+### Scope
+Make Role-Based Access Control (RBAC) *actually enforced* end-to-end. Previously
+`Manage Staff Access` had 8 flat checkboxes that only hid menu items in the UI —
+staff could still call sensitive endpoints directly. Now:
+
+1. Each of the 8 modules has a **right-side configuration drawer** exposing
+   granular actions (view / view_all / create / edit / delete / attendance /
+   salary_pay / …), stored on `salon_users.permissions.modules`.
+2. Backend enforces every granular action on ~20 sensitive endpoints via
+   `has_module_permission(user, module, action)` (fallback to legacy flat keys
+   so pre-existing staff accounts keep working).
+3. **Home page** Staff Check-in widget is hidden entirely for users without
+   `staff.attendance` and limited to self-only for users without `staff.view_all`.
+4. **Home multi-session bug fix** — after `in → out → in` on the same day the
+   third click now opens a new session instead of returning `already_in: true`.
+   Sessions are stored as an array on `staff_attendance` and mirror
+   `attendance_mode.py`'s session model.
+
+### Files touched (highlights)
+- `backend/server.py`
+  - Extended `SalonUserPermissions` with `modules: Dict[str, Dict[str, bool]]`.
+  - New `has_module_permission()` + `require_module_permission()`.
+  - Rewrote `home_toggle_attendance` with RBAC + sessions[] logic.
+  - Enforcement added to salon PUT/notifications/hours, barber POST/PUT/DELETE,
+    financials transactions CRUD + dashboard, attendance override/clear/calculate,
+    salary payout, service toggle/bulk-delete, reward-plan config + payout status.
+- `frontend/src/components/staff/ModulePermissionsConfig.js` — module schema
+  (single source of truth for keys / actions / colours + hydrate & derive helpers).
+- `frontend/src/components/staff/ModulePermissionsDrawer.js` — new right-drawer.
+- `frontend/src/components/StaffAccessManagement.js` — replaced flat checkboxes
+  with 8 module cards → drawer flow; user list now shows coloured chips per
+  granted module.
+- `frontend/src/components/staff/StaffSettingsContent.js` — added 5th tab
+  "Manage Staff Access" that renders StaffAccessManagement.
+- `frontend/src/contexts/AuthContext.js` — new `hasModulePermission(m, a)`.
+- `frontend/src/pages/salon/SalonHomeV2.js` — RBAC gates the Staff Check-in
+  widget (hide / self-only) + client-side pre-check with toast messaging.
+
+### Permission map (canonical)
+See `_MODULE_LEGACY_MAP` in `backend/server.py` and the `MODULES` array in
+`frontend/src/components/staff/ModulePermissionsConfig.js`. Keep in sync.
+
+### Tests
+- Backend deep test: 7/7 scenarios green (re-check-in bug, own-only toggle,
+  granular financials, legacy fallback, reward-plan, admin-passes-all).
+- Frontend auto-test: TEST 1 (re-check-in), TEST 2 (drawer UI + 8 modules +
+  Select/Clear + persistence + user chips), TEST 3 (hydration on edit) — all
+  PASSED. TEST 4 cleanup skipped intentionally.
+
