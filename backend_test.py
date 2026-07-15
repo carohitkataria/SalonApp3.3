@@ -12,7 +12,7 @@ import base64
 import time
 
 # Configuration
-BASE_URL = "https://ribbon-ui-adjust.preview.emergentagent.com/api"
+BASE_URL = "https://role-guard-system.preview.emergentagent.com/api"
 SALON_ID = "1eddf29d-5ffd-49b0-8dae-130eecd4e62f"
 ADMIN_IDENTIFIER = "admin"
 ADMIN_PASSWORD = "salon123"

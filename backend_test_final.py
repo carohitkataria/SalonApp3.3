@@ -9,7 +9,7 @@ import json
 from datetime import datetime
 import random
 
-BASE_URL = "https://ribbon-ui-adjust.preview.emergentagent.com"
+BASE_URL = "https://role-guard-system.preview.emergentagent.com"
 ADMIN_IDENTIFIER = "admin"
 ADMIN_PASSWORD = "salon123"
 
