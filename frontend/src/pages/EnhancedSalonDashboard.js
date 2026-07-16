@@ -29,6 +29,8 @@ import { InventoryView } from '@/pages/salon/SalonInventoryPage';
 import SalonHomeNew from '@/pages/salon/SalonHomeNew';
 import SalonHomeV2 from '@/pages/salon/SalonHomeV2';
 import HomeV2Shell from '@/pages/salon/home_v2/HomeV2Shell';
+import SalonStaffV3 from '@/pages/salon/redesign/SalonStaffV3';
+import SalonSettingsV3 from '@/pages/salon/redesign/SalonSettingsV3';
 import QueueTabV2 from '@/pages/salon/home_v2/QueueTabV2';
 import MarketingV2 from '@/pages/salon/v2_pages/MarketingV2';
 import CustomersV2 from '@/pages/salon/v2_pages/CustomersV2';
@@ -1259,45 +1261,9 @@ export default function EnhancedSalonDashboard() {
           />
         )}
 
-        {activeTab === 'staff' && salonId && (() => {
-          // Determine whether this user can see ALL staff or only their own profile.
-          let su = salonUser;
-          try {
-            const raw = localStorage.getItem('salon_user_auth');
-            if (raw) su = JSON.parse(raw);
-          } catch (e) { /* noop */ }
-          const elevated = checkIsAdmin() || checkIsBranchManager() || checkHasPermission('can_view_all_staff');
-          const ownStaffId = su?.staffId || su?.staff_id || null;
-          const restrictedToOwn = !elevated; // has can_access_staff but not view-all
-
-          return (
-            <div className="space-y-6">
-              {!restrictedToOwn && (
-                <div className="flex items-center justify-end">
-                  <button
-                    onClick={() => navigate('/salon/staff/settings')}
-                    data-testid="staff-settings-link"
-                    className="inline-flex items-center gap-1.5 text-sm font-medium text-gold hover:text-gold/80 underline underline-offset-4 decoration-gold/40 hover:decoration-gold transition-colors"
-                  >
-                    <Settings className="w-4 h-4" /> Open Staff Settings
-                    <ChevronRight className="w-3.5 h-3.5" />
-                  </button>
-                </div>
-              )}
-              {restrictedToOwn && !ownStaffId ? (
-                <div className="bg-card border border-border rounded-lg p-8 text-center text-muted-foreground">
-                  Your account is not linked to a staff profile yet. Please ask your admin to link it.
-                </div>
-              ) : (
-                <BarberManagement
-                  salonId={salonId}
-                  getAuthHeaders={getAuthHeaders}
-                  restrictToBarberId={restrictedToOwn ? ownStaffId : null}
-                />
-              )}
-            </div>
-          );
-        })()}
+        {activeTab === 'staff' && salonId && (
+          <SalonStaffV3 salonId={salonId} getAuthHeaders={getAuthHeaders} />
+        )}
 
         {activeTab === 'customer-master' && (
           <CustomersV2 salonId={salonId} getAuthHeaders={getAuthHeaders} salon={salon} />
@@ -1338,77 +1304,14 @@ export default function EnhancedSalonDashboard() {
           />
         )}
 
-        {activeTab === 'salon' && (
-          <div className="space-y-4">
-            {checkIsAdmin() && salonId && (
-              <SubscriptionBadge salonId={salonId} />
-            )}
-            <Tabs defaultValue="profile" className="w-full">
-              <TabsList className="w-full grid grid-cols-2 sm:grid-cols-5 h-auto bg-muted/40 p-1 rounded-xl">
-                <TabsTrigger value="profile" className="flex items-center gap-2 data-[state=active]:bg-gold data-[state=active]:text-black py-2.5">
-                  <User className="w-4 h-4" />
-                  <span className="text-xs sm:text-sm font-semibold">Profile</span>
-                </TabsTrigger>
-                <TabsTrigger value="staff-settings-link" className="flex items-center gap-2 data-[state=active]:bg-gold data-[state=active]:text-black py-2.5" data-testid="settings-tab-staff-settings">
-                  <Users className="w-4 h-4" />
-                  <span className="text-xs sm:text-sm font-semibold">Staff</span>
-                </TabsTrigger>
-                <TabsTrigger value="operations" className="flex items-center gap-2 data-[state=active]:bg-gold data-[state=active]:text-black py-2.5">
-                  <Clock className="w-4 h-4" />
-                  <span className="text-xs sm:text-sm font-semibold">Operations</span>
-                </TabsTrigger>
-                {(checkIsAdmin() || checkIsBranchManager()) && (
-                  <TabsTrigger value="branch" className="flex items-center gap-2 data-[state=active]:bg-gold data-[state=active]:text-black py-2.5">
-                    <Building2 className="w-4 h-4" />
-                    <span className="text-xs sm:text-sm font-semibold">Branch</span>
-                  </TabsTrigger>
-                )}
-                <TabsTrigger value="notifications-cfg" className="flex items-center gap-2 data-[state=active]:bg-gold data-[state=active]:text-black py-2.5">
-                  <Bell className="w-4 h-4" />
-                  <span className="text-xs sm:text-sm font-semibold">Notification</span>
-                </TabsTrigger>
-              </TabsList>
-
-              <TabsContent value="profile" className="mt-4">
-                <MyProfile
-                  salon={salon}
-                  onUpdate={(updatedSalon) => setSalon(updatedSalon)}
-                  getAuthHeaders={getAuthHeaders}
-                  onDeleteSalon={handleLogout}
-                />
-                <div className="mt-6">
-                  <PaymentVendorSetup salon={salon} getAuthHeaders={getAuthHeaders} />
-                </div>
-              </TabsContent>
-
-              <TabsContent value="staff-settings-link" className="mt-4">
-                <StaffSettingsContent
-                  salonId={salonId}
-                  getAuthHeaders={getAuthHeaders}
-                  isAdmin={checkIsAdmin()}
-                  useUrlTab={false}
-                  defaultTab="incentives"
-                />
-              </TabsContent>
-
-              <TabsContent value="operations" className="mt-4">
-                <OperationalHoursModule salonId={salonId} />
-              </TabsContent>
-
-              {(checkIsAdmin() || checkIsBranchManager()) && (
-                <TabsContent value="branch" className="mt-4">
-                  <BranchManagement salonId={salonId} />
-                </TabsContent>
-              )}
-
-              <TabsContent value="notifications-cfg" className="mt-4">
-                <SalonNotificationSettings
-                  salonId={salonId}
-                  getAuthHeaders={getAuthHeaders}
-                />
-              </TabsContent>
-            </Tabs>
-          </div>
+        {activeTab === 'salon' && salonId && (
+          <SalonSettingsV3
+            salonId={salonId}
+            salon={salon}
+            setSalon={setSalon}
+            getAuthHeaders={getAuthHeaders}
+            onDeleteSalon={handleLogout}
+          />
         )}
 
         {activeTab === 'branches' && salonId && checkIsAdmin() && (

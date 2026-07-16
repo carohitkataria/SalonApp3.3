@@ -6787,3 +6787,102 @@ agent_communication:
         - Toast notifications appearing for success/error states
         
         ALL REQUIREMENTS FROM REVIEW REQUEST MET. Both blockers resolved, all 4 tests passed. The RBAC v2 UI is fully functional and production-ready.
+
+##====================================================================================================
+## STAFF & SETTINGS PAGE REDESIGN (Pink + Gold theme) — July 16, 2026
+##====================================================================================================
+
+frontend:
+  - task: "Redesigned Staff Management page (Pink theme, connected workspace)"
+    implemented: true
+    working: "NA"  # implemented by main agent, visual & smoke checked; not yet tested by frontend agent
+    file: "/app/frontend/src/pages/salon/redesign/SalonStaffV3.js"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: "NA"
+        agent: "main"
+        comment: |
+          Full rebuild of the Staff Management tab to match the attached pink-theme mock.
+          Two-pane workspace: left staff list with accordion sub-nav (Profile / Attendance
+          / Services & pricing / Documents / Access) and right detail pane. All sub-pane
+          content wired to real backend endpoints (barbers, staff-attendance, per-barber
+          services). Add Staff drawer, delete staff, inline profile edit, service toggle
+          + custom pricing. Full RBAC via `hasModulePermission` — every sub-tab & action
+          gated by `staff.view/view_all/attendance/documents/access_control/create/edit/
+          delete/salary_view/salary_pay`. Scoped `.staffv3` CSS injection prevents theme
+          leak into the rest of the app.
+          Verified visually with admin login: Profile / Attendance / Services & pricing /
+          Documents / Access all render correctly with pink theme; Add Staff drawer opens.
+
+  - task: "Redesigned Settings page (Gold theme, section navigator)"
+    implemented: true
+    working: "NA"
+    file: "/app/frontend/src/pages/salon/redesign/SalonSettingsV3.js"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: "NA"
+        agent: "main"
+        comment: |
+          Full rebuild of the Settings tab to match the attached gold-theme mock. Two-pane
+          workspace: left accordion nav with 7 groups (Business profile / Staff & attendance
+          / Roles & access / Services & pricing / Booking & queue / Payments & wallet /
+          Notifications) each with sub-sub-sections. Content pane wraps EXISTING settings
+          components (MyProfile, BranchManagement, OperationalHoursModule,
+          PaymentVendorSetup, StaffAccessManagement, SalonNotificationSettings,
+          StaffSettingsContent) — no backend changes required. Every sub-section gated by
+          `hasModulePermission` with a graceful RBAC lock message when not allowed.
+          Locked sub-sections are hidden from the nav so users only see what they can open.
+          Scoped `.setv3` CSS keeps the gold theme localised.
+
+  - task: "Homepage Staff Check-in RBAC gating"
+    implemented: true
+    working: true
+    file: "/app/frontend/src/pages/salon/SalonHomeV2.js"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: true
+        agent: "main"
+        comment: |
+          Verified end-to-end. Created a limited staff user (`limitedstaff` / `pass1234`)
+          with `modules.staff.attendance=false` and `modules.staff.view_all=false`.
+          After logging in:
+            • Home page — Staff Check-in card is HIDDEN. Row 2 of the dashboard shows
+              Rebooking / Customer chart / (empty) / (empty) instead of the admin's
+              Rebooking / Chart / Staff Check-in / (empty). ✓
+            • Clicking Staff tab → app-level `restrictedTabs` guard redirects to Home. ✓
+            • Clicking Settings tab → app-level `can_edit_salon` guard redirects to Home. ✓
+          Backend endpoint `/salons/{salon_id}/home/staff-attendance/toggle` already
+          enforces `has_module_permission('staff','attendance')` and self-only when
+          `view_all` is missing (per prior RBAC v2 pass; no changes needed).
+
+metadata:
+  test_credentials_updated: true
+  test_credentials_file: /app/memory/test_credentials.md
+  main_credentials: "admin / salon123"
+  limited_test_credentials: "limitedstaff / pass1234 (staff module fully disabled)"
+
+agent_communication:
+  - agent: main
+    message: |
+      Redesigned the Staff (pink) and Settings (gold) pages end-to-end to match the
+      attached mocks exactly, WITHOUT dropping any existing feature or backend endpoint.
+      New files:
+        • /app/frontend/src/pages/salon/redesign/StaffV3Styles.js (scoped pink CSS)
+        • /app/frontend/src/pages/salon/redesign/SettingsV3Styles.js (scoped gold CSS)
+        • /app/frontend/src/pages/salon/redesign/SalonStaffV3.js
+        • /app/frontend/src/pages/salon/redesign/SalonSettingsV3.js
+      Wiring: `activeTab === 'staff'` and `activeTab === 'salon'` in EnhancedSalonDashboard.js
+      now render the new components. Existing BarberManagement + Tabs-based settings
+      remain in the file if we need to fall back but are no longer rendered by default.
+
+      RBAC verification: manually created a limited-perm salon user and confirmed the
+      Home page Staff Check-in card, the Staff tab, and the Settings tab are all
+      properly gated. The main agent did not modify any backend endpoints — the
+      RBAC v2 backend (previously 100 % tested) is unchanged.
+
