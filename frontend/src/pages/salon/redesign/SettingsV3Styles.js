@@ -119,6 +119,30 @@ export const SETTINGS_V3_CSS = `
 .setv3 .hour-row .times .closed{font-size:12px;color:var(--muted);font-style:italic}
 .setv3 .rbac-lock{padding:32px;text-align:center;color:var(--muted);font-size:14px}
 .setv3 .rbac-lock svg{width:44px;height:44px;color:var(--muted-2);margin:0 auto 10px;fill:none;stroke:currentColor;stroke-width:2}
+/* --- Reskin any legacy Tailwind-themed content dropped inside a .block ---
+   Neutralises the dark salon-dashboard theme so wrapped components (StaffAccessManagement,
+   EmployeeRewardPlan) blend into the light gold Settings look-and-feel. */
+.setv3 .block .space-y-6{--background:#FFFFFF;--foreground:#2A2317;--card:#FFFFFF;--card-foreground:#2A2317;--border:#EFE9DC;--input:#EFE9DC;--muted:#F6F1E4;--muted-foreground:#8B8069;--primary:#A67C1A;--primary-foreground:#FFFFFF;--gold:#A67C1A}
+.setv3 .block .bg-card,.setv3 .block .bg-background{background:#FEFCF7 !important}
+.setv3 .block .bg-black,.setv3 .block .bg-slate-900,.setv3 .block .bg-neutral-900{background:#FEFCF7 !important;color:#2A2317 !important}
+.setv3 .block .border-border,.setv3 .block .border-input{border-color:#EFE9DC !important}
+.setv3 .block .text-white{color:#2A2317 !important}
+.setv3 .block .text-gold,.setv3 .block .text-yellow-500,.setv3 .block .text-amber-400,.setv3 .block .text-amber-500{color:#A67C1A !important}
+.setv3 .block .bg-gold,.setv3 .block .bg-yellow-500{background:#A67C1A !important;color:#fff !important}
+.setv3 .block .bg-gold\\/10,.setv3 .block .bg-gold\\/20{background:#FBF3E0 !important;color:#A67C1A !important}
+.setv3 .block .bg-gold\\/90:hover,.setv3 .block .hover\\:bg-gold\\/90:hover{background:#8A6413 !important}
+.setv3 .block .text-muted-foreground{color:#8B8069 !important}
+.setv3 .block .bg-muted,.setv3 .block .bg-muted\\/50{background:#F6F1E4 !important}
+.setv3 .block .rounded-lg,.setv3 .block .rounded-xl{border-radius:12px !important}
+.setv3 .block .shadow-lg,.setv3 .block .shadow-md{box-shadow:0 1px 2px rgba(42,35,23,.04),0 6px 20px rgba(42,35,23,.06) !important}
+.setv3 .block h2,.setv3 .block h3{color:#2A2317 !important}
+.setv3 .block input,.setv3 .block select,.setv3 .block textarea{background:#FFFFFF !important;color:#2A2317 !important;border-color:#EFE9DC !important}
+.setv3 .block input:focus,.setv3 .block select:focus,.setv3 .block textarea:focus{border-color:#A67C1A !important;box-shadow:0 0 0 3px #FBF3E0 !important}
+.setv3 .block button.bg-gold,.setv3 .block .btn-gold{background:#A67C1A !important;color:#fff !important;border:none !important}
+.setv3 .block .bg-red-500\\/10{background:#FDECEC !important}
+.setv3 .block .text-red-500,.setv3 .block .text-red-400{color:#E5484D !important}
+/* Reward plan specific tweaks: card-like inner blocks look flat inside .block */
+.setv3 .reward-plan-host > .space-y-6 > .bg-card{background:transparent !important;border:none !important;padding:0 !important;box-shadow:none !important}
 @media(max-width:1050px){
   .setv3 .workspace{grid-template-columns:1fr}
   .setv3 .pane-l{border-right:none;border-bottom:1px solid var(--line);max-height:none}

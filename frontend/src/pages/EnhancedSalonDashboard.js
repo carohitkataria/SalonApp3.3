@@ -1234,31 +1234,33 @@ export default function EnhancedSalonDashboard() {
         {/* ===== HOME DASHBOARD (rendered separately outside this wrapper) ===== */}
 
         {activeTab === 'queue' && (
-          <QueueTabV2
-            date={date}
-            dateMode={dateMode}
-            setDateMode={setDateMode}
-            dateFrom={dateFrom}
-            setDateFrom={setDateFrom}
-            dateTo={dateTo}
-            setDateTo={setDateTo}
-            barbers={barbers}
-            selectedBarber={selectedBarber}
-            setSelectedBarber={setSelectedBarber}
-            tokens={tokens}
-            filter={filter}
-            setFilter={setFilter}
-            handleCallNext={handleCallNext}
-            handleCallToken={handleCallToken}
-            handleCompleteToken={handleCompleteToken}
-            handleRecallToken={handleRecallToken}
-            handleSkipToken={handleSkipToken}
-            handleCancelToken={handleCancelToken}
-            handleSendNotification={handleSendNotification}
-            handleOpenAddServices={handleOpenAddServices}
-            API={API}
-            navigate={navigate}
-          />
+          <div className="tab-pad-legacy">
+            <QueueTabV2
+              date={date}
+              dateMode={dateMode}
+              setDateMode={setDateMode}
+              dateFrom={dateFrom}
+              setDateFrom={setDateFrom}
+              dateTo={dateTo}
+              setDateTo={setDateTo}
+              barbers={barbers}
+              selectedBarber={selectedBarber}
+              setSelectedBarber={setSelectedBarber}
+              tokens={tokens}
+              filter={filter}
+              setFilter={setFilter}
+              handleCallNext={handleCallNext}
+              handleCallToken={handleCallToken}
+              handleCompleteToken={handleCompleteToken}
+              handleRecallToken={handleRecallToken}
+              handleSkipToken={handleSkipToken}
+              handleCancelToken={handleCancelToken}
+              handleSendNotification={handleSendNotification}
+              handleOpenAddServices={handleOpenAddServices}
+              API={API}
+              navigate={navigate}
+            />
+          </div>
         )}
 
         {activeTab === 'staff' && salonId && (
@@ -1266,7 +1268,9 @@ export default function EnhancedSalonDashboard() {
         )}
 
         {activeTab === 'customer-master' && (
-          <CustomersV2 salonId={salonId} getAuthHeaders={getAuthHeaders} salon={salon} />
+          <div className="tab-pad-legacy">
+            <CustomersV2 salonId={salonId} getAuthHeaders={getAuthHeaders} salon={salon} />
+          </div>
         )}
 
         {activeTab === 'financials' && salonId && (
@@ -1293,7 +1297,9 @@ export default function EnhancedSalonDashboard() {
         )}
 
         {activeTab === 'marketing' && (
-          <MarketingV2 salonId={salonId} getAuthHeaders={getAuthHeaders} salon={salon} />
+          <div className="tab-pad-legacy">
+            <MarketingV2 salonId={salonId} getAuthHeaders={getAuthHeaders} salon={salon} />
+          </div>
         )}
 
         {activeTab === 'analytics' && (

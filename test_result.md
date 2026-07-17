@@ -7064,3 +7064,199 @@ agent_communication:
       /api/salons/{salon_id}. The only backend change required was allowing extra
       pass-through fields on SalonUpdate + Salon, which is safe & backwards-compatible.
 
+
+##====================================================================================================
+## FOUR SETTINGS/LAYOUT FIXES — July 17, 2026 (v3)
+##====================================================================================================
+
+frontend:
+  - task: "Merge Check-in / Check-out rules into Attendance method sub-tab"
+    implemented: true
+    working: true
+    file: "/app/frontend/src/pages/salon/redesign/SalonSettingsV3.js"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: "NA"
+        agent: "main"
+        comment: |
+          The old "Check-in / check-out rules" sub-item was removed from the Staff &
+          attendance group. The single "Attendance method & rules" sub-tab now shows the
+          method radio cards + Shift & timing block + Automation & control block. The
+          rules blocks are visually + interactively disabled (opacity 0.55, inputs
+          disabled, toggles inert) when Service completion is picked, and become
+          editable the instant the admin selects Check-in / Check-out.
+      - working: true
+        agent: "testing"
+        comment: |
+          ✅ FIX 1 FULLY TESTED AND PASSED: Comprehensive UI testing completed successfully. AUTHENTICATION: Login with identifier='admin', password='salon123' working perfectly. NAVIGATION: Successfully navigated to Settings tab → Staff & attendance group. VERIFICATION RESULTS: 1) SUB-ITEMS IN STAFF & ATTENDANCE GROUP - ✅ PASS: Exactly 3 sub-items found: 'Attendance method & rules', 'Leave & holidays', 'Payroll & incentives'. The old 'Check-in / check-out rules' sub-item is correctly NOT present (merged as required). 2) RIGHT PANE HEADING - ✅ PASS: Heading displays 'Attendance method & rules'. 3) CONTENT BLOCKS - ✅ PASS: All required blocks present: Two radio cards ('Check-in / Check-out' and 'Service completion'), 'Shift & timing' block with 6 inputs (Shift start, Shift end, Grace period, Half-day if under, Full day minimum, Overtime after), 'Automation & control' block with 5 toggle rows, 'Save' button at bottom. 4) SERVICE COMPLETION MODE - ✅ PASS: When 'Service completion' radio card is selected, the Shift & timing inputs are DISABLED (grey/read-only) and toggles do not respond. Screenshot captured: fix1_service_completion_disabled.png. 5) CHECK-IN / CHECK-OUT MODE - ✅ PASS: When 'Check-in / Check-out' radio card is selected, all Shift & timing inputs become EDITABLE and toggles respond to clicks. Screenshot captured: fix1_checkin_checkout_enabled.png. CRITICAL REQUIREMENT MET: The merge is complete - no standalone 'Check-in / check-out rules' sub-item exists, all content is unified under 'Attendance method & rules', and the conditional enable/disable logic works perfectly. FIX 1 is production-ready.
+
+  - task: "Restore Employee Reward Plan under Payroll & incentives"
+    implemented: true
+    working: "NA"
+    file: "/app/frontend/src/pages/salon/redesign/SalonSettingsV3.js"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: true
+    status_history:
+      - working: "NA"
+        agent: "main"
+        comment: |
+          Replaced the ad-hoc incentive form with the existing `EmployeeRewardPlan`
+          component (Step 1 dropdown, Apply common plan to, Common Plan with monthly
+          compensation Yes/No + multiplier + auto-target, Incentive Slabs table with
+          add-slab button, and Per-Barber Override Plans list). Salary cycle + absent
+          deduction remain above with their own Save button so the two concerns don't
+          collide. Verified visually — matches the attached reference screenshot.
+      - working: "NA"
+        agent: "testing"
+        comment: |
+          ⚠️ FIX 2 TESTING INCOMPLETE: Unable to complete full verification due to session/navigation issues after initial login. ATTEMPTED: Successfully logged in and navigated to Settings tab, expanded Staff & attendance group, but encountered technical difficulties when attempting to verify Payroll & incentives content. ISSUE: Session management and element selector issues prevented complete testing of Employee Reward Plan component. RECOMMENDATION: Main agent should manually verify that all required elements are present: Salary block (Salary cycle, Absent deduction, Save salary rules button), Employee Reward Plan heading with description, Step 1 dropdown, Apply common plan to dropdown, Common Plan block with Multiplier and Auto Target inputs, Incentive Slabs table with column headers (From %, To %, Type, Rate %), Add Slab button, and Save Reward Plan button at bottom. Testing agent was unable to confirm presence/absence of these elements due to technical constraints.
+
+  - task: "Reskin Roles & permissions in the gold Settings theme"
+    implemented: true
+    working: "NA"
+    file: "/app/frontend/src/pages/salon/redesign/SettingsV3Styles.js"
+    stuck_count: 0
+    priority: "medium"
+    needs_retesting: true
+    status_history:
+      - working: "NA"
+        agent: "main"
+        comment: |
+          Added a scoped `.setv3 .block { ... }` CSS overlay that neutralises the dark
+          salon-dashboard tokens (bg-card / bg-black / border-border / text-white / bg-gold)
+          to the cream + gold Settings palette. Both `StaffAccessManagement` and
+          `EmployeeRewardPlan` inherit the gold look without any structural rewrite.
+      - working: "NA"
+        agent: "testing"
+        comment: |
+          ⚠️ FIX 3 TESTING INCOMPLETE: Unable to complete verification due to session/navigation issues. ATTEMPTED: Tried to navigate to Settings → Roles & access → Roles & permissions to verify gold theme styling, but encountered technical difficulties. ISSUE: Could not successfully navigate to the Roles & permissions section to verify visual theme (cream + gold palette vs dark theme). RECOMMENDATION: Main agent should manually verify: 1) Navigate to Settings → Roles & access → Roles & permissions, 2) Confirm Manage Staff Access section renders in cream + gold palette (NOT dark theme), 3) Verify Add Staff User button appears as gold button (not dark), 4) Check that inputs/borders are light cream (not black), 5) Confirm no pure-black card backgrounds inside settings pane, 6) Verify staff user list (Admin user) and edit/delete icons are visible. Testing agent was unable to capture screenshots or verify styling due to technical constraints.
+
+  - task: "Add left/right margins on Queue, Guests, Marketing tabs"
+    implemented: true
+    working: "NA"
+    file: "/app/frontend/src/pages/EnhancedSalonDashboard.js"
+    stuck_count: 0
+    priority: "medium"
+    needs_retesting: true
+    status_history:
+      - working: "NA"
+        agent: "main"
+        comment: |
+          Wrapped Queue (QueueTabV2), Guests (CustomersV2) and Marketing (MarketingV2)
+          in a `<div class="tab-pad-legacy">` and added a matching rule to the shell
+          stylesheet:
+            .shv2 .shv2-tabhost > .tab-pad-legacy { padding: 14px 24px 40px }
+          Content no longer hugs the rail on the left or the ribbon on the right.
+      - working: "NA"
+        agent: "testing"
+        comment: |
+          ⚠️ FIX 4 TESTING INCOMPLETE: Unable to complete verification due to session/navigation issues. ATTEMPTED: Tried to navigate to Queue, Guests, and Marketing tabs to verify horizontal margins (~24px gap between content and left rail, and between content and right ribbon), but encountered technical difficulties. ISSUE: Could not successfully navigate to these tabs to measure margins or capture screenshots. RECOMMENDATION: Main agent should manually verify: 1) Navigate to Queue tab (?tab=queue) and confirm visible horizontal gap on both left (between content and rail) and right (between content and ribbon) sides, 2) Navigate to Guests tab (?tab=customer-master) and confirm same horizontal gaps, 3) Navigate to Marketing tab (?tab=marketing) and confirm same horizontal gaps. Content should NOT touch either the left rail or right ribbon - there must be comfortable spacing (~24px) on both sides. Testing agent was unable to measure margins or verify visual spacing due to technical constraints.
+
+metadata:
+  test_credentials_file: /app/memory/test_credentials.md
+  main_credentials: "admin / salon123"
+
+test_plan:
+  current_focus:
+    - "Merge Check-in / Check-out rules into Attendance method sub-tab"
+    - "Restore Employee Reward Plan under Payroll & incentives"
+    - "Reskin Roles & permissions in the gold Settings theme"
+    - "Add left/right margins on Queue, Guests, Marketing tabs"
+  stuck_tasks: []
+  test_all: false
+  test_priority: high_first
+
+agent_communication:
+  - agent: main
+    message: |
+      Four targeted UI fixes went in. Please verify against the running preview
+      (https://design-sync-app-1.preview.emergentagent.com) using admin/salon123:
+
+      1. Settings tab → sidebar under Staff & attendance now shows THREE sub-items:
+         "Attendance method & rules", "Leave & holidays", "Payroll & incentives"
+         (the standalone "Check-in / check-out rules" item must be gone).
+         Open "Attendance method & rules" and switch between Check-in / Check-out
+         and Service completion — the Shift & timing fields plus the Automation
+         toggles below MUST become editable / disabled accordingly.
+
+      2. Settings tab → "Staff & attendance" → "Payroll & incentives". The right pane
+         must show the Employee Reward Plan (Step 1 dropdown, Common Plan block with
+         Multiplier + Auto Target, Incentive Slabs table with Add Slab, Save Reward Plan
+         button). Salary cycle + Absent deduction sits above with its own Save button.
+
+      3. Settings tab → "Roles & access" → "Roles & permissions". The Manage Staff Access
+         block must render in the cream+gold theme (no black cards / no dark rings).
+         The Add Staff User button must appear as a gold button. All existing
+         functionality (edit / permissions / delete) still works.
+
+      4. Left navigation → Queue, Guests, Marketing. Each of these three tabs must have
+         a comfortable gap (roughly 24 px) between the content and the left rail as
+         well as the right ribbon. There must be no flush edge on either side.
+
+      No backend changes in this pass. Please run a UI-level smoke test — no need to
+      exercise the reward-plan save (the underlying component is unchanged).
+  
+  - agent: testing
+    message: |
+      ✅ FIX 1 VERIFIED AND PASSED - ⚠️ FIXES 2, 3, 4 REQUIRE MANUAL VERIFICATION
+      
+      TESTING SUMMARY:
+      
+      FIX 1 (Attendance method & rules merged) - ✅ FULLY TESTED AND PASSED:
+      - Successfully verified all requirements via automated Playwright testing
+      - Login working perfectly with credentials: identifier='admin', password='salon123'
+      - Navigation to Settings → Staff & attendance working correctly
+      - VERIFIED: Exactly 3 sub-items present (Attendance method & rules, Leave & holidays, Payroll & incentives)
+      - VERIFIED: Old 'Check-in / check-out rules' sub-item correctly NOT present (merged as required)
+      - VERIFIED: Right pane heading displays 'Attendance method & rules'
+      - VERIFIED: All content blocks present (2 radio cards, Shift & timing block with 6 inputs, Automation & control block with 5 toggles, Save button)
+      - VERIFIED: Service completion mode DISABLES inputs and toggles (screenshot captured)
+      - VERIFIED: Check-in / Check-out mode ENABLES inputs and toggles (screenshot captured)
+      - FIX 1 is production-ready and working correctly
+      
+      FIX 2 (Employee Reward Plan) - ⚠️ TESTING INCOMPLETE:
+      - Encountered session/navigation issues after initial successful login
+      - Unable to verify presence of all required elements in Payroll & incentives section
+      - RECOMMENDATION: Main agent should manually verify the following elements are present:
+        * Salary block (Salary cycle, Absent deduction, Save salary rules button)
+        * Employee Reward Plan heading with description
+        * Step 1 dropdown ("Is the incentive plan same for all employees?")
+        * Apply common plan to dropdown
+        * Common Plan block with "Is reward based on Monthly Compensation (Salary)?" dropdown
+        * Multiplier number input
+        * Auto Target field
+        * Incentive Slabs table with headers: From %, To %, Type, Rate (%)
+        * Add Slab button
+        * Save Reward Plan button at bottom
+      
+      FIX 3 (Roles & permissions gold theme) - ⚠️ TESTING INCOMPLETE:
+      - Unable to navigate to Roles & permissions section due to technical constraints
+      - RECOMMENDATION: Main agent should manually verify:
+        * Navigate to Settings → Roles & access → Roles & permissions
+        * Confirm Manage Staff Access section renders in cream + gold palette (NOT dark theme)
+        * Verify Add Staff User button appears as gold button (not dark/black)
+        * Check inputs/borders are light cream (not black)
+        * Confirm no pure-black card backgrounds inside settings pane
+        * Verify staff user list shows Admin user and edit/delete icons are visible
+      
+      FIX 4 (Tab margins) - ⚠️ TESTING INCOMPLETE:
+      - Unable to navigate to Queue, Guests, Marketing tabs due to technical constraints
+      - RECOMMENDATION: Main agent should manually verify:
+        * Navigate to Queue tab (?tab=queue) - confirm ~24px horizontal gap on both left (rail) and right (ribbon) sides
+        * Navigate to Guests tab (?tab=customer-master) - confirm same horizontal gaps
+        * Navigate to Marketing tab (?tab=marketing) - confirm same horizontal gaps
+        * Content should NOT touch either the left rail or right ribbon
+      
+      TECHNICAL ISSUES ENCOUNTERED:
+      - Session management issues when navigating between tabs
+      - Element selector timeouts on login form (input field name attributes may have changed)
+      - WebSocket connection warnings in console logs (non-blocking)
+      
+      NEXT STEPS:
+      - Main agent should perform manual smoke test for FIX 2, 3, 4 using the verification steps above
+      - If all elements are visually present and styled correctly, mark fixes as working: true
+      - If any issues found, provide specific details for debugging
+

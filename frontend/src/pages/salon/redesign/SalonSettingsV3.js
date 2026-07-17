@@ -14,6 +14,7 @@ import { toast } from 'sonner';
 import { useAuth } from '@/contexts/AuthContext';
 import { SETTINGS_V3_CSS } from './SettingsV3Styles';
 import StaffAccessManagement from '@/components/StaffAccessManagement';
+import EmployeeRewardPlan from '@/components/EmployeeRewardPlan';
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
 const API = `${BACKEND_URL}/api`;
@@ -32,8 +33,7 @@ const NAV = [
     k: 'staff', label: 'Staff & attendance',
     ico: <><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/></>,
     subs: [
-      { k: 'method', label: 'Attendance method', perm: ['staff', 'attendance'] },
-      { k: 'checkinout', label: 'Check-in / check-out rules', perm: ['staff', 'attendance'] },
+      { k: 'method', label: 'Attendance method & rules', perm: ['staff', 'attendance'] },
       { k: 'leave', label: 'Leave & holidays', perm: ['staff', 'attendance'] },
       { k: 'payroll', label: 'Payroll & incentives', perm: ['staff', 'salary_view'] },
     ],
@@ -425,9 +425,12 @@ export default function SalonSettingsV3({ salonId, salon, setSalon, getAuthHeade
       </>
     ),
 
-    'staff.method': () => (
+    'staff.method': () => {
+      const ci = form.attendance_method === 'checkinout';
+      const disabledStyle = !ci ? { opacity: 0.55, pointerEvents: 'none' } : {};
+      return (
       <>
-        <SectionHeader title="Attendance method" sub="The single source that drives how the Staff page marks attendance." />
+        <SectionHeader title="Attendance method & rules" sub="The single source that drives how the Staff page marks attendance." />
         <div className="block">
           <h4>How is attendance recorded?</h4>
           <p className="bs">The Staff page attendance drawer changes to match this choice.</p>
@@ -448,45 +451,40 @@ export default function SalonSettingsV3({ salonId, salon, setSalon, getAuthHeade
           </div>
           <div className="note-box">
             <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></svg>
-            This is the only place the attendance method is set — changing it here updates the Staff page attendance drawer instantly.
+            {ci
+              ? 'Check-in / check-out rules below are active. Changes save on the button at the bottom.'
+              : 'Rules below are disabled because Service completion is selected. Pick Check-in / Check-out to edit them.'}
           </div>
         </div>
-        <SaveRow onClick={() => save(['attendance_method'])} disabled={saving || !dirty} testid="setg-method-save" />
-      </>
-    ),
 
-    'staff.checkinout': () => (
-      <>
-        <SectionHeader title="Check-in / check-out rules" sub="Applies when the method is Check-in / Check-out." />
-        <div className="block">
+        <div className="block" style={disabledStyle}>
           <h4>Shift &amp; timing</h4><p className="bs">Used to auto-flag late arrivals, half-days and overtime.</p>
           <div className="grid3">
-            <div className="field"><label>Shift start</label><input type="time" value={form.shift_start || ''} onChange={(e) => set({ shift_start: e.target.value })} /></div>
-            <div className="field"><label>Shift end</label><input type="time" value={form.shift_end || ''} onChange={(e) => set({ shift_end: e.target.value })} /></div>
-            <div className="field"><label>Grace period (min)</label><input type="number" value={form.grace_period_min ?? 0} onChange={(e) => set({ grace_period_min: Number(e.target.value) || 0 })} /><span className="hint">Late after this</span></div>
-            <div className="field"><label>Half-day if under (hrs)</label><input type="number" value={form.half_day_max_hours ?? 0} onChange={(e) => set({ half_day_max_hours: Number(e.target.value) || 0 })} /></div>
-            <div className="field"><label>Full day minimum (hrs)</label><input type="number" value={form.min_hours_full_day ?? 0} onChange={(e) => set({ min_hours_full_day: Number(e.target.value) || 0 })} /></div>
-            <div className="field"><label>Overtime after (hrs)</label><input type="number" value={form.overtime_after_hours ?? 0} onChange={(e) => set({ overtime_after_hours: Number(e.target.value) || 0 })} /></div>
+            <div className="field"><label>Shift start</label><input type="time" value={form.shift_start || ''} disabled={!ci} onChange={(e) => set({ shift_start: e.target.value })} /></div>
+            <div className="field"><label>Shift end</label><input type="time" value={form.shift_end || ''} disabled={!ci} onChange={(e) => set({ shift_end: e.target.value })} /></div>
+            <div className="field"><label>Grace period (min)</label><input type="number" value={form.grace_period_min ?? 0} disabled={!ci} onChange={(e) => set({ grace_period_min: Number(e.target.value) || 0 })} /><span className="hint">Late after this</span></div>
+            <div className="field"><label>Half-day if under (hrs)</label><input type="number" value={form.half_day_max_hours ?? 0} disabled={!ci} onChange={(e) => set({ half_day_max_hours: Number(e.target.value) || 0 })} /></div>
+            <div className="field"><label>Full day minimum (hrs)</label><input type="number" value={form.min_hours_full_day ?? 0} disabled={!ci} onChange={(e) => set({ min_hours_full_day: Number(e.target.value) || 0 })} /></div>
+            <div className="field"><label>Overtime after (hrs)</label><input type="number" value={form.overtime_after_hours ?? 0} disabled={!ci} onChange={(e) => set({ overtime_after_hours: Number(e.target.value) || 0 })} /></div>
           </div>
         </div>
-        <div className="block">
+        <div className="block" style={disabledStyle}>
           <h4>Automation &amp; control</h4><p className="bs">How check-ins are captured.</p>
-          <OptRow label="Auto check-out" hint="Close open sessions at a fixed time" on={!!form.auto_checkout} onChange={() => toggle('auto_checkout')} testid="setg-auto-checkout" />
+          <OptRow label="Auto check-out" hint="Close open sessions at a fixed time" on={!!form.auto_checkout} onChange={() => ci && toggle('auto_checkout')} testid="setg-auto-checkout" />
           {form.auto_checkout && (
             <div className="grid3" style={{ margin: '12px 0' }}>
-              <div className="field"><label>Auto check-out time</label><input type="time" value={form.auto_checkout_time || ''} onChange={(e) => set({ auto_checkout_time: e.target.value })} /></div>
+              <div className="field"><label>Auto check-out time</label><input type="time" value={form.auto_checkout_time || ''} disabled={!ci} onChange={(e) => set({ auto_checkout_time: e.target.value })} /></div>
             </div>
           )}
-          <OptRow label="Allow staff self check-in" hint="Staff can clock in from their own login" on={!!form.allow_self_checkin} onChange={() => toggle('allow_self_checkin')} />
-          <OptRow label="Require geo-fence" hint="Only allow check-in at the salon location" on={!!form.geofence_required} onChange={() => toggle('geofence_required')} />
-          <OptRow label="Photo on check-in" hint="Capture a selfie when clocking in" on={!!form.photo_on_checkin} onChange={() => toggle('photo_on_checkin')} />
+          <OptRow label="Allow staff self check-in" hint="Staff can clock in from their own login" on={!!form.allow_self_checkin} onChange={() => ci && toggle('allow_self_checkin')} />
+          <OptRow label="Require geo-fence" hint="Only allow check-in at the salon location" on={!!form.geofence_required} onChange={() => ci && toggle('geofence_required')} />
+          <OptRow label="Photo on check-in" hint="Capture a selfie when clocking in" on={!!form.photo_on_checkin} onChange={() => ci && toggle('photo_on_checkin')} />
           <OptRow label="Admin can edit past attendance" hint="Owner/manager can backdate records" on={!!form.admin_edit_past_attendance} onChange={() => toggle('admin_edit_past_attendance')} />
         </div>
-        <SaveRow onClick={() => save()} disabled={saving || !dirty} testid="setg-checkinout-save" />
+        <SaveRow onClick={() => save()} disabled={saving || !dirty} testid="setg-method-save" />
       </>
-    ),
-
-    'staff.leave': () => (
+      );
+    },    'staff.leave': () => (
       <>
         <SectionHeader title="Leave & holidays" sub="Weekly offs, holiday calendar and leave policy." />
         <div className="block">
@@ -515,7 +513,7 @@ export default function SalonSettingsV3({ salonId, salon, setSalon, getAuthHeade
 
     'staff.payroll': () => (
       <>
-        <SectionHeader title="Payroll & incentives" sub="Used when marking salary paid on the Staff page." />
+        <SectionHeader title="Payroll & incentives" sub="Cycle and deductions, plus the Employee Reward Plan used when marking salary paid." />
         <div className="block">
           <h4>Salary</h4><p className="bs">Cycle and deductions.</p>
           <div className="grid2">
@@ -531,28 +529,15 @@ export default function SalonSettingsV3({ salonId, salon, setSalon, getAuthHeade
                 <option value="none">None</option>
               </select></div>
           </div>
-        </div>
-        <div className="block">
-          <h4>Incentives</h4><p className="bs">Auto-calculated per barber.</p>
-          <div className="grid2">
-            <div className="field"><label>Incentive rule</label>
-              <select value={form.incentive_rule || 'percent_over_target'} onChange={(e) => set({ incentive_rule: e.target.value })}>
-                <option value="percent_over_target">% of revenue over target</option>
-                <option value="flat_per_service">Flat per service</option>
-                <option value="slab">Slab based</option>
-                <option value="none">None</option>
-              </select></div>
-            <div className="field"><label>Incentive %</label>
-              <input type="number" value={form.incentive_percent ?? 0} onChange={(e) => set({ incentive_percent: Number(e.target.value) || 0 })} /></div>
-            <div className="field"><label>Monthly target / stylist (₹)</label>
-              <input type="number" value={form.monthly_target_per_stylist ?? 0} onChange={(e) => set({ monthly_target_per_stylist: Number(e.target.value) || 0 })} /></div>
-            <div className="field"><label>Include retail sales</label>
-              <select value={form.include_retail_in_incentive ? 'Yes' : 'No'} onChange={(e) => set({ include_retail_in_incentive: e.target.value === 'Yes' })}>
-                <option>Yes</option><option>No</option>
-              </select></div>
+          <div className="save-row" style={{ marginTop: 12 }}>
+            <button className="btn-primary" onClick={() => save(['salary_cycle', 'absent_deduction'])} disabled={saving} data-testid="setg-payroll-cycle-save">
+              <svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg>Save salary rules
+            </button>
           </div>
         </div>
-        <SaveRow onClick={() => save()} disabled={saving || !dirty} testid="setg-payroll-save" />
+        <div className="block reward-plan-host">
+          <EmployeeRewardPlan salonId={salonId} getAuthHeaders={getAuthHeaders} isAdmin={isAdmin} />
+        </div>
       </>
     ),
 
