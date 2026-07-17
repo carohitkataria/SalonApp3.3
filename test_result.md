@@ -6886,3 +6886,75 @@ agent_communication:
       properly gated. The main agent did not modify any backend endpoints — the
       RBAC v2 backend (previously 100 % tested) is unchanged.
 
+
+##====================================================================================================
+## STAFF & SETTINGS ENHANCEMENTS — July 17, 2026
+##====================================================================================================
+
+frontend:
+  - task: "Monthly attendance calendar with click-to-cycle P/H/A/HO/L"
+    implemented: true
+    working: "NA"
+    file: "/app/frontend/src/pages/salon/redesign/SalonStaffV3.js"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: "NA"
+        agent: "main"
+        comment: |
+          Replaced the static "This Month" tiles in the Attendance sub-tab with a full
+          monthly calendar (Mon-start, week grid, pink today outline). Every past/today
+          cell cycles Present → Half-day → Absent → Holiday → On-leave → blank on click,
+          driven by PUT /api/salons/{salon_id}/staff-attendance/override/{barber_id}/{date}
+          and DELETE for the blank state (existing endpoints, no backend changes needed).
+          Month navigator with previous/next buttons (next disabled beyond current month).
+          Optimistic update + rollback on error. Summary tiles below stay in sync.
+          Verified end-to-end with admin: clicked July 14 → Present, again → Half-day,
+          again → Absent — colours + tags updated live and persisted server-side.
+
+  - task: "Staff documents upload with previews (Aadhaar / agreement / bank)"
+    implemented: true
+    working: "NA"
+    file: "/app/frontend/src/pages/salon/redesign/SalonStaffV3.js"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: "NA"
+        agent: "main"
+        comment: |
+          Wired the pink Documents tab to the real backend endpoints
+          (POST/GET/DELETE /api/barbers/{barber_id}/documents). Three named slots
+          (Aadhaar card / Employment agreement / Bank UPI details) plus an "Upload other"
+          ghost button for arbitrary docs. Each slot shows status (empty/pending/done),
+          preview button, replace button and delete button. Files are read via
+          FileReader.readAsDataURL and posted as base64 dataURLs. Preview modal renders
+          images inline and PDFs in an iframe; 10 MB per file guard on the client
+          (matches the backend). RBAC gated on `staff.documents`.
+
+  - task: "Settings search-in-nav with highlight and no-match state"
+    implemented: true
+    working: "NA"
+    file: "/app/frontend/src/pages/salon/redesign/SalonSettingsV3.js"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: "NA"
+        agent: "main"
+        comment: |
+          Added a persistent search input at the top of the gold Settings nav. Typing
+          filters both group labels and sub-sub-item labels, auto-expands every group
+          with a match, hides non-matching sub-items and highlights the hit inline with
+          the pink primary. Empty search restores full nav. Bogus queries render an
+          empty state with a magnifier icon and a "No settings match" message.
+          data-testids added: settings-search-input, settings-search-clear,
+          settings-search-nomatch and settings-nav-{group}-{sub}.
+
+agent_communication:
+  - agent: main
+    message: |
+      Delivered all three follow-up features. No backend changes needed — the required
+      endpoints (attendance override, document upload/list/delete) already exist.
+

@@ -92,6 +92,8 @@ export default function SalonSettingsV3({ salonId, salon, setSalon, getAuthHeade
 
   const [sec, setSec] = useState('business');
   const [sub, setSub] = useState('details');
+  const [search, setSearch] = useState('');
+  const q = search.trim().toLowerCase();
 
   // Inject scoped CSS once
   useEffect(() => {
@@ -322,34 +324,93 @@ export default function SalonSettingsV3({ salonId, salon, setSalon, getAuthHeade
       <div className="workspace">
         <div className="pane-l">
           <div className="nav-head">Settings</div>
+          <div className="nav-search">
+            <div className="nav-search-box">
+              <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+              <input
+                type="search"
+                placeholder="Search settings…"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                aria-label="Search settings"
+                data-testid="settings-search-input"
+              />
+              {search && (
+                <button className="clr" onClick={() => setSearch('')} aria-label="Clear search" data-testid="settings-search-clear">
+                  <svg viewBox="0 0 24 24" style={{ width: 13, height: 13, fill: 'none', stroke: 'currentColor', strokeWidth: 2 }}>
+                    <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+                  </svg>
+                </button>
+              )}
+            </div>
+          </div>
           <div className="setnav">
-            {NAV.map((n) => {
-              const on = n.k === sec;
-              const groupAllowed = n.subs.some((s) => permAllowed(s.perm));
-              if (!groupAllowed) return null;
-              const firstAllowedSub = n.subs.find((s) => permAllowed(s.perm));
-              return (
-                <div key={n.k} className={`sgroup ${on ? 'on' : ''}`}>
-                  <button className="sn" onClick={() => go(n.k, firstAllowedSub.k)}>
-                    <svg className="ic" viewBox="0 0 24 24">{n.ico}</svg>
-                    {n.label}
-                    <svg className="chev" viewBox="0 0 24 24"><polyline points="9 18 15 12 9 6"/></svg>
-                  </button>
-                  <div className="subnav">
-                    {n.subs.map((sc) => {
-                      const allowed = permAllowed(sc.perm);
-                      if (!allowed) return null;
-                      return (
-                        <button key={sc.k} className={`subitem ${on && sub === sc.k ? 'on' : ''}`}
-                          onClick={(e) => { e.stopPropagation(); go(n.k, sc.k); }}>
-                          {sc.label}
-                        </button>
-                      );
-                    })}
+            {(() => {
+              const filtered = NAV.map((n) => {
+                const allowedSubs = n.subs.filter((s) => permAllowed(s.perm));
+                if (allowedSubs.length === 0) return null;
+                if (!q) return { ...n, subs: allowedSubs, matched: allowedSubs, groupMatched: true };
+                const groupMatch = n.label.toLowerCase().includes(q);
+                const matchedSubs = allowedSubs.filter((s) => s.label.toLowerCase().includes(q));
+                if (!groupMatch && matchedSubs.length === 0) return null;
+                return {
+                  ...n,
+                  subs: allowedSubs,
+                  matched: groupMatch ? allowedSubs : matchedSubs,
+                  groupMatched: groupMatch,
+                };
+              }).filter(Boolean);
+
+              if (q && filtered.length === 0) {
+                return (
+                  <div className="no-match" data-testid="settings-search-nomatch">
+                    <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+                    <div>No settings match "{search}"</div>
                   </div>
-                </div>
-              );
-            })}
+                );
+              }
+
+              const highlight = (text) => {
+                if (!q) return text;
+                const idx = text.toLowerCase().indexOf(q);
+                if (idx === -1) return text;
+                return (
+                  <>
+                    {text.slice(0, idx)}
+                    <span className="hit">{text.slice(idx, idx + q.length)}</span>
+                    {text.slice(idx + q.length)}
+                  </>
+                );
+              };
+
+              return filtered.map((n) => {
+                const openInSearch = !!q; // auto-expand groups with matches
+                const on = openInSearch || n.k === sec;
+                const firstMatched = n.matched[0] || n.subs[0];
+                return (
+                  <div key={n.k} className={`sgroup ${on ? 'on' : ''}`}>
+                    <button className="sn" onClick={() => go(n.k, firstMatched.k)}>
+                      <svg className="ic" viewBox="0 0 24 24">{n.ico}</svg>
+                      {highlight(n.label)}
+                      <svg className="chev" viewBox="0 0 24 24"><polyline points="9 18 15 12 9 6"/></svg>
+                    </button>
+                    <div className="subnav">
+                      {n.subs.map((sc) => {
+                        const inMatched = n.matched.includes(sc);
+                        if (q && !inMatched) return null; // hide non-matching subs when searching
+                        return (
+                          <button key={sc.k} className={`subitem ${n.k === sec && sub === sc.k ? 'on' : ''}`}
+                            onClick={(e) => { e.stopPropagation(); go(n.k, sc.k); }}
+                            data-testid={`settings-nav-${n.k}-${sc.k}`}>
+                            {highlight(sc.label)}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                );
+              });
+            })()}
           </div>
         </div>
         <div className="pane-r">

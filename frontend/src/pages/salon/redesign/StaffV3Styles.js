@@ -156,6 +156,59 @@ export const STAFF_V3_CSS = `
 .staffv3-drawer .btn-ghost{border:1px solid #EFE8EF;color:#4A4150;font-size:13px;font-weight:600;padding:10px 14px;border-radius:11px;background:#fff;cursor:pointer}
 .staffv3 .rbac-lock{padding:32px;text-align:center;color:var(--muted);font-size:14px}
 .staffv3 .rbac-lock svg{width:44px;height:44px;color:var(--muted-2);margin:0 auto 10px;fill:none;stroke:currentColor;stroke-width:2}
+/* Monthly attendance calendar */
+.staffv3 .att-cal-head{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:10px;flex-wrap:wrap}
+.staffv3 .att-cal-head .mm{display:flex;align-items:center;gap:8px}
+.staffv3 .att-cal-head .mm b{font-family:'Plus Jakarta Sans';font-size:15px;font-weight:800;color:var(--ink);min-width:150px;text-align:center}
+.staffv3 .att-cal-head .mm button{width:28px;height:28px;border-radius:8px;border:1px solid var(--line);background:#fff;color:var(--ink-soft);display:grid;place-items:center;cursor:pointer;transition:.14s}
+.staffv3 .att-cal-head .mm button:hover{background:var(--line-2)}
+.staffv3 .att-cal-head .mm button:disabled{opacity:.4;cursor:not-allowed}
+.staffv3 .att-cal-head .mm button svg{width:14px;height:14px;fill:none;stroke:currentColor;stroke-width:2.4}
+.staffv3 .att-legend{display:flex;flex-wrap:wrap;gap:8px 12px;font-size:11px;color:var(--muted);font-weight:600;margin-top:2px}
+.staffv3 .att-legend .lg{display:flex;align-items:center;gap:5px}
+.staffv3 .att-legend .lg .sw{width:10px;height:10px;border-radius:3px}
+.staffv3 .cal-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:5px;margin-bottom:12px}
+.staffv3 .cal-dow{font-size:10px;font-weight:700;color:var(--muted-2);text-transform:uppercase;letter-spacing:.5px;text-align:center;padding:4px 0}
+.staffv3 .cal-cell{aspect-ratio:1;min-height:44px;border-radius:9px;border:1px solid var(--line);background:#fff;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;cursor:pointer;transition:.13s;font-weight:600;color:var(--ink);position:relative;padding:3px;user-select:none}
+.staffv3 .cal-cell:hover{border-color:var(--primary-100);transform:translateY(-1px);box-shadow:0 3px 10px rgba(198,56,158,.10)}
+.staffv3 .cal-cell.disabled{opacity:.35;cursor:not-allowed;background:var(--line-2)}
+.staffv3 .cal-cell.disabled:hover{transform:none;box-shadow:none;border-color:var(--line)}
+.staffv3 .cal-cell.other{opacity:.28;pointer-events:none}
+.staffv3 .cal-cell .dnum{font-size:13.5px;font-weight:700;line-height:1}
+.staffv3 .cal-cell .stag{font-size:9px;font-weight:800;text-transform:uppercase;letter-spacing:.3px;padding:1px 5px;border-radius:6px}
+.staffv3 .cal-cell.today{outline:2px solid var(--primary);outline-offset:1px}
+.staffv3 .cal-cell.st-present{background:var(--green-bg);border-color:#B7E5CB}
+.staffv3 .cal-cell.st-present .stag{background:var(--green);color:#fff}
+.staffv3 .cal-cell.st-half_day{background:var(--amber-bg);border-color:#F6D9A8}
+.staffv3 .cal-cell.st-half_day .stag{background:var(--amber);color:#fff}
+.staffv3 .cal-cell.st-absent{background:var(--red-bg);border-color:#F6C6C8}
+.staffv3 .cal-cell.st-absent .stag{background:var(--red);color:#fff}
+.staffv3 .cal-cell.st-holiday{background:var(--sky-bg);border-color:#CFE4FA}
+.staffv3 .cal-cell.st-holiday .stag{background:var(--sky);color:#fff}
+.staffv3 .cal-cell.st-on_leave,.staffv3 .cal-cell.st-leave{background:var(--violet-bg);border-color:#DACAF4}
+.staffv3 .cal-cell.st-on_leave .stag,.staffv3 .cal-cell.st-leave .stag{background:var(--violet);color:#fff}
+.staffv3 .cal-hint{font-size:11.5px;color:var(--muted);margin-top:8px;display:flex;align-items:center;gap:6px}
+.staffv3 .cal-hint svg{width:13px;height:13px;color:var(--primary);fill:none;stroke:currentColor;stroke-width:2}
+/* Documents upload */
+.staffv3 .doc-row .actions{display:flex;align-items:center;gap:6px}
+.staffv3 .doc-row .actions button{border:1px solid var(--line);background:#fff;color:var(--ink-soft);width:32px;height:32px;border-radius:9px;display:grid;place-items:center;cursor:pointer;transition:.13s}
+.staffv3 .doc-row .actions button:hover{background:var(--line-2)}
+.staffv3 .doc-row .actions button.danger{color:var(--red);border-color:var(--red-bg)}
+.staffv3 .doc-row .actions button.danger:hover{background:var(--red-bg)}
+.staffv3 .doc-row .actions button svg{width:15px;height:15px;fill:none;stroke:currentColor;stroke-width:2}
+.staffv3 .doc-row .di.done{background:var(--green-bg);color:var(--green)}
+.staffv3 .doc-row .di.pending{background:var(--amber-bg);color:var(--amber)}
+.staffv3 .doc-row .di.empty{background:var(--line-2);color:var(--muted)}
+.staffv3 .doc-preview-ov{position:fixed;inset:0;background:rgba(36,20,38,.68);z-index:80;display:flex;align-items:center;justify-content:center;padding:24px}
+.staffv3 .doc-preview{background:#fff;border-radius:16px;max-width:800px;max-height:90vh;width:100%;display:flex;flex-direction:column;overflow:hidden;box-shadow:var(--shadow-lg)}
+.staffv3 .doc-preview .ph{display:flex;align-items:center;justify-content:space-between;padding:14px 18px;border-bottom:1px solid var(--line)}
+.staffv3 .doc-preview .ph b{font-family:'Plus Jakarta Sans';font-size:15px;font-weight:800;color:var(--ink)}
+.staffv3 .doc-preview .ph .close{width:34px;height:34px;border-radius:10px;background:var(--line-2);color:var(--muted);display:grid;place-items:center;cursor:pointer;border:none}
+.staffv3 .doc-preview .ph .close svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:2.2}
+.staffv3 .doc-preview .pb{flex:1;overflow:auto;padding:18px;background:var(--line-2);display:flex;align-items:center;justify-content:center;min-height:280px}
+.staffv3 .doc-preview .pb img{max-width:100%;max-height:70vh;border-radius:10px;box-shadow:var(--shadow)}
+.staffv3 .doc-preview .pb iframe{width:100%;height:70vh;border:none;border-radius:10px;background:#fff}
+.staffv3 .doc-preview .pb .empty{color:var(--muted);font-size:13px;text-align:center;padding:40px}
 @media(max-width:1050px){
   .staffv3 .workspace{grid-template-columns:1fr}
   .staffv3 .pane-l{border-right:none;border-bottom:1px solid var(--line)}

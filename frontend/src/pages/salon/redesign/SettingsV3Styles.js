@@ -28,6 +28,16 @@ export const SETTINGS_V3_CSS = `
 .setv3 .pane-l{border-right:1px solid var(--line);background:#FEFCF7;display:flex;flex-direction:column;overflow:auto;max-height:calc(100vh - 190px)}
 .setv3 .pane-r{min-width:0;display:flex;flex-direction:column;background:#fff}
 .setv3 .nav-head{padding:13px 14px 9px;font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:var(--muted-2);border-bottom:1px solid var(--line)}
+.setv3 .nav-search{padding:9px 10px 10px;border-bottom:1px solid var(--line);background:#fff}
+.setv3 .nav-search-box{display:flex;align-items:center;gap:8px;background:var(--line-2);border:1px solid var(--line);border-radius:10px;padding:8px 11px;transition:.15s}
+.setv3 .nav-search-box:focus-within{background:#fff;border-color:var(--primary);box-shadow:0 0 0 3px var(--primary-050)}
+.setv3 .nav-search-box svg{width:14px;height:14px;flex:none;color:var(--muted);fill:none;stroke:currentColor;stroke-width:2}
+.setv3 .nav-search-box input{border:none;background:none;outline:none;flex:1;font-size:12.5px;color:var(--ink);width:100%}
+.setv3 .nav-search-box .clr{background:none;border:none;color:var(--muted);cursor:pointer;padding:0;display:grid;place-items:center}
+.setv3 .no-match{padding:22px 16px;text-align:center;font-size:12px;color:var(--muted)}
+.setv3 .no-match svg{width:24px;height:24px;color:var(--muted-2);margin-bottom:6px;fill:none;stroke:currentColor;stroke-width:2}
+.setv3 .subitem .hit{background:var(--primary-050);color:var(--primary);border-radius:4px;padding:0 2px}
+.setv3 .subitem.on .hit{background:rgba(255,255,255,.28);color:#fff}
 .setv3 .setnav{padding:7px;display:flex;flex-direction:column;gap:2px}
 .setv3 .sgroup{border-radius:11px;transition:.14s}
 .setv3 .sgroup.on{background:var(--primary-050);border:1px solid var(--primary-100)}

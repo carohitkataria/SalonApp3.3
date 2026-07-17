@@ -59,6 +59,17 @@ export default function SalonStaffV3({ salonId, getAuthHeaders }) {
   const [barberServices, setBarberServices] = useState({});
   const [editingProfile, setEditingProfile] = useState(false);
   const [profileDraft, setProfileDraft] = useState({});
+  // Monthly attendance grid: { [barberId]: { month: 'YYYY-MM', days: { 'YYYY-MM-DD': {status,...} } } }
+  const [attendanceGrid, setAttendanceGrid] = useState({});
+  const [attMonth, setAttMonth] = useState(() => new Date().toISOString().slice(0, 7));
+  const [attSaving, setAttSaving] = useState({});
+  // Documents
+  const [docs, setDocs] = useState({});
+  const [docBusy, setDocBusy] = useState(false);
+  const [preview, setPreview] = useState(null); // {doc, fileData}
+  // Hidden file input ref for uploading
+  const fileInputRef = React.useRef(null);
+  const [pendingDocType, setPendingDocType] = useState(null);
 
   // Scoped CSS injection
   useEffect(() => {
@@ -126,30 +137,177 @@ export default function SalonStaffV3({ salonId, getAuthHeaders }) {
     })();
   }, [selectedId]);
 
-  // Fetch monthly attendance summary for selected staff
+  // Fetch monthly attendance summary + full grid for selected staff / month
   useEffect(() => {
     (async () => {
       if (!selectedId || !salonId) return;
-      const month = new Date().toISOString().slice(0, 7);
       try {
-        const res = await axios.get(`${API}/salons/${salonId}/staff-attendance/month/${month}?barber_id=${selectedId}`, {
-          headers: getAuthHeaders?.() || {},
-        });
+        const res = await axios.get(
+          `${API}/salons/${salonId}/staff-attendance/month/${attMonth}?barber_id=${selectedId}`,
+          { headers: getAuthHeaders?.() || {} },
+        );
         const b = (res.data?.barbers || []).find((x) => x.barber_id === selectedId);
         const arr = b?.attendance || [];
         const s = { P: 0, A: 0, H: 0, HO: 0, L: 0 };
+        const days = {};
         arr.forEach((r) => {
           const st = String(r.status || '').toLowerCase();
+          days[r.date] = { status: st, note: r.override_note, marked_by: r.marked_by_name };
           if (st === 'present') s.P += 1;
           else if (st === 'absent') s.A += 1;
           else if (st === 'half_day' || st === 'half-day') s.H += 1;
           else if (st === 'holiday') s.HO += 1;
-          else if (st === 'leave') s.L += 1;
+          else if (st === 'leave' || st === 'on_leave') s.L += 1;
         });
         setAttendanceSummary((prev) => ({ ...prev, [selectedId]: s }));
-      } catch (_) {}
+        setAttendanceGrid((prev) => ({ ...prev, [selectedId]: { month: attMonth, days } }));
+      } catch (_) { /* noop */ }
     })();
-  }, [selectedId, salonId, getAuthHeaders]);
+  }, [selectedId, salonId, attMonth, getAuthHeaders]);
+
+  // Cycle attendance status on click: blank → present → half_day → absent → holiday → on_leave → blank
+  const CYCLE = ['present', 'half_day', 'absent', 'holiday', 'on_leave'];
+  const cycleAttendance = async (date) => {
+    if (!canAttendance || !selected) return;
+    // Guard: don't allow future dates
+    const today = new Date().toISOString().slice(0, 10);
+    if (date > today) return toast.error("Can't mark attendance for future dates");
+    const key = `${selectedId}::${date}`;
+    if (attSaving[key]) return;
+    setAttSaving((prev) => ({ ...prev, [key]: true }));
+    const grid = attendanceGrid[selectedId]?.days || {};
+    const cur = (grid[date]?.status || '').toLowerCase();
+    const idx = CYCLE.indexOf(cur);
+    const next = idx === -1 ? CYCLE[0] : (idx === CYCLE.length - 1 ? null : CYCLE[idx + 1]);
+    // Optimistic
+    setAttendanceGrid((prev) => {
+      const p = prev[selectedId] || { month: attMonth, days: {} };
+      const days = { ...(p.days || {}) };
+      if (next) days[date] = { ...(days[date] || {}), status: next };
+      else delete days[date];
+      return { ...prev, [selectedId]: { ...p, days } };
+    });
+    try {
+      if (next) {
+        await axios.put(
+          `${API}/salons/${salonId}/staff-attendance/override/${selectedId}/${date}`,
+          { status: next },
+          { headers: getAuthHeaders?.() || {} },
+        );
+      } else {
+        await axios.delete(
+          `${API}/salons/${salonId}/staff-attendance/override/${selectedId}/${date}`,
+          { headers: getAuthHeaders?.() || {} },
+        );
+      }
+      // Refresh summary counts
+      const days = attendanceGrid[selectedId]?.days || {};
+      const merged = { ...days };
+      if (next) merged[date] = { status: next }; else delete merged[date];
+      const s = { P: 0, A: 0, H: 0, HO: 0, L: 0 };
+      Object.values(merged).forEach((r) => {
+        const st = (r.status || '').toLowerCase();
+        if (st === 'present') s.P += 1;
+        else if (st === 'absent') s.A += 1;
+        else if (st === 'half_day') s.H += 1;
+        else if (st === 'holiday') s.HO += 1;
+        else if (st === 'leave' || st === 'on_leave') s.L += 1;
+      });
+      setAttendanceSummary((prev) => ({ ...prev, [selectedId]: s }));
+    } catch (err) {
+      // Revert on failure
+      setAttendanceGrid((prev) => ({ ...prev, [selectedId]: { month: attMonth, days: grid } }));
+      const msg = err?.response?.data?.detail || 'Could not update attendance';
+      toast.error(String(msg));
+    } finally {
+      setAttSaving((prev) => { const p = { ...prev }; delete p[key]; return p; });
+    }
+  };
+
+  // Documents: fetch list when staff selected
+  useEffect(() => {
+    (async () => {
+      if (!selectedId || !canDocuments) return;
+      try {
+        const res = await axios.get(`${API}/barbers/${selectedId}/documents`, {
+          headers: getAuthHeaders?.() || {},
+        });
+        setDocs((prev) => ({ ...prev, [selectedId]: res.data?.documents || [] }));
+      } catch (_) { /* noop */ }
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedId, canDocuments]);
+
+  const uploadDoc = (docType) => {
+    if (!canDocuments) return toast.error("You don't have permission");
+    setPendingDocType(docType);
+    // Trigger the hidden file input
+    setTimeout(() => fileInputRef.current?.click(), 30);
+  };
+
+  const onFileSelected = async (e) => {
+    const file = e.target.files?.[0];
+    e.target.value = ''; // reset so same file can be re-selected
+    if (!file || !pendingDocType || !selectedId) return;
+    if (file.size > 10 * 1024 * 1024) return toast.error('File too large (max 10 MB)');
+    setDocBusy(true);
+    try {
+      const dataUrl = await new Promise((res, rej) => {
+        const r = new FileReader();
+        r.onload = () => res(r.result);
+        r.onerror = () => rej(new Error('read failed'));
+        r.readAsDataURL(file);
+      });
+      const label = pendingDocType === 'aadhar_front' ? 'Aadhaar card'
+        : pendingDocType === 'agreement' ? 'Employment agreement'
+        : pendingDocType === 'bank_details' ? 'Bank / UPI details'
+        : (pendingDocType.charAt(0).toUpperCase() + pendingDocType.slice(1).replace(/_/g, ' '));
+      await axios.post(
+        `${API}/barbers/${selectedId}/documents`,
+        { doc_type: pendingDocType, label, file_data: dataUrl, mime_type: file.type, file_name: file.name },
+        { headers: getAuthHeaders?.() || {} },
+      );
+      // Re-fetch list
+      const res = await axios.get(`${API}/barbers/${selectedId}/documents`, {
+        headers: getAuthHeaders?.() || {},
+      });
+      setDocs((prev) => ({ ...prev, [selectedId]: res.data?.documents || [] }));
+      toast.success(label + ' uploaded');
+    } catch (err) {
+      toast.error(err?.response?.data?.detail || 'Upload failed');
+    } finally {
+      setDocBusy(false);
+      setPendingDocType(null);
+    }
+  };
+
+  const deleteDoc = async (docId) => {
+    if (!canDocuments) return;
+    if (!window.confirm('Delete this document?')) return;
+    try {
+      await axios.delete(`${API}/barbers/${selectedId}/documents/${docId}`, {
+        headers: getAuthHeaders?.() || {},
+      });
+      setDocs((prev) => ({
+        ...prev,
+        [selectedId]: (prev[selectedId] || []).filter((d) => d.id !== docId),
+      }));
+      toast.success('Document removed');
+    } catch (err) {
+      toast.error(err?.response?.data?.detail || 'Delete failed');
+    }
+  };
+
+  const previewDoc = async (docId) => {
+    try {
+      const res = await axios.get(`${API}/barbers/${selectedId}/documents/${docId}`, {
+        headers: getAuthHeaders?.() || {},
+      });
+      setPreview(res.data);
+    } catch (err) {
+      toast.error('Could not load document');
+    }
+  };
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -402,6 +560,48 @@ export default function SalonStaffV3({ salonId, getAuthHeaders }) {
     const M = salonSettings;
     const isCI = M.attendance_method === 'checkinout' || M.attendance_method === 'geo_checkin';
     const att = attendanceSummary[s.id] || { P: 0, A: 0, H: 0, HO: 0, L: 0 };
+    // Build calendar grid for attMonth
+    const [yy, mm] = attMonth.split('-').map((x) => parseInt(x, 10));
+    const first = new Date(Date.UTC(yy, mm - 1, 1));
+    const daysInMonth = new Date(Date.UTC(yy, mm, 0)).getUTCDate();
+    // Sunday=0 shifted so Mon=0 (India)
+    const dowIdx = (first.getUTCDay() + 6) % 7; // 0..6, Mon start
+    const gridDays = attendanceGrid[s.id]?.days || {};
+    const today = new Date().toISOString().slice(0, 10);
+    const cells = [];
+    for (let i = 0; i < dowIdx; i += 1) cells.push({ empty: true });
+    for (let d = 1; d <= daysInMonth; d += 1) {
+      const dd = String(d).padStart(2, '0');
+      const dateStr = `${attMonth}-${dd}`;
+      const rec = gridDays[dateStr];
+      cells.push({ date: dateStr, d, status: rec?.status || null, isToday: dateStr === today, isFuture: dateStr > today });
+    }
+    while (cells.length % 7 !== 0) cells.push({ empty: true });
+
+    const monthLabel = first.toLocaleString('en-IN', { month: 'long', year: 'numeric', timeZone: 'UTC' });
+    const nowMonth = new Date().toISOString().slice(0, 7);
+    const canGoNext = attMonth < nowMonth;
+    const goPrev = () => {
+      const py = mm === 1 ? yy - 1 : yy;
+      const pm = mm === 1 ? 12 : mm - 1;
+      setAttMonth(`${py}-${String(pm).padStart(2, '0')}`);
+    };
+    const goNext = () => {
+      if (!canGoNext) return;
+      const ny = mm === 12 ? yy + 1 : yy;
+      const nm = mm === 12 ? 1 : mm + 1;
+      setAttMonth(`${ny}-${String(nm).padStart(2, '0')}`);
+    };
+
+    const shortTag = (st) => {
+      if (st === 'present') return 'P';
+      if (st === 'half_day') return 'H';
+      if (st === 'absent') return 'A';
+      if (st === 'holiday') return 'HO';
+      if (st === 'leave' || st === 'on_leave') return 'L';
+      return '';
+    };
+
     return (
       <>
         <div className="method-note">
@@ -424,7 +624,60 @@ export default function SalonStaffV3({ salonId, getAuthHeaders }) {
             </div>
           </>
         )}
-        <div className="secttl">This month</div>
+
+        <div className="att-cal-head">
+          <div className="mm">
+            <button type="button" onClick={goPrev} aria-label="Previous month" data-testid="att-prev-month">
+              <svg viewBox="0 0 24 24"><polyline points="15 18 9 12 15 6"/></svg>
+            </button>
+            <b>{monthLabel}</b>
+            <button type="button" onClick={goNext} disabled={!canGoNext} aria-label="Next month" data-testid="att-next-month">
+              <svg viewBox="0 0 24 24"><polyline points="9 18 15 12 9 6"/></svg>
+            </button>
+          </div>
+          <div className="att-legend">
+            <span className="lg"><span className="sw" style={{ background: 'var(--green)' }} />Present</span>
+            <span className="lg"><span className="sw" style={{ background: 'var(--amber)' }} />Half-day</span>
+            <span className="lg"><span className="sw" style={{ background: 'var(--red)' }} />Absent</span>
+            <span className="lg"><span className="sw" style={{ background: 'var(--sky)' }} />Holiday</span>
+            <span className="lg"><span className="sw" style={{ background: 'var(--violet)' }} />Leave</span>
+          </div>
+        </div>
+
+        <div className="cal-grid">
+          {['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map((d) => (
+            <div key={d} className="cal-dow">{d}</div>
+          ))}
+          {cells.map((c, i) => {
+            if (c.empty) return <div key={`e${i}`} />;
+            const disabled = c.isFuture;
+            const cls = [
+              'cal-cell',
+              c.status ? `st-${c.status}` : '',
+              c.isToday ? 'today' : '',
+              disabled ? 'disabled' : '',
+            ].filter(Boolean).join(' ');
+            return (
+              <div
+                key={c.date}
+                className={cls}
+                onClick={() => !disabled && cycleAttendance(c.date)}
+                title={disabled ? 'Future date' : 'Click to cycle: Present → Half-day → Absent → Holiday → Leave → Clear'}
+                data-testid={`att-cell-${c.date}`}
+              >
+                <span className="dnum">{c.d}</span>
+                {c.status && <span className="stag">{shortTag(c.status)}</span>}
+              </div>
+            );
+          })}
+        </div>
+
+        <p className="cal-hint">
+          <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></svg>
+          Click any date to cycle attendance. Salary-locked months are read-only.
+        </p>
+
+        <div className="secttl" style={{ marginTop: 18 }}>This month</div>
         <div className="att-summary">
           <div className="att-s"><b style={{ color: 'var(--green)' }}>{att.P}</b><span>Present</span></div>
           <div className="att-s"><b style={{ color: 'var(--red)' }}>{att.A}</b><span>Absent</span></div>
@@ -489,27 +742,125 @@ export default function SalonStaffV3({ salonId, getAuthHeaders }) {
     if (!canDocuments) {
       return <div className="rbac-lock"><svg viewBox="0 0 24 24"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>You don't have permission to view documents.</div>;
     }
+    const list = docs[selectedId] || [];
+    const byType = list.reduce((acc, d) => { (acc[d.doc_type] = acc[d.doc_type] || []).push(d); return acc; }, {});
+    const SLOTS = [
+      { type: 'aadhar_front', label: 'Aadhaar card', hint: 'Front side of Aadhaar', ico: <><rect x="3" y="4" width="18" height="16" rx="2"/><line x1="3" y1="10" x2="21" y2="10"/></> },
+      { type: 'agreement', label: 'Employment agreement', hint: 'Signed offer / contract', ico: <><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/></> },
+      { type: 'bank_details', label: 'Bank / UPI details', hint: 'For salary transfer', ico: <><rect x="1" y="4" width="22" height="16" rx="2"/><line x1="1" y1="10" x2="23" y2="10"/></> },
+    ];
+    const otherDocs = list.filter((d) => !SLOTS.find((s) => s.type === d.doc_type));
+
+    const renderRow = (slot) => {
+      const uploaded = (byType[slot.type] || [])[0];
+      const status = uploaded ? 'done' : 'empty';
+      return (
+        <div className="doc-row" key={slot.type}>
+          <div className={`di ${status}`}>
+            <svg viewBox="0 0 24 24">{slot.ico}</svg>
+          </div>
+          <div className="dd">
+            <b>{slot.label}</b>
+            <span>
+              {uploaded
+                ? `${uploaded.file_name || 'Uploaded'} · ${uploaded.size_kb || 0} KB`
+                : slot.hint}
+            </span>
+          </div>
+          <div className="actions">
+            {uploaded && (
+              <>
+                <button title="Preview" onClick={() => previewDoc(uploaded.id)} data-testid={`doc-preview-${slot.type}`}>
+                  <svg viewBox="0 0 24 24"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+                </button>
+                <button title="Replace" onClick={() => uploadDoc(slot.type)} data-testid={`doc-replace-${slot.type}`}>
+                  <svg viewBox="0 0 24 24"><path d="M23 4v6h-6"/><path d="M1 20v-6h6"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10"/><path d="M20.49 15a9 9 0 0 1-14.85 3.36L1 14"/></svg>
+                </button>
+                <button title="Delete" className="danger" onClick={() => deleteDoc(uploaded.id)} data-testid={`doc-delete-${slot.type}`}>
+                  <svg viewBox="0 0 24 24"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+                </button>
+              </>
+            )}
+            {!uploaded && (
+              <button title="Upload" onClick={() => uploadDoc(slot.type)} data-testid={`doc-upload-${slot.type}`}>
+                <svg viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+              </button>
+            )}
+          </div>
+        </div>
+      );
+    };
+
     return (
       <>
         <div className="secttl">
           Documents
-          <button className="btn-ghost" style={{ padding: '7px 12px' }} onClick={() => toast.info('Document upload coming soon')}>
-            <svg viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>Upload
+          <button className="btn-ghost" style={{ padding: '7px 12px' }} onClick={() => uploadDoc('other')} disabled={docBusy} data-testid="doc-upload-other">
+            <svg viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+            {docBusy ? 'Uploading…' : 'Upload other'}
           </button>
         </div>
-        <div className="doc-row">
-          <div className="di"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><line x1="3" y1="10" x2="21" y2="10"/></svg></div>
-          <div className="dd"><b>Aadhaar card</b><span>{selected.aadhar_number ? 'On file' : 'Not uploaded'}</span></div>
-          {selected.aadhar_number && <span style={{ fontSize: 11, fontWeight: 800, color: 'var(--green)' }}>✓</span>}
-        </div>
-        <div className="doc-row">
-          <div className="di"><svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/></svg></div>
-          <div className="dd"><b>Employment agreement</b><span>Not uploaded</span></div>
-        </div>
-        <div className="doc-row">
-          <div className="di"><svg viewBox="0 0 24 24"><rect x="1" y="4" width="22" height="16" rx="2"/><line x1="1" y1="10" x2="23" y2="10"/></svg></div>
-          <div className="dd"><b>Bank / UPI details</b><span>{selected.bank_details ? 'On file' : 'For salary transfer'}</span></div>
-        </div>
+        {SLOTS.map(renderRow)}
+        {otherDocs.length > 0 && (
+          <>
+            <div className="secttl" style={{ marginTop: 18 }}>Other documents</div>
+            {otherDocs.map((d) => (
+              <div className="doc-row" key={d.id}>
+                <div className="di done">
+                  <svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/></svg>
+                </div>
+                <div className="dd">
+                  <b>{d.label || d.file_name || 'Document'}</b>
+                  <span>{d.file_name || ''} · {d.size_kb || 0} KB</span>
+                </div>
+                <div className="actions">
+                  <button title="Preview" onClick={() => previewDoc(d.id)}>
+                    <svg viewBox="0 0 24 24"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+                  </button>
+                  <button title="Delete" className="danger" onClick={() => deleteDoc(d.id)}>
+                    <svg viewBox="0 0 24 24"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+                  </button>
+                </div>
+              </div>
+            ))}
+          </>
+        )}
+
+        {/* Hidden file input used by every upload button */}
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept="image/png,image/jpeg,image/webp,application/pdf"
+          style={{ display: 'none' }}
+          onChange={onFileSelected}
+          data-testid="doc-file-input"
+        />
+
+        {/* Preview modal */}
+        {preview && (
+          <div className="doc-preview-ov" onClick={() => setPreview(null)}>
+            <div className="doc-preview" onClick={(e) => e.stopPropagation()}>
+              <div className="ph">
+                <b>{preview.label || preview.file_name || 'Document'}</b>
+                <button className="close" onClick={() => setPreview(null)} aria-label="Close">
+                  <svg viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                </button>
+              </div>
+              <div className="pb">
+                {preview.file_data && preview.mime_type?.startsWith('image/') && (
+                  <img src={preview.file_data} alt={preview.label || preview.file_name || ''} />
+                )}
+                {preview.file_data && preview.mime_type === 'application/pdf' && (
+                  <iframe src={preview.file_data} title={preview.label || 'PDF'} />
+                )}
+                {(!preview.file_data ||
+                  (!preview.mime_type?.startsWith('image/') && preview.mime_type !== 'application/pdf')) && (
+                  <div className="empty">Preview not available for this file type</div>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
       </>
     );
   };
