@@ -63,6 +63,21 @@ export default function SalonStaffV3({ salonId, getAuthHeaders }) {
   const [attendanceGrid, setAttendanceGrid] = useState({});
   const [attMonth, setAttMonth] = useState(() => new Date().toISOString().slice(0, 7));
   const [attSaving, setAttSaving] = useState({});
+  // Attendance drawer
+  const [attOpen, setAttOpen] = useState(false);
+  const [attFrom, setAttFrom] = useState('');
+  const [attTo, setAttTo] = useState('');
+  const [attRows, setAttRows] = useState([]); // [{date, in, out, status, sel}]
+  const [attBusy, setAttBusy] = useState(false);
+  // Salary drawer
+  const [salOpen, setSalOpen] = useState(false);
+  const [salMonth, setSalMonth] = useState(() => new Date().toISOString().slice(0, 7));
+  const [salMethod, setSalMethod] = useState('upi');
+  const [salBase, setSalBase] = useState(0);
+  const [salInc, setSalInc] = useState(0);
+  const [salDed, setSalDed] = useState(0);
+  const [salAdv, setSalAdv] = useState(0);
+  const [salRecord, setSalRecord] = useState(null);
   // Documents
   const [docs, setDocs] = useState({});
   const [docBusy, setDocBusy] = useState(false);
@@ -309,6 +324,152 @@ export default function SalonStaffV3({ salonId, getAuthHeaders }) {
     }
   };
 
+  // ============ Attendance drawer helpers ============
+  const openAttDrawer = () => {
+    if (!canAttendance) return toast.error("You don't have permission");
+    if (!selected) return;
+    // Default range: this month up to today
+    const today = new Date().toISOString().slice(0, 10);
+    const first = today.slice(0, 8) + '01';
+    setAttFrom(first);
+    setAttTo(today);
+    setAttRows([]);
+    setAttOpen(true);
+    // Auto-load
+    setTimeout(() => buildAttRows(first, today), 40);
+  };
+
+  const buildAttRows = (fromDate, toDate) => {
+    const from = fromDate || attFrom;
+    const to = toDate || attTo;
+    if (!from || !to || from > to) return toast.error('Pick a valid date range');
+    const rows = [];
+    const days = attendanceGrid[selectedId]?.days || {};
+    const start = new Date(from + 'T00:00:00Z');
+    const end = new Date(to + 'T00:00:00Z');
+    for (let d = new Date(start); d <= end; d.setUTCDate(d.getUTCDate() + 1)) {
+      const dstr = d.toISOString().slice(0, 10);
+      const rec = days[dstr];
+      const st = rec?.status || '';
+      const inT = rec?.check_in_time || (st === 'present' || st === 'half_day' ? (salonSettings.shift_start || '10:00') : '');
+      const outT = rec?.check_out_time || (st === 'present' ? (salonSettings.shift_end || '20:00') : '');
+      rows.push({
+        date: dstr,
+        in: inT,
+        out: outT,
+        status: st === 'half_day' ? 'H' : st === 'absent' ? 'A' : st === 'holiday' ? 'HO' : st === 'leave' || st === 'on_leave' ? 'L' : st === 'present' ? 'P' : '',
+        sel: false,
+      });
+    }
+    setAttRows(rows);
+  };
+
+  const attToggleAll = () => {
+    const all = attRows.every((r) => r.sel);
+    setAttRows(attRows.map((r) => ({ ...r, sel: !all })));
+  };
+  const attToggleRow = (i) => setAttRows(attRows.map((r, j) => (j === i ? { ...r, sel: !r.sel } : r)));
+  const bulkStatus = (code) => {
+    const anySel = attRows.some((r) => r.sel);
+    setAttRows(attRows.map((r) => ((anySel ? r.sel : true) ? { ...r, status: code } : r)));
+  };
+  const bulkTime = (inV, outV) => {
+    const anySel = attRows.some((r) => r.sel);
+    setAttRows(attRows.map((r) => ((anySel ? r.sel : true) ? { ...r, in: inV, out: outV } : r)));
+  };
+  const setRow = (i, patch) => setAttRows(attRows.map((r, j) => (j === i ? { ...r, ...patch } : r)));
+
+  const saveAttendance = async () => {
+    if (!canAttendance || !selected) return;
+    if (attRows.length === 0) return toast.error('Load dates first');
+    setAttBusy(true);
+    const statusMap = { P: 'present', A: 'absent', H: 'half_day', HO: 'holiday', L: 'on_leave' };
+    let ok = 0;
+    let fail = 0;
+    // Sequential to avoid overwhelming the backend
+    for (const row of attRows) {
+      try {
+        if (!row.status) {
+          await axios.delete(`${API}/salons/${salonId}/staff-attendance/override/${selectedId}/${row.date}`, {
+            headers: getAuthHeaders?.() || {},
+          });
+        } else {
+          await axios.put(
+            `${API}/salons/${salonId}/staff-attendance/override/${selectedId}/${row.date}`,
+            { status: statusMap[row.status] || row.status.toLowerCase() },
+            { headers: getAuthHeaders?.() || {} },
+          );
+        }
+        ok += 1;
+      } catch (_) { fail += 1; }
+    }
+    setAttBusy(false);
+    if (fail === 0) toast.success(`Saved ${ok} day${ok === 1 ? '' : 's'}`);
+    else toast.error(`Saved ${ok}, ${fail} failed`);
+    setAttOpen(false);
+    // Refresh grid + summary
+    setAttMonth((m) => m);
+    // Trigger re-fetch
+    const month = attRows[0]?.date.slice(0, 7) || attMonth;
+    setAttMonth(month);
+  };
+
+  // ============ Salary drawer helpers ============
+  const bindSalary = async (month) => {
+    if (!selected || !canSalaryView) return;
+    try {
+      const res = await axios.get(
+        `${API}/salons/${salonId}/staff-salary/month/${month}?barber_id=${selectedId}`,
+      );
+      const r = (res.data?.barbers || []).find((x) => x.barber_id === selectedId) || res.data;
+      const record = r?.salary || r || null;
+      setSalRecord(record);
+      setSalBase(Number(record?.calculated_salary ?? record?.base_salary ?? selected.compensation ?? 0));
+      setSalInc(Number(record?.incentive_amount ?? 0));
+      setSalDed(Number(record?.lop_deduction ?? 0));
+      setSalAdv(Number(record?.advance_deducted ?? 0));
+    } catch (err) {
+      // Fallback to profile base
+      setSalRecord(null);
+      setSalBase(Number(selected?.compensation ?? 0));
+      setSalInc(0);
+      setSalDed(0);
+      setSalAdv(0);
+    }
+  };
+
+  const openSalDrawer = async () => {
+    if (!canSalaryPay) return toast.error("You don't have permission");
+    setSalMonth(new Date().toISOString().slice(0, 7));
+    setSalMethod('upi');
+    await bindSalary(new Date().toISOString().slice(0, 7));
+    setSalOpen(true);
+  };
+
+  const changeSalMonth = async (m) => {
+    setSalMonth(m);
+    await bindSalary(m);
+  };
+
+  const salNet = Math.max(0, Number(salBase || 0) + Number(salInc || 0) - Number(salDed || 0) - Number(salAdv || 0));
+
+  const markSalaryPaid = async () => {
+    if (!canSalaryPay || !selected) return;
+    if (salRecord?.is_paid) return toast.error('Already paid for this month');
+    try {
+      await axios.post(
+        `${API}/salons/${salonId}/staff-salary/pay/${selectedId}/${salMonth}`,
+        { payment_method: salMethod, note: `Net ₹${salNet}` },
+        { headers: getAuthHeaders?.() || {} },
+      );
+      toast.success('Salary marked as paid');
+      setSalOpen(false);
+      fetchAll();
+    } catch (err) {
+      toast.error(err?.response?.data?.detail || 'Could not mark as paid');
+    }
+  };
+
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
     if (!q) return staff;
@@ -486,8 +647,8 @@ export default function SalonStaffV3({ salonId, getAuthHeaders }) {
           <div className="payline">
             <div className="pl"><b>{rupee(base + inc)}</b><span>Base {rupee(base)} + incentives {rupee(inc)}</span></div>
             {canSalaryPay && (
-              <button className="btn-primary" onClick={() => toast.info('Salary drawer coming soon — please use Staff Rewards for now')}>
-                <svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg>Mark salary paid
+              <button className="btn-primary" onClick={openSalDrawer} data-testid="staff-mark-salary-btn">
+                <svg viewBox="0 0 24 24"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>Mark salary paid
               </button>
             )}
           </div>
@@ -560,48 +721,6 @@ export default function SalonStaffV3({ salonId, getAuthHeaders }) {
     const M = salonSettings;
     const isCI = M.attendance_method === 'checkinout' || M.attendance_method === 'geo_checkin';
     const att = attendanceSummary[s.id] || { P: 0, A: 0, H: 0, HO: 0, L: 0 };
-    // Build calendar grid for attMonth
-    const [yy, mm] = attMonth.split('-').map((x) => parseInt(x, 10));
-    const first = new Date(Date.UTC(yy, mm - 1, 1));
-    const daysInMonth = new Date(Date.UTC(yy, mm, 0)).getUTCDate();
-    // Sunday=0 shifted so Mon=0 (India)
-    const dowIdx = (first.getUTCDay() + 6) % 7; // 0..6, Mon start
-    const gridDays = attendanceGrid[s.id]?.days || {};
-    const today = new Date().toISOString().slice(0, 10);
-    const cells = [];
-    for (let i = 0; i < dowIdx; i += 1) cells.push({ empty: true });
-    for (let d = 1; d <= daysInMonth; d += 1) {
-      const dd = String(d).padStart(2, '0');
-      const dateStr = `${attMonth}-${dd}`;
-      const rec = gridDays[dateStr];
-      cells.push({ date: dateStr, d, status: rec?.status || null, isToday: dateStr === today, isFuture: dateStr > today });
-    }
-    while (cells.length % 7 !== 0) cells.push({ empty: true });
-
-    const monthLabel = first.toLocaleString('en-IN', { month: 'long', year: 'numeric', timeZone: 'UTC' });
-    const nowMonth = new Date().toISOString().slice(0, 7);
-    const canGoNext = attMonth < nowMonth;
-    const goPrev = () => {
-      const py = mm === 1 ? yy - 1 : yy;
-      const pm = mm === 1 ? 12 : mm - 1;
-      setAttMonth(`${py}-${String(pm).padStart(2, '0')}`);
-    };
-    const goNext = () => {
-      if (!canGoNext) return;
-      const ny = mm === 12 ? yy + 1 : yy;
-      const nm = mm === 12 ? 1 : mm + 1;
-      setAttMonth(`${ny}-${String(nm).padStart(2, '0')}`);
-    };
-
-    const shortTag = (st) => {
-      if (st === 'present') return 'P';
-      if (st === 'half_day') return 'H';
-      if (st === 'absent') return 'A';
-      if (st === 'holiday') return 'HO';
-      if (st === 'leave' || st === 'on_leave') return 'L';
-      return '';
-    };
-
     return (
       <>
         <div className="method-note">
@@ -624,60 +743,12 @@ export default function SalonStaffV3({ salonId, getAuthHeaders }) {
             </div>
           </>
         )}
-
-        <div className="att-cal-head">
-          <div className="mm">
-            <button type="button" onClick={goPrev} aria-label="Previous month" data-testid="att-prev-month">
-              <svg viewBox="0 0 24 24"><polyline points="15 18 9 12 15 6"/></svg>
-            </button>
-            <b>{monthLabel}</b>
-            <button type="button" onClick={goNext} disabled={!canGoNext} aria-label="Next month" data-testid="att-next-month">
-              <svg viewBox="0 0 24 24"><polyline points="9 18 15 12 9 6"/></svg>
-            </button>
-          </div>
-          <div className="att-legend">
-            <span className="lg"><span className="sw" style={{ background: 'var(--green)' }} />Present</span>
-            <span className="lg"><span className="sw" style={{ background: 'var(--amber)' }} />Half-day</span>
-            <span className="lg"><span className="sw" style={{ background: 'var(--red)' }} />Absent</span>
-            <span className="lg"><span className="sw" style={{ background: 'var(--sky)' }} />Holiday</span>
-            <span className="lg"><span className="sw" style={{ background: 'var(--violet)' }} />Leave</span>
-          </div>
+        <div className="secttl" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          <span>This month</span>
+          <button className="btn-primary" style={{ padding: '9px 14px' }} onClick={openAttDrawer} data-testid="staff-mark-attendance-btn">
+            <svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/><path d="M9 16l2 2 4-4"/></svg>Mark attendance
+          </button>
         </div>
-
-        <div className="cal-grid">
-          {['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map((d) => (
-            <div key={d} className="cal-dow">{d}</div>
-          ))}
-          {cells.map((c, i) => {
-            if (c.empty) return <div key={`e${i}`} />;
-            const disabled = c.isFuture;
-            const cls = [
-              'cal-cell',
-              c.status ? `st-${c.status}` : '',
-              c.isToday ? 'today' : '',
-              disabled ? 'disabled' : '',
-            ].filter(Boolean).join(' ');
-            return (
-              <div
-                key={c.date}
-                className={cls}
-                onClick={() => !disabled && cycleAttendance(c.date)}
-                title={disabled ? 'Future date' : 'Click to cycle: Present → Half-day → Absent → Holiday → Leave → Clear'}
-                data-testid={`att-cell-${c.date}`}
-              >
-                <span className="dnum">{c.d}</span>
-                {c.status && <span className="stag">{shortTag(c.status)}</span>}
-              </div>
-            );
-          })}
-        </div>
-
-        <p className="cal-hint">
-          <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></svg>
-          Click any date to cycle attendance. Salary-locked months are read-only.
-        </p>
-
-        <div className="secttl" style={{ marginTop: 18 }}>This month</div>
         <div className="att-summary">
           <div className="att-s"><b style={{ color: 'var(--green)' }}>{att.P}</b><span>Present</span></div>
           <div className="att-s"><b style={{ color: 'var(--red)' }}>{att.A}</b><span>Absent</span></div>
@@ -948,10 +1019,174 @@ export default function SalonStaffV3({ salonId, getAuthHeaders }) {
         {renderDetailPane()}
       </div>
 
+      {/* Mark Attendance drawer */}
+      <div className={`staffv3-ov ${attOpen ? 'open' : ''}`} onClick={() => !attBusy && setAttOpen(false)} />
+      <aside className={`staffv3-drawer wide ${attOpen ? 'open' : ''}`}>
+        <div className="dh">
+          <div className="tt">
+            <div className="ic">
+              <svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/><path d="M9 16l2 2 4-4"/></svg>
+            </div>
+            <div>
+              <h3>Mark Attendance {selected ? `— ${selected.name}` : ''}</h3>
+              <p>Select dates, then mark or bulk-apply</p>
+            </div>
+          </div>
+          <button className="close" onClick={() => setAttOpen(false)} disabled={attBusy}>
+            <svg viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+          </button>
+        </div>
+        <div className="db-scroll">
+          <div className="range-row">
+            <div className="field">
+              <label>From</label>
+              <input type="date" value={attFrom} max={attTo || undefined} onChange={(e) => setAttFrom(e.target.value)} data-testid="att-drawer-from" />
+            </div>
+            <div className="field">
+              <label>To</label>
+              <input type="date" value={attTo} min={attFrom || undefined} max={new Date().toISOString().slice(0, 10)} onChange={(e) => setAttTo(e.target.value)} data-testid="att-drawer-to" />
+            </div>
+            <button className="btn-ghost" onClick={() => buildAttRows()} data-testid="att-drawer-load">
+              <svg viewBox="0 0 24 24"><path d="M23 4v6h-6"/><path d="M1 20v-6h6"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>Load dates
+            </button>
+          </div>
+          {attRows.length > 0 && (
+            <div className="bulkbar">
+              <span className="bt">{attRows.filter((r) => r.sel).length || attRows.length} {attRows.some((r) => r.sel) ? 'selected' : 'all'}</span>
+              <button className="btn-ghost" onClick={() => bulkStatus('P')} data-testid="bulk-present">Present</button>
+              <button className="btn-ghost" onClick={() => bulkStatus('A')} data-testid="bulk-absent">Absent</button>
+              <button className="btn-ghost" onClick={() => bulkStatus('H')} data-testid="bulk-halfday">Half-day</button>
+              <button className="btn-ghost" onClick={() => bulkStatus('HO')} data-testid="bulk-holiday">Holiday</button>
+              <button className="btn-ghost" onClick={() => bulkStatus('L')} data-testid="bulk-leave">Leave</button>
+              <button className="btn-ghost" onClick={() => bulkStatus('')} data-testid="bulk-clear">Clear</button>
+            </div>
+          )}
+          {attRows.length > 0 && (
+            <table className="att-table">
+              <thead>
+                <tr>
+                  <th style={{ width: 34 }}>
+                    <div className={`cbx ${attRows.every((r) => r.sel) ? 'on' : ''}`} onClick={attToggleAll}>
+                      <svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg>
+                    </div>
+                  </th>
+                  <th>Date</th>
+                  <th style={{ width: 100 }}>In</th>
+                  <th style={{ width: 100 }}>Out</th>
+                  <th style={{ width: 90 }}>Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {attRows.map((r, i) => (
+                  <tr key={r.date}>
+                    <td>
+                      <div className={`cbx ${r.sel ? 'on' : ''}`} onClick={() => attToggleRow(i)}>
+                        <svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg>
+                      </div>
+                    </td>
+                    <td>{r.date}</td>
+                    <td><input type="time" className="time-in" value={r.in} disabled={!['P', 'H'].includes(r.status)} onChange={(e) => setRow(i, { in: e.target.value })} /></td>
+                    <td><input type="time" className="time-in" value={r.out} disabled={r.status !== 'P'} onChange={(e) => setRow(i, { out: e.target.value })} /></td>
+                    <td>
+                      {r.status ? (
+                        <span className={`st-pill st-${r.status}`}>{r.status}</span>
+                      ) : (
+                        <span className="st-pill st-">—</span>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+          {attRows.length === 0 && (
+            <div style={{ padding: '30px 10px', textAlign: 'center', color: '#8A7F90', fontSize: 12.5 }}>
+              Pick a date range and click <b>Load dates</b> to start marking attendance.
+            </div>
+          )}
+        </div>
+        <div className="df">
+          <span style={{ fontSize: 12, color: '#8A7F90', marginRight: 'auto' }}>
+            Method: <b>{salonSettings.attendance_method === 'checkinout' ? 'Check-in / Check-out' : 'Service completion'}</b>
+          </span>
+          <button className="btn-ghost" onClick={() => setAttOpen(false)} disabled={attBusy}>Cancel</button>
+          <button className="btn-primary" onClick={saveAttendance} disabled={attBusy || attRows.length === 0} data-testid="att-drawer-save">
+            <svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg>{attBusy ? 'Saving…' : 'Save attendance'}
+          </button>
+        </div>
+      </aside>
+
+      {/* Mark Salary Paid drawer */}
+      <div className={`staffv3-ov ${salOpen ? 'open' : ''}`} onClick={() => setSalOpen(false)} />
+      <aside className={`staffv3-drawer ${salOpen ? 'open' : ''}`}>
+        <div className="dh">
+          <div className="tt">
+            <div className="ic">
+              <svg viewBox="0 0 24 24"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
+            </div>
+            <div>
+              <h3>Mark Salary Paid {selected ? `— ${selected.name}` : ''}</h3>
+              <p>Payroll for this cycle</p>
+            </div>
+          </div>
+          <button className="close" onClick={() => setSalOpen(false)}>
+            <svg viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+          </button>
+        </div>
+        <div className="db">
+          <div className="grid2">
+            <div className="field">
+              <label>Month</label>
+              <input type="month" value={salMonth} max={new Date().toISOString().slice(0, 7)} onChange={(e) => changeSalMonth(e.target.value)} data-testid="sal-drawer-month" />
+            </div>
+            <div className="field">
+              <label>Payment method</label>
+              <select value={salMethod} onChange={(e) => setSalMethod(e.target.value)} data-testid="sal-drawer-method">
+                <option value="upi">UPI</option>
+                <option value="bank">Bank transfer</option>
+                <option value="cash">Cash</option>
+              </select>
+            </div>
+            <div className="field">
+              <label>Base salary (₹)</label>
+              <input type="number" value={salBase} onChange={(e) => setSalBase(e.target.value)} />
+            </div>
+            <div className="field">
+              <label>Incentives (₹)</label>
+              <input type="number" value={salInc} onChange={(e) => setSalInc(e.target.value)} />
+            </div>
+            <div className="field">
+              <label>Deductions (₹)</label>
+              <input type="number" value={salDed} onChange={(e) => setSalDed(e.target.value)} />
+            </div>
+            <div className="field">
+              <label>Advance adjusted (₹)</label>
+              <input type="number" value={salAdv} onChange={(e) => setSalAdv(e.target.value)} />
+            </div>
+          </div>
+          <div className="payline">
+            <div className="pl"><span>Net payable</span><b data-testid="sal-net">{rupee(salNet)}</b></div>
+            {salRecord?.is_paid && (
+              <span style={{ fontSize: 11, fontWeight: 800, color: 'var(--green)', textTransform: 'uppercase', letterSpacing: '.4px' }}>
+                Already paid
+              </span>
+            )}
+          </div>
+          <p style={{ fontSize: 11.5, color: '#8A7F90', marginTop: 10, lineHeight: 1.5 }}>
+            Values above default to the calculated salary for {salMonth}. Editing base / incentives here does not change the ledger — deductions & advance are stored on the payment receipt.
+          </p>
+        </div>
+        <div className="df" style={{ justifyContent: 'flex-end' }}>
+          <button className="btn-ghost" onClick={() => setSalOpen(false)}>Cancel</button>
+          <button className="btn-primary" onClick={markSalaryPaid} disabled={salRecord?.is_paid} data-testid="sal-drawer-save">
+            <svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg>Mark as paid
+          </button>
+        </div>
+      </aside>
+
       {/* Add Staff drawer */}
       <div className={`staffv3-ov ${addOpen ? 'open' : ''}`} onClick={() => setAddOpen(false)} />
-      <aside className={`staffv3-drawer ${addOpen ? 'open' : ''}`}>
-        <div className="dh">
+      <aside className={`staffv3-drawer ${addOpen ? 'open' : ''}`}>        <div className="dh">
           <div className="tt">
             <div className="ic"><svg viewBox="0 0 24 24"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><line x1="19" y1="8" x2="19" y2="14"/><line x1="22" y1="11" x2="16" y2="11"/></svg></div>
             <div><h3>Add Staff</h3><p>Mobile number is the login ID</p></div>

@@ -154,6 +154,40 @@ export const STAFF_V3_CSS = `
 .staffv3-drawer .btn-primary:hover{background:#A82D86}
 .staffv3-drawer .btn-primary svg{width:15px;height:15px;fill:none;stroke:currentColor;stroke-width:2}
 .staffv3-drawer .btn-ghost{border:1px solid #EFE8EF;color:#4A4150;font-size:13px;font-weight:600;padding:10px 14px;border-radius:11px;background:#fff;cursor:pointer}
+/* Attendance drawer */
+.staffv3-drawer .range-row{display:grid;grid-template-columns:1fr 1fr auto;gap:10px;align-items:end;margin-bottom:14px}
+.staffv3-drawer .range-row .field{gap:5px}
+.staffv3-drawer .range-row .field label{font-size:11.5px}
+.staffv3-drawer .range-row .field input{padding:9px 11px;font-size:13px}
+.staffv3-drawer .range-row .btn-ghost{padding:9px 12px;height:37px;background:#fff;border:1px solid #EFE8EF;color:#4A4150;font-size:12.5px;font-weight:600;border-radius:10px;display:inline-flex;align-items:center;gap:6px;cursor:pointer}
+.staffv3-drawer .range-row .btn-ghost svg{width:14px;height:14px;fill:none;stroke:currentColor;stroke-width:2}
+.staffv3-drawer .bulkbar{display:flex;flex-wrap:wrap;align-items:center;gap:6px;background:#FCEAF5;border:1px solid #F6D4EA;border-radius:11px;padding:9px 10px;margin-bottom:10px}
+.staffv3-drawer .bulkbar .bt{font-size:11.5px;font-weight:700;color:#A82D86;margin-right:4px}
+.staffv3-drawer .bulkbar .btn-ghost{padding:6px 10px !important;font-size:11.5px;background:#fff;border:1px solid #F6D4EA;color:#A82D86;font-weight:700;border-radius:8px;cursor:pointer}
+.staffv3-drawer .bulkbar .btn-ghost:hover{background:#F6D4EA}
+.staffv3-drawer .bulkbar .time-in{border:1px solid #EFE8EF;border-radius:7px;padding:4px 7px;font-size:11.5px;width:82px;background:#fff}
+.staffv3-drawer .att-table{width:100%;border-collapse:collapse}
+.staffv3-drawer .att-table th{font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;color:#A99FB0;text-align:left;padding:0 6px 8px;background:#FDFAFC;position:sticky;top:0;z-index:1}
+.staffv3-drawer .att-table td{padding:7px 6px;border-top:1px solid #F6F1F6;vertical-align:middle;font-size:12.5px;color:#241E27}
+.staffv3-drawer .att-table td .cbx{width:16px;height:16px;border-radius:5px;border:2px solid #EFE8EF;display:grid;place-items:center;cursor:pointer}
+.staffv3-drawer .att-table td .cbx.on{background:#C6389E;border-color:#C6389E}
+.staffv3-drawer .att-table td .cbx svg{width:10px;height:10px;fill:none;stroke:#fff;stroke-width:3;opacity:0}
+.staffv3-drawer .att-table td .cbx.on svg{opacity:1}
+.staffv3-drawer .att-table td .time-in{border:1px solid #EFE8EF;border-radius:7px;padding:4px 7px;font-size:11.5px;width:82px;background:#fff}
+.staffv3-drawer .att-table td .time-in:disabled{background:#F6F1F6;color:#A99FB0}
+.staffv3-drawer .att-table .st-pill{font-size:10.5px;font-weight:800;padding:2px 8px;border-radius:20px;text-transform:uppercase;letter-spacing:.3px}
+.staffv3-drawer .att-table .st-P{background:#E7F6ED;color:#2FA96A}
+.staffv3-drawer .att-table .st-A{background:#FDECEC;color:#E5484D}
+.staffv3-drawer .att-table .st-H{background:#FDF3E4;color:#E8952B}
+.staffv3-drawer .att-table .st-HO{background:#E9F2FD;color:#3E93E8}
+.staffv3-drawer .att-table .st-L{background:#F0E9FB;color:#8A5CD1}
+.staffv3-drawer .att-table .st-{background:#F6F1F6;color:#8A7F90}
+.staffv3-drawer.wide{width:min(720px,95vw)}
+.staffv3-drawer .db-scroll{flex:1;overflow:auto;padding:18px 22px}
+.staffv3-drawer .payline{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:12px 15px;background:#FCEAF5;border:1px solid #F6D4EA;border-radius:12px;margin-top:16px}
+.staffv3-drawer .payline .pl{display:flex;flex-direction:column}
+.staffv3-drawer .payline .pl span{font-size:11.5px;color:#A82D86;opacity:.85}
+.staffv3-drawer .payline .pl b{font-family:'Plus Jakarta Sans';font-size:17px;font-weight:800;color:#A82D86}
 .staffv3 .rbac-lock{padding:32px;text-align:center;color:var(--muted);font-size:14px}
 .staffv3 .rbac-lock svg{width:44px;height:44px;color:var(--muted-2);margin:0 auto 10px;fill:none;stroke:currentColor;stroke-width:2}
 /* Monthly attendance calendar */

@@ -109,6 +109,7 @@ class SalonCreate(BaseModel):
     gender_tag: str = "Unisex"  # Unisex/Men/Women
 
 class SalonUpdate(BaseModel):
+    model_config = ConfigDict(extra="allow")
     salon_name: Optional[str] = None
     owner_name: Optional[str] = None
     phone: Optional[str] = None
@@ -168,7 +169,7 @@ class ManualToggle(BaseModel):
     overridden_at: Optional[str] = None  # ISO timestamp
 
 class Salon(BaseModel):
-    model_config = ConfigDict(extra="ignore")
+    model_config = ConfigDict(extra="allow")
     id: str
     salon_name: str
     owner_name: str

@@ -6958,3 +6958,109 @@ agent_communication:
       Delivered all three follow-up features. No backend changes needed — the required
       endpoints (attendance override, document upload/list/delete) already exist.
 
+
+##====================================================================================================
+## FULL DESIGN-MATCH REBUILD OF STAFF & SETTINGS — July 17, 2026 (v2)
+##====================================================================================================
+
+backend:
+  - task: "SalonUpdate + Salon models allow extra pass-through fields for the settings V3 payload"
+    implemented: true
+    working: true
+    file: "/app/backend/server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: true
+        agent: "main"
+        comment: |
+          Added `model_config = ConfigDict(extra="allow")` to both `SalonUpdate` and
+          `Salon` so PUT /api/salons/{salon_id} accepts the new inline settings keys
+          (shift_start, otp_login, counter_cash, slot_duration_min, business_hours,
+          notif_*, gateway_test_mode, etc.) and returns them back. Verified with a
+          curl PUT + a follow-up GET — all extras persist and round-trip cleanly.
+
+frontend:
+  - task: "Staff attendance drawer (design-exact) replaces calendar grid"
+    implemented: true
+    working: "NA"
+    file: "/app/frontend/src/pages/salon/redesign/SalonStaffV3.js"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: "NA"
+        agent: "main"
+        comment: |
+          Removed the standalone monthly calendar grid (user feedback: "not required"). The
+          Attendance sub-tab now matches the mock exactly:
+            • Rules cards (shift, grace period, half-day, full-day min, auto check-out,
+              overtime, self check-in, geo-fence, weekly off) — read-only, sourced from
+              Settings → Staff & attendance
+            • "This month" summary tiles (P/A/H/HO/L)
+            • "Mark attendance" primary button that opens the wide drawer
+          The Mark Attendance drawer contains: From/To date pickers + Load-dates button,
+          a bulk bar (Present / Absent / Half-day / Holiday / Leave / Clear) that applies
+          to the current selection (or all rows when nothing is selected), and a table
+          with checkbox + date + In-time + Out-time + status pill per row. Save posts
+          each row via PUT/DELETE /staff-attendance/override.
+
+  - task: "Mark Salary Paid drawer wired to /staff-salary/pay"
+    implemented: true
+    working: "NA"
+    file: "/app/frontend/src/pages/salon/redesign/SalonStaffV3.js"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: "NA"
+        agent: "main"
+        comment: |
+          Payroll drawer per mock: Month picker (defaults to current, loads calculated
+          salary via GET /staff-salary/month/{month}), Payment method (UPI/Bank/Cash),
+          Base salary, Incentives, Deductions, Advance adjusted, and a live Net-payable
+          pink panel (max(0, base + inc - ded - adv)). Save posts POST /staff-salary/pay.
+          Detects existing paid record and disables the button with an "Already paid" tag.
+
+  - task: "Settings page fully inlined per mock (7 groups × sub-sub-sections)"
+    implemented: true
+    working: "NA"
+    file: "/app/frontend/src/pages/salon/redesign/SalonSettingsV3.js"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: "NA"
+        agent: "main"
+        comment: |
+          Full rewrite of the gold Settings page: every sub-section from the mock is
+          inlined instead of pointing at existing tabs. Sections cover:
+            • Business profile → Salon details (with logo uploader), Branches, Business
+              hours (7-day toggle + open/close time inputs)
+            • Staff & attendance → Attendance method (radio cards), Check-in/out rules
+              (shift & timing + 5 automation toggles), Leave & holidays, Payroll
+            • Roles & access → Login identity (OTP / PIN / auto-logout toggles),
+              Roles & permissions (embeds existing StaffAccessManagement)
+            • Services & pricing → Catalogue, Per-barber rules, Taxes & invoicing (GSTIN,
+              rate, prefix, next number, footer, tax-inclusive & round-off toggles)
+            • Booking & queue → Online (3 toggles + 4 selects), Walk-in queue
+            • Payments & wallet → Gateway status, Counter methods (5 toggles), Marketing
+              wallet balance
+            • Notifications → Guest (5 toggles), Staff & owner (4 toggles)
+          All fields are backed by the salon record via PUT /api/salons/{salon_id};
+          form.name is mapped to salon_name and form.attendance_method to attendance_mode
+          on save. RBAC still gates every sub-section — locked ones are hidden from the
+          nav and locked ones the user opens directly show the pink RBAC lock card.
+          Search-in-nav from the previous cycle is preserved and continues to work.
+
+agent_communication:
+  - agent: main
+    message: |
+      Both pages are now 1-to-1 with the attached mocks. The calendar grid I built
+      earlier is gone (user asked to remove it) and the two drawers (Mark Attendance,
+      Mark Salary Paid) are in — same colours and layout as the design. Every
+      Settings sub-section is inlined with real form fields, saving via PUT
+      /api/salons/{salon_id}. The only backend change required was allowing extra
+      pass-through fields on SalonUpdate + Salon, which is safe & backwards-compatible.
+

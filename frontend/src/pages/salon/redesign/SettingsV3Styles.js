@@ -93,6 +93,12 @@ export const SETTINGS_V3_CSS = `
 .setv3 .note-box{display:flex;align-items:flex-start;gap:9px;background:var(--sky-bg);border:1px solid #CFE4FA;border-radius:11px;padding:11px 13px;font-size:12px;color:var(--ink-soft)}
 .setv3 .note-box svg{width:15px;height:15px;color:var(--sky);fill:none;stroke:currentColor;stroke-width:2;flex:none;margin-top:2px}
 .setv3 .save-row{display:flex;justify-content:flex-end;margin-top:6px}
+.setv3 .logo-up{display:flex;align-items:center;gap:14px;padding:14px;background:var(--primary-050);border:1px solid var(--primary-100);border-radius:12px;margin-bottom:16px}
+.setv3 .logo-up .logo{width:64px;height:64px;border-radius:14px;background:#fff;border:1px dashed var(--primary-100);display:grid;place-items:center;color:var(--primary);flex:none}
+.setv3 .logo-up .logo svg{width:26px;height:26px;fill:none;stroke:currentColor;stroke-width:2}
+.setv3 .logo-up p{font-size:11.5px;color:var(--muted);margin-top:2px}
+.setv3 .block h4.row-btn{display:flex;justify-content:space-between;align-items:center}
+.setv3 .save-row{display:flex;justify-content:flex-end;margin-top:6px}
 .setv3 .method-pick{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin:14px 0}
 .setv3 .method{border:1.5px solid var(--line);border-radius:12px;padding:14px;text-align:left;transition:.15s;position:relative;cursor:pointer;background:#fff}
 .setv3 .method:hover{border-color:var(--primary-100)}
