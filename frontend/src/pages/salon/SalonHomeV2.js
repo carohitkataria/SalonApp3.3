@@ -47,8 +47,7 @@ const RAIL_ITEMS = [
   { id: 'marketplace',     label: 'Shop',      route: '/salon/marketplace' },
   { id: 'staff',           label: 'Staff',     route: '/salon/dashboard?tab=staff' },
   { id: 'services',        label: 'Services',  route: '/salon/dashboard?tab=services' },
-  { id: 'financials',      label: 'Finance',   route: '/salon/dashboard?tab=financials' },
-  { id: 'analytics',       label: 'Analytics', route: '/salon/dashboard?tab=analytics' },
+  { id: 'reports',         label: 'Reports',   route: '/salon/dashboard?tab=reports' },
   { id: 'salon',           label: 'Settings',  route: '/salon/dashboard?tab=salon' },
 ];
 
@@ -377,9 +376,8 @@ export default function SalonHomeV2({ salon, salonId, tokens = [], barbers = [],
               {it.id === 'queue' && <I.cal />}
               {it.id === 'staff' && <I.users />}
               {it.id === 'services' && <I.scissors />}
-              {it.id === 'financials' && <I.rupee />}
+              {it.id === 'reports' && <I.chart />}
               {it.id === 'customer-master' && <I.guestAdd />}
-              {it.id === 'analytics' && <I.chart />}
               {it.id === 'marketplace' && <I.cart />}
               {it.id === 'inventory' && <I.tag />}
               {it.id === 'marketing' && <I.send />}

@@ -9,7 +9,7 @@ import json
 from datetime import datetime
 import random
 
-BASE_URL = "https://shop-order-merge.preview.emergentagent.com"
+BASE_URL = "https://reporting-hub-19.preview.emergentagent.com"
 ADMIN_IDENTIFIER = "admin"
 ADMIN_PASSWORD = "salon123"
 

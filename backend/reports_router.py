@@ -204,6 +204,24 @@ def init_reports_router(*, db, get_current_salon_user, has_module_permission,
             out.append((nm, float(s.get("price") or each)))
         return out
 
+    def _elapsed_fraction(view: str, start: str, end: str, today_str: str) -> float:
+        """Fraction (0..1) of the window that has already elapsed as of today.
+        For closed past windows returns 1.0; for future windows returns a small
+        floor (0.05) so we never divide by zero and never over-project."""
+        try:
+            s = _parse_date(start).date()
+            e = _parse_date(end).date()
+            t = _parse_date(today_str).date()
+        except Exception:
+            return 1.0
+        if t > e:
+            return 1.0
+        if t < s:
+            return 0.05
+        days_elapsed = (t - s).days + 1
+        days_total = (e - s).days + 1
+        return max(0.05, min(1.0, days_elapsed / max(1, days_total)))
+
     async def _compute_snapshot(salon_id: str, view: str, start: str, end: str,
                                 branch_id: Optional[str],
                                 prefs_cards: List[str], prefs_order: List[str],
@@ -266,12 +284,17 @@ def init_reports_router(*, db, get_current_salon_user, has_module_permission,
             if svc_ids:
                 async for s in db.services.find({"id": {"$in": list(svc_ids)}},
                                                 {"_id": 0, "id": 1, "sub_category": 1, "category": 1}):
-                    svc_cat_map[s["id"]] = s.get("sub_category") or s.get("category") or "Services"
+                    # Guide: prefer category (Hair/Spa/Beard/Facial), fallback to sub_category
+                    svc_cat_map[s["id"]] = s.get("category") or s.get("sub_category") or "Services"
             for t in completed:
                 assigns = t.get("service_assignments") or []
                 if assigns:
                     for a in assigns:
-                        cat = svc_cat_map.get(a.get("service_id"), "Services")
+                        # Product/retail lines get their own bucket per guide
+                        if a.get("is_retail") or a.get("kind") == "product" or a.get("product_id"):
+                            cat = "Retail"
+                        else:
+                            cat = svc_cat_map.get(a.get("service_id"), "Services")
                         by_cat[cat] = by_cat.get(cat, 0) + float(a.get("line_total") or a.get("price") or 0)
                 else:
                     by_cat["Services"] = by_cat.get("Services", 0) + float(t.get("total_amount") or 0)
@@ -491,19 +514,27 @@ def init_reports_router(*, db, get_current_salon_user, has_module_permission,
                                               "data": [["Manual discount", round(disc, 2)]]}}
 
         # ---- Build cards in preferred order ----
+        # Ratio/stock metrics do NOT get elapsed-fraction projection
+        RATIO_STOCK = {"utilization", "noshow", "rebooking", "feedback",
+                       "avgticket", "membership"}
+        elapsed = _elapsed_fraction(view, start, end, today_str)
         cards_out = []
         for cid in prefs_order:
             if cid not in prefs_cards or cid not in results:
                 continue
             r = results[cid]
             target = await _get_target(salon_id, cid, view, branch_id)
-            if target is None:
-                target = r["total"] * 1.1 if cid not in LOWER_BETTER else max(1, r["total"])
-            proj = r["total"] if cid in STOCK_CARDS or cid == "feedback" or cid == "utilization" else r["total"]
+            # Projection — flow metrics use elapsed-fraction; ratios/stock don't project.
+            if cid in RATIO_STOCK or cid in STOCK_CARDS:
+                proj = r["total"]
+            else:
+                proj = round(r["total"] / max(elapsed, 0.05), 2)
             cards_out.append({
                 "id": cid, "label": CARD_LABELS.get(cid, cid),
                 "money": cid in MONEY_CARDS,
-                "total": r["total"], "projected": proj, "target": round(target, 2),
+                "total": r["total"], "projected": proj,
+                # target may be None → resolved after we know previous
+                "target": target,
                 "trend": None, "up": None,
                 "chart": r["chart"],
                 "lower_is_better": cid in LOWER_BETTER,
@@ -533,14 +564,23 @@ def init_reports_router(*, db, get_current_salon_user, has_module_permission,
         cards = await _compute_snapshot(salon_id, view, start, end, branch_id,
                                         cards_on, order, today_str)
 
-        if compare:
-            prev = await _compute_snapshot(salon_id, view, pstart, pend, branch_id,
-                                           cards_on, order, today_str)
-            prev_by_id = {c["id"]: c for c in prev}
-            for c in cards:
-                pv = prev_by_id.get(c["id"], {}).get("total") or 0
-                if pv > 0:
-                    delta = ((c["total"] - pv) / pv) * 100
+        # Compare / target resolution — we compute previous either way so we can
+        # (a) use its actual × 1.1 as a target default and (b) build trend when
+        # compare=true.
+        prev = await _compute_snapshot(salon_id, view, pstart, pend, branch_id,
+                                       cards_on, order, today_str)
+        prev_by_id = {c["id"]: c for c in prev}
+        for c in cards:
+            pv_total = prev_by_id.get(c["id"], {}).get("total") or 0
+            # Target: user-set > previous × 1.1 > current × 1.1 (bootstrap first-run)
+            if c["target"] is None:
+                if pv_total > 0:
+                    c["target"] = round(pv_total * 1.1, 2)
+                else:
+                    c["target"] = round(max(c["total"] * 1.1, 0), 2) if c["total"] else 0
+            if compare:
+                if pv_total > 0:
+                    delta = ((c["total"] - pv_total) / pv_total) * 100
                     c["trend"] = f"{'+' if delta >= 0 else ''}{round(delta)}%"
                     # invert semantics for lower_is_better
                     if c.get("lower_is_better"):
@@ -608,9 +648,11 @@ def init_reports_router(*, db, get_current_salon_user, has_module_permission,
             by_staff.setdefault(bn, {"revenue": 0, "bookings": 0})
             by_staff[bn]["revenue"] += float(t.get("total_amount") or 0)
             by_staff[bn]["bookings"] += 1
-        by_staff_rows = [{"name": k, "revenue": round(v["revenue"], 2),
-                          "bookings": v["bookings"]}
-                         for k, v in by_staff.items()]
+        by_staff_rows = sorted(
+            [{"name": k, "revenue": round(v["revenue"], 2),
+              "bookings": v["bookings"]}
+             for k, v in by_staff.items()],
+            key=lambda r: -r["revenue"])
 
         # by service
         by_svc: Dict[str, Dict[str, Any]] = {}
@@ -620,8 +662,10 @@ def init_reports_router(*, db, get_current_salon_user, has_module_permission,
                 by_svc.setdefault(nm, {"revenue": 0, "count": 0})
                 by_svc[nm]["revenue"] += float(a.get("line_total") or a.get("price") or 0)
                 by_svc[nm]["count"] += 1
-        by_svc_rows = [{"name": k, "revenue": round(v["revenue"], 2), "count": v["count"]}
-                       for k, v in by_svc.items()]
+        by_svc_rows = sorted(
+            [{"name": k, "revenue": round(v["revenue"], 2), "count": v["count"]}
+             for k, v in by_svc.items()],
+            key=lambda r: -r["revenue"])
 
         return {"window": {"view": view, "start": start, "end": end},
                 "line": line, "by_staff": by_staff_rows, "by_service": by_svc_rows,

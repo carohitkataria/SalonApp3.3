@@ -18,7 +18,7 @@ import string
 from datetime import datetime, date, timedelta
 
 # Configuration
-BASE_URL = "https://shop-order-merge.preview.emergentagent.com/api"
+BASE_URL = "https://reporting-hub-19.preview.emergentagent.com/api"
 ADMIN_CREDENTIALS = {"identifier": "admin", "password": "salon123"}
 
 # Test state

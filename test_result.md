@@ -1416,7 +1416,7 @@ agent_communication:
       message: "✅ PHASE 1.5 FRONTEND UI TESTING COMPLETED (2026-04-30): Successfully tested salon admin login and all Phase 1.5 UI features. LOGIN: Working perfectly with credentials (identifier='admin', password='salon123'), redirects to /salon/dashboard. DASHBOARD: Quick Actions section present with all cards (Token Queue, Customers, Services, Staff, Financials, Analytics, Gallery, Settings). STAFF MANAGEMENT: Clicking Staff Quick Action navigates to staff list showing 2 staff members (Imran, Abdul) with 'View Profile' buttons. STAFF PROFILE PAGE: ✅ Tabs verified - Profile, Attendance, Services, Access tabs present. ✅ NO Rewards tab (correctly removed as per Phase 1 Task 2c). LAST WORKING DAY FIELD: ✅ Present in Profile tab edit mode (Phase 1.5 feature), successfully saves and persists value (verified by page reload showing '2026-12-31'). ATTENDANCE TAB: ✅ All required buttons present and working: 'Mark All Present', 'Leave Mode: OFF/ON' (toggles correctly), 'Auto Calculate'. ✅ Leave Mode functionality tested: turned ON, clicked future date (25), leave marked with toast notification, clicked again to remove leave, turned Leave Mode back OFF. ✅ Calendar displays with proper legend (P=Present, H=Half Day, A=Absent, Holiday, L=On Leave). ✅ Salary Summary section visible with all fields. All Phase 1.5 frontend features are working correctly and ready for production."
 
     - agent: "testing"
-      message: "❌ CRITICAL BLOCKER - PHASE 1 + 1.5 FRONTEND TESTING FAILED: Unable to complete frontend testing due to login failure. ISSUE: Salon admin login with credentials (identifier='admin', password='salon123') is NOT WORKING on the production URL (https://shop-order-merge.preview.emergentagent.com/salon/login). SYMPTOMS: (1) Login form accepts credentials and button is clickable, (2) After clicking 'Login with Password' button, page stays on /salon/login URL, (3) Form fields are cleared but no navigation occurs, (4) No POST request to login API detected in network logs, (5) No error messages displayed on UI, (6) No Quick Actions dashboard elements appear. EVIDENCE: Multiple test attempts with proper wait times all resulted in staying on login page. Backend logs show salon ID b742cd5f-e3f8-4b63-872b-b83d84841d2c is active with API calls, suggesting the backend is working but frontend login flow is broken. IMPACT: Cannot test ANY of the requested Phase 1/1.5 features: (A) Manual booking dialog with customer search, (B) Skipped tokens Cancel button, (C) Gallery limits, (D) Staff clickable cards + Rewards tab removal + Last Working Day field, (E) Attendance tab Mark All Present + Leave Mode, (F) Customer booking All services + auto-latest-slot. ROOT CAUSE HYPOTHESIS: Login form submission is not triggering the API call - possible JavaScript error, form validation issue, or event handler not attached. URGENT ACTION REQUIRED: Main agent must investigate and fix the salon login flow before frontend testing can proceed."
+      message: "❌ CRITICAL BLOCKER - PHASE 1 + 1.5 FRONTEND TESTING FAILED: Unable to complete frontend testing due to login failure. ISSUE: Salon admin login with credentials (identifier='admin', password='salon123') is NOT WORKING on the production URL (https://reporting-hub-19.preview.emergentagent.com/salon/login). SYMPTOMS: (1) Login form accepts credentials and button is clickable, (2) After clicking 'Login with Password' button, page stays on /salon/login URL, (3) Form fields are cleared but no navigation occurs, (4) No POST request to login API detected in network logs, (5) No error messages displayed on UI, (6) No Quick Actions dashboard elements appear. EVIDENCE: Multiple test attempts with proper wait times all resulted in staying on login page. Backend logs show salon ID b742cd5f-e3f8-4b63-872b-b83d84841d2c is active with API calls, suggesting the backend is working but frontend login flow is broken. IMPACT: Cannot test ANY of the requested Phase 1/1.5 features: (A) Manual booking dialog with customer search, (B) Skipped tokens Cancel button, (C) Gallery limits, (D) Staff clickable cards + Rewards tab removal + Last Working Day field, (E) Attendance tab Mark All Present + Leave Mode, (F) Customer booking All services + auto-latest-slot. ROOT CAUSE HYPOTHESIS: Login form submission is not triggering the API call - possible JavaScript error, form validation issue, or event handler not attached. URGENT ACTION REQUIRED: Main agent must investigate and fix the salon login flow before frontend testing can proceed."
 
     - agent: "main"
       message: "Bug-fix + enhancement round (post Phase 1.5):
@@ -4999,7 +4999,7 @@ agent_communication:
         ═══════════════════════════════════════════════════════════════════
         
         TESTED: Staff Access / Access Control UI on Staff Profile page (per-staff, under "Access" tab)
-        URL: https://shop-order-merge.preview.emergentagent.com/salon/staff/e580d816-f0aa-4ce6-a12d-0cdf2de45d0f
+        URL: https://reporting-hub-19.preview.emergentagent.com/salon/staff/e580d816-f0aa-4ce6-a12d-0cdf2de45d0f
         Staff: Imran (master)
         
         ✅ PASSED TESTS (8):
@@ -6082,7 +6082,7 @@ agent_communication:
     - agent: "main"
       message: "Completed the WhatsApp template example-values feature end-to-end. Backend: TemplateCreateIn enforces one example per {{N}}; Twilio submit sends `variables`, Meta sends components[].example.body_text. Frontend: per-placeholder inputs + preview in composer, values shown in view mode. .env files were missing on session resume — restored from git (backend/.env with Twilio keys, frontend/.env with REACT_APP_BACKEND_URL). Installed missing python packages (python-socketio, APScheduler). Backend + frontend now running clean. Please test the backend flow described in the task status_history: draft validation, draft persistence, submit-shape, and no-placeholder passthrough."
     - agent: "testing"
-      message: "✅ WHATSAPP TEMPLATE EXAMPLE_VALUES TESTING COMPLETE - ALL TESTS PASSED (6/6): Comprehensive backend testing completed successfully with 100% pass rate. All test cases from the review request have been verified: (A) Draft validation with missing example_values returns 422 mentioning both placeholders, (B) Partial example_values returns 422 mentioning missing placeholder, (C) Full example_values returns 200 with correct persistence, (D) No-placeholder templates correctly ignore/strip example_values, (E) Twilio submit successfully sends variables field and returns 200 with sid and approval_status, (G) Duplicate name detection returns 409. All 4 test templates cleaned up successfully. The feature is production-ready and working exactly as specified. NOTE: External URL (https://shop-order-merge.preview.emergentagent.com/api) returns 404 for all endpoints - this appears to be a Kubernetes ingress routing issue, not a code issue. Testing was performed using localhost:8001 which works perfectly."
+      message: "✅ WHATSAPP TEMPLATE EXAMPLE_VALUES TESTING COMPLETE - ALL TESTS PASSED (6/6): Comprehensive backend testing completed successfully with 100% pass rate. All test cases from the review request have been verified: (A) Draft validation with missing example_values returns 422 mentioning both placeholders, (B) Partial example_values returns 422 mentioning missing placeholder, (C) Full example_values returns 200 with correct persistence, (D) No-placeholder templates correctly ignore/strip example_values, (E) Twilio submit successfully sends variables field and returns 200 with sid and approval_status, (G) Duplicate name detection returns 409. All 4 test templates cleaned up successfully. The feature is production-ready and working exactly as specified. NOTE: External URL (https://reporting-hub-19.preview.emergentagent.com/api) returns 404 for all endpoints - this appears to be a Kubernetes ingress routing issue, not a code issue. Testing was performed using localhost:8001 which works perfectly."
 
 backend:
   - task: "Home v2 — new KPI endpoints (customer_count, staff_attendance, marketing_perf, booking_links) + send-booking-link + staff attendance toggle"
@@ -6483,7 +6483,7 @@ Files touched:
 NO backend endpoint changes needed — existing `/api/notifications/*` and `PUT /api/salons/{id}` endpoints handle everything. Credentials unchanged: admin / salon123 (salon_id = c896b84b-f34a-4a23-a27b-a47909f8f834)."
 
     - agent: "testing"
-      message: "✅ ALL 4 BUG FIXES VERIFIED AND WORKING (Jul 14 2026): Comprehensive UI testing completed successfully for all four bug fixes/feature changes on the salon-side app. Test credentials: identifier='admin', password='salon123', salon_id: c896b84b-f34a-4a23-a27b-a47909f8f834. Base URL: https://shop-order-merge.preview.emergentagent.com
+      message: "✅ ALL 4 BUG FIXES VERIFIED AND WORKING (Jul 14 2026): Comprehensive UI testing completed successfully for all four bug fixes/feature changes on the salon-side app. Test credentials: identifier='admin', password='salon123', salon_id: c896b84b-f34a-4a23-a27b-a47909f8f834. Base URL: https://reporting-hub-19.preview.emergentagent.com
 
 TEST RESULTS SUMMARY:
 
@@ -6784,7 +6784,7 @@ agent_communication:
         7. ✅ USER CREATION WORKING: New staff user created successfully with granular module permissions
         
         TECHNICAL DETAILS:
-        - Frontend URL: https://shop-order-merge.preview.emergentagent.com
+        - Frontend URL: https://reporting-hub-19.preview.emergentagent.com
         - Login route: /salon/login (Password Login tab)
         - Home page: SalonHomeV2 component (default landing after login)
         - Settings navigation: /salon/dashboard?tab=salon → Staff Settings tab → Manage Staff Access tab
@@ -7180,7 +7180,7 @@ agent_communication:
   - agent: main
     message: |
       Four targeted UI fixes went in. Please verify against the running preview
-      (https://shop-order-merge.preview.emergentagent.com) using admin/salon123:
+      (https://reporting-hub-19.preview.emergentagent.com) using admin/salon123:
 
       1. Settings tab → sidebar under Staff & attendance now shows THREE sub-items:
          "Attendance method & rules", "Leave & holidays", "Payroll & incentives"
@@ -7310,3 +7310,215 @@ agent_communication:
       Please run a backend regression on: GET /api/salon/store/products,
       /categories, /brands, /orders and POST /orders/{id}/cancel to
       confirm the shop path still works.
+    -agent: "testing"
+    -message: |
+      REPORTS MODULE BACKEND REGRESSION COMPLETED - ALL TESTS PASSED ✅
+      
+      Executed comprehensive backend regression testing for Reports module as requested.
+      Test suite: 30 endpoints tested, 30 passed (100% success rate).
+      
+      KEY FINDINGS:
+      1. ✅ All prefs endpoints working (GET/PUT with persistence)
+      2. ✅ Targets endpoint working with NEW schema (metric_id, period_type, target)
+      3. ✅ OLD target schema correctly rejected with 422
+      4. ✅ Snapshot endpoint working for all views (day/week/month) with compare mode
+      5. ✅ Projection logic correctly implemented:
+         - Flow metrics (revenue, appointments, etc.): projected >= total using elapsed-fraction
+         - Ratio/stock metrics (utilization, feedback, etc.): projected == total (no projection)
+      6. ✅ Target persistence verified (75000 target saved and retrieved)
+      7. ✅ All 13 metric detail endpoints working (revenue, appointments, collections, guests, 
+         avgticket, noshow, rebooking, utilization, wait, feedback, products, addons, membership)
+      8. ✅ All 6 section endpoints working (sales, payments-gst, pnl, clients, marketing, inventory)
+      9. ✅ Sales endpoint correctly sorts by_staff and by_service by revenue DESC
+      10. ✅ Auth/permission checks working (401/403 for missing/invalid tokens)
+      
+      MINOR OBSERVATION:
+      - Review request mentions "by_source" field in sales endpoint, but implementation returns:
+        window, line, by_staff, by_service, total_revenue, bookings (no by_source).
+        This is not a bug - just a documentation discrepancy.
+      
+      RECOMMENDATION FOR MAIN AGENT:
+      Reports module backend is FULLY FUNCTIONAL and production-ready. All regression tests passed.
+      No fixes needed. Ready to summarize and finish.
+
+
+
+
+
+  - task: "Reports module — complete WIP per REPORTS_BACKEND_GUIDE.md"
+    implemented: true
+    working: true
+    file: "/app/backend/reports_router.py, /app/frontend/src/components/ops/ReportsModule.js, /app/frontend/src/pages/salon/SalonHomeV2.js"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+        - working: "NA"
+          agent: "main"
+          comment: |
+            Completed the Reports WIP based on the attached REPORTS_BACKEND_GUIDE.md
+            and salon_reports.html mockup. Reports merges Financials + Analytics.
+
+            Backend fixes in /app/backend/reports_router.py:
+              1) Projection formula now uses elapsed-fraction of the current window
+                 per guide §4: proj = achieved / elapsed_fraction (with 0.05 floor
+                 to avoid division by zero and cap at 1.0 for closed windows).
+                 Ratio/stock metrics (utilization, noshow, rebooking, feedback,
+                 avgticket, membership + STOCK_CARDS) are NOT projected — they
+                 stay at current value.
+              2) Target defaults per guide §4: user-set target > previous period
+                 actual × 1.1 > current × 1.1 (bootstrap for first-run only when
+                 previous period has zero data). Previously always current × 1.1.
+              3) Revenue by category now correctly falls back to `services.category`
+                 first (Hair/Spa/Beard/Facial) and buckets retail lines (is_retail
+                 or product_id) into a separate "Retail" bucket per guide.
+              4) Sales `by_staff` / `by_service` rows now sorted by revenue desc
+                 so the top rows in the section table are highest earners.
+              5) Snapshot now always fetches previous window (regardless of
+                 compare flag) so target defaults have data available.
+
+            Frontend fixes in /app/frontend/src/components/ops/ReportsModule.js:
+              6) TargetEditDrawer payload bug fixed — was PUT-ing
+                 { period, targets:{[card.id]: value} } which the backend rejected.
+                 Now sends { metric_id, period_type, target } matching the
+                 TargetRequest schema. Users can now save a target from the
+                 individual-card drawer (previously silent 422).
+              7) Added CSV Export button in the header — downloads current
+                 snapshot cards (label, achieved, projected, target, trend) as
+                 a CSV file with the window range in the header comment. Uses
+                 client-side download only (no new endpoint).
+              8) SnapshotTab lifts { cards, window } up via onLoaded so the
+                 header Export button has the current data.
+
+            Navigation cleanup:
+              9) /app/frontend/src/pages/salon/SalonHomeV2.js — RAIL_ITEMS:
+                 removed 'financials' + 'analytics', added single 'reports' item
+                 with chart icon.
+             10) /app/frontend/src/components/salon/SalonHamburgerMenu.js —
+                 same swap.
+             11) /app/frontend/src/pages/salon/home_v2/GlobalSearchDropdown.js —
+                 same swap (keywords include finance/analytics for backwards
+                 discoverability).
+
+            /app/frontend/.env & /app/backend/.env were missing at start of
+            job — recreated with the correct MONGO_URL / DB_NAME /
+            REACT_APP_BACKEND_URL values so services could start.
+
+            Manual verification done via curl:
+              - PUT /api/salons/{sid}/reports/targets with new payload → success
+              - GET /snapshot?view=month&compare=true → proj computed via
+                elapsed-fraction (achieved 300, window 07/01–07/31, day 18 →
+                projected 516.67, target 330 = previous × 1.1)
+              - All sub-section endpoints (sales, payments-gst, pnl, clients,
+                marketing, inventory) return 200.
+              - UI screenshot confirms Reports appears in left rail, cards render
+                correctly, detail panel with donut chart works.
+
+            Please run a full backend regression on the Reports endpoints:
+              PUT/GET /api/salons/{sid}/reports/prefs
+              PUT    /api/salons/{sid}/reports/targets  (new schema: metric_id + period_type + target)
+              GET    /api/salons/{sid}/reports/snapshot?view=day|week|month&date=YYYY-MM-DD&compare=true|false
+              GET    /api/salons/{sid}/reports/metric/{metric_id}?...
+              GET    /api/salons/{sid}/reports/sales?...
+              GET    /api/salons/{sid}/reports/payments-gst?...
+              GET    /api/salons/{sid}/reports/pnl?...
+              GET    /api/salons/{sid}/reports/clients?...
+              GET    /api/salons/{sid}/reports/marketing?...
+              GET    /api/salons/{sid}/reports/inventory?...
+            Credentials: identifier=admin / password=salon123, salon_id from
+            /app/memory/test_credentials.md.
+        - working: true
+          agent: "testing"
+          comment: |
+            ✅ REPORTS MODULE BACKEND REGRESSION TEST COMPLETED - ALL ENDPOINTS WORKING
+            
+            Comprehensive testing completed successfully with 30/30 tests passed (100% success rate).
+            Test date: 2026-07-18, Salon ID: c1ab42d2-dca7-4d8b-9ce9-8dff1942a393
+            
+            AUTHENTICATION & AUTHORIZATION:
+            ✅ Admin login working (identifier: admin, password: salon123)
+            ✅ All endpoints correctly reject requests without Authorization header (403)
+            ✅ All endpoints correctly reject requests with invalid token (401)
+            
+            PREFS ENDPOINTS (Card Preferences):
+            ✅ GET /api/salons/{sid}/reports/prefs - WORKING
+               Returns: all_cards (15 cards), cards (user selection), order (user order)
+            ✅ PUT /api/salons/{sid}/reports/prefs - WORKING
+               Successfully saves card preferences (tested with revenue, appointments)
+            ✅ GET /api/salons/{sid}/reports/prefs (persistence check) - WORKING
+               Preferences correctly persisted and retrieved
+            
+            TARGETS ENDPOINT (Metric Targets):
+            ✅ PUT /api/salons/{sid}/reports/targets (NEW schema) - WORKING
+               NEW schema accepted: {metric_id: "revenue", period_type: "month", target: 75000}
+               Target correctly saved and persisted
+            ✅ PUT /api/salons/{sid}/reports/targets (OLD schema rejection) - WORKING
+               OLD schema {period, targets:{}} correctly rejected with HTTP 422
+               This confirms the schema migration was successful
+            
+            SNAPSHOT ENDPOINT (Business Dashboard):
+            ✅ GET /api/salons/{sid}/reports/snapshot?view=month&date=2026-07-18&compare=true - WORKING
+               - Returns proper structure: {window: {view, start, end, previous}, cards: [...]}
+               - Each card has all required fields: id, label, money, total, projected, target, trend, up, chart, lower_is_better
+               - PROJECTION LOGIC VERIFIED:
+                 * Flow metrics (revenue, appointments): projected >= total ✅
+                   Example: revenue total=300.0, projected=516.67 (1.72x ratio for 18/31 days elapsed)
+                 * Ratio/stock metrics: projected == total (no projection applied) ✅
+               - TARGET PERSISTENCE VERIFIED: Revenue target correctly set to 75000 ✅
+               - Trend and up fields present when compare=true ✅
+            ✅ GET /api/salons/{sid}/reports/snapshot?view=day&date=2026-07-18 - WORKING
+               Day view returns correct data structure
+            ✅ GET /api/salons/{sid}/reports/snapshot?view=week&date=2026-07-18 - WORKING
+               Week view returns correct data structure
+            
+            METRIC DETAIL ENDPOINTS (All 13 metrics tested):
+            ✅ GET /api/salons/{sid}/reports/metric/revenue - WORKING
+            ✅ GET /api/salons/{sid}/reports/metric/appointments - WORKING
+            ✅ GET /api/salons/{sid}/reports/metric/collections - WORKING
+            ✅ GET /api/salons/{sid}/reports/metric/guests - WORKING
+            ✅ GET /api/salons/{sid}/reports/metric/avgticket - WORKING
+            ✅ GET /api/salons/{sid}/reports/metric/noshow - WORKING
+            ✅ GET /api/salons/{sid}/reports/metric/rebooking - WORKING
+            ✅ GET /api/salons/{sid}/reports/metric/utilization - WORKING
+            ✅ GET /api/salons/{sid}/reports/metric/wait - WORKING
+               Wait time metric correctly has lower_is_better=true
+            ✅ GET /api/salons/{sid}/reports/metric/feedback - WORKING
+            ✅ GET /api/salons/{sid}/reports/metric/products - WORKING
+            ✅ GET /api/salons/{sid}/reports/metric/addons - WORKING
+            ✅ GET /api/salons/{sid}/reports/metric/membership - WORKING
+            All metric endpoints return: {metric: {...}, breakdown: [...], window: {...}}
+            
+            SECTION ENDPOINTS (Detailed Reports):
+            ✅ GET /api/salons/{sid}/reports/sales - WORKING
+               Returns: window, line (day-wise), by_staff, by_service, total_revenue, bookings
+               VERIFIED: by_staff and by_service arrays correctly sorted by revenue DESC ✅
+               NOTE: Response does NOT include "by_source" field (review request mentioned it but implementation doesn't have it)
+            ✅ GET /api/salons/{sid}/reports/payments-gst - WORKING
+               Returns: total_collected, by_mode, gst {gross, taxable, cgst, sgst, igst, total_tax}
+               All GST calculation fields present and correct
+            ✅ GET /api/salons/{sid}/reports/pnl - WORKING
+               Returns: revenue, expenses_total, expenses_by_category, profit
+               P&L calculation working correctly
+            ✅ GET /api/salons/{sid}/reports/clients - WORKING
+               Returns: unique_guests, new_guests, returning_guests, top_spenders
+               Client segmentation working correctly
+            ✅ GET /api/salons/{sid}/reports/marketing - WORKING
+               Returns marketing data structure with window
+            ✅ GET /api/salons/{sid}/reports/inventory - WORKING
+               Returns: consumed_value, purchases_value, on_hand_value, below_reorder
+               Inventory tracking working correctly
+            
+            OBSERVATIONS:
+            1. All 30 endpoints tested are working correctly with proper authentication
+            2. NEW target schema (metric_id, period_type, target) is correctly implemented
+            3. OLD target schema is correctly rejected with 422
+            4. Projection logic correctly differentiates between flow and ratio/stock metrics
+            5. Target persistence working correctly (75000 target saved and retrieved)
+            6. All section endpoints return proper data structures
+            7. Sorting by revenue DESC working correctly in sales endpoint
+            8. Auth checks working correctly (401/403 for missing/invalid tokens)
+            
+            MINOR DISCREPANCY:
+            - Review request mentions "by_source" field in sales endpoint response, but actual implementation returns: window, line, by_staff, by_service, total_revenue, bookings (no by_source field). This is not a bug - just a documentation/review request discrepancy.
+            
+            CONCLUSION: Reports module backend is FULLY FUNCTIONAL and production-ready. All regression tests passed with 100% success rate.

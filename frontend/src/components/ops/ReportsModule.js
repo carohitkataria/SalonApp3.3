@@ -23,6 +23,34 @@ const PAY_ICONS = { cash: 'cash', upi: 'phone', card: 'card', wallet: 'wallet' }
  * ReportsModule — merged Financials + Analytics
  * Preserves the ability to add finance entries (used by admins).
  */
+function exportCardsToCsv(cards, windowMeta) {
+  if (!cards || !cards.length) { toast.info('Nothing to export'); return; }
+  const rows = [['Metric', 'Achieved', 'Projected', 'Target', 'Trend']];
+  cards.forEach((c) => {
+    rows.push([
+      (c.label || '').replace(/,/g, ' '),
+      c.total ?? '',
+      c.projected ?? '',
+      c.target ?? '',
+      c.trend ?? '',
+    ]);
+  });
+  const csv = rows.map((r) => r.join(',')).join('\n');
+  const blob = new Blob(
+    [`# Reports snapshot ${windowMeta?.view || ''} ${windowMeta?.start || ''} to ${windowMeta?.end || ''}\n`, csv],
+    { type: 'text/csv' }
+  );
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `reports-snapshot-${windowMeta?.start || Date.now()}.csv`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+  toast.success('CSV exported');
+}
+
 export default function ReportsModule({ salonId, canManageFinancials = true, getAuthHeaders }) {
   useEffect(() => { injectZenCss(); }, []);
   const [tab, setTab] = useState('snapshot');
@@ -32,6 +60,8 @@ export default function ReportsModule({ salonId, canManageFinancials = true, get
   const [showAddEntry, setShowAddEntry] = useState(false);
   const [showConfig, setShowConfig] = useState(false);
   const [showTargets, setShowTargets] = useState(false);
+  // Snapshot data lifted for the export button in header
+  const [snapshotData, setSnapshotData] = useState({ cards: [], window: null });
 
   return (
     <div className="zen">
@@ -54,6 +84,12 @@ export default function ReportsModule({ salonId, canManageFinancials = true, get
                    style={{ padding: '8px 12px', border: '1px solid var(--z-line)', borderRadius: 10, background: '#fff' }} />
             <button className={`z-btn ${compare ? 'z-btn--soft' : 'z-btn--ghost'}`} onClick={() => setCompare((c) => !c)}>
               <Icon name="layers" /> Compare
+            </button>
+            <button className="z-btn z-btn--ghost"
+                    onClick={() => exportCardsToCsv(snapshotData.cards, snapshotData.window)}
+                    data-testid="reports-export-btn"
+                    title="Download snapshot as CSV">
+              <Icon name="save" /> Export
             </button>
             {canManageFinancials && (
               <button className="z-btn z-btn--pri" onClick={() => setShowAddEntry(true)}>
@@ -78,6 +114,7 @@ export default function ReportsModule({ salonId, canManageFinancials = true, get
             getAuthHeaders={getAuthHeaders}
             onConfigure={() => setShowConfig(true)}
             onTargets={() => setShowTargets(true)}
+            onLoaded={setSnapshotData}
           />
         )}
         {tab === 'sales' && <SalesTab salonId={salonId} view={view} date={date} getAuthHeaders={getAuthHeaders} />}
@@ -206,7 +243,7 @@ function GaugeRing({ pct }) {
   );
 }
 
-function SnapshotTab({ salonId, view, date, compare, getAuthHeaders, onConfigure, onTargets }) {
+function SnapshotTab({ salonId, view, date, compare, getAuthHeaders, onConfigure, onTargets, onLoaded }) {
   const [cards, setCards] = useState([]);
   const [loading, setLoading] = useState(true);
   const [sel, setSel] = useState(null);
@@ -223,10 +260,11 @@ function SnapshotTab({ salonId, view, date, compare, getAuthHeaders, onConfigure
       const list = res.data?.cards || [];
       setCards(list);
       if (list.length && !list.find((c) => c.id === sel)) setSel(list[0].id);
+      if (onLoaded) onLoaded({ cards: list, window: res.data?.window });
     } catch (e) {
       toast.error('Failed to load snapshot');
     } finally { setLoading(false); }
-  }, [salonId, view, date, compare, getAuthHeaders, sel]);
+  }, [salonId, view, date, compare, getAuthHeaders, sel, onLoaded]);
 
   useEffect(() => { load(); /* eslint-disable-next-line */ }, [salonId, view, date, compare]);
 
@@ -430,7 +468,7 @@ function TargetEditDrawer({ card, salonId, view, getAuthHeaders, onClose, onSave
     try {
       await axios.put(
         `${API}/salons/${salonId}/reports/targets`,
-        { period: view, targets: { [card.id]: Number(value) } },
+        { metric_id: card.id, period_type: view, target: Number(value) },
         { headers: getAuthHeaders() }
       );
       toast.success('Target updated');
