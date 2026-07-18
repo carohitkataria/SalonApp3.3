@@ -31,6 +31,7 @@ import AppointmentDrawer from './home_v2/AppointmentDrawer';
 import CustomerDrawer from './home_v2/CustomerDrawer';
 import GlobalSearchDropdown from './home_v2/GlobalSearchDropdown';
 import NotificationsDrawer from './home_v2/NotificationsDrawer';
+import OrdersDrawer from '@/components/ops/OrdersDrawer';
 import SalonLogoControl from './home_v2/SalonLogoControl';
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
@@ -90,6 +91,7 @@ const I = {
   tag: () => <svg viewBox="0 0 24 24"><path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"/><line x1="7" y1="7" x2="7.01" y2="7"/></svg>,
   clock: () => <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>,
   trophy: () => <svg viewBox="0 0 24 24"><polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/><polyline points="17 6 23 6 23 12"/></svg>,
+  truck: () => <svg viewBox="0 0 24 24"><path d="M3 6h11v9H3zM14 9h4l3 3v3h-7z"/><circle cx="7" cy="18" r="1.6"/><circle cx="17" cy="18" r="1.6"/></svg>,
 };
 
 function fmtRupee(n) {
@@ -176,7 +178,15 @@ export default function SalonHomeV2({ salon, salonId, tokens = [], barbers = [],
   const [apptOpen, setApptOpen] = useState(false);
   const [guestOpen, setGuestOpen] = useState(false);
   const [notifOpen, setNotifOpen] = useState(false);
+  const [ordersOpen, setOrdersOpen] = useState(false);
   const [notifCount, setNotifCount] = useState(0);
+
+  // Allow any component (Shop, etc.) to open the orders drawer via a global event.
+  useEffect(() => {
+    const handler = () => setOrdersOpen(true);
+    window.addEventListener('salon:open-orders-drawer', handler);
+    return () => window.removeEventListener('salon:open-orders-drawer', handler);
+  }, []);
 
   // Inject scoped stylesheet once.
   useEffect(() => {
@@ -393,6 +403,12 @@ export default function SalonHomeV2({ salon, salonId, tokens = [], barbers = [],
         <button className="ribbon__btn ribbon__cta" data-tip="New Appointment" onClick={() => setApptOpen(true)}><I.plus /></button>
         <button className="ribbon__btn" data-tip="Add Guest" onClick={() => setGuestOpen(true)}><I.guestAdd /></button>
         <button className="ribbon__btn" data-tip="Retail Sale" onClick={() => navigate('/salon/dashboard?tab=inventory')}><I.cart /></button>
+        <button
+          className="ribbon__btn"
+          data-tip="Shop Orders"
+          data-testid="ribbon-orders-btn"
+          onClick={() => setOrdersOpen(true)}
+        ><I.truck /></button>
         <div className="ribbon__sep" />
         <button className="ribbon__btn" data-tip="Messages" onClick={() => navigate('/salon/dashboard?tab=marketing')}>
           {mk.sent > 0 && <span className="dot">{Math.min(99, mk.sent)}</span>}
@@ -886,6 +902,15 @@ export default function SalonHomeV2({ salon, salonId, tokens = [], barbers = [],
         onClose={() => setNotifOpen(false)}
         salonId={salonId}
         onCountUpdate={setNotifCount}
+      />
+
+      {/* Orders side-drawer — opens from ribbon Truck icon (or the CustomEvent
+          dispatched by ShopModule). Shows recent shop orders with quick actions
+          and a "View all orders" button that jumps to /?tab=shop&view=orders. */}
+      <OrdersDrawer
+        open={ordersOpen}
+        onClose={() => setOrdersOpen(false)}
+        getAuthHeaders={getAuthHeaders}
       />
     </div>
   );

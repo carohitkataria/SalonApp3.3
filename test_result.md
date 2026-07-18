@@ -7267,3 +7267,46 @@ agent_communication:
       - If all elements are visually present and styled correctly, mark fixes as working: true
       - If any issues found, provide specific details for debugging
 
+
+
+agent_communication:
+    -agent: "main"
+    -message: |
+      SALON OPS BUILD — COMPLETION PASS
+      Delivered on continuation request:
+      1) Orders is NOT a rail item (removed from rail_items). Rail on all pages: Home, Queue,
+         Guests, Marketing, Inventory, Shop, Staff, Services, Reports, Settings + Exit.
+      2) NEW: Right-ribbon "Orders" bag icon opens a side drawer (OrdersDrawer.js) with
+         recent orders, 5-step tracker (Placed→Packed→Shipped→In transit→Delivered),
+         and quick actions: Cancel (for placed/processing), Return, Replace and Raise
+         concern. Drawer stays open ON TOP of the current page — no navigation required.
+      3) Shop page has a single "Orders" (truck) button (data-testid="shop-orders-btn")
+         that opens the SAME drawer via `window.dispatchEvent(new CustomEvent('salon:open-orders-drawer'))`.
+         Drawer footer button "View all orders (Details)" navigates to
+         /salon/dashboard?tab=shop&view=orders which renders the full orders history
+         INLINE inside Shop (left rail + right ribbon stay visible). Full page has
+         segmented tabs (All / Active / Delivered / Cancelled / Returned) and Order
+         Detail drawer with return / replacement / concern flows.
+      4) All 4 Ops pages (Services, Inventory, Shop, Orders-inline) share the
+         homepage color theme via .zen scope (primary #6C4FE0, matching /home_v2
+         --primary). Same buttons, chips, cards, drawers, purple accents.
+      5) Restored missing frontend/.env and backend/.env with correct URLs, and
+         extended server startup to auto-seed supplier_products from
+         seed_store_fixtures so the Shop tab has ~7 sample product cards on first
+         run (no manual seeding needed).
+      6) Fixed brand/category chip rendering — /store/brands returns
+         [{name,count}], so old `b.brand||b` was rendering an object and
+         crashing the page; now handles both string and {name,count} shapes.
+      Files touched:
+         backend/server.py (live supplier_products seed at startup)
+         backend/.env (restored)
+         frontend/.env (restored)
+         frontend/src/components/ops/OrdersDrawer.js (NEW)
+         frontend/src/components/ops/ShopModule.js (inline orders view + drawer trigger + brands/categories shape fix)
+         frontend/src/pages/salon/home_v2/HomeV2Shell.js (ordersOpen state + ribbon click + global event listener)
+         frontend/src/pages/salon/SalonHomeV2.js (ordersOpen state + truck icon + global event listener) — so
+           the Orders drawer is now truly global (opens from Home ribbon too, not only from HomeV2Shell tabs).
+      Test creds: identifier=admin / password=salon123 (see /app/memory/test_credentials.md).
+      Please run a backend regression on: GET /api/salon/store/products,
+      /categories, /brands, /orders and POST /orders/{id}/cancel to
+      confirm the shop path still works.

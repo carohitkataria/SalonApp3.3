@@ -16442,6 +16442,68 @@ async def startup_event():
         logger.info(f"[STARTUP] Seeded {n} supplier product samples")
     except Exception as e:
         logger.error(f"[STARTUP] product samples seed failed: {e}")
+    # Also seed a minimal set of live supplier_products so the salon-store
+    # Shop tab has real product cards to browse (idempotent).
+    try:
+        from seed_store_fixtures import SUPPLIER_FIXTURES, _now_iso
+        from passlib.context import CryptContext as _CC
+        _pwd = _CC(schemes=["bcrypt"], deprecated="auto")
+        seeded_p = 0
+        for sup in SUPPLIER_FIXTURES:
+            await db.suppliers.update_one(
+                {"id": sup["id"]},
+                {"$set": {
+                    "id": sup["id"],
+                    "business_name": sup["business_name"],
+                    "owner_name": sup["owner_name"],
+                    "phone": sup["phone"],
+                    "mobile": sup["phone"],
+                    "email": sup["email"],
+                    "city": sup["city"],
+                    "state": sup["state"],
+                    "country": "India",
+                    "rating_avg": sup["rating_avg"],
+                    "rating_count": sup["rating_count"],
+                    "status": "active",
+                    "approved_at": _now_iso(),
+                    "password_hash": _pwd.hash("supplier123"),
+                    "login_id": sup["phone"],
+                    "created_at": _now_iso(),
+                    "updated_at": _now_iso(),
+                }},
+                upsert=True,
+            )
+            for p in sup["products"]:
+                pid = f"{sup['id']}::{p['name']}".replace(" ", "_")[:80]
+                await db.supplier_products.update_one(
+                    {"id": pid},
+                    {"$set": {
+                        "id": pid,
+                        "supplier_id": sup["id"],
+                        "name": p["name"],
+                        "brand": p["brand"],
+                        "category": p["category"],
+                        "description": f"Sample product from {sup['business_name']} — {p['name']}.",
+                        "images": [],
+                        "selling_price": p["selling_price"],
+                        "mrp": p["mrp"],
+                        "gst_percent": p["gst_percent"],
+                        "inventory_available": p["inventory_available"],
+                        "inventory_reserved": 0,
+                        "min_order_qty": 1,
+                        "pack_size": None,
+                        "unit": p["unit"],
+                        "is_active": True,
+                        "is_deleted": False,
+                        "created_at": _now_iso(),
+                        "updated_at": _now_iso(),
+                    }},
+                    upsert=True,
+                )
+                seeded_p += 1
+        logger.info(f"[STARTUP] Seeded {seeded_p} live supplier products for Shop")
+    except Exception as e:
+        logger.error(f"[STARTUP] live supplier products seed failed: {e}")
     scheduler.start()
     # Marketing M0 — one-time migration to add can_access_marketing=true to
     # admin/branch-manager records. We overwrite existing values (default:

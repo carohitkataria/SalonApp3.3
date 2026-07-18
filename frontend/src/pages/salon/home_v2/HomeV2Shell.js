@@ -34,6 +34,7 @@ import CustomerDrawer from './CustomerDrawer';
 import GlobalSearchDropdown from './GlobalSearchDropdown';
 import NotificationsDrawer from './NotificationsDrawer';
 import SalonLogoControl from './SalonLogoControl';
+import OrdersDrawer from '@/components/ops/OrdersDrawer';
 
 // ---- Rail items — copies of existing hamburger menu (kept in sync with SalonHomeV2) ----
 export const RAIL_ITEMS = [
@@ -108,8 +109,18 @@ export default function HomeV2Shell({
   const [apptOpen, setApptOpen] = useState(false);
   const [guestOpen, setGuestOpen] = useState(false);
   const [notifOpen, setNotifOpen] = useState(false);
+  const [ordersOpen, setOrdersOpen] = useState(false);
   const [notifCount, setNotifCount] = useState(unreadNotifCount || 0);
   useEffect(() => { setNotifCount(unreadNotifCount || 0); }, [unreadNotifCount]);
+
+  // Allow any child component (e.g. ShopModule) to open the orders drawer
+  // by dispatching a global CustomEvent. This keeps the drawer state at
+  // the shell level so it works from every page.
+  useEffect(() => {
+    const handler = () => setOrdersOpen(true);
+    window.addEventListener('salon:open-orders-drawer', handler);
+    return () => window.removeEventListener('salon:open-orders-drawer', handler);
+  }, []);
 
   // Inject scoped stylesheet once.
   useEffect(() => {
@@ -171,7 +182,7 @@ export default function HomeV2Shell({
         <button className="ribbon__btn ribbon__cta" data-tip="New Appointment" onClick={() => setApptOpen(true)}><I.plus /></button>
         <button className="ribbon__btn" data-tip="Add Guest" onClick={() => setGuestOpen(true)}><I.guestAdd /></button>
         <button className="ribbon__btn" data-tip="Retail Sale" onClick={() => navigate('/salon/dashboard?tab=inventory')}><I.cart /></button>
-        <button className="ribbon__btn" data-tip="Shop Orders" data-testid="ribbon-orders-btn" onClick={() => navigate('/salon/dashboard?tab=shop&orders=1')}><I.bag /></button>
+        <button className="ribbon__btn" data-tip="Shop Orders" data-testid="ribbon-orders-btn" onClick={() => setOrdersOpen(true)}><I.bag /></button>
         <div className="ribbon__sep" />
         <button className="ribbon__btn" data-tip="Messages" onClick={() => navigate('/salon/dashboard?tab=marketing')}><I.chat /></button>
         <button
@@ -239,6 +250,15 @@ export default function HomeV2Shell({
         onClose={() => setNotifOpen(false)}
         salonId={salonId}
         onCountUpdate={setNotifCount}
+      />
+
+      {/* Orders side-drawer — opens from ribbon bag icon (and from Shop's "Orders" button)
+          Shows recent orders with quick actions (cancel / return / replace / concern) and a
+          "View all orders (Details)" button that navigates to the full orders page inside Shop. */}
+      <OrdersDrawer
+        open={ordersOpen}
+        onClose={() => setOrdersOpen(false)}
+        getAuthHeaders={getAuthHeaders}
       />
     </div>
   );

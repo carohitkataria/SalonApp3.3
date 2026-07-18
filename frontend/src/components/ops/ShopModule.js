@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import { useLocation } from 'react-router-dom';
 import axios from 'axios';
 import { toast } from 'sonner';
 import { injectZenCss, Icon, rupee } from './opsTheme';
@@ -24,6 +25,10 @@ export default function ShopModule({ salonId, salonProfile, getAuthHeaders }) {
   const [selBrand, setSelBrand] = useState('all');
   const [search, setSearch] = useState('');
   const [ordersUnseen, setOrdersUnseen] = useState(0);
+  // Inline "orders" view flag — driven by ?view=orders URL parameter.
+  // When true, we render the full Orders history page inline (keeping the
+  // left rail visible) instead of the products grid.
+  const [inlineOrders, setInlineOrders] = useState(false);
 
   const {
     salonCart, addToCart, updateQty, removeFromCart, cartCount,
@@ -32,13 +37,19 @@ export default function ShopModule({ salonId, salonProfile, getAuthHeaders }) {
     showOrdersPage, setShowOrdersPage,
   } = useOps();
 
-  // Auto-open orders overlay when ?orders=1 is present in URL
+  // Read `?view=orders` on mount + whenever the URL changes so the Shop
+  // page can flip between the product grid and the full orders history
+  // without leaving the rail-and-ribbon shell.
+  const location = useLocation();
   useEffect(() => {
     try {
-      const p = new URLSearchParams(window.location.search);
-      if (p.get('orders') === '1') setShowOrdersPage(true);
+      const p = new URLSearchParams(location.search || window.location.search);
+      setInlineOrders(p.get('view') === 'orders');
+      if (p.get('orders') === '1') {
+        window.dispatchEvent(new CustomEvent('salon:open-orders-drawer'));
+      }
     } catch (_) { /* noop */ }
-  }, [setShowOrdersPage]);
+  }, [location.search]);
 
   const load = useCallback(async () => {
     try {
@@ -82,63 +93,110 @@ export default function ShopModule({ salonId, salonProfile, getAuthHeaders }) {
       <div className="z-wrap">
         <div className="z-phead">
           <div>
-            <div className="eyebrow">Operations · B2B</div>
-            <h1>Shop</h1>
-            <p>Order salon consumables and retail products from verified suppliers with COD or prepaid checkout.</p>
+            <div className="eyebrow">{inlineOrders ? 'Shop · Orders' : 'Operations · B2B'}</div>
+            <h1>{inlineOrders ? 'Your orders' : 'Shop'}</h1>
+            <p>{inlineOrders
+              ? 'Full order history — track delivery, cancel, return, replace or raise a concern.'
+              : 'Order salon consumables and retail products from verified suppliers with COD or prepaid checkout.'}</p>
           </div>
           <div className="z-actions">
-            <button className="z-btn z-btn--ghost" onClick={() => setShowOrdersPage(true)} style={{ position: 'relative' }}>
-              <Icon name="bag" /> Orders {ordersUnseen > 0 && <span className="z-cart-badge" style={{ position: 'static', marginLeft: 4 }}>{ordersUnseen}</span>}
-            </button>
-            <button className="z-btn z-btn--pri" onClick={() => setShowReviewDrawer(true)} disabled={cartCount === 0} style={{ position: 'relative' }}>
-              <Icon name="cart" /> Cart
-              {cartCount > 0 && <span className="z-cart-badge">{cartCount}</span>}
-            </button>
-          </div>
-        </div>
-
-        {/* Filters */}
-        <div className="z-toolbar">
-          <div className="z-search"><Icon name="search" />
-            <input placeholder="Search products, brands..." value={search} onChange={(e) => setSearch(e.target.value)} />
-          </div>
-          <div style={{ display: 'flex', gap: 6, overflowX: 'auto', maxWidth: '100%' }}>
-            <button className={`z-chip ${selCat === 'all' ? 'on' : ''}`} onClick={() => setSelCat('all')}>All categories</button>
-            {categories.slice(0, 8).map((c) => (
-              <button key={c.category || c} className={`z-chip ${selCat === (c.category || c) ? 'on' : ''}`} onClick={() => setSelCat(c.category || c)}>
-                {c.category || c} {c.count ? `(${c.count})` : ''}
+            {inlineOrders ? (
+              <button
+                className="z-btn z-btn--ghost"
+                data-testid="shop-back-to-products"
+                onClick={() => {
+                  const url = new URL(window.location.href);
+                  url.searchParams.delete('view');
+                  window.history.pushState({}, '', url.toString());
+                  setInlineOrders(false);
+                }}
+              >
+                <Icon name="chevL" /> Back to shop
               </button>
-            ))}
+            ) : (
+              <>
+                <button
+                  className="z-btn z-btn--ghost"
+                  data-testid="shop-orders-btn"
+                  onClick={() => window.dispatchEvent(new CustomEvent('salon:open-orders-drawer'))}
+                  style={{ position: 'relative' }}
+                >
+                  <Icon name="truck" /> Orders
+                  {ordersUnseen > 0 && (
+                    <span className="z-cart-badge" style={{ position: 'static', marginLeft: 4 }}>
+                      {ordersUnseen}
+                    </span>
+                  )}
+                </button>
+                <button
+                  className="z-btn z-btn--pri"
+                  onClick={() => setShowReviewDrawer(true)}
+                  disabled={cartCount === 0}
+                  style={{ position: 'relative' }}
+                >
+                  <Icon name="cart" /> Cart
+                  {cartCount > 0 && <span className="z-cart-badge">{cartCount}</span>}
+                </button>
+              </>
+            )}
           </div>
         </div>
-        {brands.length > 0 && (
-          <div className="z-toolbar" style={{ marginTop: -6 }}>
-            <div style={{ display: 'flex', gap: 6, overflowX: 'auto', maxWidth: '100%' }}>
-              <button className={`z-chip ${selBrand === 'all' ? 'on' : ''}`} onClick={() => setSelBrand('all')}>All brands</button>
-              {brands.slice(0, 12).map((b) => (
-                <button key={b.brand || b} className={`z-chip ${selBrand === (b.brand || b) ? 'on' : ''}`} onClick={() => setSelBrand(b.brand || b)}>
-                  {b.brand || b}
-                </button>
-              ))}
-            </div>
-          </div>
-        )}
 
-        {filtered.length === 0 ? (
-          <div className="z-empty z-card"><Icon name="bag" size={40} /><br />No products found.</div>
+        {inlineOrders ? (
+          <OrdersInline salonId={salonId} getAuthHeaders={getAuthHeaders} />
         ) : (
-          <div className="z-shop-grid">
-            {filtered.map((p) => (
-              <ShopCard
-                key={p.id}
-                product={p}
-                inCart={salonCart.find((x) => x.product_id === p.id)}
-                onOpen={() => setOpenProduct(p)}
-                onAdd={() => addToCart(p, p.low_stock_threshold || 1)}
-                onQty={(q) => updateQty(p.id, q)}
-              />
-            ))}
-          </div>
+          <>
+            {/* Filters */}
+            <div className="z-toolbar">
+              <div className="z-search"><Icon name="search" />
+                <input placeholder="Search products, brands..." value={search} onChange={(e) => setSearch(e.target.value)} />
+              </div>
+              <div style={{ display: 'flex', gap: 6, overflowX: 'auto', maxWidth: '100%' }}>
+                <button className={`z-chip ${selCat === 'all' ? 'on' : ''}`} onClick={() => setSelCat('all')}>All categories</button>
+                {categories.slice(0, 8).map((c) => {
+                  const label = typeof c === 'string' ? c : (c.name || c.category);
+                  const cnt = typeof c === 'object' ? c.count : null;
+                  return (
+                    <button key={label} className={`z-chip ${selCat === label ? 'on' : ''}`} onClick={() => setSelCat(label)}>
+                      {label}{cnt ? ` (${cnt})` : ''}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+            {brands.length > 0 && (
+              <div className="z-toolbar" style={{ marginTop: -6 }}>
+                <div style={{ display: 'flex', gap: 6, overflowX: 'auto', maxWidth: '100%' }}>
+                  <button className={`z-chip ${selBrand === 'all' ? 'on' : ''}`} onClick={() => setSelBrand('all')}>All brands</button>
+                  {brands.slice(0, 12).map((b) => {
+                    const label = typeof b === 'string' ? b : (b.name || b.brand);
+                    return (
+                      <button key={label} className={`z-chip ${selBrand === label ? 'on' : ''}`} onClick={() => setSelBrand(label)}>
+                        {label}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
+            {filtered.length === 0 ? (
+              <div className="z-empty z-card"><Icon name="bag" size={40} /><br />No products found.</div>
+            ) : (
+              <div className="z-shop-grid">
+                {filtered.map((p) => (
+                  <ShopCard
+                    key={p.id}
+                    product={p}
+                    inCart={salonCart.find((x) => x.product_id === p.id)}
+                    onOpen={() => setOpenProduct(p)}
+                    onAdd={() => addToCart(p, p.low_stock_threshold || 1)}
+                    onQty={(q) => updateQty(p.id, q)}
+                  />
+                ))}
+              </div>
+            )}
+          </>
         )}
       </div>
 
@@ -159,11 +217,16 @@ export default function ShopModule({ salonId, salonProfile, getAuthHeaders }) {
           onUpdateQty={updateQty}
           onRemove={removeFromCart}
           onClose={() => setShowReviewDrawer(false)}
-          onPlaced={() => { setShowReviewDrawer(false); setShowOrdersPage(true); load(); }}
+          onPlaced={() => {
+            setShowReviewDrawer(false);
+            // Push ?view=orders so the shell keeps the rail visible and Shop renders inline orders.
+            const url = new URL(window.location.href);
+            url.searchParams.set('view', 'orders');
+            window.history.pushState({}, '', url.toString());
+            setInlineOrders(true);
+            load();
+          }}
         />
-      )}
-      {showOrdersPage && (
-        <OrdersOverlay salonId={salonId} getAuthHeaders={getAuthHeaders} onClose={() => setShowOrdersPage(false)} />
       )}
     </div>
   );
@@ -473,8 +536,8 @@ function ReviewOrderDrawer({ salonId, salonProfile, getAuthHeaders, items, onUpd
   );
 }
 
-/* ------------ Orders Full Overlay ------------ */
-export function OrdersOverlay({ salonId, getAuthHeaders, onClose }) {
+/* ------------ Orders Inline (renders inside Shop, keeps left rail visible) ------------ */
+export function OrdersInline({ salonId, getAuthHeaders }) {
   useEffect(() => { injectZenCss(); }, []);
   const [orders, setOrders] = useState([]);
   const [selected, setSelected] = useState(null);
@@ -505,6 +568,42 @@ export function OrdersOverlay({ salonId, getAuthHeaders, onClose }) {
   };
 
   return (
+    <>
+      <div className="z-toolbar">
+        <div className="z-seg">
+          {['all', 'active', 'delivered', 'cancelled', 'returned'].map((t) => (
+            <button key={t} className={tab === t ? 'on' : ''} onClick={() => setTab(t)}>
+              {t[0].toUpperCase() + t.slice(1)}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {filtered.length === 0 ? (
+        <div className="z-empty z-card">
+          <Icon name="bag" size={40} /><br />
+          No orders here.
+        </div>
+      ) : filtered.map((o) => (
+        <OrderCard key={o.id} order={o} onOpen={() => setSelected(o)} onCancel={() => doCancel(o.id)} />
+      ))}
+
+      {selected && (
+        <OrderDetail
+          order={selected}
+          getAuthHeaders={getAuthHeaders}
+          onClose={() => setSelected(null)}
+          onChanged={load}
+        />
+      )}
+    </>
+  );
+}
+
+/* ------------ Orders Full Overlay (legacy — kept for backwards compatibility) ------------ */
+export function OrdersOverlay({ salonId, getAuthHeaders, onClose }) {
+  useEffect(() => { injectZenCss(); }, []);
+  return (
     <div className="zen" style={{ position: 'fixed', inset: 0, background: 'var(--z-bg)', zIndex: 1200, overflowY: 'auto' }}>
       <div className="z-wrap">
         <div className="z-phead">
@@ -517,30 +616,8 @@ export function OrdersOverlay({ salonId, getAuthHeaders, onClose }) {
             </div>
           </div>
         </div>
-
-        <div className="z-toolbar">
-          <div className="z-seg">
-            {['all', 'active', 'delivered', 'cancelled', 'returned'].map((t) => (
-              <button key={t} className={tab === t ? 'on' : ''} onClick={() => setTab(t)}>{t[0].toUpperCase() + t.slice(1)}</button>
-            ))}
-          </div>
-        </div>
-
-        {filtered.length === 0 ? (
-          <div className="z-empty z-card"><Icon name="bag" size={40} /><br />No orders here.</div>
-        ) : filtered.map((o) => (
-          <OrderCard key={o.id} order={o} onOpen={() => setSelected(o)} onCancel={() => doCancel(o.id)} />
-        ))}
+        <OrdersInline salonId={salonId} getAuthHeaders={getAuthHeaders} />
       </div>
-
-      {selected && (
-        <OrderDetail
-          order={selected}
-          getAuthHeaders={getAuthHeaders}
-          onClose={() => setSelected(null)}
-          onChanged={load}
-        />
-      )}
     </div>
   );
 }
