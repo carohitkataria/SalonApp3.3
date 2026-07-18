@@ -230,6 +230,68 @@ export const ZEN_CSS = `
 .zen .z-bar-row .v{width:66px;text-align:right;font-weight:800;color:var(--z-ink);flex:none}
 @media(max-width:1080px){.zen .z-split{grid-template-columns:1fr}.zen .z-cats{position:static}.zen .z-metrics{grid-template-columns:repeat(2,1fr)}}
 @media(max-width:760px){.zen .z-metrics{grid-template-columns:1fr 1fr}.zen .z-inv-head{display:none}.zen .z-inv-row{grid-template-columns:1fr;gap:8px}.zen .z-drawer{width:100vw}}
+
+/* ============ REPORTS SNAPSHOT (Zenoti-style split) ============ */
+.zen .z-snap{display:grid;grid-template-columns:340px 1fr;background:var(--z-surface);border:1px solid var(--z-line);border-radius:var(--z-r);box-shadow:var(--z-shadow);overflow:hidden;min-height:560px}
+.zen .z-snap-l{border-right:1px solid var(--z-line);background:#FBFBFE;padding:12px;overflow:auto;max-height:calc(100vh - 210px)}
+.zen .z-snap-l::-webkit-scrollbar{width:8px}.zen .z-snap-l::-webkit-scrollbar-thumb{background:#D3D3E0;border-radius:20px}
+.zen .z-kgrid{display:grid;grid-template-columns:1fr 1fr;gap:9px}
+.zen .z-kcard{border:1px solid transparent;border-radius:14px;padding:12px 13px 13px;cursor:pointer;transition:transform .16s,box-shadow .16s;position:relative;text-align:left;overflow:hidden;box-shadow:0 2px 8px rgba(30,32,50,.05);background:linear-gradient(135deg,#EDE9FE 0%,#DCE4FD 100%)}
+.zen .z-kcard:hover{transform:translateY(-2px);box-shadow:0 8px 20px rgba(30,32,50,.13)}
+.zen .z-kcard.on{box-shadow:0 0 0 2px #fff,0 0 0 4px rgba(108,79,224,.55),0 8px 20px rgba(30,32,50,.14)}
+.zen .z-kcard .kt{display:flex;align-items:flex-start;justify-content:space-between;gap:6px;margin-bottom:12px}
+.zen .z-kcard .kl{font-size:11px;color:#3A4256;font-weight:800;line-height:1.3;letter-spacing:-.1px}
+.zen .z-kcard .kchip{width:28px;height:28px;border-radius:9px;background:rgba(255,255,255,.6);backdrop-filter:blur(2px);display:grid;place-items:center;flex:none;box-shadow:0 1px 3px rgba(30,32,50,.08)}
+.zen .z-kcard .kchip svg{width:15px;height:15px}
+.zen .z-kcard .kv{font-family:'Bebas Neue';font-size:26px;font-weight:400;letter-spacing:-.4px;color:#161D2E}
+.zen .z-kcard .kd{font-size:10px;font-weight:800;margin-top:4px;display:inline-flex;align-items:center;gap:3px;padding:2px 7px;border-radius:20px;background:rgba(255,255,255,.55)}
+.zen .z-kcard .kd.up{color:#2E7D32}.zen .z-kcard .kd.down{color:#C2255C}.zen .z-kcard .kd.flat{color:var(--z-muted)}
+.zen .z-snap-r{padding:18px 20px;display:flex;flex-direction:column;min-width:0}
+.zen .z-dtop{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;flex-wrap:wrap;margin-bottom:18px}
+.zen .z-dtop h3{font-size:18px;font-weight:800;display:flex;align-items:center;gap:7px;color:var(--z-ink)}
+.zen .z-dtop p{font-size:12px;color:var(--z-muted);margin-top:2px}
+.zen .z-tgt{display:flex;align-items:center;gap:20px}
+.zen .z-tgt .tc{text-align:right}
+.zen .z-tgt .tc .k{font-size:10.5px;color:var(--z-muted);font-weight:700;display:block;margin-bottom:2px;text-transform:uppercase;letter-spacing:.06em}
+.zen .z-tgt .tc .v{font-family:'Bebas Neue';font-size:22px;font-weight:400;display:flex;align-items:center;gap:6px;justify-content:flex-end;color:var(--z-ink)}
+.zen .z-tgt .tc .v button{background:none;border:none;color:var(--z-muted-2);display:grid;place-items:center;cursor:pointer;padding:0}
+.zen .z-tgt .tc .v button:hover{color:var(--z-primary)}
+.zen .z-tgt .sep{width:1px;height:34px;background:var(--z-line)}
+.zen .z-gauge{position:relative;width:60px;height:60px;flex:none}
+.zen .z-gauge svg{transform:rotate(-90deg)}
+.zen .z-gauge .gv{position:absolute;inset:0;display:grid;place-items:center;font-size:12px;font-weight:800}
+.zen .z-dbody{display:grid;grid-template-columns:1.35fr 1fr;gap:18px;flex:1;align-items:start}
+.zen .z-chartbox{border:1px solid var(--z-line);border-radius:12px;padding:14px;min-height:280px}
+.zen .z-chart-ttl{font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:.06em;color:var(--z-muted-2);margin-bottom:12px}
+.zen .z-pieholder{display:flex;justify-content:center;padding:14px 0 6px}
+.zen .z-pie{position:relative;width:170px;height:170px;flex:none}
+.zen .z-pie svg{width:170px;height:170px;overflow:visible}
+.zen .z-pieseg{animation:zenPieGrow 1s cubic-bezier(.34,.85,.32,1) forwards;transition:opacity .15s}
+.zen .z-pie svg:hover .z-pieseg{opacity:.35}
+.zen .z-pie svg .z-pieseg:hover{opacity:1;filter:drop-shadow(0 2px 5px rgba(30,32,50,.22))}
+@keyframes zenPieGrow{to{stroke-dasharray:var(--len) var(--gap)}}
+.zen .z-pie-c{position:absolute;inset:0;display:grid;place-items:center;text-align:center;pointer-events:none}
+.zen .z-pie-c-v{font-family:'Bebas Neue';font-size:26px;font-weight:400;letter-spacing:-.5px;color:var(--z-ink)}
+.zen .z-pie-c-l{font-size:10px;color:var(--z-muted);font-weight:700;margin-top:1px;text-transform:uppercase;letter-spacing:.06em}
+.zen .z-bars{display:flex;align-items:flex-end;gap:10px;height:210px;padding-left:32px;position:relative}
+.zen .z-bars .yaxis{position:absolute;left:0;top:0;bottom:24px;width:28px;display:flex;flex-direction:column;justify-content:space-between;font-size:9.5px;color:var(--z-muted-2);text-align:right;font-weight:700}
+.zen .z-bcol{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;height:100%;gap:6px}
+.zen .z-bcol .bar{width:100%;max-width:34px;border-radius:4px 4px 2px 2px;min-height:3px;transition:.35s;position:relative}
+.zen .z-bcol .bl{font-size:9.5px;color:var(--z-muted);font-weight:700;text-align:center;height:24px;display:flex;align-items:center;justify-content:center;line-height:1.1}
+.zen .z-legend{display:flex;flex-wrap:wrap;gap:8px 14px;margin-top:12px;font-size:11.5px;color:var(--z-muted);font-weight:700;justify-content:center}
+.zen .z-legend span{display:flex;align-items:center;gap:6px}
+.zen .z-legend i{width:9px;height:9px;border-radius:2px}
+.zen .z-dtable{border:1px solid var(--z-line);border-radius:12px;overflow:hidden}
+.zen .z-dtable table{width:100%;border-collapse:collapse}
+.zen .z-dtable th{background:var(--z-line-2);font-size:10.5px;font-weight:800;text-transform:uppercase;letter-spacing:.06em;color:var(--z-muted);text-align:left;padding:10px 13px}
+.zen .z-dtable th:last-child,.zen .z-dtable td:last-child{text-align:right}
+.zen .z-dtable td{padding:9px 13px;border-top:1px solid var(--z-line-2);font-size:12.5px;color:var(--z-ink-soft)}
+.zen .z-dtable td:first-child{display:flex;align-items:center;gap:8px;font-weight:600}
+.zen .z-dtable .sw{width:9px;height:9px;border-radius:2px;flex:none}
+.zen .z-dtable td:last-child{font-weight:800;font-family:'Bebas Neue';font-size:15px;color:var(--z-ink)}
+.zen .z-dfoot{display:flex;align-items:center;justify-content:space-between;margin-top:16px;padding-top:14px;border-top:1px solid var(--z-line-2)}
+.zen .z-dfoot a{font-size:12.5px;color:var(--z-primary);font-weight:800;cursor:pointer}
+@media(max-width:1080px){.zen .z-snap{grid-template-columns:1fr}.zen .z-dbody{grid-template-columns:1fr}}
 `;
 
 // Simple SVG icon set (React-friendly) — subset used across modules.

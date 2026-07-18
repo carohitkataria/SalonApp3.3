@@ -16257,6 +16257,8 @@ _reports_router = reports_router_mod.init_reports_router(
     has_module_permission=has_module_permission,
     is_branch_manager=is_branch_manager,
     enforce_branch_for_manager=enforce_branch_for_manager,
+    attribute_token_revenue_to_barbers=attribute_token_revenue_to_barbers,
+    attribute_token_revenue_to_services=attribute_token_revenue_to_services,
 )
 fastapi_app.include_router(_reports_router)
 

@@ -96,11 +96,122 @@ export default function ReportsModule({ salonId, canManageFinancials = true, get
   );
 }
 
-/* ---------- SNAPSHOT ---------- */
+/* ---------- SNAPSHOT (Zenoti-style split view — gradient KPI cards on left, animated pie + table on right) ---------- */
+const GRADS = [
+  ['linear-gradient(135deg,#EDE9FE 0%,#DCE4FD 100%)', '#6D5AE0'],
+  ['linear-gradient(135deg,#FDECD9 0%,#FBD8C1 100%)', '#DB8433'],
+  ['linear-gradient(135deg,#FCE0EC 0%,#F8C9DC 100%)', '#D24C86'],
+  ['linear-gradient(135deg,#FDE3DD 0%,#F9C6BE 100%)', '#DF6350'],
+  ['linear-gradient(135deg,#D8F2EA 0%,#C1EADB 100%)', '#149A80'],
+  ['linear-gradient(135deg,#E2EFFD 0%,#C9E0FB 100%)', '#3A7ED4'],
+  ['linear-gradient(135deg,#EEE4FC 0%,#DFCFFA 100%)', '#7A5CD1'],
+  ['linear-gradient(135deg,#FBF1D3 0%,#F6E1A8 100%)', '#C0941C'],
+];
+const PIE_COLORS = ['#2145C7', '#7CB342', '#D9A82C', '#A61E4D', '#E5556E', '#3E93E8', '#7A5CD1', '#12A594', '#DB8433', '#E5484D'];
+const CARD_ICON = {
+  appointments: 'calendar', collections: 'money', revenue: 'trendup', source: 'chart',
+  guests: 'users', avgticket: 'tag', utilization: 'gauge', wait: 'clock',
+  products: 'box', addons: 'plus', noshow: 'bell', rebooking: 'refresh',
+  feedback: 'star', membership: 'wallet', discounts: 'scissors',
+};
+const BAR_IDS = new Set(['wait', 'feedback']);
+
+function formatCardValue(card) {
+  const v = card.total;
+  if (card.money) return rupee(v);
+  const label = (card.label || '').toLowerCase();
+  if (card.id === 'utilization' || card.id === 'noshow' || card.id === 'rebooking' || label.includes('rate') || label.includes('%')) return `${Math.round(v || 0)}%`;
+  if (card.id === 'wait') return `${Math.round(v || 0)} min`;
+  if (card.id === 'feedback') return `${(v || 0).toFixed(1)}`;
+  return `${v}`;
+}
+
+function AnimatedPie({ data, centerLabel, centerValue }) {
+  const total = data.reduce((s, d) => s + Number(d[1] || 0), 0) || 1;
+  const R = 60, sw = 28, cx = 85, cy = 85, circ = 2 * Math.PI * R;
+  let acc = 0;
+  return (
+    <div className="z-pie">
+      <svg viewBox="0 0 170 170" style={{ transform: 'rotate(-90deg)' }}>
+        <circle cx={cx} cy={cy} r={R} fill="none" stroke="var(--z-line-2)" strokeWidth={sw} />
+        {data.map(([name, value], i) => {
+          const frac = Number(value || 0) / total;
+          const len = frac * circ;
+          const rot = acc * 360;
+          acc += frac;
+          const col = PIE_COLORS[i % PIE_COLORS.length];
+          return (
+            <circle
+              key={name + i}
+              className="z-pieseg"
+              cx={cx} cy={cy} r={R}
+              fill="none"
+              stroke={col}
+              strokeWidth={sw}
+              strokeDasharray={`0 ${circ.toFixed(1)}`}
+              style={{
+                '--len': `${len.toFixed(1)}`,
+                '--gap': `${(circ - len).toFixed(1)}`,
+                transform: `rotate(${rot.toFixed(2)}deg)`,
+                transformOrigin: `${cx}px ${cy}px`,
+                animationDelay: `${(i * 0.09).toFixed(2)}s`,
+              }}
+            >
+              <title>{`${name}: ${Math.round(frac * 100)}%`}</title>
+            </circle>
+          );
+        })}
+      </svg>
+      <div className="z-pie-c">
+        <div className="z-pie-c-v">{centerValue}</div>
+        <div className="z-pie-c-l">{centerLabel || 'total'}</div>
+      </div>
+    </div>
+  );
+}
+
+function AnimatedBars({ data }) {
+  const max = Math.max(1, ...data.map((d) => Number(d[1] || 0)));
+  const ticks = [max, Math.round(max * 0.75), Math.round(max * 0.5), Math.round(max * 0.25), 0];
+  return (
+    <div className="z-bars">
+      <div className="yaxis">{ticks.map((t, i) => <span key={i}>{t}</span>)}</div>
+      {data.map(([name, value], i) => {
+        const h = Math.max(2, (Number(value || 0) / max) * 100);
+        const col = PIE_COLORS[i % PIE_COLORS.length];
+        return (
+          <div key={name + i} className="z-bcol">
+            <div className="bar" data-v={value} style={{ height: `${h}%`, background: col }} />
+            <div className="bl">{name}</div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function GaugeRing({ pct }) {
+  const R = 26, circ = 2 * Math.PI * R;
+  const color = pct >= 80 ? 'var(--z-ok)' : pct >= 40 ? 'var(--z-warn)' : 'var(--z-bad)';
+  return (
+    <div className="z-gauge">
+      <svg width="60" height="60">
+        <circle cx="30" cy="30" r={R} fill="none" stroke="var(--z-line)" strokeWidth="5" />
+        <circle cx="30" cy="30" r={R} fill="none" stroke={color} strokeWidth="5"
+                strokeLinecap="round" strokeDasharray={circ}
+                strokeDashoffset={circ - (circ * pct) / 100} />
+      </svg>
+      <span className="gv" style={{ color }}>{pct}%</span>
+    </div>
+  );
+}
+
 function SnapshotTab({ salonId, view, date, compare, getAuthHeaders, onConfigure, onTargets }) {
   const [cards, setCards] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [sel, setSel] = useState(null);
   const [detail, setDetail] = useState(null);
+  const [drill, setDrill] = useState(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -109,76 +220,256 @@ function SnapshotTab({ salonId, view, date, compare, getAuthHeaders, onConfigure
         `${API}/salons/${salonId}/reports/snapshot?view=${view}&date=${date}&compare=${compare}`,
         { headers: getAuthHeaders() }
       );
-      setCards(res.data?.cards || []);
+      const list = res.data?.cards || [];
+      setCards(list);
+      if (list.length && !list.find((c) => c.id === sel)) setSel(list[0].id);
     } catch (e) {
       toast.error('Failed to load snapshot');
     } finally { setLoading(false); }
-  }, [salonId, view, date, compare, getAuthHeaders]);
+  }, [salonId, view, date, compare, getAuthHeaders, sel]);
 
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => { load(); /* eslint-disable-next-line */ }, [salonId, view, date, compare]);
+
+  const active = useMemo(() => cards.find((c) => c.id === sel) || cards[0], [cards, sel]);
 
   return (
     <>
       <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginBottom: 10 }}>
-        <button className="z-btn z-btn--ghost z-btn--sm" onClick={onTargets}>
+        <button className="z-btn z-btn--ghost z-btn--sm" onClick={onTargets} data-testid="reports-targets-btn">
           <Icon name="gauge" /> Targets
         </button>
-        <button className="z-btn z-btn--ghost z-btn--sm" onClick={onConfigure}>
+        <button className="z-btn z-btn--ghost z-btn--sm" onClick={onConfigure} data-testid="reports-configure-btn">
           <Icon name="settings" /> Configure cards
         </button>
       </div>
+
       {loading ? (
         <div className="z-empty">Loading…</div>
+      ) : cards.length === 0 ? (
+        <div className="z-empty z-card"><Icon name="chart" size={40} /><br />No metrics available.</div>
       ) : (
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(230px,1fr))', gap: 13 }}>
-          {cards.map((c) => (
-            <MetricCard key={c.id} card={c} onOpen={() => setDetail(c)} />
-          ))}
+        <div className="z-snap">
+          <div className="z-snap-l">
+            <div className="z-kgrid" data-testid="reports-kgrid">
+              {cards.map((c, i) => {
+                const [bg, acc] = GRADS[i % GRADS.length];
+                const trendUp = c.up === true;
+                const trendDown = c.up === false;
+                return (
+                  <button
+                    key={c.id}
+                    className={`z-kcard ${c.id === (active?.id) ? 'on' : ''}`}
+                    style={{ background: bg }}
+                    onClick={() => setSel(c.id)}
+                    data-testid={`reports-card-${c.id}`}
+                  >
+                    <div className="kt">
+                      <span className="kl">{c.label}</span>
+                      <span className="kchip" style={{ color: acc }}>
+                        <Icon name={CARD_ICON[c.id] || 'chart'} />
+                      </span>
+                    </div>
+                    <div className="kv">{formatCardValue(c)}</div>
+                    {c.trend && (
+                      <div className={`kd ${trendUp ? 'up' : trendDown ? 'down' : 'flat'}`}>
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3">
+                          {trendUp ? <polyline points="18 15 12 9 6 15" /> : <polyline points="6 9 12 15 18 9" />}
+                        </svg>
+                        {c.trend}
+                      </div>
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+          <div className="z-snap-r">
+            {active && (
+              <SnapshotDetail
+                card={active}
+                salonId={salonId} view={view} date={date}
+                getAuthHeaders={getAuthHeaders}
+                onEditTarget={() => setDetail(active)}
+                onDrill={() => setDrill(active)}
+              />
+            )}
+          </div>
         </div>
       )}
+
       {detail && (
-        <MetricDetailDrawer
-          card={detail} salonId={salonId} view={view} date={date}
+        <TargetEditDrawer
+          card={detail} salonId={salonId} view={view}
           getAuthHeaders={getAuthHeaders}
           onClose={() => setDetail(null)}
+          onSaved={() => { setDetail(null); load(); }}
+        />
+      )}
+      {drill && (
+        <MetricDrillDrawer
+          card={drill} salonId={salonId} view={view} date={date}
+          getAuthHeaders={getAuthHeaders}
+          onClose={() => setDrill(null)}
         />
       )}
     </>
   );
 }
 
-function MetricCard({ card, onOpen }) {
-  const attained = card.target ? Math.min(100, (card.total / card.target) * 100) : 0;
-  const attainedLabel = card.target ? `${Math.round(attained)}% of target` : '';
-  const grad = card.money ? 'g-blue' : (card.id === 'feedback' ? 'g-amber' : (card.lower_is_better ? 'g-rose' : 'g-mint'));
-  const val = card.money ? rupee(card.total) : (card.id === 'utilization' || card.id === 'noshow' || card.id === 'rebooking' ? `${card.total}%` : card.total);
+/* ------ Detail panel showing pie chart + achievement gauge + share table ------ */
+function SnapshotDetail({ card, salonId, view, date, getAuthHeaders, onEditTarget, onDrill }) {
+  const [breakdown, setBreakdown] = useState(card.chart?.data || []);
+  useEffect(() => {
+    setBreakdown(card.chart?.data || []);
+    (async () => {
+      try {
+        const res = await axios.get(
+          `${API}/salons/${salonId}/reports/metric/${card.id}?view=${view}&date=${date}`,
+          { headers: getAuthHeaders() }
+        );
+        if (res.data?.breakdown) {
+          setBreakdown(res.data.breakdown.map((r) => [r.label, r.value]));
+        }
+      } catch (_) { /* keep existing chart data */ }
+    })();
+  }, [card.id, view, date]); // eslint-disable-line
+
+  const useBars = BAR_IDS.has(card.id) || card.chart?.kind === 'bar';
+  const pct = card.target > 0 ? Math.min(100, Math.round((card.total / card.target) * 100)) : 0;
+  const total = breakdown.reduce((s, d) => s + Number(d[1] || 0), 0);
+
   return (
-    <div className={`z-metric ${grad}`} onClick={onOpen} style={{ cursor: 'pointer' }}>
-      <div className="k">
-        <Icon name={card.money ? 'money' : 'chart'} /> {card.label}
-      </div>
-      <div className="v">{val}</div>
-      <div className="sub" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-        {card.trend ? (
-          <span className={`z-trend ${card.up ? 'up' : 'dn'}`}>{card.trend}</span>
-        ) : null}
-        {attainedLabel && <span>{attainedLabel}</span>}
-      </div>
-      {card.target > 0 && (
-        <div style={{ marginTop: 6 }}>
-          <div style={{ height: 4, borderRadius: 4, background: 'var(--z-line-2)', overflow: 'hidden' }}>
-            <div style={{ width: `${Math.min(100, attained)}%`, height: '100%', background: 'var(--z-primary)' }} />
-          </div>
-          <div style={{ fontSize: 10, color: 'var(--z-muted-2)', marginTop: 2 }}>
-            Target · {card.money ? rupee(card.target) : card.target}
-          </div>
+    <>
+      <div className="z-dtop">
+        <div>
+          <h3>{card.label.replace(' (₹)', '')}</h3>
+          <p>{card.description || 'Detailed breakdown for this metric.'}</p>
         </div>
-      )}
-    </div>
+        <div className="z-tgt">
+          <div className="tc">
+            <span className="k">Achieved</span>
+            <span className="v">{formatCardValue(card)}</span>
+          </div>
+          <div className="sep" />
+          <div className="tc">
+            <span className="k">Projected</span>
+            <span className="v">{formatCardValue({ ...card, total: card.projected || 0 })}</span>
+          </div>
+          <div className="sep" />
+          <div className="tc">
+            <span className="k">Target</span>
+            <span className="v">
+              {formatCardValue({ ...card, total: card.target || 0 })}
+              <button onClick={onEditTarget} title="Edit target" data-testid={`reports-edit-target-${card.id}`}>
+                <Icon name="edit" size={14} />
+              </button>
+            </span>
+          </div>
+          <GaugeRing pct={pct} />
+        </div>
+      </div>
+
+      <div className="z-dbody">
+        <div className="z-chartbox">
+          <div className="z-chart-ttl">{card.chart?.title || 'Breakdown'}</div>
+          {breakdown.length === 0 ? (
+            <div className="z-empty" style={{ padding: '30px 10px' }}>No data for this period.</div>
+          ) : useBars ? (
+            <AnimatedBars data={breakdown} />
+          ) : (
+            <>
+              <div className="z-pieholder">
+                <AnimatedPie
+                  data={breakdown}
+                  centerLabel="Total"
+                  centerValue={card.money ? rupee(total) : Math.round(total)}
+                />
+              </div>
+              <div className="z-legend">
+                {breakdown.map(([n], i) => (
+                  <span key={n + i}>
+                    <i style={{ background: PIE_COLORS[i % PIE_COLORS.length] }} />{n}
+                  </span>
+                ))}
+              </div>
+            </>
+          )}
+        </div>
+        <div className="z-dtable">
+          <table>
+            <thead>
+              <tr><th>{(card.chart?.title || 'Item')}</th><th>Value</th></tr>
+            </thead>
+            <tbody>
+              {breakdown.map(([n, v], i) => (
+                <tr key={n + i}>
+                  <td>
+                    <span className="sw" style={{ background: PIE_COLORS[i % PIE_COLORS.length] }} />
+                    {n}
+                  </td>
+                  <td>{card.money ? rupee(v) : Math.round(Number(v || 0))}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div className="z-dfoot">
+        <a onClick={() => toast.info('Feedback noted — thanks!')} data-testid="reports-feedback-link">Give feedback</a>
+        <a onClick={onDrill} data-testid={`reports-drill-${card.id}`}>View details ›</a>
+      </div>
+    </>
   );
 }
 
-function MetricDetailDrawer({ card, salonId, view, date, getAuthHeaders, onClose }) {
+/* ------ Target edit drawer (per metric) ------ */
+function TargetEditDrawer({ card, salonId, view, getAuthHeaders, onClose, onSaved }) {
+  const [value, setValue] = useState(card.target || 0);
+  const save = async () => {
+    try {
+      await axios.put(
+        `${API}/salons/${salonId}/reports/targets`,
+        { period: view, targets: { [card.id]: Number(value) } },
+        { headers: getAuthHeaders() }
+      );
+      toast.success('Target updated');
+      onSaved();
+    } catch (e) { toast.error('Could not save target'); }
+  };
+  return (
+    <>
+      <div className="z-overlay" onClick={onClose} />
+      <aside className="z-drawer" style={{ zIndex: 2000, maxWidth: 460 }}>
+        <div className="z-drawer-h">
+          <div className="dico"><Icon name="gauge" /></div>
+          <div>
+            <div className="eyebrow">Set target</div>
+            <h3>{card.label}</h3>
+            <p>{view.charAt(0).toUpperCase() + view.slice(1)} target</p>
+          </div>
+          <button className="z-drawer-close" onClick={onClose}><Icon name="x" /></button>
+        </div>
+        <div className="z-drawer-body">
+          <div className="z-field">
+            <label>Target value</label>
+            <input type="number" value={value} onChange={(e) => setValue(e.target.value)}
+                   data-testid={`reports-target-input-${card.id}`} />
+          </div>
+        </div>
+        <div className="z-drawer-foot" style={{ display: 'flex', gap: 10 }}>
+          <button className="z-btn z-btn--ghost" style={{ flex: 1 }} onClick={onClose}>Cancel</button>
+          <button className="z-btn z-btn--pri" style={{ flex: 2 }} onClick={save} data-testid={`reports-target-save-${card.id}`}>
+            <Icon name="save" /> Save target
+          </button>
+        </div>
+      </aside>
+    </>
+  );
+}
+
+/* ------ Drill-down: full breakdown with per-row share and bar mini ------ */
+function MetricDrillDrawer({ card, salonId, view, date, getAuthHeaders, onClose }) {
   const [data, setData] = useState({ breakdown: [] });
   useEffect(() => {
     (async () => {
@@ -188,41 +479,51 @@ function MetricDetailDrawer({ card, salonId, view, date, getAuthHeaders, onClose
           { headers: getAuthHeaders() }
         );
         setData(res.data);
-      } catch (e) { /* ignore */ }
+      } catch (_) { /* ignore */ }
     })();
   }, [card.id, view, date]); // eslint-disable-line
-  const total = card.total || 1;
-  const maxBar = Math.max(1, ...(data.breakdown || []).map((r) => r.value));
 
+  const rows = data.breakdown || (card.chart?.data || []).map(([label, value]) => ({ label, value, share: 0 }));
+  const maxV = Math.max(1, ...rows.map((r) => Number(r.value || 0)));
   return (
     <>
       <div className="z-overlay" onClick={onClose} />
-      <aside className="z-drawer wide">
+      <aside className="z-drawer wide" style={{ zIndex: 2000 }}>
         <div className="z-drawer-h">
-          <div className="dico"><Icon name="chart" size={20} /></div>
+          <div className="dico"><Icon name="chart" /></div>
           <div>
-            <div className="eyebrow">{view} · {date}</div>
-            <h3>{card.label}</h3>
-            <p>Detailed breakdown for this metric.</p>
+            <div className="eyebrow">Detail</div>
+            <h3>{card.label.replace(' (₹)', '')} — details</h3>
+            <p>Full share breakdown</p>
           </div>
           <button className="z-drawer-close" onClick={onClose}><Icon name="x" /></button>
         </div>
         <div className="z-drawer-body">
-          <div style={{ textAlign: 'center', padding: '12px 0 18px' }}>
-            <div style={{ fontFamily: 'Bebas Neue', fontSize: 50, color: 'var(--z-primary)' }}>
-              {card.money ? rupee(card.total) : card.total}
-            </div>
-            {card.trend && <span className={`z-trend ${card.up ? 'up' : 'dn'}`}>{card.trend} vs previous</span>}
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 10, marginBottom: 16 }}>
+            <div className="z-metric g-blue"><div className="k">Achieved</div><div className="v">{formatCardValue(card)}</div></div>
+            <div className="z-metric g-mint"><div className="k">Projected</div><div className="v">{formatCardValue({ ...card, total: card.projected || 0 })}</div></div>
+            <div className="z-metric g-amber"><div className="k">Target</div><div className="v">{formatCardValue({ ...card, total: card.target || 0 })}</div></div>
           </div>
-          <div className="z-dsec">{card.chart?.title || 'Breakdown'}</div>
-          <div className="z-bar-chart">
-            {(data.breakdown || []).map((r) => (
-              <div key={r.label} className="z-bar-row">
-                <div className="lbl">{r.label}</div>
-                <div className="track"><div className="fill" style={{ width: `${(r.value / maxBar) * 100}%` }} /></div>
-                <div className="v">{card.money ? rupee(r.value) : r.value}<br /><small style={{ fontWeight: 600, color: 'var(--z-muted-2)' }}>{r.share}%</small></div>
-              </div>
-            ))}
+          <div className="z-dtable">
+            <table>
+              <thead>
+                <tr><th>Item</th><th>Bar</th><th>Value</th><th>Share</th></tr>
+              </thead>
+              <tbody>
+                {rows.map((r, i) => (
+                  <tr key={r.label + i}>
+                    <td><span className="sw" style={{ background: PIE_COLORS[i % PIE_COLORS.length] }} />{r.label}</td>
+                    <td style={{ minWidth: 100 }}>
+                      <div style={{ height: 7, background: 'var(--z-line-2)', borderRadius: 20, overflow: 'hidden', minWidth: 70 }}>
+                        <div style={{ height: '100%', width: `${(Number(r.value || 0) / maxV) * 100}%`, background: PIE_COLORS[i % PIE_COLORS.length], borderRadius: 20 }} />
+                      </div>
+                    </td>
+                    <td>{card.money ? rupee(r.value) : Math.round(Number(r.value || 0))}</td>
+                    <td>{r.share || Math.round((Number(r.value || 0) / (rows.reduce((s, x) => s + Number(x.value || 0), 0) || 1)) * 100)}%</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
         </div>
       </aside>
