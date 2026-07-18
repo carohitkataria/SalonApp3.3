@@ -38,6 +38,32 @@ export default function ServicesModule({ salonId, getAuthHeaders }) {
   const [editing, setEditing] = useState(null); // service being edited
   const [addingSubFor, setAddingSubFor] = useState(null); // category being added-to
   const [newSubName, setNewSubName] = useState('');
+  const [uploading, setUploading] = useState(false);
+
+  const handleUploadCsv = async (e) => {
+    const file = e.target?.files?.[0];
+    e.target.value = ''; // reset so same file can be re-picked
+    if (!file || !salonId) return;
+    setUploading(true);
+    try {
+      const fd = new FormData();
+      fd.append('file', file);
+      const res = await axios.post(
+        `${API}/salons/${salonId}/services/upload-csv`,
+        fd,
+        { headers: { ...getAuthHeaders(), 'Content-Type': 'multipart/form-data' } },
+      );
+      const added = res.data?.added ?? res.data?.count ?? 0;
+      const skipped = res.data?.skipped ?? 0;
+      toast.success(`Uploaded — added ${added}${skipped ? `, skipped ${skipped}` : ''}`);
+      await load();
+    } catch (err) {
+      const msg = err?.response?.data?.detail || 'Upload failed';
+      toast.error(typeof msg === 'string' ? msg : 'Upload failed');
+    } finally {
+      setUploading(false);
+    }
+  };
 
   const load = async () => {
     if (!salonId) return;
@@ -150,9 +176,24 @@ export default function ServicesModule({ salonId, getAuthHeaders }) {
           <div>
             <div className="eyebrow">Operations</div>
             <h1>Services</h1>
-            <p>Manage salon services and packages. Categories are fixed to Services and Packages; add your own sub-categories.</p>
           </div>
           <div className="z-actions">
+            <button
+              className="z-btn z-btn--ghost"
+              onClick={() => document.getElementById('svc-upload-input')?.click()}
+              data-testid="services-upload-btn"
+              disabled={uploading}
+              title="Upload a CSV/Excel file to bulk-add services"
+            >
+              <Icon name="save" /> {uploading ? 'Uploading…' : 'Upload CSV'}
+            </button>
+            <input
+              id="svc-upload-input"
+              type="file"
+              accept=".csv,.xlsx,.xls"
+              style={{ display: 'none' }}
+              onChange={handleUploadCsv}
+            />
             <button className="z-btn z-btn--pri" onClick={openNew}>
               <Icon name="plus" /> Add Service
             </button>

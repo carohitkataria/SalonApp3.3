@@ -186,6 +186,13 @@ export default function SalonHomeV2({ salon, salonId, tokens = [], barbers = [],
     return () => window.removeEventListener('salon:open-orders-drawer', handler);
   }, []);
 
+  // Let any tab (e.g. Queue's "Add Booking") open the New Appointment drawer.
+  useEffect(() => {
+    const handler = () => setApptOpen(true);
+    window.addEventListener('salon:open-new-appointment', handler);
+    return () => window.removeEventListener('salon:open-new-appointment', handler);
+  }, []);
+
   // Inject scoped stylesheet once.
   useEffect(() => {
     const id = 'shv2-styles';

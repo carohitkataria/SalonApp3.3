@@ -1352,21 +1352,59 @@ export default function EnhancedSalonDashboard() {
         )}
       </div>
 
-      {/* Modify Booking Dialog */}
-      <Dialog open={addServicesDialog} onOpenChange={setAddServicesDialog}>
-        <DialogContent className="max-w-3xl max-h-[90vh] overflow-hidden flex flex-col" data-testid="modify-booking-dialog">
-          <DialogHeader>
-            <DialogTitle className="text-lg">Modify Booking</DialogTitle>
-          </DialogHeader>
-
+      {/* Modify Booking Drawer (right-side, matches Queue theme) */}
+      <div
+        className={`shv2-overlay ${addServicesDialog ? 'open' : ''}`}
+        onClick={() => setAddServicesDialog(false)}
+        style={{ zIndex: 9060 }}
+      />
+      <aside
+        data-testid="modify-booking-drawer"
+        role="dialog"
+        aria-modal="true"
+        aria-hidden={!addServicesDialog}
+        style={{
+          position: 'fixed', right: 0, top: 0, bottom: 0,
+          width: 'min(640px, 95vw)', background: '#fff',
+          boxShadow: '-20px 0 40px rgba(30,32,50,.12)',
+          borderLeft: '1px solid #ECECF3',
+          transform: addServicesDialog ? 'translateX(0)' : 'translateX(100%)',
+          transition: 'transform .32s cubic-bezier(.22,.61,.36,1)',
+          zIndex: 9070, display: 'flex', flexDirection: 'column',
+          fontFamily: "'Plus Jakarta Sans','Inter',system-ui,sans-serif",
+          color: '#23252F',
+        }}
+      >
+        {/* Drawer header — Queue-purple theme */}
+        <div style={{
+          padding: '16px 22px', borderBottom: '1px solid #ECECF3',
+          background: 'linear-gradient(135deg,#F5F1FF,#FFFFFF)',
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12,
+        }}>
+          <div>
+            <div style={{ fontSize: 11, fontWeight: 800, letterSpacing: '.7px', color: '#6C4FE0', textTransform: 'uppercase' }}>Queue · Booking</div>
+            <div style={{ fontSize: 18, fontWeight: 800, marginTop: 2 }}>Modify Booking</div>
+          </div>
+          <button
+            type="button"
+            aria-label="Close"
+            onClick={() => setAddServicesDialog(false)}
+            style={{
+              width: 34, height: 34, borderRadius: 10, border: '1px solid #ECECF3',
+              background: '#fff', color: '#23252F', cursor: 'pointer', fontSize: 20, lineHeight: 1,
+              display: 'grid', placeItems: 'center',
+            }}
+          >×</button>
+        </div>
+        <div style={{ padding: '14px 22px 18px', overflow: 'hidden', display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }} data-testid="modify-booking-dialog">
           {selectedToken && (
             <>
               {/* Compact Info Row */}
-              <div className="flex items-center gap-3 p-3 bg-muted rounded-lg text-sm flex-shrink-0">
-                <span className="font-bold text-gold">{selectedToken.token_number}</span>
-                <span className="text-foreground font-semibold">{selectedToken.customer_name}</span>
-                <span className="text-muted-foreground">•</span>
-                <span className={selectedToken.payment_confirmed ? 'text-green-500 font-medium' : 'text-yellow-500 font-medium'}>
+              <div className="flex items-center gap-3 p-3 rounded-lg text-sm flex-shrink-0" style={{ background: '#F6F6FA' }}>
+                <span className="font-bold" style={{ color: '#6C4FE0' }}>{selectedToken.token_number}</span>
+                <span className="font-semibold">{selectedToken.customer_name}</span>
+                <span style={{ color: '#9EA1B2' }}>•</span>
+                <span style={{ color: selectedToken.payment_confirmed ? '#12A150' : '#D8873F', fontWeight: 600 }}>
                   {selectedToken.payment_confirmed ? '✓ Paid' : '⏳ Unpaid'}
                 </span>
               </div>
@@ -1404,13 +1442,15 @@ export default function EnhancedSalonDashboard() {
               </div>
 
               {/* Tabs: Services search vs Assignment table */}
-              <div className="mt-3 flex items-center gap-2 border-b border-border flex-shrink-0">
+              <div className="mt-3 flex items-center gap-2 border-b flex-shrink-0" style={{ borderColor: '#ECECF3' }}>
                 <button
                   type="button"
                   onClick={() => setModifyTab('services')}
-                  className={`px-3 py-1.5 text-xs font-semibold transition-colors ${
-                    modifyTab === 'services' ? 'text-gold border-b-2 border-gold' : 'text-muted-foreground'
-                  }`}
+                  className="px-3 py-1.5 text-xs font-semibold transition-colors"
+                  style={{
+                    color: modifyTab === 'services' ? '#6C4FE0' : '#7C8092',
+                    borderBottom: modifyTab === 'services' ? '2px solid #6C4FE0' : '2px solid transparent',
+                  }}
                   data-testid="modify-tab-services"
                 >
                   Pick services ({selectedNewServices.length})
@@ -1418,9 +1458,11 @@ export default function EnhancedSalonDashboard() {
                 <button
                   type="button"
                   onClick={() => setModifyTab('assignment')}
-                  className={`px-3 py-1.5 text-xs font-semibold transition-colors ${
-                    modifyTab === 'assignment' ? 'text-gold border-b-2 border-gold' : 'text-muted-foreground'
-                  }`}
+                  className="px-3 py-1.5 text-xs font-semibold transition-colors"
+                  style={{
+                    color: modifyTab === 'assignment' ? '#6C4FE0' : '#7C8092',
+                    borderBottom: modifyTab === 'assignment' ? '2px solid #6C4FE0' : '2px solid transparent',
+                  }}
                   data-testid="modify-tab-assignment"
                 >
                   Barber assignment
@@ -1450,15 +1492,16 @@ export default function EnhancedSalonDashboard() {
                         return (
                           <div
                             key={service.id}
-                            className={`flex items-center gap-3 px-3 py-2 border rounded-lg cursor-pointer transition-all text-sm ${
-                              isSelected ? 'border-gold bg-gold/5' : 'border-border hover:border-gold/40'
-                            }`}
+                            className="flex items-center gap-3 px-3 py-2 border rounded-lg cursor-pointer transition-all text-sm"
+                            style={isSelected
+                              ? { borderColor: '#6C4FE0', background: 'rgba(108,79,224,.06)' }
+                              : { borderColor: '#ECECF3' }}
                             onClick={() => toggleServiceSelection(service.id)}
                           >
                             <Checkbox checked={isSelected} onCheckedChange={() => toggleServiceSelection(service.id)} />
                             <span className="flex-1 font-medium">{service.service_name}</span>
-                            <span className="text-xs text-muted-foreground">{service.category}</span>
-                            <span className="font-bold text-gold">₹{service.base_price}</span>
+                            <span className="text-xs" style={{ color: '#7C8092' }}>{service.category}</span>
+                            <span className="font-bold" style={{ color: '#6C4FE0' }}>₹{service.base_price}</span>
                           </div>
                         );
                       })}
@@ -1498,7 +1541,7 @@ export default function EnhancedSalonDashboard() {
                               </p>
                               <p className="text-[11px] text-muted-foreground">{svc?.category || ''}</p>
                             </div>
-                            <div className="col-span-2 text-right font-bold text-gold" data-testid={`assignment-price-${sid}`}>
+                            <div className="col-span-2 text-right font-bold" style={{ color: '#6C4FE0' }} data-testid={`assignment-price-${sid}`}>
                               ₹{Number(price || 0).toFixed(0)}
                             </div>
                             <div className="col-span-5">
@@ -1562,7 +1605,8 @@ export default function EnhancedSalonDashboard() {
                         discountSourceRef.current = 'final';
                         setFinalAmount(e.target.value);
                       }}
-                      className="w-24 h-8 text-sm font-bold text-gold"
+                      className="w-24 h-8 text-sm font-bold"
+                      style={{ color: '#6C4FE0' }}
                       min={0}
                       data-testid="modify-final-amount"
                     />
@@ -1570,7 +1614,8 @@ export default function EnhancedSalonDashboard() {
                   <Button
                     onClick={handleSaveAllModifications}
                     disabled={modifySubtotal === 0}
-                    className="bg-gold text-black hover:bg-gold/90 h-8 text-sm disabled:opacity-50"
+                    className="h-8 text-sm disabled:opacity-50"
+                    style={{ background: 'linear-gradient(135deg,#6C4FE0,#8464F5)', color: '#fff', fontWeight: 700 }}
                     data-testid="modify-save-btn"
                   >
                     <CheckCircle className="w-4 h-4 mr-1.5" />
@@ -1580,8 +1625,8 @@ export default function EnhancedSalonDashboard() {
               </div>
             </>
           )}
-        </DialogContent>
-      </Dialog>
+        </div>
+      </aside>
 
       {/* Payment Confirmation Dialog (when clicking Complete) */}
       <Dialog open={showPaymentConfirmDialog} onOpenChange={setShowPaymentConfirmDialog}>

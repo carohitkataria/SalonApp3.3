@@ -215,7 +215,9 @@ export default function QueueTabV2({
         </button>
         <button
           className="qv2-btn ghost"
-          onClick={() => navigate('/salon/dashboard/new-booking?return=queue')}
+          onClick={() => {
+            try { window.dispatchEvent(new CustomEvent('salon:open-new-appointment')); } catch (_) { /* ignore */ }
+          }}
           data-testid="queue-add-booking-btn"
         >
           <I.plus />

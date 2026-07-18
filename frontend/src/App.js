@@ -35,7 +35,6 @@ import ReelsFeed from '@/pages/ReelsFeed';
 import OTPLoginPage from '@/pages/OTPLoginPage';
 import SalonSignupPage from '@/pages/SalonSignupPage';
 import EnhancedSalonDashboard from '@/pages/EnhancedSalonDashboard';
-import NewBookingPage from '@/pages/salon/NewBookingPage';
 import QuickInvoicePage from '@/pages/salon/QuickInvoicePage';
 import AddCustomerPage from '@/pages/salon/AddCustomerPage';
 import SellMembershipPage from '@/pages/salon/SellMembershipPage';
@@ -110,7 +109,6 @@ function App() {
                   <Route path="/salon/login" element={<OTPLoginPage />} />
                   <Route path="/salon/signup" element={<SalonSignupPage />} />
                   <Route path="/salon/dashboard" element={<EnhancedSalonDashboard />} />
-                  <Route path="/salon/dashboard/new-booking" element={<NewBookingPage />} />
                   <Route path="/salon/dashboard/quick-invoice" element={<QuickInvoicePage />} />
                   <Route path="/salon/dashboard/add-customer" element={<AddCustomerPage />} />
                   <Route path="/salon/dashboard/sell-membership" element={<SellMembershipPage />} />

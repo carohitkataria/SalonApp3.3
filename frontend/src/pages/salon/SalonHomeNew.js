@@ -260,7 +260,7 @@ export default function SalonHomeNew({
           desc="Book / Invoice"
           icon={Calendar}
           tint="from-amber-400 to-yellow-500"
-          onClick={() => navigate('/salon/dashboard/new-booking')}
+          onClick={() => window.dispatchEvent(new CustomEvent('salon:open-new-appointment'))}
           testId="quick-new-booking"
         />
         <QuickAction
@@ -268,7 +268,7 @@ export default function SalonHomeNew({
           desc="Bill without queue"
           icon={FileText}
           tint="from-emerald-400 to-teal-500"
-          onClick={() => navigate('/salon/dashboard/new-booking')}
+          onClick={() => window.dispatchEvent(new CustomEvent('salon:open-new-appointment'))}
           testId="quick-invoice"
         />
         <QuickAction
@@ -292,7 +292,7 @@ export default function SalonHomeNew({
           desc="Products / POS"
           icon={ShoppingBag}
           tint="from-pink-400 to-rose-500"
-          onClick={() => navigate('/salon/dashboard/new-booking')}
+          onClick={() => window.dispatchEvent(new CustomEvent('salon:open-new-appointment'))}
           testId="quick-retail"
         />
         <QuickAction

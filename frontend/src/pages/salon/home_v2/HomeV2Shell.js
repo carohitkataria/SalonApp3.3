@@ -121,6 +121,14 @@ export default function HomeV2Shell({
     return () => window.removeEventListener('salon:open-orders-drawer', handler);
   }, []);
 
+  // Same pattern — let any tab (e.g. Queue's "Add Booking") open the New
+  // Appointment drawer that lives on the right ribbon.
+  useEffect(() => {
+    const handler = () => setApptOpen(true);
+    window.addEventListener('salon:open-new-appointment', handler);
+    return () => window.removeEventListener('salon:open-new-appointment', handler);
+  }, []);
+
   // Inject scoped stylesheet once.
   useEffect(() => {
     const id = 'shv2-styles';
