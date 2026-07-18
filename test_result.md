@@ -7430,6 +7430,16 @@ agent_communication:
         - working: true
           agent: "testing"
           comment: |
+            30/30 Reports backend tests passed (100%). Verified: new target
+            schema (metric_id/period_type/target) accepted and old schema rejected
+            with 422; projection uses elapsed-fraction for flow metrics (300
+            achieved → 516.67 projected on day 18/31) and stays flat for ratio/
+            stock metrics; sales by_staff/by_service sorted by revenue desc; all
+            13 sub-metric detail endpoints return 200; auth 401/403 correctly
+            enforced. Reports module backend is production-ready.
+        - working: true
+          agent: "testing"
+          comment: |
             ✅ REPORTS MODULE BACKEND REGRESSION TEST COMPLETED - ALL ENDPOINTS WORKING
             
             Comprehensive testing completed successfully with 30/30 tests passed (100% success rate).
