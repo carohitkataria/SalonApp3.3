@@ -3,17 +3,17 @@
  * Scoped to `.zen` root so it doesn't affect the rest of the app.
  */
 export const ZEN_CSS = `
-.zen{--z-primary:#1B54C7;--z-primary-600:#123FA0;--z-primary-700:#0E3282;
-  --z-primary-050:#EEF3FF;--z-primary-100:#D9E4FD;--z-primary-200:#BBD0FB;
-  --z-bg:#F4F7FC;--z-surface:#FFFFFF;--z-surface-2:#FBFCFF;
-  --z-ink:#141C2E;--z-ink-soft:#37415C;--z-muted:#6B7793;--z-muted-2:#98A2B8;
-  --z-line:#E6EBF4;--z-line-2:#F1F5FB;
-  --z-ok:#2E7D32;--z-ok-bg:#E7F4E8;--z-warn:#B5730B;--z-warn-bg:#FBF0DA;--z-bad:#C0392B;--z-bad-bg:#FBE7E4;
-  --z-gold:#D9A82C;--z-green:#7CB342;--z-maroon:#A61E4D;--z-pink:#E5556E;--z-sky:#3E93E8;--z-violet:#7A5CD1;--z-teal:#12A594;
-  --z-shadow:0 1px 2px rgba(20,28,46,.05),0 8px 24px -12px rgba(20,28,46,.14);
-  --z-shadow-lg:0 24px 60px -24px rgba(20,28,46,.34);
-  --z-r:14px;--z-r-sm:10px;--z-r-lg:20px;
-  color:var(--z-ink);font-family:'Manrope',system-ui,sans-serif;font-size:14px;line-height:1.5}
+.zen{--z-primary:#6C4FE0;--z-primary-600:#5B3FD1;--z-primary-700:#4B33B8;
+  --z-primary-050:#F1EEFF;--z-primary-100:#E7E2FF;--z-primary-200:#D6CBFF;
+  --z-bg:#F6F6FB;--z-surface:#FFFFFF;--z-surface-2:#FBFBFE;
+  --z-ink:#23252F;--z-ink-soft:#3C3F4E;--z-muted:#7C8092;--z-muted-2:#9A9EAE;
+  --z-line:#ECECF3;--z-line-2:#F3F3F8;
+  --z-ok:#2FA96A;--z-ok-bg:#E7F6ED;--z-warn:#E8952B;--z-warn-bg:#FDF3E4;--z-bad:#E45C86;--z-bad-bg:#FCEAF1;
+  --z-gold:#E8952B;--z-green:#2FA96A;--z-maroon:#E45C86;--z-pink:#E45C86;--z-sky:#3E93E8;--z-violet:#6C4FE0;--z-teal:#12A594;
+  --z-shadow:0 1px 2px rgba(30,32,50,.04),0 6px 20px rgba(30,32,50,.05);
+  --z-shadow-lg:0 10px 40px rgba(30,32,50,.14);
+  --z-r:16px;--z-r-sm:12px;--z-r-lg:20px;
+  color:var(--z-ink);font-family:'Inter','Manrope',system-ui,sans-serif;font-size:14px;line-height:1.45}
 .zen .num{font-family:'Bebas Neue',sans-serif;font-weight:400;letter-spacing:.5px;line-height:1}
 .zen .eyebrow{font-size:11px;font-weight:800;letter-spacing:.14em;text-transform:uppercase;color:var(--z-primary)}
 .zen h1,.zen h2,.zen h3,.zen h4{margin:0;font-weight:800;letter-spacing:-.01em}
@@ -25,14 +25,14 @@ export const ZEN_CSS = `
 .zen .z-btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;padding:9px 15px;border-radius:11px;font-weight:700;font-size:13.5px;transition:.15s;white-space:nowrap;border:1px solid transparent;background:transparent;cursor:pointer}
 .zen .z-btn:disabled{opacity:.45;cursor:not-allowed}
 .zen .z-btn svg{width:16px;height:16px}
-.zen .z-btn--pri{background:var(--z-primary);color:#fff;box-shadow:var(--z-shadow)}
+.zen .z-btn--pri{background:var(--z-primary);color:#fff;box-shadow:0 6px 16px rgba(108,79,224,.24)}
 .zen .z-btn--pri:hover{background:var(--z-primary-600)}
 .zen .z-btn--ghost{background:#fff;color:var(--z-ink-soft);border-color:var(--z-line)}
 .zen .z-btn--ghost:hover{border-color:var(--z-primary-200);color:var(--z-primary);background:var(--z-primary-050)}
 .zen .z-btn--soft{background:var(--z-primary-050);color:var(--z-primary)}
 .zen .z-btn--soft:hover{background:var(--z-primary-100)}
 .zen .z-btn--danger{background:var(--z-bad-bg);color:var(--z-bad)}
-.zen .z-btn--danger:hover{background:#f6d5d0}
+.zen .z-btn--danger:hover{background:#f7d5e2}
 .zen .z-btn--ok{background:var(--z-ok);color:#fff}
 .zen .z-btn--sm{padding:6px 11px;font-size:12.5px;border-radius:9px}
 .zen .z-metrics{display:grid;grid-template-columns:repeat(4,1fr);gap:13px;margin-bottom:18px}
@@ -41,10 +41,10 @@ export const ZEN_CSS = `
 .zen .z-metric .v{font-family:'Bebas Neue',sans-serif;font-size:32px;line-height:.9;color:var(--z-ink)}
 .zen .z-metric .v small{font-size:15px;font-family:'Manrope';font-weight:700;color:var(--z-muted)}
 .zen .z-metric .sub{font-size:12px;color:var(--z-muted);margin-top:5px}
-.zen .z-metric.g-blue{background:linear-gradient(135deg,#EEF3FF,#fff)}
-.zen .z-metric.g-mint{background:linear-gradient(135deg,#E8F6EC,#fff)}
-.zen .z-metric.g-amber{background:linear-gradient(135deg,#FBF2DC,#fff)}
-.zen .z-metric.g-rose{background:linear-gradient(135deg,#FBE9EC,#fff)}
+.zen .z-metric.g-blue{background:linear-gradient(135deg,#F1EEFF,#fff)}
+.zen .z-metric.g-mint{background:linear-gradient(135deg,#E7F6ED,#fff)}
+.zen .z-metric.g-amber{background:linear-gradient(135deg,#FDF3E4,#fff)}
+.zen .z-metric.g-rose{background:linear-gradient(135deg,#FCEAF1,#fff)}
 .zen .z-trend{font-size:11.5px;font-weight:800;padding:2px 7px;border-radius:20px;display:inline-block}
 .zen .z-trend.up{background:var(--z-ok-bg);color:var(--z-ok)} .zen .z-trend.dn{background:var(--z-bad-bg);color:var(--z-bad)}
 .zen .z-pill{display:inline-flex;align-items:center;gap:5px;padding:3px 9px;border-radius:20px;font-size:11.5px;font-weight:700;background:var(--z-line-2);color:var(--z-ink-soft)}
@@ -296,7 +296,7 @@ export const injectZenCss = (() => {
     injected = true;
     const link = document.createElement('link');
     link.rel = 'stylesheet';
-    link.href = 'https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Manrope:wght@400;500;600;700;800&display=swap';
+    link.href = 'https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Inter:wght@400;500;600;700;800&family=Manrope:wght@400;500;600;700;800&display=swap';
     document.head.appendChild(link);
     const s = document.createElement('style');
     s.setAttribute('data-zen-ops', '1');
