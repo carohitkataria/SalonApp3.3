@@ -62,6 +62,21 @@ export default function ReportsModule({ salonId, canManageFinancials = true, get
   const [showTargets, setShowTargets] = useState(false);
   // Snapshot data lifted for the export button in header
   const [snapshotData, setSnapshotData] = useState({ cards: [], window: null });
+  // Branch filter — 'all' means aggregate across all branches
+  const [branches, setBranches] = useState([]);
+  const [branchId, setBranchId] = useState('all');
+
+  useEffect(() => {
+    if (!salonId) return;
+    (async () => {
+      try {
+        const res = await axios.get(`${API}/salons/${salonId}/branches`, { headers: getAuthHeaders() });
+        setBranches(res.data || []);
+      } catch (_) { /* single-branch mode is fine */ }
+    })();
+  }, [salonId, getAuthHeaders]);
+
+  const effectiveBranch = branchId === 'all' ? null : branchId;
 
   return (
     <div className="zen">
@@ -70,7 +85,6 @@ export default function ReportsModule({ salonId, canManageFinancials = true, get
           <div>
             <div className="eyebrow">Business intelligence</div>
             <h1>Reports</h1>
-            <p>Your merged Financials + Analytics view. Track KPIs, compare periods, and drill into any card.</p>
           </div>
           <div className="z-actions">
             <div className="z-seg">
@@ -82,6 +96,20 @@ export default function ReportsModule({ salonId, canManageFinancials = true, get
             </div>
             <input type="date" value={date} onChange={(e) => setDate(e.target.value)}
                    style={{ padding: '8px 12px', border: '1px solid var(--z-line)', borderRadius: 10, background: '#fff' }} />
+            {branches.length > 1 && (
+              <select
+                value={branchId}
+                onChange={(e) => setBranchId(e.target.value)}
+                data-testid="reports-branch-filter"
+                title="Filter by branch"
+                style={{ padding: '8px 12px', border: '1px solid var(--z-line)', borderRadius: 10, background: '#fff', fontWeight: 700, fontSize: 13, color: 'var(--z-ink-soft)', cursor: 'pointer' }}
+              >
+                <option value="all">All branches</option>
+                {branches.map((b) => (
+                  <option key={b.id} value={b.id}>{b.branch_name || b.name}</option>
+                ))}
+              </select>
+            )}
             <button className={`z-btn ${compare ? 'z-btn--soft' : 'z-btn--ghost'}`} onClick={() => setCompare((c) => !c)}>
               <Icon name="layers" /> Compare
             </button>
@@ -110,20 +138,20 @@ export default function ReportsModule({ salonId, canManageFinancials = true, get
 
         {tab === 'snapshot' && (
           <SnapshotTab
-            salonId={salonId} view={view} date={date} compare={compare}
+            salonId={salonId} view={view} date={date} compare={compare} branchId={effectiveBranch}
             getAuthHeaders={getAuthHeaders}
             onConfigure={() => setShowConfig(true)}
             onTargets={() => setShowTargets(true)}
             onLoaded={setSnapshotData}
           />
         )}
-        {tab === 'sales' && <SalesTab salonId={salonId} view={view} date={date} getAuthHeaders={getAuthHeaders} />}
-        {tab === 'payments-gst' && <PaymentsTab salonId={salonId} view={view} date={date} getAuthHeaders={getAuthHeaders} />}
-        {tab === 'pnl' && <PnlTab salonId={salonId} view={view} date={date} getAuthHeaders={getAuthHeaders} canManage={canManageFinancials} onAdd={() => setShowAddEntry(true)} />}
-        {tab === 'staff' && <StaffTab salonId={salonId} view={view} date={date} getAuthHeaders={getAuthHeaders} />}
-        {tab === 'clients' && <ClientsTab salonId={salonId} view={view} date={date} getAuthHeaders={getAuthHeaders} />}
-        {tab === 'marketing' && <MarketingTab salonId={salonId} view={view} date={date} getAuthHeaders={getAuthHeaders} />}
-        {tab === 'inventory' && <InventoryReportsTab salonId={salonId} view={view} date={date} getAuthHeaders={getAuthHeaders} />}
+        {tab === 'sales' && <SalesTab salonId={salonId} view={view} date={date} branchId={effectiveBranch} getAuthHeaders={getAuthHeaders} />}
+        {tab === 'payments-gst' && <PaymentsTab salonId={salonId} view={view} date={date} branchId={effectiveBranch} getAuthHeaders={getAuthHeaders} />}
+        {tab === 'pnl' && <PnlTab salonId={salonId} view={view} date={date} branchId={effectiveBranch} getAuthHeaders={getAuthHeaders} canManage={canManageFinancials} onAdd={() => setShowAddEntry(true)} />}
+        {tab === 'staff' && <StaffTab salonId={salonId} view={view} date={date} branchId={effectiveBranch} getAuthHeaders={getAuthHeaders} />}
+        {tab === 'clients' && <ClientsTab salonId={salonId} view={view} date={date} branchId={effectiveBranch} getAuthHeaders={getAuthHeaders} />}
+        {tab === 'marketing' && <MarketingTab salonId={salonId} view={view} date={date} branchId={effectiveBranch} getAuthHeaders={getAuthHeaders} />}
+        {tab === 'inventory' && <InventoryReportsTab salonId={salonId} view={view} date={date} branchId={effectiveBranch} getAuthHeaders={getAuthHeaders} />}
       </div>
 
       {showAddEntry && <AddEntryDialog salonId={salonId} getAuthHeaders={getAuthHeaders} onClose={() => setShowAddEntry(false)} />}
@@ -243,7 +271,7 @@ function GaugeRing({ pct }) {
   );
 }
 
-function SnapshotTab({ salonId, view, date, compare, getAuthHeaders, onConfigure, onTargets, onLoaded }) {
+function SnapshotTab({ salonId, view, date, compare, branchId, getAuthHeaders, onConfigure, onTargets, onLoaded }) {
   const [cards, setCards] = useState([]);
   const [loading, setLoading] = useState(true);
   const [sel, setSel] = useState(null);
@@ -253,8 +281,9 @@ function SnapshotTab({ salonId, view, date, compare, getAuthHeaders, onConfigure
   const load = useCallback(async () => {
     setLoading(true);
     try {
+      const bp = branchId ? `&branch_id=${branchId}` : '';
       const res = await axios.get(
-        `${API}/salons/${salonId}/reports/snapshot?view=${view}&date=${date}&compare=${compare}`,
+        `${API}/salons/${salonId}/reports/snapshot?view=${view}&date=${date}&compare=${compare}${bp}`,
         { headers: getAuthHeaders() }
       );
       const list = res.data?.cards || [];
@@ -264,9 +293,9 @@ function SnapshotTab({ salonId, view, date, compare, getAuthHeaders, onConfigure
     } catch (e) {
       toast.error('Failed to load snapshot');
     } finally { setLoading(false); }
-  }, [salonId, view, date, compare, getAuthHeaders, sel, onLoaded]);
+  }, [salonId, view, date, compare, branchId, getAuthHeaders, sel, onLoaded]);
 
-  useEffect(() => { load(); /* eslint-disable-next-line */ }, [salonId, view, date, compare]);
+  useEffect(() => { load(); /* eslint-disable-next-line */ }, [salonId, view, date, compare, branchId]);
 
   const active = useMemo(() => cards.find((c) => c.id === sel) || cards[0], [cards, sel]);
 
@@ -570,16 +599,17 @@ function MetricDrillDrawer({ card, salonId, view, date, getAuthHeaders, onClose 
 }
 
 /* ---------- SALES ---------- */
-function SalesTab({ salonId, view, date, getAuthHeaders }) {
+function SalesTab({ salonId, view, date, branchId, getAuthHeaders }) {
   const [data, setData] = useState(null);
   useEffect(() => {
     (async () => {
       try {
-        const res = await axios.get(`${API}/salons/${salonId}/reports/sales?view=${view}&date=${date}`, { headers: getAuthHeaders() });
+        const bp = branchId ? `&branch_id=${branchId}` : '';
+        const res = await axios.get(`${API}/salons/${salonId}/reports/sales?view=${view}&date=${date}${bp}`, { headers: getAuthHeaders() });
         setData(res.data);
       } catch (e) { toast.error('Failed to load sales'); }
     })();
-  }, [salonId, view, date]); // eslint-disable-line
+  }, [salonId, view, date, branchId]); // eslint-disable-line
   if (!data) return <div className="z-empty">Loading…</div>;
   return (
     <>
@@ -632,16 +662,17 @@ function TopTable({ rows }) {
 }
 
 /* ---------- PAYMENTS & GST ---------- */
-function PaymentsTab({ salonId, view, date, getAuthHeaders }) {
+function PaymentsTab({ salonId, view, date, branchId, getAuthHeaders }) {
   const [data, setData] = useState(null);
   useEffect(() => {
     (async () => {
       try {
-        const res = await axios.get(`${API}/salons/${salonId}/reports/payments-gst?view=${view}&date=${date}`, { headers: getAuthHeaders() });
+        const bp = branchId ? `&branch_id=${branchId}` : '';
+        const res = await axios.get(`${API}/salons/${salonId}/reports/payments-gst?view=${view}&date=${date}${bp}`, { headers: getAuthHeaders() });
         setData(res.data);
       } catch (e) { toast.error('Failed to load payments'); }
     })();
-  }, [salonId, view, date]); // eslint-disable-line
+  }, [salonId, view, date, branchId]); // eslint-disable-line
   if (!data) return <div className="z-empty">Loading…</div>;
   return (
     <>
@@ -678,16 +709,17 @@ function PaymentsTab({ salonId, view, date, getAuthHeaders }) {
 }
 
 /* ---------- P&L ---------- */
-function PnlTab({ salonId, view, date, getAuthHeaders, canManage, onAdd }) {
+function PnlTab({ salonId, view, date, branchId, getAuthHeaders, canManage, onAdd }) {
   const [data, setData] = useState(null);
   useEffect(() => {
     (async () => {
       try {
-        const res = await axios.get(`${API}/salons/${salonId}/reports/pnl?view=${view}&date=${date}`, { headers: getAuthHeaders() });
+        const bp = branchId ? `&branch_id=${branchId}` : '';
+        const res = await axios.get(`${API}/salons/${salonId}/reports/pnl?view=${view}&date=${date}${bp}`, { headers: getAuthHeaders() });
         setData(res.data);
       } catch (e) { toast.error('Failed to load P&L'); }
     })();
-  }, [salonId, view, date]); // eslint-disable-line
+  }, [salonId, view, date, branchId]); // eslint-disable-line
   if (!data) return <div className="z-empty">Loading…</div>;
   return (
     <>
@@ -717,17 +749,18 @@ function PnlTab({ salonId, view, date, getAuthHeaders, canManage, onAdd }) {
 }
 
 /* ---------- STAFF ---------- */
-function StaffTab({ salonId, view, date, getAuthHeaders }) {
+function StaffTab({ salonId, view, date, branchId, getAuthHeaders }) {
   const [data, setData] = useState(null);
   useEffect(() => {
     // Reuse Sales endpoint's by_staff for a quick staff view.
     (async () => {
       try {
-        const res = await axios.get(`${API}/salons/${salonId}/reports/sales?view=${view}&date=${date}`, { headers: getAuthHeaders() });
+        const bp = branchId ? `&branch_id=${branchId}` : '';
+        const res = await axios.get(`${API}/salons/${salonId}/reports/sales?view=${view}&date=${date}${bp}`, { headers: getAuthHeaders() });
         setData(res.data);
       } catch (e) { /* noop */ }
     })();
-  }, [salonId, view, date]); // eslint-disable-line
+  }, [salonId, view, date, branchId]); // eslint-disable-line
   if (!data) return <div className="z-empty">Loading…</div>;
   return (
     <div className="z-card" style={{ padding: 16 }}>
@@ -738,16 +771,17 @@ function StaffTab({ salonId, view, date, getAuthHeaders }) {
 }
 
 /* ---------- CLIENTS ---------- */
-function ClientsTab({ salonId, view, date, getAuthHeaders }) {
+function ClientsTab({ salonId, view, date, branchId, getAuthHeaders }) {
   const [data, setData] = useState(null);
   useEffect(() => {
     (async () => {
       try {
-        const res = await axios.get(`${API}/salons/${salonId}/reports/clients?view=${view}&date=${date}`, { headers: getAuthHeaders() });
+        const bp = branchId ? `&branch_id=${branchId}` : '';
+        const res = await axios.get(`${API}/salons/${salonId}/reports/clients?view=${view}&date=${date}${bp}`, { headers: getAuthHeaders() });
         setData(res.data);
       } catch (e) { /* noop */ }
     })();
-  }, [salonId, view, date]); // eslint-disable-line
+  }, [salonId, view, date, branchId]); // eslint-disable-line
   if (!data) return <div className="z-empty">Loading…</div>;
   return (
     <>
@@ -770,16 +804,17 @@ function ClientsTab({ salonId, view, date, getAuthHeaders }) {
 }
 
 /* ---------- MARKETING ---------- */
-function MarketingTab({ salonId, view, date, getAuthHeaders }) {
+function MarketingTab({ salonId, view, date, branchId, getAuthHeaders }) {
   const [data, setData] = useState(null);
   useEffect(() => {
     (async () => {
       try {
-        const res = await axios.get(`${API}/salons/${salonId}/reports/marketing?view=${view}&date=${date}`, { headers: getAuthHeaders() });
+        const bp = branchId ? `&branch_id=${branchId}` : '';
+        const res = await axios.get(`${API}/salons/${salonId}/reports/marketing?view=${view}&date=${date}${bp}`, { headers: getAuthHeaders() });
         setData(res.data);
       } catch (e) { /* noop */ }
     })();
-  }, [salonId, view, date]); // eslint-disable-line
+  }, [salonId, view, date, branchId]); // eslint-disable-line
   if (!data) return <div className="z-empty">Loading…</div>;
   return (
     <div className="z-metrics">
@@ -800,16 +835,17 @@ function MarketingTab({ salonId, view, date, getAuthHeaders }) {
 }
 
 /* ---------- INVENTORY ---------- */
-function InventoryReportsTab({ salonId, view, date, getAuthHeaders }) {
+function InventoryReportsTab({ salonId, view, date, branchId, getAuthHeaders }) {
   const [data, setData] = useState(null);
   useEffect(() => {
     (async () => {
       try {
-        const res = await axios.get(`${API}/salons/${salonId}/reports/inventory?view=${view}&date=${date}`, { headers: getAuthHeaders() });
+        const bp = branchId ? `&branch_id=${branchId}` : '';
+        const res = await axios.get(`${API}/salons/${salonId}/reports/inventory?view=${view}&date=${date}${bp}`, { headers: getAuthHeaders() });
         setData(res.data);
       } catch (e) { /* noop */ }
     })();
-  }, [salonId, view, date]); // eslint-disable-line
+  }, [salonId, view, date, branchId]); // eslint-disable-line
   if (!data) return <div className="z-empty">Loading…</div>;
   return (
     <>
@@ -875,7 +911,7 @@ function AddEntryDialog({ salonId, getAuthHeaders, onClose }) {
       <aside className="z-drawer">
         <div className="z-drawer-h">
           <div className="dico"><Icon name="wallet" size={20} /></div>
-          <div><div className="eyebrow">Finance</div><h3>Add entry</h3><p>Record an expense, deposit, or adjustment.</p></div>
+          <div><div className="eyebrow">Finance</div><h3>Add entry</h3></div>
           <button className="z-drawer-close" onClick={onClose}><Icon name="x" /></button>
         </div>
         <div className="z-drawer-body">
@@ -935,16 +971,29 @@ function ConfigDialog({ salonId, getAuthHeaders, onClose }) {
   const toggle = (id) => {
     setPrefs((p) => {
       const set = new Set(p.cards);
-      if (set.has(id)) set.delete(id); else set.add(id);
-      return { ...p, cards: Array.from(set) };
+      const order = Array.isArray(p.order) ? [...p.order] : [];
+      if (set.has(id)) {
+        set.delete(id);
+      } else {
+        set.add(id);
+        // Ensure order includes the newly enabled card — otherwise the backend
+        // (which iterates `order` and filters by `cards`) will silently omit it
+        // even though the toggle looks enabled.
+        if (!order.includes(id)) order.push(id);
+      }
+      return { ...p, cards: Array.from(set), order };
     });
   };
   const save = async () => {
     try {
+      // Reconcile order so it contains every enabled card at least once.
+      const enabled = prefs.cards || [];
+      const order = Array.isArray(prefs.order) ? [...prefs.order] : [];
+      enabled.forEach((id) => { if (!order.includes(id)) order.push(id); });
       await axios.put(`${API}/salons/${salonId}/reports/prefs`, {
-        cards: prefs.cards, order: prefs.order,
+        cards: enabled, order,
       }, { headers: getAuthHeaders() });
-      toast.success('Saved — reload to see changes');
+      toast.success('Saved');
       onClose();
     } catch (e) { toast.error('Save failed'); }
   };

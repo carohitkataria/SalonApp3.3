@@ -36,9 +36,8 @@ import NotificationsDrawer from './NotificationsDrawer';
 import SalonLogoControl from './SalonLogoControl';
 import OrdersDrawer from '@/components/ops/OrdersDrawer';
 
-// ---- Rail items — copies of existing hamburger menu (kept in sync with SalonHomeV2) ----
+// ---- Rail items — Home is provided by the logo click at top ----
 export const RAIL_ITEMS = [
-  { id: 'home',            label: 'Home',      route: '/salon/dashboard?tab=home' },
   { id: 'queue',           label: 'Queue',     route: '/salon/dashboard?tab=queue' },
   { id: 'customer-master', label: 'Guests',    route: '/salon/dashboard?tab=customer-master' },
   { id: 'marketing',       label: 'Marketing', route: '/salon/dashboard?tab=marketing' },
@@ -144,6 +143,7 @@ export default function HomeV2Shell({
           salon={salon}
           getAuthHeaders={getAuthHeaders}
           onLogoChanged={() => onSaved?.()}
+          onClick={() => navigate('/salon/dashboard?tab=home')}
         />
         <nav className="rail__nav">
           {RAIL_ITEMS.map((it) => {
@@ -161,20 +161,15 @@ export default function HomeV2Shell({
               </button>
             );
           })}
-        </nav>
-        <div className="rail__foot">
           <button
-            className="navitem"
-            style={{ height: 44 }}
-            onClick={() => { try { onLogout?.(); logout?.(); } catch (_) {} navigate('/'); }}
+            className="navitem navitem--exit"
+            onClick={() => { try { onLogout?.(); logout?.(); } catch (_) { /* ignore */ } navigate('/'); }}
             title="Logout"
+            data-testid="rail-exit-btn"
           >
             <I.rotate /><span>Exit</span>
           </button>
-          <div className="rail__avatar" title={salon?.salon_name}>
-            {(salon?.salon_name || 'SL').split(' ').map(w => w[0]).slice(0, 2).join('').toUpperCase()}
-          </div>
-        </div>
+        </nav>
       </aside>
 
       {/* ===== RIBBON ===== */}

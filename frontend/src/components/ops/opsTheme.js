@@ -52,7 +52,8 @@ export const ZEN_CSS = `
 .zen .z-seg{display:inline-flex;background:var(--z-line-2);border:1px solid var(--z-line);border-radius:10px;padding:3px;gap:1px}
 .zen .z-seg button{padding:6px 12px;border-radius:8px;font-weight:700;font-size:12.5px;color:var(--z-muted);background:transparent;border:none;cursor:pointer}
 .zen .z-seg button.on{background:#fff;color:var(--z-primary);box-shadow:var(--z-shadow)}
-.zen .z-chip{padding:7px 12px;border-radius:20px;border:1px solid var(--z-line);background:#fff;font-weight:700;font-size:12.5px;color:var(--z-ink-soft);white-space:nowrap;transition:.15s;cursor:pointer}
+.zen .z-chip{display:inline-flex;align-items:center;gap:6px;padding:7px 12px;border-radius:20px;border:1px solid var(--z-line);background:#fff;font-weight:700;font-size:12.5px;color:var(--z-ink-soft);white-space:nowrap;transition:.15s;cursor:pointer;line-height:1}
+.zen .z-chip svg{flex:none;width:14px;height:14px}
 .zen .z-chip:hover{border-color:var(--z-primary-200)}
 .zen .z-chip.on{background:var(--z-primary);color:#fff;border-color:var(--z-primary)}
 .zen .z-field label{display:block;font-size:11px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;color:var(--z-muted);margin-bottom:5px}

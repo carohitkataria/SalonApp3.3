@@ -45,7 +45,7 @@ async function fileToDataURL(file) {
   });
 }
 
-export default function SalonLogoControl({ salonId, salon, onLogoChanged, getAuthHeaders }) {
+export default function SalonLogoControl({ salonId, salon, onLogoChanged, getAuthHeaders, onClick }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [logoUrl, setLogoUrl] = useState(salon?.logo_url || null);
@@ -123,8 +123,11 @@ export default function SalonLogoControl({ salonId, salon, onLogoChanged, getAut
       <button
         type="button"
         data-testid="rail-logo-btn"
-        onClick={() => setMenuOpen(v => !v)}
-        title={busy ? 'Saving…' : 'Manage salon logo'}
+        onClick={() => {
+          if (onClick) { onClick(); return; }
+          setMenuOpen(v => !v);
+        }}
+        title={onClick ? (salon?.salon_name || 'Home') : (busy ? 'Saving…' : 'Manage salon logo')}
         style={{
           width: 44, height: 44, borderRadius: 13,
           background: hasLogo
@@ -147,17 +150,21 @@ export default function SalonLogoControl({ salonId, salon, onLogoChanged, getAut
         ) : <DefaultMark />}
       </button>
 
-      {/* Pencil badge (always visible on the corner for discoverability) */}
-      <span
-        aria-hidden
+      {/* Pencil badge — clickable when the logo itself is a Home button.
+          Opens the manage-logo mini menu. */}
+      <button
+        type="button"
+        aria-label="Manage salon logo"
+        data-testid="rail-logo-manage"
+        onClick={(e) => { e.stopPropagation(); setMenuOpen(v => !v); }}
         style={{
           position: 'absolute', right: -3, bottom: -3,
           width: 16, height: 16, borderRadius: '50%',
           background: '#6C4FE0', color: '#fff',
           display: 'grid', placeItems: 'center',
-          border: '2px solid #fff', pointerEvents: 'none',
+          border: '2px solid #fff', padding: 0, cursor: 'pointer',
         }}
-      ><Pencil /></span>
+      ><Pencil /></button>
 
       <input
         ref={fileRef}

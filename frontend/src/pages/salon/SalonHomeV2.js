@@ -37,9 +37,8 @@ import SalonLogoControl from './home_v2/SalonLogoControl';
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
 const API = `${BACKEND_URL}/api`;
 
-// ---- Rail items — copies of existing hamburger menu ----
+// ---- Rail items (Home is now provided by the logo click at the top) ----
 const RAIL_ITEMS = [
-  { id: 'home',            label: 'Home',      route: '/salon/dashboard?tab=home' },
   { id: 'queue',           label: 'Queue',     route: '/salon/dashboard?tab=queue' },
   { id: 'customer-master', label: 'Guests',    route: '/salon/dashboard?tab=customer-master' },
   { id: 'marketing',       label: 'Marketing', route: '/salon/dashboard?tab=marketing' },
@@ -368,11 +367,11 @@ export default function SalonHomeV2({ salon, salonId, tokens = [], barbers = [],
           salon={salon}
           getAuthHeaders={getAuthHeaders}
           onLogoChanged={() => { /* parent refreshes via next tab open */ }}
+          onClick={() => navigate('/salon/dashboard?tab=home')}
         />
         <nav className="rail__nav">
           {RAIL_ITEMS.map((it, idx) => (
-            <button key={it.id} className={`navitem ${it.id === 'home' ? 'active' : ''}`} onClick={() => goRail(it)} title={it.label}>
-              {it.id === 'home' && <I.home />}
+            <button key={it.id} className="navitem" onClick={() => goRail(it)} title={it.label}>
               {it.id === 'queue' && <I.cal />}
               {it.id === 'staff' && <I.users />}
               {it.id === 'services' && <I.scissors />}
@@ -385,15 +384,15 @@ export default function SalonHomeV2({ salon, salonId, tokens = [], barbers = [],
               <span>{it.label}</span>
             </button>
           ))}
-        </nav>
-        <div className="rail__foot">
-          <button className="navitem" style={{ height: 44 }} onClick={() => { try { logout?.(); } catch (_) { /* ignore */ } navigate('/'); }} title="Logout">
+          <button
+            className="navitem navitem--exit"
+            onClick={() => { try { logout?.(); } catch (_) { /* ignore */ } navigate('/'); }}
+            title="Logout"
+            data-testid="rail-exit-btn"
+          >
             <I.rotate /><span>Exit</span>
           </button>
-          <div className="rail__avatar" title={salon?.salon_name}>
-            {(salon?.salon_name || 'SL').split(' ').map(w => w[0]).slice(0, 2).join('').toUpperCase()}
-          </div>
-        </div>
+        </nav>
       </aside>
 
       {/* ===== RIBBON ===== */}
