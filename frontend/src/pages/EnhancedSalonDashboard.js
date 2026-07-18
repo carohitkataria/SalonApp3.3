@@ -31,6 +31,7 @@ import SalonHomeV2 from '@/pages/salon/SalonHomeV2';
 import HomeV2Shell from '@/pages/salon/home_v2/HomeV2Shell';
 import SalonStaffV3 from '@/pages/salon/redesign/SalonStaffV3';
 import SalonSettingsV3 from '@/pages/salon/redesign/SalonSettingsV3';
+import TabHeaderV3 from '@/pages/salon/redesign/TabHeaderV3';
 import QueueTabV2 from '@/pages/salon/home_v2/QueueTabV2';
 import MarketingV2 from '@/pages/salon/v2_pages/MarketingV2';
 import CustomersV2 from '@/pages/salon/v2_pages/CustomersV2';
@@ -1234,7 +1235,13 @@ export default function EnhancedSalonDashboard() {
         {/* ===== HOME DASHBOARD (rendered separately outside this wrapper) ===== */}
 
         {activeTab === 'queue' && (
-          <div className="tab-pad-legacy">
+          <div className="tab-pad-legacy tab-hdr-scope">
+            <TabHeaderV3
+              icon="queue"
+              title="Live Queue"
+              subtitle="Manage today's booked and walk-in tokens in real time."
+              accent="sky"
+            />
             <QueueTabV2
               date={date}
               dateMode={dateMode}
@@ -1268,7 +1275,7 @@ export default function EnhancedSalonDashboard() {
         )}
 
         {activeTab === 'customer-master' && (
-          <div className="tab-pad-legacy">
+          <div className="tab-pad-legacy tab-hue-teal">
             <CustomersV2 salonId={salonId} getAuthHeaders={getAuthHeaders} salon={salon} />
           </div>
         )}
@@ -1297,7 +1304,7 @@ export default function EnhancedSalonDashboard() {
         )}
 
         {activeTab === 'marketing' && (
-          <div className="tab-pad-legacy">
+          <div className="tab-pad-legacy tab-hue-violet">
             <MarketingV2 salonId={salonId} getAuthHeaders={getAuthHeaders} salon={salon} />
           </div>
         )}
