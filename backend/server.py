@@ -226,6 +226,7 @@ class ServiceUpdate(BaseModel):
     service_name: Optional[str] = None
     description: Optional[str] = None
     category: Optional[str] = None
+    sub_category: Optional[str] = None
     gender_tag: Optional[str] = None
     default_duration: Optional[int] = None
     base_price: Optional[float] = None
@@ -247,7 +248,8 @@ class Service(BaseModel):
     id: str
     service_name: str
     description: Optional[str] = None
-    category: str = "General"
+    category: str = "Services"
+    sub_category: Optional[str] = None
     gender_tag: str = "Unisex"
     default_duration: int
     base_price: float
@@ -993,6 +995,17 @@ _MODULE_LEGACY_MAP: Dict[str, Dict[str, str]] = {
     "analytics": {
         "view": "can_access_analytics",
     },
+    "reports": {
+        # Reports = merged Financials + Analytics. Grants view via either legacy flag.
+        "view": "can_access_analytics",
+        "view_dashboard": "can_access_financials",
+        "view_transactions": "can_access_financials",
+        "create_transaction": "can_access_financials",
+        "edit_transaction": "can_access_financials",
+        "delete_transaction": "can_access_financials",
+        "edit_targets": "can_access_financials",
+        "edit_prefs": "can_access_analytics",
+    },
     "services": {
         "view": "can_access_services",
         "create": "can_access_services",
@@ -1060,6 +1073,11 @@ def has_module_permission(user_payload: dict, module: str, action: str) -> bool:
     legacy_key = _MODULE_LEGACY_MAP.get(module, {}).get(action)
     if legacy_key and perms.get(legacy_key):
         return True
+
+    # Reports module = union of legacy Financials + Analytics access.
+    if module == "reports":
+        if perms.get("can_access_financials") or perms.get("can_access_analytics"):
+            return True
     return False
 
 
@@ -4637,6 +4655,87 @@ async def get_service_categories():
         })
     
     return {"categories": categories}
+
+
+# ---- Sub-categories master (per salon, free-form) ----
+@api_router.get("/salons/{salon_id}/services/subcategories")
+async def list_service_subcategories(salon_id: str):
+    """Return list of sub-categories used by this salon under Services and Packages,
+    plus any explicitly-added sub-categories saved in service_subcategories."""
+    # collected from actual services
+    pipeline = [
+        {"$match": {"salon_id": salon_id, "is_active": True}},
+        {"$group": {"_id": {"category": "$category", "sub_category": "$sub_category"}}}
+    ]
+    seen: Dict[str, set] = {"Services": set(), "Packages": set()}
+    try:
+        async for row in db.services.aggregate(pipeline):
+            k = row["_id"]
+            cat = k.get("category") or "Services"
+            sub = k.get("sub_category")
+            if cat not in ("Services", "Packages"):
+                cat = "Services"
+            if sub:
+                seen[cat].add(sub)
+    except Exception:
+        pass
+    # extras saved manually
+    try:
+        docs = await db.service_subcategories.find(
+            {"salon_id": salon_id}, {"_id": 0}
+        ).to_list(500)
+        for d in docs:
+            cat = d.get("category") or "Services"
+            if cat not in ("Services", "Packages"):
+                cat = "Services"
+            if d.get("name"):
+                seen[cat].add(d["name"])
+    except Exception:
+        pass
+    return {
+        "Services": sorted(list(seen["Services"])),
+        "Packages": sorted(list(seen["Packages"])),
+    }
+
+
+@api_router.post("/salons/{salon_id}/services/subcategories")
+async def add_service_subcategory(
+    salon_id: str,
+    payload: dict,
+    current_user=Depends(get_current_salon_user),
+):
+    """Add a free-form sub-category to service_subcategories (idempotent)."""
+    if not has_module_permission(current_user, "services", "manage_categories"):
+        raise HTTPException(403, "Permission denied")
+    cat = payload.get("category") or "Services"
+    name = (payload.get("name") or "").strip()
+    if cat not in ("Services", "Packages"):
+        cat = "Services"
+    if not name:
+        raise HTTPException(400, "name required")
+    await db.service_subcategories.update_one(
+        {"salon_id": salon_id, "category": cat, "name": name},
+        {"$set": {"salon_id": salon_id, "category": cat, "name": name,
+                  "updated_at": datetime.utcnow().isoformat()}},
+        upsert=True,
+    )
+    return {"success": True, "category": cat, "name": name}
+
+
+@api_router.delete("/salons/{salon_id}/services/subcategories")
+async def delete_service_subcategory(
+    salon_id: str,
+    category: str,
+    name: str,
+    current_user=Depends(get_current_salon_user),
+):
+    if not has_module_permission(current_user, "services", "manage_categories"):
+        raise HTTPException(403, "Permission denied")
+    await db.service_subcategories.delete_one(
+        {"salon_id": salon_id, "category": category, "name": name}
+    )
+    return {"success": True}
+
 
 @api_router.get("/services/by-category")
 async def get_services_by_category(gender: Optional[str] = None):
@@ -16149,6 +16248,17 @@ salon_inventory_mod.init_salon_inventory_router(
     resolve_branch_id=resolve_branch_id,
 )
 fastapi_app.include_router(salon_inventory_mod.salon_inventory_router)
+
+# Reports Router (merged Financials + Analytics)
+import reports_router as reports_router_mod  # noqa: E402
+_reports_router = reports_router_mod.init_reports_router(
+    db=db,
+    get_current_salon_user=get_current_salon_user,
+    has_module_permission=has_module_permission,
+    is_branch_manager=is_branch_manager,
+    enforce_branch_for_manager=enforce_branch_for_manager,
+)
+fastapi_app.include_router(_reports_router)
 
 # Phase 13 — wire auto-post hook into salon_store.supplier_deliver_order
 salon_store_mod.set_auto_post_hook(

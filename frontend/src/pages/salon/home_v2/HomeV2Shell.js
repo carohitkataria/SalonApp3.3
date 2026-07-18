@@ -42,11 +42,10 @@ export const RAIL_ITEMS = [
   { id: 'customer-master', label: 'Guests',    route: '/salon/dashboard?tab=customer-master' },
   { id: 'marketing',       label: 'Marketing', route: '/salon/dashboard?tab=marketing' },
   { id: 'inventory',       label: 'Inventory', route: '/salon/dashboard?tab=inventory' },
-  { id: 'marketplace',     label: 'Shop',      route: '/salon/marketplace' },
+  { id: 'shop',            label: 'Shop',      route: '/salon/dashboard?tab=shop' },
   { id: 'staff',           label: 'Staff',     route: '/salon/dashboard?tab=staff' },
   { id: 'services',        label: 'Services',  route: '/salon/dashboard?tab=services' },
-  { id: 'financials',      label: 'Finance',   route: '/salon/dashboard?tab=financials' },
-  { id: 'analytics',       label: 'Analytics', route: '/salon/dashboard?tab=analytics' },
+  { id: 'reports',         label: 'Reports',   route: '/salon/dashboard?tab=reports' },
   { id: 'salon',           label: 'Settings',  route: '/salon/dashboard?tab=salon' },
 ];
 
@@ -70,6 +69,8 @@ export const SHELL_ICONS = {
   tag:      () => <svg viewBox="0 0 24 24"><path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"/><line x1="7" y1="7" x2="7.01" y2="7"/></svg>,
   send:     () => <svg viewBox="0 0 24 24"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>,
   rotate:   () => <svg viewBox="0 0 24 24"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></svg>,
+  bag:      () => <svg viewBox="0 0 24 24"><path d="M6 8h12l1 12H5L6 8z"/><path d="M9 8a3 3 0 0 1 6 0"/></svg>,
+  chartMix: () => <svg viewBox="0 0 24 24"><path d="M3 3v18h18"/><path d="M7 15l4-4 3 3 5-6"/></svg>,
 };
 
 // Rail icon lookup — id → icon component
@@ -81,8 +82,10 @@ const RAIL_ICON = {
   financials: SHELL_ICONS.rupee,
   'customer-master': SHELL_ICONS.guestAdd,
   analytics: SHELL_ICONS.chart,
+  reports: SHELL_ICONS.chartMix,
   marketplace: SHELL_ICONS.cart,
   inventory: SHELL_ICONS.tag,
+  shop: SHELL_ICONS.bag,
   marketing: SHELL_ICONS.send,
   salon: SHELL_ICONS.gear,
 };
@@ -168,6 +171,7 @@ export default function HomeV2Shell({
         <button className="ribbon__btn ribbon__cta" data-tip="New Appointment" onClick={() => setApptOpen(true)}><I.plus /></button>
         <button className="ribbon__btn" data-tip="Add Guest" onClick={() => setGuestOpen(true)}><I.guestAdd /></button>
         <button className="ribbon__btn" data-tip="Retail Sale" onClick={() => navigate('/salon/dashboard?tab=inventory')}><I.cart /></button>
+        <button className="ribbon__btn" data-tip="Shop Orders" data-testid="ribbon-orders-btn" onClick={() => navigate('/salon/dashboard?tab=shop&orders=1')}><I.bag /></button>
         <div className="ribbon__sep" />
         <button className="ribbon__btn" data-tip="Messages" onClick={() => navigate('/salon/dashboard?tab=marketing')}><I.chat /></button>
         <button

@@ -1202,12 +1202,19 @@ metadata:
 
 test_plan:
   current_focus:
-    - "RBAC: Granular module permissions backend enforcement (staff/financials/analytics/services/gallery/marketing/salon_settings/delete_salon)"
-    - "RBAC: Home-page Staff Check-in widget hidden for users w/o staff.attendance; self-only when w/o staff.view_all"
-    - "Home Staff Attendance re-check-in bug: after check-in → check-out → check-in again should succeed same day"
+    - "Reports module — merged Financials + Analytics (snapshot cards, prefs, targets, section endpoints)"
+    - "Services rebuild — categories Services/Packages only, free-form sub-categories, add/edit drawer"
+    - "Inventory rebuild — status pills, Sell/Restock/Assign drawer, supplier & expiry on restock"
+    - "Shop rebuild — Zenoti-blue grid + PDP drawer + Review-order drawer (COD/Cashfree)"
+    - "Orders — separate overlay page, cancel + return/replacement/concern flow, ribbon icon + Shop-page icon"
   stuck_tasks: []
   test_all: false
   test_priority: "high_first"
+
+agent_communication:
+    - agent: "main"
+      message: "REBUILT Services / Inventory / Shop and merged Financials + Analytics into Reports (Zenoti-inspired blue theme). Backend adds: /api/salons/{id}/reports/{snapshot,prefs,targets,metric/{id},sales,payments-gst,pnl,clients,marketing,inventory} + /api/salons/{id}/services/subcategories. Permission-wise 'reports' module grants access if legacy can_access_financials OR can_access_analytics is set. Frontend adds /app/frontend/src/components/ops/{ServicesModule,InventoryModule,ShopModule,ReportsModule,OpsContext,opsTheme}.js. Menu items 'financials' and 'analytics' merged into single 'Reports'; Orders is not a menu item — it's opened via the ribbon icon (data-testid=ribbon-orders-btn) and via the header of the Shop page (?orders=1). Existing add-finance-entry flow preserved: Reports → Add entry hits the same POST /salons/{id}/financials/transactions endpoint. Please backend-test the /reports/* endpoints and /services/subcategories with admin token (identifier=admin, password=salon123, salon_id=b5c6b0ca-66ec-431b-8dc8-387de72fa67c which maps to actual salon 7bb9f2e5-ffbe-4d6a-b8b4-9507db8c5ca3 from token)."
+
 
 agent_communication:
     - agent: "main"

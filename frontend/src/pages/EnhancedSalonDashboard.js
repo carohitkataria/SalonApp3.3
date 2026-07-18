@@ -17,6 +17,11 @@ import BranchManagement from '@/components/BranchManagement';
 import BranchSelector from '@/components/BranchSelector';
 import OfferingsModule from '@/components/OfferingsModule';
 import FinancialsModule from '@/components/FinancialsModule';
+import ServicesModule from '@/components/ops/ServicesModule';
+import InventoryModule from '@/components/ops/InventoryModule';
+import ShopModule from '@/components/ops/ShopModule';
+import ReportsModule from '@/components/ops/ReportsModule';
+import { OpsProvider, useOps } from '@/components/ops/OpsContext';
 import MyProfile from '@/components/MyProfile';
 import PaymentVendorSetup from '@/components/PaymentVendorSetup';
 import SalonNotificationSettings from '@/components/SalonNotificationSettings';
@@ -173,6 +178,14 @@ export default function EnhancedSalonDashboard() {
       setSearchParams({ tab: id });
     }
   };
+  // Listen for programmatic navigation events emitted by Ops modules
+  useEffect(() => {
+    const onNav = (e) => {
+      if (e?.detail?.tab) goToTab(e.detail.tab);
+    };
+    window.addEventListener('ops:navigate', onNav);
+    return () => window.removeEventListener('ops:navigate', onNav);
+  }, []); // eslint-disable-line
   const [salonId, setSalonId] = useState(null);
   const [salon, setSalon] = useState(null);
   const [barbers, setBarbers] = useState([]);
@@ -1172,12 +1185,12 @@ export default function EnhancedSalonDashboard() {
     { id: 'home', label: 'Home', icon: LayoutDashboard, show: true },
     { id: 'queue', label: 'Token Queue', icon: Calendar, show: true },
     { id: 'staff', label: 'Staff Management', icon: Users, show: checkIsAdmin() || checkIsBranchManager() || checkHasPermission('can_access_staff') },
-    { id: 'services', label: 'Services & Offerings', icon: Scissors, show: checkIsAdmin() || checkIsBranchManager() || checkHasPermission('can_access_services') },
-    { id: 'financials', label: 'Financials', icon: DollarSign, show: checkIsAdmin() || checkIsBranchManager() || checkHasPermission('can_access_financials') },
+    { id: 'services', label: 'Services', icon: Scissors, show: checkIsAdmin() || checkIsBranchManager() || checkHasPermission('can_access_services') },
+    { id: 'reports', label: 'Reports', icon: TrendingUp, show: checkIsAdmin() || checkIsBranchManager() || checkHasPermission('can_access_financials') || checkHasPermission('can_access_analytics') },
     { id: 'customer-master', label: 'Guests', icon: Database, show: true },
-    { id: 'analytics', label: 'Analytics', icon: TrendingUp, show: checkIsAdmin() || checkIsBranchManager() || checkHasPermission('can_access_analytics') },
     { id: 'marketplace', label: 'Marketplace', icon: ShoppingBag, show: checkIsAdmin(), route: '/salon/marketplace' },
     { id: 'inventory', label: 'Inventory', icon: Boxes, show: checkIsAdmin() || checkIsBranchManager() },
+    { id: 'shop', label: 'Shop', icon: ShoppingBag, show: checkIsAdmin() || checkIsBranchManager() },
     { id: 'marketing', label: 'Marketing', icon: Megaphone, show: checkIsAdmin() || checkIsBranchManager() || checkHasPermission('can_access_gallery') || checkHasPermission('can_access_marketing') },
     { id: 'salon', label: 'Salon Settings', icon: Settings, show: checkIsAdmin() || checkHasPermission('can_edit_salon') }
   ].filter(item => item.show);
@@ -1281,26 +1294,23 @@ export default function EnhancedSalonDashboard() {
         )}
 
         {activeTab === 'financials' && salonId && (
-          <FinancialsModule salonId={salonId} getAuthHeaders={getAuthHeaders} />
+          <ReportsModule salonId={salonId} getAuthHeaders={getAuthHeaders} canManageFinancials={checkIsAdmin() || checkHasPermission('can_access_financials')} />
+        )}
+
+        {activeTab === 'reports' && salonId && (
+          <ReportsModule salonId={salonId} getAuthHeaders={getAuthHeaders} canManageFinancials={checkIsAdmin() || checkHasPermission('can_access_financials')} />
+        )}
+
+        {activeTab === 'shop' && salonId && (
+          <OpsProvider>
+            <ShopModule salonId={salonId} salonProfile={salon} getAuthHeaders={getAuthHeaders} />
+          </OpsProvider>
         )}
 
         {/* Legacy customer-master placeholder removed — replaced by CustomersV2 above */}
 
-        {activeTab === 'services' && (
-          <OfferingsModule 
-            salonId={salonId} 
-            token={(() => {
-              // Prefer multi-user token, fall back to legacy admin token
-              try {
-                const raw = localStorage.getItem('salon_user_auth');
-                if (raw) {
-                  const parsed = JSON.parse(raw);
-                  if (parsed?.token) return parsed.token;
-                }
-              } catch (e) { /* ignore */ }
-              return localStorage.getItem('salon_admin_token');
-            })()}
-          />
+        {activeTab === 'services' && salonId && (
+          <ServicesModule salonId={salonId} getAuthHeaders={getAuthHeaders} />
         )}
 
         {activeTab === 'marketing' && (
@@ -1309,12 +1319,8 @@ export default function EnhancedSalonDashboard() {
           </div>
         )}
 
-        {activeTab === 'analytics' && (
-          <Analytics 
-            salonId={salonId}
-            getAuthHeaders={getAuthHeaders}
-            isAdmin={checkIsAdmin()}
-          />
+        {activeTab === 'analytics' && salonId && (
+          <ReportsModule salonId={salonId} getAuthHeaders={getAuthHeaders} canManageFinancials={checkIsAdmin() || checkHasPermission('can_access_financials')} />
         )}
 
         {activeTab === 'salon' && salonId && (
@@ -1332,7 +1338,7 @@ export default function EnhancedSalonDashboard() {
         )}
 
         {activeTab === 'inventory' && salonId && (checkIsAdmin() || checkIsBranchManager()) && (
-          <InventoryView embedded />
+          <InventoryModule salonId={salonId} getAuthHeaders={getAuthHeaders} />
         )}
 
         {activeTab === 'notifications' && salonId && (

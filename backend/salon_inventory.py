@@ -103,6 +103,9 @@ class InventoryCreate(BaseModel):
     low_stock_threshold: int = Field(default=5, ge=0)
     sku_code: Optional[str] = Field(default=None, max_length=80)
     image_url: Optional[str] = Field(default=None, max_length=600)
+    supplier: Optional[str] = Field(default=None, max_length=200)
+    expiry: Optional[str] = Field(default=None, max_length=32)
+    assigned_staff_ids: Optional[List[str]] = None
     branch_id: Optional[str] = None
     # Jul 2026 — auto-purchase-entry fields when salon adds stock manually
     purchase_payment_mode: Optional[str] = Field(
@@ -147,6 +150,9 @@ class InventoryUpdate(BaseModel):
     low_stock_threshold: Optional[int] = Field(default=None, ge=0)
     sku_code: Optional[str] = Field(default=None, max_length=80)
     image_url: Optional[str] = Field(default=None, max_length=600)
+    supplier: Optional[str] = Field(default=None, max_length=200)
+    expiry: Optional[str] = Field(default=None, max_length=32)
+    assigned_staff_ids: Optional[List[str]] = None
 
     @field_validator("unit")
     @classmethod
@@ -200,6 +206,8 @@ class RestockPayload(BaseModel):
     """Phase 17 — manual stock-in for salon inventory items."""
     qty: int = Field(..., ge=1)
     cost_price: Optional[float] = Field(default=None, ge=0)
+    supplier: Optional[str] = Field(default=None, max_length=200)
+    expiry: Optional[str] = Field(default=None, max_length=32)  # YYYY-MM or YYYY-MM-DD
     note: Optional[str] = Field(default=None, max_length=500)
     payment_mode: Optional[str] = Field(default="cash")
     record_finance: bool = Field(default=False)  # set True to log an inventory_purchase outflow
@@ -812,7 +820,9 @@ async def manual_restock(item_id: str, payload: RestockPayload, user: dict = Dep
         {"id": item_id, "salon_id": salon_id},
         {"$inc": {"qty_total": payload.qty},
          "$set": {"updated_at": _now_iso(),
-                  **({"cost_price": float(payload.cost_price)} if payload.cost_price is not None else {})}},
+                  **({"cost_price": float(payload.cost_price)} if payload.cost_price is not None else {}),
+                  **({"supplier": payload.supplier} if payload.supplier else {}),
+                  **({"expiry": payload.expiry} if payload.expiry else {})}},
         return_document=True,
         projection={"_id": 0},
     )
