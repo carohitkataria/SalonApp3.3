@@ -20,7 +20,7 @@ import random
 from typing import Dict, Optional, List
 
 # Backend URL from frontend/.env
-BASE_URL = "https://design-sync-app-1.preview.emergentagent.com/api"
+BASE_URL = "https://inventory-shop-merge.preview.emergentagent.com/api"
 
 # Test credentials from memory/test_credentials.md
 ADMIN_IDENTIFIER = "admin"

@@ -2,7 +2,7 @@
 import requests
 from datetime import datetime, timedelta, timezone
 
-BASE_URL = "https://design-sync-app-1.preview.emergentagent.com/api"
+BASE_URL = "https://inventory-shop-merge.preview.emergentagent.com/api"
 
 # Get IST today
 ist = timezone(timedelta(hours=5, minutes=30))
