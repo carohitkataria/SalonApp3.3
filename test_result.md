@@ -7532,3 +7532,189 @@ agent_communication:
             - Review request mentions "by_source" field in sales endpoint response, but actual implementation returns: window, line, by_staff, by_service, total_revenue, bookings (no by_source field). This is not a bug - just a documentation/review request discrepancy.
             
             CONCLUSION: Reports module backend is FULLY FUNCTIONAL and production-ready. All regression tests passed with 100% success rate.
+        - working: false
+          agent: "testing"
+          comment: |
+            ❌ REPORTS MODULE UI VERIFICATION - CRITICAL OVERLAY BUG FOUND
+            
+            UI verification testing completed for 9 checks (A-I) as specified in review request.
+            Test URL: https://a189b6aa-f4e5-4bf1-b0e3-4cd4e1dd39f0.preview.emergentagent.com
+            Test date: 2026-07-18
+            Login credentials: identifier='admin', password='salon123'
+            
+            ═══════════════════════════════════════════════════════════════════
+            PASSING CHECKS (5/9):
+            ═══════════════════════════════════════════════════════════════════
+            
+            ✅ CHECK A - Header commentary removed
+               VERIFIED: Header shows only "BUSINESS INTELLIGENCE" (eyebrow) + "Reports" (title)
+               NO subtitle paragraph like "Your merged Financials + Analytics view..." present
+               Evidence: Screenshot check_a_header.png
+            
+            ✅ CHECK F - Left rail: logo IS home
+               VERIFIED: First nav item is "Queue" (NOT "Home" - correct)
+               VERIFIED: Clicking salon logo navigates to Home dashboard
+               URL after click: /salon/dashboard (no tab parameter = Home)
+               Evidence: Screenshot check_f_retry.png
+            
+            ✅ CHECK G - Left rail: Exit at bottom, no TL avatar
+               VERIFIED: "Exit" item found at bottom of navigation rail
+               VERIFIED: No circular avatar with initials (like "TL") present
+               Nav items: Queue, Guests, Marketing, Inventory, Shop, Staff, Services, Reports, Settings, Exit
+               Evidence: Screenshot check_g_rail_bottom.png
+            
+            ✅ CHECK H - Left rail: no internal scrollbar
+               VERIFIED: Left rail has no internal scrollbar at 1920x1080 viewport
+               Rail scrollHeight: 1080px, clientHeight: 1080px (perfect fit)
+               overflowY: visible (no scroll needed)
+               Evidence: Screenshot check_h_rail_scroll.png
+            
+            ✅ CHECK I - No branch dropdown for single-branch salon
+               VERIFIED: No <select> element with "All branches" option present
+               VERIFIED: No branch dropdown visible in header
+               This is correct behavior for single-branch salon
+               Evidence: Screenshot check_i_no_branch_dropdown.png
+            
+            ═══════════════════════════════════════════════════════════════════
+            FAILING CHECKS (4/9):
+            ═══════════════════════════════════════════════════════════════════
+            
+            ❌ CHECK B - Section chip alignment (icon + label in single row)
+               STATUS: INCONCLUSIVE - Automated test had selector issues
+               OBSERVATION: From visual inspection of screenshot, the section chips
+               (Snapshot, Sales, Payments & GST, Expenses & P&L, Staff, Clients,
+               Marketing, Inventory) appear to be correctly laid out in a single
+               horizontal row with icons and labels side-by-side.
+               ISSUE: Test selector picked up wrong elements (entire page content)
+               RECOMMENDATION: Manual visual verification needed
+               Evidence: Screenshot check_b_chips.png shows chips appear correct
+            
+            ❌ CHECK C - Configure cards toggle-to-visibility fix
+               STATUS: BLOCKED BY OVERLAY BUG
+               CRITICAL BUG: <div class="z-overlay"> intercepts pointer events
+               OBSERVATION: "Configure cards" button exists and drawer opens successfully
+               OBSERVATION: Drawer shows all KPI toggles including "Membership liability (₹)"
+               ISSUE: Cannot interact with toggles due to overlay blocking clicks
+               Playwright error: "z-overlay intercepts pointer events"
+               IMPACT: Users cannot toggle card visibility settings
+               Evidence: Screenshots check_c_drawer_opened.png shows drawer with toggles
+               
+               BLOCKING BUG DETAILS:
+               - Element: <div x-column="6" class="z-overlay" x-component="div" 
+                          x-dynamic="false" x-line-number="1002" 
+                          x-file-name="ReportsModule" x-id="ReportsModule_1002_6"></div>
+               - This overlay prevents ALL interactions with buttons/controls
+               - Affects both "Configure cards" and "Add entry" functionality
+            
+            ❌ CHECK D - Add-entry drawer commentary removed
+               STATUS: BLOCKED BY OVERLAY BUG
+               CRITICAL BUG: Same z-overlay blocks "Add entry" button clicks
+               OBSERVATION: "Add entry" button exists in header (purple button)
+               ISSUE: Cannot click button to open drawer and verify subtitle removal
+               Playwright error: "z-overlay intercepts pointer events" (30s timeout)
+               IMPACT: Users cannot add financial entries
+               Evidence: Screenshot reports_page_initial.png shows button exists
+            
+            ❌ CHECK E - Add-entry drawer functional
+               STATUS: BLOCKED BY OVERLAY BUG
+               CRITICAL BUG: Same z-overlay prevents testing form functionality
+               OBSERVATION: Cannot open drawer to test Expense entry form
+               ISSUE: Cannot verify if form accepts amount/category/note and saves
+               IMPACT: Cannot confirm if subtitle removal broke form functionality
+            
+            ═══════════════════════════════════════════════════════════════════
+            CRITICAL BUG SUMMARY:
+            ═══════════════════════════════════════════════════════════════════
+            
+            🚨 BLOCKING BUG: z-overlay div intercepts pointer events
+            
+            LOCATION: /app/frontend/src/components/ops/ReportsModule.js (line 1002)
+            ELEMENT: <div class="z-overlay">
+            IMPACT: Prevents user interaction with:
+              - "Configure cards" button and drawer
+              - "Add entry" button and drawer
+              - Any other interactive elements when overlay is present
+            
+            ROOT CAUSE: An overlay div is rendered and blocks pointer events,
+            preventing clicks on buttons and form controls. This appears to be
+            a modal/drawer overlay that is not properly z-indexed or is missing
+            pointer-events: none CSS property.
+            
+            SEVERITY: HIGH - Core Reports module functionality is unusable
+            
+            USER IMPACT:
+              - Cannot configure which KPI cards to display
+              - Cannot add financial entries (expenses/deposits/adjustments)
+              - Reports module is partially broken for interactive features
+            
+            RECOMMENDED FIX:
+              1. Check ReportsModule.js line 1002 for z-overlay div
+              2. Add CSS: pointer-events: none to overlay background
+              3. Ensure only modal/drawer content is clickable
+              4. OR remove overlay if not needed
+              5. Test that buttons become clickable after fix
+            
+            ═══════════════════════════════════════════════════════════════════
+            TEST SUMMARY:
+            ═══════════════════════════════════════════════════════════════════
+            
+            PASSED: 5/9 checks (55.6%)
+            FAILED: 4/9 checks (44.4%)
+              - 1 check inconclusive (needs manual verification)
+              - 3 checks blocked by critical overlay bug
+            
+            OVERALL STATUS: ❌ FAILING - Critical bug prevents core functionality
+            
+            NEXT STEPS FOR MAIN AGENT:
+            1. FIX CRITICAL: Remove or fix z-overlay pointer event blocking
+            2. Re-test CHECK C, D, E after overlay fix
+            3. Manually verify CHECK B (section chip alignment)
+            4. All other checks (A, F, G, H, I) are passing correctly
+            
+            NOTE: Backend is 100% working (30/30 tests passed). Only frontend
+            UI has this critical overlay bug blocking user interactions.
+
+
+  - agent: testing
+    message: |
+      🚨 CRITICAL BUG FOUND IN REPORTS MODULE UI
+      
+      Completed UI verification testing for Reports module. Found a BLOCKING bug
+      that prevents users from interacting with key features.
+      
+      CRITICAL ISSUE:
+      A <div class="z-overlay"> element in ReportsModule.js (line 1002) intercepts
+      all pointer events, preventing clicks on:
+        - "Configure cards" button/drawer
+        - "Add entry" button/drawer
+        - Any interactive elements when overlay is present
+      
+      IMPACT:
+        - Users CANNOT configure which KPI cards to display
+        - Users CANNOT add financial entries (expenses/deposits/adjustments)
+        - Core Reports functionality is BROKEN
+      
+      PASSING CHECKS (5/9):
+        ✅ Header commentary removed (no subtitle paragraph)
+        ✅ Logo navigates to Home
+        ✅ Exit at bottom, no TL avatar
+        ✅ No internal scrollbar in left rail
+        ✅ No branch dropdown for single-branch salon
+      
+      BLOCKED CHECKS (3/9):
+        ❌ Configure cards toggle-to-visibility (blocked by overlay)
+        ❌ Add-entry drawer commentary check (blocked by overlay)
+        ❌ Add-entry drawer functional test (blocked by overlay)
+      
+      INCONCLUSIVE (1/9):
+        ⚠️ Section chip alignment (selector issues, but visually appears correct)
+      
+      URGENT ACTION REQUIRED:
+      Fix the z-overlay pointer-events issue in ReportsModule.js before this
+      can be marked as working. The overlay should either:
+        1. Have CSS: pointer-events: none (so clicks pass through), OR
+        2. Be removed if not needed, OR
+        3. Only cover the background, not the interactive elements
+      
+      Backend is 100% working. This is purely a frontend UI bug.
+
