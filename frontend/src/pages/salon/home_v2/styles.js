@@ -440,6 +440,7 @@ export const HOME_V2_CSS = `
    fixed backgrounds and full-viewport wrappers so the shell layout owns the
    space between rail (left) and ribbon (right). */
 .shv2 .shv2-tabhost{padding:0;min-height:calc(100vh - 68px);background:var(--bg);position:relative;overflow-x:hidden}
+.tab-pad-legacy{padding:16px 44px 40px}
 .shv2 .shv2-tabhost > .tab-pad-legacy{padding:16px 44px 40px}
 .shv2 .shv2-tabhost > .tab-pad-legacy > .min-h-screen{background:transparent !important}
 .shv2 .shv2-tabhost > .min-h-screen{min-height:auto !important;background:transparent !important;overflow:visible !important}
@@ -448,7 +449,7 @@ export const HOME_V2_CSS = `
 /* Hide the legacy header (Salon Dashboard / hamburger / branch chip) — shell topbar replaces it entirely. */
 .shv2 .shv2-tabhost > .min-h-screen > .relative.z-10 > div:first-child{display:none !important}
 .shv2 .shv2-tabhost > .min-h-screen > .relative.z-10 > .backdrop-blur-xl{display:none !important}
-.shv2 .shv2-tabhost .max-w-7xl{max-width:none;margin:0;padding:14px 24px 40px}
+.shv2 .shv2-tabhost .max-w-7xl{max-width:none;margin:0;padding:16px 44px 40px}
 .shv2 .shv2-tabhost .container{max-width:none}
 /* Hide the hamburger sidebar (the rail replaces it). */
 .shv2 .shv2-tabhost aside[class*="fixed"][class*="left-0"][class*="top-0"][class*="bottom-0"]{display:none !important}
