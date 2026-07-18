@@ -276,8 +276,8 @@ export const HOME_V2_CSS = `
 .shv2 .topsvc__row .ct{font-size:12px;font-weight:700;color:var(--primary);background:var(--primary-050);padding:3px 9px;border-radius:20px}
 
 /* ===== DRAWERS ===== */
-.shv2-overlay{position:fixed;inset:0;background:rgba(28,26,54,.42);backdrop-filter:blur(2px);opacity:0;visibility:hidden;transition:.28s;z-index:60}
-.shv2-overlay.open{opacity:1;visibility:visible}
+.shv2-overlay{position:fixed;inset:0;background:rgba(28,26,54,.42);backdrop-filter:blur(2px);opacity:0;visibility:hidden;pointer-events:none;transition:.28s;z-index:60}
+.shv2-overlay.open{opacity:1;visibility:visible;pointer-events:auto}
 .shv2-drawer{position:fixed;top:0;right:0;bottom:0;width:min(1100px,75vw);background:#FFFFFF;z-index:70;transform:translateX(100%);transition:transform .32s cubic-bezier(.22,.61,.36,1);display:flex;flex-direction:column;font-family:'Inter',system-ui,sans-serif;color:#23252F}
 .shv2-drawer.open{transform:translateX(0);box-shadow:-20px 0 60px rgba(28,26,54,.22)}
 .shv2-drawer.narrow{width:min(720px,60vw)}
