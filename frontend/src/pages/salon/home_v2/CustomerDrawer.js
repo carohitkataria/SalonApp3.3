@@ -145,17 +145,44 @@ export default function CustomerDrawer({
         instagram_id: form.instagram_id || null,
         facebook_id: form.facebook_id || null,
       };
-      const res = await axios.post(
-        `${API}/salons/${salonRef.current}/customers`,
-        payload,
-        { headers: authRef.current() },
-      );
-      const cust = res.data?.customer || res.data || {};
+      const isEditing = !!initial?.phone;
+      let cust;
+      if (isEditing) {
+        // Backend PUT accepts a subset (name/phone/gender/date_of_birth). Best-effort.
+        const putPhone = String(initial.phone || '').replace(/^\+?91/, '').trim();
+        try {
+          const putUrl = `${API}/salons/${salonRef.current}/customers/${encodeURIComponent(putPhone)}`;
+          const res = await axios.put(putUrl, {
+            name: payload.name,
+            phone: fullPhone,
+            gender: payload.gender,
+            date_of_birth: payload.dob,
+          }, { headers: authRef.current() });
+          cust = res.data?.customer || res.data || {};
+        } catch (putErr) {
+          // Fallback: try POST (upsert) — the backend usually upserts on same phone.
+          const res = await axios.post(
+            `${API}/salons/${salonRef.current}/customers`,
+            payload,
+            { headers: authRef.current() },
+          );
+          cust = res.data?.customer || res.data || {};
+        }
+      } else {
+        const res = await axios.post(
+          `${API}/salons/${salonRef.current}/customers`,
+          payload,
+          { headers: authRef.current() },
+        );
+        cust = res.data?.customer || res.data || {};
+      }
       setTimeout(() => {
         onSaved?.({
           ...cust, phone: fullPhone, name: payload.name,
           photo_url: form.photo_url, dob: form.dob, anniversary: form.anniversary,
           preferred_barber_id: form.preferred_barber_id,
+          gender: payload.gender, email: payload.email, notes: payload.notes,
+          tags: payload.tags,
         });
       }, 300);
       onClose?.();

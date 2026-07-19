@@ -8,6 +8,7 @@
  * "Edit" action that emits back to caller for opening the edit drawer.
  */
 import React, { useEffect, useState, useRef } from 'react';
+import ReactDOM from 'react-dom';
 import axios from 'axios';
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
@@ -42,10 +43,10 @@ export default function GuestProfileModal({ open, onClose, phone, salonId, getAu
   const initial = ((p.name || 'G')[0] || 'G').toUpperCase();
   const bgStyle = p.photo_url ? { backgroundImage: `url(${p.photo_url})` } : {};
 
-  return (
+  return ReactDOM.createPortal(
     <>
-      <div className={`shv2-profile-back ${open ? 'open' : ''}`} onClick={onClose} />
-      <div className={`shv2-profile ${open ? 'open' : ''}`}>
+      <div className={`shv2-overlay ${open ? 'open' : ''}`} onClick={onClose} style={{ zIndex: 9075 }} />
+      <aside className={`shv2-drawer profile ${open ? 'open' : ''}`} style={{ zIndex: 9080 }}>
         <div className="shv2-profile__h">
           <div className="av" style={bgStyle}>{!p.photo_url && initial}</div>
           <div className="who">
@@ -153,7 +154,8 @@ export default function GuestProfileModal({ open, onClose, phone, salonId, getAu
             <button className="btn-primary" style={{ background: '#6C4FE0', color: '#fff', padding: '10px 16px', borderRadius: 10, fontWeight: 700, fontSize: 13, border: 'none', cursor: 'pointer' }} onClick={() => onEdit(p)}>Edit guest</button>
           )}
         </div>
-      </div>
-    </>
+      </aside>
+    </>,
+    document.body
   );
 }

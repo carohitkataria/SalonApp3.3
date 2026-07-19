@@ -51,10 +51,18 @@ const SHIFT_OPTIONS = [
   { id: 'Evening', label: 'Evening', hint: '5 PM – 9 PM' },
 ];
 const PAYMENT_MODES = [
-  { id: 'cash', label: 'Cash' },
-  { id: 'upi',  label: 'UPI' },
-  { id: 'card', label: 'Card' },
-  { id: 'wallet', label: 'Wallet' },
+  { id: 'cash', label: 'Cash', ic: (
+    <svg viewBox="0 0 24 24"><rect x="2" y="6" width="20" height="12" rx="2"/><circle cx="12" cy="12" r="2.5"/><path d="M6 10v.01M18 14v.01"/></svg>
+  ) },
+  { id: 'upi',  label: 'UPI', ic: (
+    <svg viewBox="0 0 24 24"><path d="M12 2v20M5 9l7-7 7 7M5 15l7 7 7-7"/></svg>
+  ) },
+  { id: 'card', label: 'Card', ic: (
+    <svg viewBox="0 0 24 24"><rect x="2" y="5" width="20" height="14" rx="2"/><line x1="2" y1="10" x2="22" y2="10"/></svg>
+  ) },
+  { id: 'wallet', label: 'Wallet', ic: (
+    <svg viewBox="0 0 24 24"><path d="M20 12V8a2 2 0 0 0-2-2H5a2 2 0 0 0 0 4h15a2 2 0 0 1 2 2v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6"/><circle cx="17" cy="14" r="1.2"/></svg>
+  ) },
 ];
 
 export default function AppointmentDrawer({
@@ -83,6 +91,15 @@ export default function AppointmentDrawer({
   const [discountPct, setDiscountPct] = useState(0);
   const [tip, setTip] = useState(0);
   const [paymentMode, setPaymentMode] = useState('cash');
+  // Split-payment (multi-mode) support. Off by default (single mode).
+  const [paySplit, setPaySplit] = useState(false);
+  // Amounts per mode when split is on: { cash: 0, upi: 0, card: 0, wallet: 0 }.
+  // A mode is considered "picked" in split mode when its entry exists (>= 0).
+  const [payAmounts, setPayAmounts] = useState({ cash: 0 });
+  // Edit-guest drawer (stacked over appointment) — pencil button.
+  const [editOpen, setEditOpen] = useState(false);
+  // Full-profile drawer (stacked) — "View full details".
+  const [profileEditOpen, setProfileEditOpen] = useState(false);
   const [sellMembershipId, setSellMembershipId] = useState('');
   const [saving, setSaving] = useState(false);
   const [errors, setErrors] = useState({});
@@ -103,6 +120,8 @@ export default function AppointmentDrawer({
     setCustomer(null); setCustProfile(null); setCustSearch(''); setSelectedSvc([]);
     setSelectedProd({}); setStaffId(''); setDate(todayISO()); setSlot(currentSlot());
     setCouponCode(''); setDiscountPct(0); setTip(0); setPaymentMode('cash');
+    setPaySplit(false); setPayAmounts({ cash: 0 });
+    setEditOpen(false); setProfileEditOpen(false);
     setSellMembershipId(''); setErrors({}); setCategory('all'); setProductsOpen(false);
     setShowSug(false); setProfileOpen(false);
     (async () => {
@@ -170,6 +189,57 @@ export default function AppointmentDrawer({
     return n;
   });
 
+  // -------- Split-payment helpers --------
+  // In single mode: `paymentMode` selects the one active pill.
+  // In split mode: `payAmounts` is the source of truth — a key exists for every picked mode.
+  const pickedModes = Object.keys(payAmounts);
+  const allocatedTotal = pickedModes.reduce((sum, m) => sum + (Number(payAmounts[m]) || 0), 0);
+  const dueRemaining = Math.max(0, Math.round((grandTotal - allocatedTotal) * 100) / 100);
+
+  const enableSplit = () => {
+    setPaySplit(true);
+    // Seed with the currently-selected single mode carrying the full total.
+    setPayAmounts({ [paymentMode]: grandTotal });
+  };
+  const disableSplit = () => {
+    setPaySplit(false);
+    // Keep the first picked mode as the new single mode (fallback to cash).
+    const first = pickedModes[0] || 'cash';
+    setPaymentMode(first);
+    setPayAmounts({ [first]: 0 });
+  };
+  const togglePickedMode = (id) => {
+    setPayAmounts(prev => {
+      const n = { ...prev };
+      if (id in n) {
+        // Prevent deselecting the last mode — always keep at least one.
+        if (Object.keys(n).length === 1) return n;
+        delete n[id];
+      } else {
+        // New mode gets the current remaining due (rounded).
+        n[id] = Math.max(0, Math.round((grandTotal - allocatedTotal) * 100) / 100);
+      }
+      return n;
+    });
+  };
+  const setPickedAmount = (id, val) => {
+    const num = val === '' || val === null || val === undefined ? 0 : Number(val);
+    setPayAmounts(prev => ({ ...prev, [id]: isNaN(num) ? 0 : Math.max(0, num) }));
+  };
+  const applyRemainingTo = (id) => {
+    setPayAmounts(prev => {
+      const others = Object.entries(prev).reduce((s, [k, v]) => k === id ? s : s + (Number(v) || 0), 0);
+      const rem = Math.max(0, Math.round((grandTotal - others) * 100) / 100);
+      return { ...prev, [id]: rem };
+    });
+  };
+
+  const allocState = paySplit ? (
+    Math.abs(allocatedTotal - grandTotal) < 0.5 ? 'ok'
+      : allocatedTotal > grandTotal ? 'over'
+      : 'under'
+  ) : 'ok';
+
   // Fetch full profile every time a customer is chosen so the right panel is rich.
   const fetchProfile = async (phone) => {
     if (!phone) { setCustProfile(null); return; }
@@ -198,6 +268,11 @@ export default function AppointmentDrawer({
     if (!selectedSvc.length && !Object.keys(selectedProd).length) errs.svc = 'Pick at least one service or product';
     if (stylistRequired && !staffId) errs.staff = 'Stylist is mandatory to create an invoice';
     if (mode === 'schedule' && (!date || !slot)) errs.date = 'Date and slot required';
+    if (paySplit && grandTotal > 0 && Math.abs(allocatedTotal - grandTotal) >= 0.5) {
+      errs.payment = allocatedTotal > grandTotal
+        ? `Over-allocated by ₹${(allocatedTotal - grandTotal).toFixed(2)}`
+        : `Short by ₹${(grandTotal - allocatedTotal).toFixed(2)}`;
+    }
     if (Object.keys(errs).length) { setErrors(errs); return; }
     setSaving(true);
     try {
@@ -208,11 +283,26 @@ export default function AppointmentDrawer({
         return { product_id: pid, name: p?.product_name || p?.name, qty: Number(qty), unit_price: Number(p?.retail_price || p?.selling_price || 0) };
       });
 
+      // Payment payload — single mode by default, split when the operator opts in.
+      const paymentPayload = paySplit
+        ? {
+            payment_mode: 'split',
+            cash_amount: Number(payAmounts.cash || 0),
+            upi_amount: Number(payAmounts.upi || 0),
+            wallet_amount: Number(payAmounts.wallet || 0),
+            card_amount: Number(payAmounts.card || 0),
+            payments: Object.entries(payAmounts)
+              .filter(([, v]) => Number(v) > 0)
+              .map(([mode, amount]) => ({ mode, amount: Number(amount) })),
+          }
+        : { payment_mode: paymentMode };
+
       if (mode === 'direct') {
         await axios.post(`${API}/salons/${sid}/direct-invoice`, {
           customer_name: customer.name, phone: customer.phone, gender: customer.gender || 'Men',
           barber_id: staffId, selected_services: selectedSvc, selected_products: products_payload,
-          payment_mode: paymentMode, coupon_code: couponCode || null,
+          ...paymentPayload,
+          coupon_code: couponCode || null,
           discount_percent: Number(discountPct) || 0, membership_plan_id: sellMembershipId || null,
           tip_amount: Number(tip) || 0, source: 'direct',
         }, { headers });
@@ -226,7 +316,7 @@ export default function AppointmentDrawer({
           shift: mode === 'schedule' ? slot : currentSlot(),
           date: mode === 'schedule' ? date : todayISO(),
           start_time: null, // slot-based; no fixed time
-          payment_mode: paymentMode,
+          ...paymentPayload,
           coupon_code: couponCode || null,
           discount_percent: Number(discountPct) || 0,
           membership_plan_id: sellMembershipId || null,
@@ -238,8 +328,12 @@ export default function AppointmentDrawer({
       onSaved?.({ mode, total: grandTotal });
       onClose?.();
     } catch (e) {
-      const detail = e?.response?.data?.detail || 'Save failed';
-      setErrors({ save: typeof detail === 'string' ? detail : 'Save failed' });
+      const raw = e?.response?.data?.detail;
+      let msg = 'Save failed';
+      if (typeof raw === 'string') msg = raw;
+      else if (Array.isArray(raw)) msg = raw.map(x => x?.msg || 'Invalid value').join(', ');
+      else if (raw && typeof raw === 'object') msg = raw.msg || 'Save failed';
+      setErrors({ save: msg });
     } finally { setSaving(false); }
   };
 
@@ -440,11 +534,79 @@ export default function AppointmentDrawer({
                 <label>Tip amount</label>
                 <input type="number" min="0" value={tip} onChange={e => setTip(e.target.value)} />
               </div>
-              <div className="field">
-                <label>Payment mode</label>
-                <select value={paymentMode} onChange={e => setPaymentMode(e.target.value)}>
-                  {PAYMENT_MODES.map(p => <option key={p.id} value={p.id}>{p.label}</option>)}
-                </select>
+              <div className="field full">
+                <div className="pay-head">
+                  <label style={{ marginBottom: 0 }}>Payment mode</label>
+                  {!paySplit ? (
+                    <button type="button" className="pay-split-toggle" onClick={enableSplit}
+                            data-testid="pay-split-enable"
+                            title="Split the amount across multiple modes">
+                      <svg viewBox="0 0 24 24"><line x1="12" y1="3" x2="12" y2="21"/><polyline points="8 7 12 3 16 7"/><polyline points="8 17 12 21 16 17"/></svg>
+                      Split
+                    </button>
+                  ) : (
+                    <button type="button" className="pay-split-toggle on" onClick={disableSplit}
+                            data-testid="pay-split-disable"
+                            title="Switch back to single-mode payment">
+                      <svg viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                      Single
+                    </button>
+                  )}
+                </div>
+                <div className="pay-chips" role="radiogroup" aria-label="Payment mode">
+                  {PAYMENT_MODES.map(p => {
+                    const active = paySplit ? (p.id in payAmounts) : paymentMode === p.id;
+                    return (
+                      <button
+                        key={p.id}
+                        type="button"
+                        role={paySplit ? 'checkbox' : 'radio'}
+                        aria-checked={active}
+                        data-testid={`pay-mode-${p.id}`}
+                        className={`pay-chip ${active ? 'on' : ''}`}
+                        onClick={() => paySplit ? togglePickedMode(p.id) : setPaymentMode(p.id)}
+                      >
+                        <span className="pc-ic">{p.ic}</span>
+                        <span className="pc-lb">{p.label}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+                {paySplit && (
+                  <div className="pay-split">
+                    {pickedModes.map(pm => {
+                      const meta = PAYMENT_MODES.find(m => m.id === pm);
+                      return (
+                        <div key={pm} className="pay-line">
+                          <span className="pl-lb">
+                            <span className="pl-ic">{meta?.ic}</span>
+                            {meta?.label || pm}
+                          </span>
+                          <div className="pl-amt">
+                            <span className="cur">₹</span>
+                            <input
+                              type="number"
+                              min="0"
+                              inputMode="decimal"
+                              value={payAmounts[pm] ?? 0}
+                              onChange={(e) => setPickedAmount(pm, e.target.value)}
+                              data-testid={`pay-amount-${pm}`}
+                            />
+                          </div>
+                          <button type="button" className="pl-rem" onClick={() => applyRemainingTo(pm)}
+                                  title="Fill remaining amount">= due</button>
+                        </div>
+                      );
+                    })}
+                    <div className={`pay-meta ${allocState}`}>
+                      Allocated <b>₹{allocatedTotal.toLocaleString('en-IN')}</b> of ₹{grandTotal.toLocaleString('en-IN')}
+                      {allocState === 'ok' && <span> · Fully allocated</span>}
+                      {allocState === 'under' && <span> · ₹{dueRemaining.toLocaleString('en-IN')} remaining</span>}
+                      {allocState === 'over' && <span> · Over by ₹{(allocatedTotal - grandTotal).toLocaleString('en-IN')}</span>}
+                    </div>
+                    {errors.payment && <span className="msg show">{errors.payment}</span>}
+                  </div>
+                )}
               </div>
               <div className="field full">
                 <label>Sell membership</label>
@@ -464,7 +626,14 @@ export default function AppointmentDrawer({
               <div className="gd-h">
                 <b>Guest details</b>
                 {customer && (
-                  <button className="gd-full" onClick={() => setProfileOpen(true)}>View full details</button>
+                  <div className="gd-acts">
+                    <button className="gd-edit" onClick={() => setEditOpen(true)}
+                            data-testid="gd-edit-btn" title="Edit guest details" aria-label="Edit guest">
+                      <svg viewBox="0 0 24 24"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4 12.5-12.5z"/></svg>
+                    </button>
+                    <button className="gd-full" onClick={() => setProfileOpen(true)}
+                            data-testid="gd-view-full-btn">View full details</button>
+                  </div>
                 )}
               </div>
 
@@ -614,13 +783,38 @@ export default function AppointmentDrawer({
         }}
       />
 
-      {/* Full guest details modal (existing customer with history) */}
+      {/* Stacked EDIT-guest drawer (pencil button on Guest details) */}
+      <CustomerDrawer
+        open={editOpen}
+        stacked
+        onClose={() => setEditOpen(false)}
+        salonId={salonId}
+        getAuthHeaders={getAuthHeaders}
+        source="owner"
+        initial={customer ? {
+          ...customer,
+          ...(custProfile || {}),
+          name: (custProfile?.name || customer.name || ''),
+          phone: (custProfile?.phone || customer.phone || ''),
+        } : null}
+        onSaved={(c) => {
+          setCustomers(prev => {
+            const idx = prev.findIndex(x => (x.phone || '') === (c.phone || ''));
+            if (idx >= 0) { const n = [...prev]; n[idx] = { ...prev[idx], ...c }; return n; }
+            return [c, ...prev];
+          });
+          chooseCustomer({ id: c.id, name: c.name, phone: c.phone, gender: c.gender, preferred_barber_id: c.preferred_barber_id });
+        }}
+      />
+
+      {/* Full guest details — now a stacked drawer over the appointment drawer */}
       <GuestProfileModal
         open={profileOpen}
         onClose={() => setProfileOpen(false)}
         phone={customer?.phone}
         salonId={salonId}
         getAuthHeaders={getAuthHeaders}
+        onEdit={() => { setProfileOpen(false); setEditOpen(true); }}
       />
     </>,
     document.body

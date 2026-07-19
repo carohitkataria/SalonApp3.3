@@ -427,6 +427,10 @@ export const HOME_V2_CSS = `
 .shv2-drawer .gd-card{background:#FFFFFF;border:1px solid #ECECF3;border-radius:14px;padding:12px 14px;margin-bottom:14px;box-shadow:0 6px 20px rgba(30,32,50,.05)}
 .shv2-drawer .gd-h{display:flex;align-items:center;justify-content:space-between;gap:8px;padding-bottom:8px;margin-bottom:6px;border-bottom:1px solid #F3F3F8}
 .shv2-drawer .gd-h b{font-family:'Plus Jakarta Sans';font-size:13px;font-weight:800;color:#23252F;letter-spacing:.2px}
+.shv2-drawer .gd-acts{display:flex;align-items:center;gap:6px}
+.shv2-drawer .gd-edit{width:26px;height:26px;border-radius:8px;background:#F1EEFF;color:#6C4FE0;border:1px solid #E7E2FF;display:grid;place-items:center;cursor:pointer;transition:.15s;padding:0}
+.shv2-drawer .gd-edit:hover{background:#6C4FE0;color:#fff;border-color:#6C4FE0}
+.shv2-drawer .gd-edit svg{width:12px;height:12px;fill:none;stroke:currentColor;stroke-width:2.2}
 .shv2-drawer .gd-full{font-size:10.5px;font-weight:800;color:#6C4FE0;background:#F1EEFF;border:1px solid #E7E2FF;padding:4px 8px;border-radius:8px;cursor:pointer;transition:.15s}
 .shv2-drawer .gd-full:hover{background:#6C4FE0;color:#fff;border-color:#6C4FE0}
 .shv2-drawer .gd-sec{padding:6px 0;border-top:1px dashed #F3F3F8}
@@ -505,4 +509,68 @@ export const HOME_V2_CSS = `
   .shv2 .kgrid,.shv2 .strip,.shv2 .row.a,.shv2 .row.b,.shv2 .row.c{grid-template-columns:1fr}
   .shv2-drawer{width:100vw}
 }
+
+/* ===== Payment mode — pills + split-mode ===== */
+.shv2-drawer .pay-head{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:6px}
+.shv2-drawer .pay-head label{font-size:12.5px;font-weight:700;color:#3C3F4E}
+.shv2-drawer .pay-split-toggle{display:inline-flex;align-items:center;gap:5px;font-size:10.5px;font-weight:800;letter-spacing:.2px;color:#6C4FE0;background:#F1EEFF;border:1px solid #E7E2FF;padding:5px 9px;border-radius:8px;cursor:pointer;transition:.15s;line-height:1}
+.shv2-drawer .pay-split-toggle:hover{background:#6C4FE0;color:#fff;border-color:#6C4FE0}
+.shv2-drawer .pay-split-toggle svg{width:11px;height:11px;fill:none;stroke:currentColor;stroke-width:2.4}
+.shv2-drawer .pay-split-toggle.on{background:#FFF3EC;color:#E45C86;border-color:#FADFCC}
+.shv2-drawer .pay-split-toggle.on:hover{background:#E45C86;color:#fff;border-color:#E45C86}
+.shv2-drawer .pay-chips{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px}
+.shv2-drawer .pay-chip{display:flex;align-items:center;justify-content:center;gap:7px;padding:10px 8px;background:#FFFFFF;border:1.5px solid #ECECF3;border-radius:11px;color:#3C3F4E;font-size:12.5px;font-weight:700;cursor:pointer;transition:.15s;min-height:44px}
+.shv2-drawer .pay-chip:hover{border-color:#6C4FE0;color:#6C4FE0}
+.shv2-drawer .pay-chip.on{background:#F1EEFF;border-color:#6C4FE0;color:#6C4FE0;box-shadow:0 0 0 3px #E7E2FF}
+.shv2-drawer .pay-chip .pc-ic{width:18px;height:18px;display:grid;place-items:center;flex:none}
+.shv2-drawer .pay-chip .pc-ic svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:2}
+.shv2-drawer .pay-chip .pc-lb{white-space:nowrap}
+@media(max-width:520px){.shv2-drawer .pay-chips{grid-template-columns:1fr 1fr}}
+.shv2-drawer .pay-split{margin-top:10px;display:flex;flex-direction:column;gap:8px}
+.shv2-drawer .pay-line{display:grid;grid-template-columns:1fr auto auto;gap:8px;align-items:center;background:#FAFAFD;border:1px solid #ECECF3;border-radius:10px;padding:7px 10px}
+.shv2-drawer .pay-line .pl-lb{display:flex;align-items:center;gap:7px;font-size:12.5px;font-weight:700;color:#3C3F4E}
+.shv2-drawer .pay-line .pl-lb .pl-ic{width:22px;height:22px;border-radius:7px;background:#F1EEFF;color:#6C4FE0;display:grid;place-items:center;flex:none}
+.shv2-drawer .pay-line .pl-lb .pl-ic svg{width:12px;height:12px;fill:none;stroke:currentColor;stroke-width:2}
+.shv2-drawer .pay-line .pl-amt{display:inline-flex;align-items:center;gap:4px;background:#FFFFFF;border:1px solid #ECECF3;border-radius:8px;padding:5px 8px}
+.shv2-drawer .pay-line .pl-amt .cur{font-size:12px;font-weight:800;color:#7C8092}
+.shv2-drawer .pay-line .pl-amt input{border:none;outline:none;width:88px;text-align:right;font-size:13px;font-weight:800;color:#23252F;background:transparent;font-family:inherit}
+.shv2-drawer .pay-line .pl-rem{font-size:11px;font-weight:800;color:#12A594;background:#E4F6F3;border:1px solid #C6E9E2;padding:5px 8px;border-radius:8px;cursor:pointer;transition:.15s;letter-spacing:.2px}
+.shv2-drawer .pay-line .pl-rem:hover{background:#12A594;color:#fff;border-color:#12A594}
+.shv2-drawer .pay-meta{font-size:11.5px;font-weight:700;color:#7C8092;padding:5px 2px}
+.shv2-drawer .pay-meta b{color:#23252F;font-weight:800}
+.shv2-drawer .pay-meta.ok{color:#2FA96A}
+.shv2-drawer .pay-meta.under{color:#E8952B}
+.shv2-drawer .pay-meta.over{color:#E45C86}
+
+/* ===== Guest profile — presented as a stacked drawer over the appointment drawer ===== */
+.shv2-drawer.profile{width:min(760px,58vw)}
+.shv2-drawer.profile .shv2-profile__h{display:flex;align-items:center;gap:14px;padding:20px 26px;border-bottom:1px solid #ECECF3}
+.shv2-drawer.profile .shv2-profile__h .av{width:52px;height:52px;border-radius:15px;background:#F1EEFF;color:#6C4FE0;display:grid;place-items:center;font-weight:800;font-size:20px;background-size:cover;background-position:center;flex:none}
+.shv2-drawer.profile .shv2-profile__h .who{flex:1;min-width:0}
+.shv2-drawer.profile .shv2-profile__h .who h3{font-size:18px;font-weight:800;color:#23252F;font-family:'Plus Jakarta Sans','Inter',sans-serif}
+.shv2-drawer.profile .shv2-profile__h .who p{font-size:12.5px;color:#7C8092;margin-top:2px}
+.shv2-drawer.profile .shv2-profile__close{width:38px;height:38px;border-radius:11px;background:#F3F3F8;color:#7C8092;display:grid;place-items:center;border:none;cursor:pointer;transition:.15s}
+.shv2-drawer.profile .shv2-profile__close:hover{background:#FCEAF1;color:#E45C86}
+.shv2-drawer.profile .shv2-profile__close svg{width:19px;height:19px;fill:none;stroke:currentColor;stroke-width:2.2}
+.shv2-drawer.profile .shv2-profile__body{flex:1;overflow:auto;padding:20px 26px}
+.shv2-drawer.profile .shv2-profile__body h4{font-family:'Plus Jakarta Sans','Inter',sans-serif;font-size:13px;font-weight:800;color:#23252F;margin:16px 0 8px;letter-spacing:.2px}
+.shv2-drawer.profile .p-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}
+@media(max-width:640px){.shv2-drawer.profile .p-grid{grid-template-columns:1fr 1fr}}
+.shv2-drawer.profile .p-card{background:#FAFAFD;border:1px solid #ECECF3;border-radius:12px;padding:11px 12px}
+.shv2-drawer.profile .p-card .lb{font-size:10.5px;font-weight:700;color:#7C8092;text-transform:uppercase;letter-spacing:.4px}
+.shv2-drawer.profile .p-card .val{font-size:17px;font-weight:800;color:#23252F;margin-top:4px}
+.shv2-drawer.profile .p-card .sub{font-size:11px;color:#9A9EAE;font-weight:600;margin-top:2px}
+.shv2-drawer.profile .p-details{display:grid;grid-template-columns:1fr 1fr;gap:11px 16px}
+@media(max-width:640px){.shv2-drawer.profile .p-details{grid-template-columns:1fr}}
+.shv2-drawer.profile .p-details .k{font-size:11px;font-weight:700;color:#7C8092;text-transform:uppercase;letter-spacing:.4px}
+.shv2-drawer.profile .p-details .v{font-size:13px;font-weight:700;color:#23252F;margin-top:2px}
+.shv2-drawer.profile .hist{border:1px solid #ECECF3;border-radius:12px;overflow:hidden}
+.shv2-drawer.profile .hist .row{display:grid;grid-template-columns:100px 140px 90px 110px 1fr;gap:8px;padding:9px 12px;font-size:12.5px;align-items:center;border-top:1px solid #F3F3F8}
+.shv2-drawer.profile .hist .row:first-child{border-top:none}
+.shv2-drawer.profile .hist .row.head{background:#FAFAFD;font-size:10.5px;font-weight:800;color:#7C8092;text-transform:uppercase;letter-spacing:.4px}
+.shv2-drawer.profile .hist .row .money{font-weight:800;text-align:right}
+.shv2-drawer.profile .hist .row .badge{font-size:10.5px;font-weight:800;padding:3px 7px;border-radius:6px;background:#F1EEFF;color:#6C4FE0;text-transform:uppercase;letter-spacing:.3px}
+.shv2-drawer.profile .hist .row .badge.completed{background:#E4F6F3;color:#12A594}
+.shv2-drawer.profile .hist .row .badge.cancelled{background:#FCEAF1;color:#E45C86}
+.shv2-drawer.profile .shv2-profile__f{padding:14px 26px;border-top:1px solid #ECECF3;display:flex;justify-content:flex-end;gap:10px;background:#FFFFFF}
 `;
