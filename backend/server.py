@@ -206,6 +206,7 @@ class ServiceCreate(BaseModel):
     service_name: str
     description: Optional[str] = None
     category: str = "General"  # Category for grouping
+    sub_category: Optional[str] = None  # Fine-grained bucket under the category
     gender_tag: str = "Unisex"  # Men/Women/Unisex
     default_duration: int = 30  # minutes
     base_price: float = 0
@@ -7799,6 +7800,7 @@ async def upload_services_csv(
             "service_name": name[:120],
             "description": str(_find(raw, "description", "desc") or "").strip()[:500] or None,
             "category": (str(_find(raw, "category", "cat") or "").strip()[:60] or "General"),
+            "sub_category": (str(_find(raw, "sub_category", "subcategory", "sub-cat", "subcat") or "").strip()[:60] or None),
             "gender_tag": _norm_gender(_find(raw, "gender_tag", "gender")),
             "default_duration": max(1, _to_int(_find(raw, "default_duration", "duration", "minutes"), 30)),
             "base_price": max(0.0, _to_float(_find(raw, "base_price", "price", "amount"), 0.0)),
@@ -7815,6 +7817,7 @@ async def upload_services_csv(
         docs_to_insert.append(doc)
 
     created = 0
+    batch_id: Optional[str] = None
     if docs_to_insert:
         await db.services.insert_many(docs_to_insert)
         created = len(docs_to_insert)
@@ -7832,8 +7835,30 @@ async def upload_services_csv(
         ]
         await db.salon_services.insert_many(salon_service_docs)
 
+        # Record an upload batch so the salon can see history & roll it back.
+        batch_id = str(uuid.uuid4())
+        uploader = (
+            current_user.get("email")
+            or current_user.get("phone")
+            or current_user.get("sub")
+            or "salon_admin"
+        )
+        await db.service_upload_batches.insert_one({
+            "id": batch_id,
+            "salon_id": salon_id,
+            "filename": file.filename,
+            "uploaded_by": uploader,
+            "uploaded_at": now_iso,
+            "created_count": created,
+            "skipped_count": skipped_duplicates,
+            "error_count": len(errors),
+            "service_ids": [d["id"] for d in docs_to_insert],
+            "status": "active",  # → "rolled_back" after undo
+        })
+
     return {
         "success": True,
+        "batch_id": batch_id,
         "total_rows": len(rows),
         "created": created,
         "skipped_duplicates": skipped_duplicates,
@@ -7845,6 +7870,92 @@ async def upload_services_csv(
             + "."
         ),
     }
+
+
+# ---- Upload template + history + rollback ------------------------------------
+SERVICES_CSV_TEMPLATE = (
+    "service_name,description,category,sub_category,gender_tag,default_duration,base_price,price_type,is_favorite,available_at_home,thumbnail_url,images\n"
+    "Men's Haircut,Classic scissor cut with styling,Services,Hair,Men,30,300,fixed,true,false,,\n"
+    "Beard Trim,Shape-up and hot towel,Services,Beard,Men,20,150,fixed,false,false,,\n"
+    "Women's Haircut,Wash + cut + blow-dry,Services,Hair,Women,45,600,fixed,true,false,,\n"
+    "Classic Manicure,Nail shaping + cuticle care,Services,Nails,Unisex,30,400,fixed,false,true,,\n"
+    "Bridal Glow Package,Facial + hair spa + mani-pedi,Packages,,Women,180,4999,onwards,true,false,,\n"
+)
+
+
+@api_router.get("/services/upload-template.csv")
+async def download_services_csv_template():
+    """Return a small illustrative CSV so owners know the exact column headers.
+    Available to any authenticated salon; no salon_id required."""
+    from fastapi.responses import Response
+    return Response(
+        content=SERVICES_CSV_TEMPLATE,
+        media_type="text/csv",
+        headers={
+            "Content-Disposition": 'attachment; filename="services-upload-template.csv"'
+        },
+    )
+
+
+@api_router.get("/salons/{salon_id}/services/upload-batches")
+async def list_service_upload_batches(
+    salon_id: str,
+    current_user=Depends(get_current_salon_user),
+):
+    """List past service-upload batches for this salon, newest first."""
+    batches = await db.service_upload_batches.find(
+        {"salon_id": salon_id},
+        {"_id": 0},
+    ).sort("uploaded_at", -1).to_list(200)
+    return {"batches": batches}
+
+
+@api_router.delete("/salons/{salon_id}/services/upload-batches/{batch_id}")
+async def rollback_service_upload_batch(
+    salon_id: str,
+    batch_id: str,
+    current_user=Depends(get_current_salon_user),
+):
+    """Undo a service-upload batch — hard-delete the created services and their
+    salon_services mappings. Idempotent: rolling back an already-rolled-back
+    batch is a no-op."""
+    batch = await db.service_upload_batches.find_one(
+        {"id": batch_id, "salon_id": salon_id}, {"_id": 0}
+    )
+    if not batch:
+        raise HTTPException(status_code=404, detail="Upload batch not found")
+
+    if batch.get("status") == "rolled_back":
+        return {"success": True, "removed": 0, "already_rolled_back": True}
+
+    svc_ids: List[str] = batch.get("service_ids") or []
+    removed = 0
+    if svc_ids:
+        # Only delete services still owned by this salon (safety).
+        result = await db.services.delete_many({
+            "id": {"$in": svc_ids},
+            "salon_id": salon_id,
+        })
+        removed = int(getattr(result, "deleted_count", 0) or 0)
+        # Clean mappings + any barber links.
+        await db.salon_services.delete_many({
+            "salon_id": salon_id,
+            "service_id": {"$in": svc_ids},
+        })
+        try:
+            await db.barber_services.delete_many({"service_id": {"$in": svc_ids}})
+        except Exception:
+            pass
+
+    await db.service_upload_batches.update_one(
+        {"id": batch_id, "salon_id": salon_id},
+        {"$set": {
+            "status": "rolled_back",
+            "rolled_back_at": datetime.now(timezone.utc).isoformat(),
+            "removed_count": removed,
+        }}
+    )
+    return {"success": True, "removed": removed, "batch_id": batch_id}
 
 
 
@@ -9498,6 +9609,18 @@ async def complete_token(token_id: str, current_salon=Depends(get_current_salon)
         # Auto-attendance must never block completing the booking. Log + continue.
         logger.warning(f"Auto-attendance upsert failed for token {token_id}: {auto_attn_err}")
 
+    # After completion the queue advances — ping guests that are now 1 or 2
+    # spots away so they can start heading over.
+    try:
+        salon_id_n = token.get("salon_id")
+        barber_id_n = token.get("barber_id")
+        date_n = token.get("date")
+        tok_num_n = token.get("token_number")
+        if salon_id_n and barber_id_n and date_n and tok_num_n:
+            await check_and_notify_nearby_tokens(salon_id_n, barber_id_n, date_n, str(tok_num_n))
+    except Exception as _e:
+        logger.warning(f"nearby-alert skipped on /complete: {_e}")
+
     # Notify customer of status change (in-app)
     if token.get("phone"):
         await create_in_app_notification(
@@ -9693,7 +9816,18 @@ async def call_token(token_id: str, current_salon=Depends(get_current_salon_user
     
     # Send notification
     await send_booking_notification(token, 'token_called')
-    
+
+    # Also ping guests waiting 2 and 1 spots away — they should start heading over.
+    try:
+        salon_id = token.get("salon_id")
+        barber_id = token.get("barber_id")
+        date = token.get("date")
+        tok_num = token.get("token_number")
+        if salon_id and barber_id and date and tok_num:
+            await check_and_notify_nearby_tokens(salon_id, barber_id, date, str(tok_num))
+    except Exception as _e:
+        logger.warning(f"nearby-alert skipped on /call: {_e}")
+
     return {"message": "Token called"}
 
 @api_router.post("/tokens/{token_id}/cancel")

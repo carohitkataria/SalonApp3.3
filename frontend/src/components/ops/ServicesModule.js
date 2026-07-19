@@ -39,6 +39,24 @@ export default function ServicesModule({ salonId, getAuthHeaders }) {
   const [addingSubFor, setAddingSubFor] = useState(null); // category being added-to
   const [newSubName, setNewSubName] = useState('');
   const [uploading, setUploading] = useState(false);
+  const [uploadOpen, setUploadOpen] = useState(false);
+  const [batches, setBatches] = useState([]);
+  const [batchesLoading, setBatchesLoading] = useState(false);
+
+  const fetchBatches = async () => {
+    if (!salonId) return;
+    setBatchesLoading(true);
+    try {
+      const res = await axios.get(
+        `${API}/salons/${salonId}/services/upload-batches`,
+        { headers: getAuthHeaders() },
+      );
+      setBatches(Array.isArray(res.data?.batches) ? res.data.batches : []);
+    } catch (_) { /* keep prior list */ }
+    finally { setBatchesLoading(false); }
+  };
+
+  const openUploadDrawer = () => { setUploadOpen(true); fetchBatches(); };
 
   const handleUploadCsv = async (e) => {
     const file = e.target?.files?.[0];
@@ -53,10 +71,10 @@ export default function ServicesModule({ salonId, getAuthHeaders }) {
         fd,
         { headers: { ...getAuthHeaders(), 'Content-Type': 'multipart/form-data' } },
       );
-      const added = res.data?.added ?? res.data?.count ?? 0;
-      const skipped = res.data?.skipped ?? 0;
+      const added = res.data?.created ?? 0;
+      const skipped = res.data?.skipped_duplicates ?? 0;
       toast.success(`Uploaded — added ${added}${skipped ? `, skipped ${skipped}` : ''}`);
-      await load();
+      await Promise.all([load(), fetchBatches()]);
     } catch (err) {
       const msg = err?.response?.data?.detail || 'Upload failed';
       toast.error(typeof msg === 'string' ? msg : 'Upload failed');
@@ -64,6 +82,24 @@ export default function ServicesModule({ salonId, getAuthHeaders }) {
       setUploading(false);
     }
   };
+
+  const handleRollbackBatch = async (batchId) => {
+    if (!salonId || !batchId) return;
+    if (!window.confirm('Undo this upload? Services created by this batch will be removed.')) return;
+    try {
+      const res = await axios.delete(
+        `${API}/salons/${salonId}/services/upload-batches/${batchId}`,
+        { headers: getAuthHeaders() },
+      );
+      const removed = res.data?.removed ?? 0;
+      toast.success(`Rolled back — removed ${removed} service(s)`);
+      await Promise.all([load(), fetchBatches()]);
+    } catch (err) {
+      toast.error(err?.response?.data?.detail || 'Rollback failed');
+    }
+  };
+
+  const downloadTemplateUrl = `${API}/services/upload-template.csv`;
 
   const load = async () => {
     if (!salonId) return;
@@ -180,20 +216,12 @@ export default function ServicesModule({ salonId, getAuthHeaders }) {
           <div className="z-actions">
             <button
               className="z-btn z-btn--ghost"
-              onClick={() => document.getElementById('svc-upload-input')?.click()}
+              onClick={openUploadDrawer}
               data-testid="services-upload-btn"
-              disabled={uploading}
-              title="Upload a CSV/Excel file to bulk-add services"
+              title="Bulk-add services from a CSV / Excel file"
             >
-              <Icon name="save" /> {uploading ? 'Uploading…' : 'Upload CSV'}
+              <Icon name="save" /> Upload
             </button>
-            <input
-              id="svc-upload-input"
-              type="file"
-              accept=".csv,.xlsx,.xls"
-              style={{ display: 'none' }}
-              onChange={handleUploadCsv}
-            />
             <button className="z-btn z-btn--pri" onClick={openNew}>
               <Icon name="plus" /> Add Service
             </button>
@@ -317,6 +345,18 @@ export default function ServicesModule({ salonId, getAuthHeaders }) {
           }}
         />
       )}
+
+      {/* Upload drawer — sample + upload + history w/ rollback */}
+      <UploadServicesDrawer
+        open={uploadOpen}
+        onClose={() => setUploadOpen(false)}
+        uploading={uploading}
+        onFilePicked={handleUploadCsv}
+        templateHref={downloadTemplateUrl}
+        batches={batches}
+        loading={batchesLoading}
+        onRollback={handleRollbackBatch}
+      />
     </div>
   );
 
