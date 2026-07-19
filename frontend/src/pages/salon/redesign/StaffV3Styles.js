@@ -129,6 +129,7 @@ export const STAFF_V3_CSS = `
 .staffv3-ov{position:fixed;inset:0;background:rgba(36,20,38,.44);opacity:0;visibility:hidden;transition:.28s;z-index:60}
 .staffv3-ov.open{opacity:1;visibility:visible}
 .staffv3-drawer{position:fixed;top:0;right:0;bottom:0;width:min(500px,95vw);background:#fff;z-index:70;box-shadow:-20px 0 60px rgba(36,20,38,.22);transform:translateX(100%);transition:transform .32s cubic-bezier(.22,.61,.36,1);display:flex;flex-direction:column;font-family:'Inter',sans-serif}
+.staffv3-drawer.wide{width:min(760px,96vw)}
 .staffv3-drawer.open{transform:translateX(0)}
 .staffv3-drawer h3{font-family:'Plus Jakarta Sans';font-size:18px;font-weight:800;color:#241E27}
 .staffv3-drawer .dh{display:flex;align-items:center;justify-content:space-between;padding:19px 22px;border-bottom:1px solid #EFE8EF}
@@ -142,6 +143,29 @@ export const STAFF_V3_CSS = `
 .staffv3-drawer .db{flex:1;overflow:auto;padding:20px 22px}
 .staffv3-drawer .df{padding:15px 22px;border-top:1px solid #EFE8EF;display:flex;align-items:center;justify-content:flex-end;gap:10px}
 .staffv3-drawer .grid2{display:grid;grid-template-columns:1fr 1fr;gap:15px 18px}
+.staffv3-drawer .grid3{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px 14px}
+.staffv3-drawer .grid3 .field.span2{grid-column:span 2}
+.staffv3-drawer .grid3 .field.span3{grid-column:span 3}
+@media (max-width: 720px){
+  .staffv3-drawer .grid3{grid-template-columns:1fr 1fr}
+  .staffv3-drawer .grid3 .field.span2,.staffv3-drawer .grid3 .field.span3{grid-column:1/-1}
+}
+.staffv3-drawer .dsec-title{font-size:11.5px;font-weight:800;letter-spacing:.6px;text-transform:uppercase;color:#A99FB0;margin:18px 0 10px;display:flex;align-items:center;gap:8px}
+.staffv3-drawer .dsec-title:first-child{margin-top:0}
+.staffv3-drawer .dsec-title .dsec-sub{font-size:10.5px;font-weight:600;color:#C1B6C5;text-transform:none;letter-spacing:0}
+.staffv3-drawer .doc-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}
+@media (max-width: 720px){.staffv3-drawer .doc-grid{grid-template-columns:1fr 1fr}}
+.staffv3-drawer .doc-slot{position:relative;display:flex;align-items:center;gap:10px;padding:11px 12px;border:1.5px dashed #EFE8EF;border-radius:12px;background:#FDFAFC;cursor:pointer;transition:.15s;min-height:58px}
+.staffv3-drawer .doc-slot:hover{border-color:#C6389E;background:#FCEAF5}
+.staffv3-drawer .doc-slot.has{border-style:solid;border-color:#12A594;background:#E4F6F3}
+.staffv3-drawer .doc-slot .ds-ic{width:32px;height:32px;border-radius:10px;background:#fff;color:#C6389E;display:grid;place-items:center;flex:none;box-shadow:0 1px 2px rgba(40,26,44,.04)}
+.staffv3-drawer .doc-slot.has .ds-ic{color:#12A594}
+.staffv3-drawer .doc-slot .ds-ic svg{width:15px;height:15px;fill:none;stroke:currentColor;stroke-width:2}
+.staffv3-drawer .doc-slot .ds-tx{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}
+.staffv3-drawer .doc-slot .ds-tx b{font-size:12.5px;font-weight:700;color:#241E27;line-height:1.2}
+.staffv3-drawer .doc-slot .ds-tx span{font-size:11px;color:#8A7F90;line-height:1.2;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:180px}
+.staffv3-drawer .doc-slot .ds-rm{width:22px;height:22px;border-radius:7px;background:#fff;color:#E5484D;display:grid;place-items:center;border:1px solid #FDECEC;cursor:pointer;flex:none}
+.staffv3-drawer .doc-slot .ds-rm svg{width:11px;height:11px;fill:none;stroke:currentColor;stroke-width:2.4}
 .staffv3-drawer .field{display:flex;flex-direction:column;gap:6px}
 .staffv3-drawer .field.full{grid-column:1/-1}
 .staffv3-drawer .field label{font-size:12.5px;font-weight:600;color:#4A4150}

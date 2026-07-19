@@ -17,7 +17,7 @@ import sys
 from typing import Dict, Optional
 
 # Backend URL
-BASE_URL = "https://f2cb7247-6365-40eb-8aaf-4d7893dcba4b.preview.emergentagent.com/api"
+BASE_URL = "https://staff-form-fix.preview.emergentagent.com/api"
 
 # Test credentials
 ADMIN_IDENTIFIER = "admin"

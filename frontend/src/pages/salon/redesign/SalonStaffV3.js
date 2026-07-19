@@ -23,6 +23,54 @@ const colorFor = (s = '') => AV_COLORS[(s.charCodeAt(0) || 0) % AV_COLORS.length
 const initial = (s = '') => (s || 'S').trim().charAt(0).toUpperCase();
 const rupee = (n) => '₹' + Number(n || 0).toLocaleString('en-IN');
 
+// Safely convert an API error (including FastAPI/Pydantic 422 objects) into a
+// plain string so we never end up rendering a raw object as a React child.
+const formatApiError = (err, fallback = 'Something went wrong') => {
+  const detail = err?.response?.data?.detail;
+  if (typeof detail === 'string') return detail;
+  if (Array.isArray(detail)) {
+    return detail
+      .map((d) => {
+        if (typeof d === 'string') return d;
+        const field = Array.isArray(d?.loc) ? d.loc.filter((x) => x !== 'body').join('.') : '';
+        const msg = d?.msg || 'Invalid value';
+        return field ? `${field}: ${msg}` : msg;
+      })
+      .join(', ');
+  }
+  if (detail && typeof detail === 'object') return detail.msg || fallback;
+  if (typeof err?.response?.data === 'string') return err.response.data;
+  return err?.message || fallback;
+};
+
+// Read a File as a base64 data URL for inline document uploads.
+const fileToDataUrl = (file) => new Promise((resolve, reject) => {
+  const reader = new FileReader();
+  reader.onload = () => resolve(reader.result);
+  reader.onerror = () => reject(new Error('read failed'));
+  reader.readAsDataURL(file);
+});
+
+// Fields configuring the multi-document uploader in the Add Staff drawer.
+const DOC_SLOTS = [
+  { key: 'aadhar_front', label: 'Aadhaar (Front)', accept: 'image/*,application/pdf' },
+  { key: 'aadhar_back', label: 'Aadhaar (Back)', accept: 'image/*,application/pdf' },
+  { key: 'pan', label: 'PAN Card', accept: 'image/*,application/pdf' },
+  { key: 'photo', label: 'Profile Photo', accept: 'image/*' },
+  { key: 'agreement', label: 'Agreement', accept: 'image/*,application/pdf' },
+  { key: 'bank_details', label: 'Bank / UPI', accept: 'image/*,application/pdf' },
+];
+
+const EMPTY_NEW_STAFF = {
+  name: '', mobile: '', experience: 0, category: 'Junior',
+  department: '', designation: '',
+  gender_specialization: '', specialization: '',
+  dob: '', doj: '',
+  emergency_contact: '', aadhar_number: '',
+  compensation: '',
+  is_barber: true,
+};
+
 const SECTIONS = [
   { key: 'profile', label: 'Profile', ico: <><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></> },
   { key: 'attendance', label: 'Attendance', ico: <><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></> },
@@ -53,7 +101,9 @@ export default function SalonStaffV3({ salonId, getAuthHeaders }) {
   const [search, setSearch] = useState('');
   const [loading, setLoading] = useState(true);
   const [addOpen, setAddOpen] = useState(false);
-  const [newStaff, setNewStaff] = useState({ name: '', mobile: '', experience: 0, category: 'Junior', department: '', designation: '' });
+  const [newStaff, setNewStaff] = useState(EMPTY_NEW_STAFF);
+  const [newDocs, setNewDocs] = useState({}); // { doc_type: { file, dataUrl, name, mime, size } }
+  const [addBusy, setAddBusy] = useState(false);
   const [attendanceSummary, setAttendanceSummary] = useState({});
   const [services, setServices] = useState([]);
   const [barberServices, setBarberServices] = useState({});
@@ -232,7 +282,7 @@ export default function SalonStaffV3({ salonId, getAuthHeaders }) {
     } catch (err) {
       // Revert on failure
       setAttendanceGrid((prev) => ({ ...prev, [selectedId]: { month: attMonth, days: grid } }));
-      const msg = err?.response?.data?.detail || 'Could not update attendance';
+      const msg = formatApiError(err, 'Could not update attendance');
       toast.error(String(msg));
     } finally {
       setAttSaving((prev) => { const p = { ...prev }; delete p[key]; return p; });
@@ -289,7 +339,7 @@ export default function SalonStaffV3({ salonId, getAuthHeaders }) {
       setDocs((prev) => ({ ...prev, [selectedId]: res.data?.documents || [] }));
       toast.success(label + ' uploaded');
     } catch (err) {
-      toast.error(err?.response?.data?.detail || 'Upload failed');
+      toast.error(formatApiError(err, 'Upload failed'));
     } finally {
       setDocBusy(false);
       setPendingDocType(null);
@@ -309,7 +359,7 @@ export default function SalonStaffV3({ salonId, getAuthHeaders }) {
       }));
       toast.success('Document removed');
     } catch (err) {
-      toast.error(err?.response?.data?.detail || 'Delete failed');
+      toast.error(formatApiError(err, 'Delete failed'));
     }
   };
 
@@ -466,7 +516,7 @@ export default function SalonStaffV3({ salonId, getAuthHeaders }) {
       setSalOpen(false);
       fetchAll();
     } catch (err) {
-      toast.error(err?.response?.data?.detail || 'Could not mark as paid');
+      toast.error(formatApiError(err, 'Could not mark as paid'));
     }
   };
 
@@ -497,23 +547,67 @@ export default function SalonStaffV3({ salonId, getAuthHeaders }) {
     const phone = (newStaff.mobile || '').replace(/\D/g, '');
     if (!name) return toast.error('Enter full name');
     if (phone.length < 10) return toast.error('Mobile number is required (login ID)');
+    const mobile = `+91${phone.slice(-10)}`;
+    setAddBusy(true);
     try {
-      await axios.post(`${API}/salons/${salonId}/barbers`, {
+      const payload = {
         name,
-        phone: `+91${phone.slice(-10)}`,
+        salon_id: salonId,
+        mobile,
         experience: Number(newStaff.experience) || 0,
-        category: newStaff.category,
-        department: newStaff.department,
-        designation: newStaff.designation,
-        is_barber: true,
-        is_active: true,
-      }, { headers: getAuthHeaders?.() || {} });
+        category: newStaff.category || 'Junior',
+        department: newStaff.department || null,
+        designation: newStaff.designation || null,
+        specialization: newStaff.specialization || null,
+        gender_specialization: newStaff.gender_specialization || null,
+        emergency_contact: newStaff.emergency_contact || null,
+        aadhar_number: newStaff.aadhar_number || null,
+        dob: newStaff.dob || null,
+        doj: newStaff.doj || null,
+        compensation: newStaff.compensation === '' || newStaff.compensation === null
+          ? null
+          : Number(newStaff.compensation) || 0,
+        is_barber: newStaff.is_barber !== false,
+      };
+      const res = await axios.post(
+        `${API}/salons/${salonId}/barbers`,
+        payload,
+        { headers: getAuthHeaders?.() || {} },
+      );
+      const createdId = res?.data?.id;
+
+      // Upload attached documents (if any) in sequence
+      const uploads = Object.entries(newDocs || {}).filter(([, v]) => v && v.dataUrl);
+      if (createdId && uploads.length) {
+        for (const [docType, meta] of uploads) {
+          const slot = DOC_SLOTS.find((s) => s.key === docType);
+          try {
+            await axios.post(
+              `${API}/barbers/${createdId}/documents`,
+              {
+                doc_type: docType,
+                label: slot?.label || docType,
+                file_data: meta.dataUrl,
+                mime_type: meta.mime,
+                file_name: meta.name,
+              },
+              { headers: getAuthHeaders?.() || {} },
+            );
+          } catch (docErr) {
+            toast.error(`${slot?.label || docType}: ${formatApiError(docErr, 'upload failed')}`);
+          }
+        }
+      }
+
       toast.success('Staff added · login ID ' + phone);
       setAddOpen(false);
-      setNewStaff({ name: '', mobile: '', experience: 0, category: 'Junior', department: '', designation: '' });
+      setNewStaff(EMPTY_NEW_STAFF);
+      setNewDocs({});
       fetchAll();
     } catch (err) {
-      toast.error(err?.response?.data?.detail || 'Could not add staff');
+      toast.error(formatApiError(err, 'Could not add staff'));
+    } finally {
+      setAddBusy(false);
     }
   };
 
@@ -525,7 +619,7 @@ export default function SalonStaffV3({ salonId, getAuthHeaders }) {
       toast.success('Staff removed');
       fetchAll();
     } catch (err) {
-      toast.error(err?.response?.data?.detail || 'Could not delete staff');
+      toast.error(formatApiError(err, 'Could not delete staff'));
     }
   };
 
@@ -553,7 +647,7 @@ export default function SalonStaffV3({ salonId, getAuthHeaders }) {
       setEditingProfile(false);
       fetchAll();
     } catch (err) {
-      toast.error(err?.response?.data?.detail || 'Could not save profile');
+      toast.error(formatApiError(err, 'Could not save profile'));
     }
   };
 
@@ -1185,41 +1279,141 @@ export default function SalonStaffV3({ salonId, getAuthHeaders }) {
       </aside>
 
       {/* Add Staff drawer */}
-      <div className={`staffv3-ov ${addOpen ? 'open' : ''}`} onClick={() => setAddOpen(false)} />
-      <aside className={`staffv3-drawer ${addOpen ? 'open' : ''}`}>        <div className="dh">
+      <div className={`staffv3-ov ${addOpen ? 'open' : ''}`} onClick={() => !addBusy && setAddOpen(false)} />
+      <aside className={`staffv3-drawer wide ${addOpen ? 'open' : ''}`}>
+        <div className="dh">
           <div className="tt">
             <div className="ic"><svg viewBox="0 0 24 24"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><line x1="19" y1="8" x2="19" y2="14"/><line x1="22" y1="11" x2="16" y2="11"/></svg></div>
-            <div><h3>Add Staff</h3><p>Mobile number is the login ID</p></div>
+            <div><h3>Add Staff</h3><p>Mobile number becomes the login ID</p></div>
           </div>
-          <button className="close" onClick={() => setAddOpen(false)}>
+          <button className="close" onClick={() => !addBusy && setAddOpen(false)}>
             <svg viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
           </button>
         </div>
         <div className="db">
-          <div className="grid2">
-            <div className="field full"><label>Full name <span className="req">*</span></label>
+          {/* Basic details */}
+          <div className="dsec-title">Basic details</div>
+          <div className="grid3">
+            <div className="field span2"><label>Full name <span className="req">*</span></label>
               <input value={newStaff.name} onChange={(e) => setNewStaff({ ...newStaff, name: e.target.value })} placeholder="e.g. Ravi Kumar" /></div>
-            <div className="field full"><label>Mobile number <span className="req">*</span> (login ID)</label>
-              <input value={newStaff.mobile} onChange={(e) => setNewStaff({ ...newStaff, mobile: e.target.value.replace(/\D/g, '').slice(0, 10) })}
-                placeholder="10-digit mobile" inputMode="numeric" />
-              <span className="idnote"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></svg>This mobile number becomes the staff login ID.</span>
+            <div className="field"><label>Mobile <span className="req">*</span></label>
+              <input value={newStaff.mobile}
+                onChange={(e) => setNewStaff({ ...newStaff, mobile: e.target.value.replace(/\D/g, '').slice(0, 10) })}
+                placeholder="10-digit" inputMode="numeric" /></div>
+            <div className="field"><label>DOB</label>
+              <input type="date" value={newStaff.dob} onChange={(e) => setNewStaff({ ...newStaff, dob: e.target.value })} /></div>
+            <div className="field"><label>Date of joining</label>
+              <input type="date" value={newStaff.doj} onChange={(e) => setNewStaff({ ...newStaff, doj: e.target.value })} /></div>
+            <div className="field"><label>Emergency contact</label>
+              <input value={newStaff.emergency_contact}
+                onChange={(e) => setNewStaff({ ...newStaff, emergency_contact: e.target.value })} placeholder="+91…" /></div>
+            <div className="field span3">
+              <span className="idnote"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></svg>Mobile number is the unique login ID for this staff.</span>
             </div>
-            <div className="field"><label>Experience (yrs)</label>
-              <input type="number" value={newStaff.experience} onChange={(e) => setNewStaff({ ...newStaff, experience: e.target.value })} /></div>
+          </div>
+
+          {/* Role & experience */}
+          <div className="dsec-title">Role &amp; experience</div>
+          <div className="grid3">
             <div className="field"><label>Category</label>
               <select value={newStaff.category} onChange={(e) => setNewStaff({ ...newStaff, category: e.target.value })}>
                 <option>Junior</option><option>Star</option><option>Master</option>
               </select></div>
+            <div className="field"><label>Experience (yrs)</label>
+              <input type="number" min="0" value={newStaff.experience}
+                onChange={(e) => setNewStaff({ ...newStaff, experience: e.target.value })} /></div>
+            <div className="field"><label>Base salary (₹)</label>
+              <input type="number" min="0" value={newStaff.compensation}
+                onChange={(e) => setNewStaff({ ...newStaff, compensation: e.target.value })} placeholder="Monthly" /></div>
             <div className="field"><label>Department</label>
-              <input value={newStaff.department} onChange={(e) => setNewStaff({ ...newStaff, department: e.target.value })} placeholder="e.g. Hairstyling" /></div>
+              <input value={newStaff.department}
+                onChange={(e) => setNewStaff({ ...newStaff, department: e.target.value })} placeholder="e.g. Hairstyling" /></div>
             <div className="field"><label>Designation</label>
-              <input value={newStaff.designation} onChange={(e) => setNewStaff({ ...newStaff, designation: e.target.value })} placeholder="e.g. Stylist" /></div>
+              <input value={newStaff.designation}
+                onChange={(e) => setNewStaff({ ...newStaff, designation: e.target.value })} placeholder="e.g. Stylist" /></div>
+            <div className="field"><label>Specialization</label>
+              <input value={newStaff.specialization}
+                onChange={(e) => setNewStaff({ ...newStaff, specialization: e.target.value })} placeholder="e.g. Hair color" /></div>
+            <div className="field"><label>Gender specialization</label>
+              <select value={newStaff.gender_specialization}
+                onChange={(e) => setNewStaff({ ...newStaff, gender_specialization: e.target.value })}>
+                <option value="">Select…</option>
+                <option value="Men">Men</option>
+                <option value="Women">Women</option>
+                <option value="Unisex">Unisex</option>
+                <option value="Kids">Kids</option>
+              </select></div>
+            <div className="field"><label>Visible to customers</label>
+              <select value={newStaff.is_barber ? 'Yes' : 'No'}
+                onChange={(e) => setNewStaff({ ...newStaff, is_barber: e.target.value === 'Yes' })}>
+                <option>Yes</option><option>No</option>
+              </select></div>
+          </div>
+
+          {/* Identity */}
+          <div className="dsec-title">Identity</div>
+          <div className="grid3">
+            <div className="field span2"><label>Aadhaar number</label>
+              <input value={newStaff.aadhar_number}
+                onChange={(e) => setNewStaff({ ...newStaff, aadhar_number: e.target.value.replace(/[^0-9\s]/g, '').slice(0, 14) })}
+                placeholder="XXXX XXXX XXXX" inputMode="numeric" /></div>
+          </div>
+
+          {/* Documents */}
+          <div className="dsec-title">Documents <span className="dsec-sub">Optional · max 10 MB each</span></div>
+          <div className="doc-grid">
+            {DOC_SLOTS.map((slot) => {
+              const meta = newDocs[slot.key];
+              return (
+                <label key={slot.key} className={`doc-slot ${meta ? 'has' : ''}`}>
+                  <input
+                    type="file"
+                    accept={slot.accept}
+                    style={{ display: 'none' }}
+                    onChange={async (e) => {
+                      const file = e.target.files?.[0];
+                      e.target.value = '';
+                      if (!file) return;
+                      if (file.size > 10 * 1024 * 1024) return toast.error('File too large (max 10 MB)');
+                      try {
+                        const dataUrl = await fileToDataUrl(file);
+                        setNewDocs((prev) => ({
+                          ...prev,
+                          [slot.key]: { file, dataUrl, name: file.name, mime: file.type, size: file.size },
+                        }));
+                      } catch (_) { toast.error('Could not read file'); }
+                    }}
+                  />
+                  <div className="ds-ic">
+                    {meta ? (
+                      <svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg>
+                    ) : (
+                      <svg viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+                    )}
+                  </div>
+                  <div className="ds-tx">
+                    <b>{slot.label}</b>
+                    <span>{meta ? meta.name : 'Click to upload'}</span>
+                  </div>
+                  {meta && (
+                    <button
+                      type="button"
+                      className="ds-rm"
+                      onClick={(ev) => { ev.preventDefault(); ev.stopPropagation(); setNewDocs((prev) => { const n = { ...prev }; delete n[slot.key]; return n; }); }}
+                      title="Remove"
+                    >
+                      <svg viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                    </button>
+                  )}
+                </label>
+              );
+            })}
           </div>
         </div>
         <div className="df">
-          <button className="btn-ghost" onClick={() => setAddOpen(false)}>Cancel</button>
-          <button className="btn-primary" onClick={handleAddStaff}>
-            <svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg>Add staff
+          <button className="btn-ghost" disabled={addBusy} onClick={() => setAddOpen(false)}>Cancel</button>
+          <button className="btn-primary" onClick={handleAddStaff} disabled={addBusy} data-testid="add-staff-submit">
+            <svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg>{addBusy ? 'Adding…' : 'Add staff'}
           </button>
         </div>
       </aside>

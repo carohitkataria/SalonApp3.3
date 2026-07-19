@@ -18,7 +18,7 @@ import string
 from datetime import datetime, date, timedelta
 
 # Configuration
-BASE_URL = "https://csv-template-manager.preview.emergentagent.com/api"
+BASE_URL = "https://staff-form-fix.preview.emergentagent.com/api"
 ADMIN_CREDENTIALS = {"identifier": "admin", "password": "salon123"}
 
 # Test state
