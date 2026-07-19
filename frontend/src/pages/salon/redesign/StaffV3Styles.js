@@ -28,9 +28,9 @@ export const STAFF_V3_CSS = `
 .staffv3 .btn-ghost svg{width:15px;height:15px;fill:none;stroke:currentColor;stroke-width:2}
 .staffv3 .btn-danger{border:1px solid var(--red-bg);color:var(--red);font-size:13px;font-weight:700;padding:9px 13px;border-radius:11px;display:inline-flex;align-items:center;gap:7px;background:var(--red-bg);cursor:pointer}
 .staffv3 .btn-danger svg{width:15px;height:15px;fill:none;stroke:currentColor;stroke-width:2}
-.staffv3 .workspace{display:grid;grid-template-columns:290px 1fr;background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);box-shadow:var(--shadow);overflow:hidden;min-height:calc(100vh - 190px)}
-.staffv3 .pane-l{border-right:1px solid var(--line);background:#FDFAFC;display:flex;flex-direction:column}
-.staffv3 .pane-r{min-width:0;display:flex;flex-direction:column;background:#fff}
+.staffv3 .workspace{display:grid;grid-template-columns:290px 1fr;background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);box-shadow:var(--shadow);overflow:hidden;height:calc(100vh - 140px);min-height:520px}
+.staffv3 .pane-l{border-right:1px solid var(--line);background:#FDFAFC;display:flex;flex-direction:column;min-height:0;overflow:hidden}
+.staffv3 .pane-r{min-width:0;display:flex;flex-direction:column;background:#fff;min-height:0;overflow-y:auto}
 .staffv3 .list-head{padding:14px 13px 10px;border-bottom:1px solid var(--line)}
 .staffv3 .list-head .lt{display:flex;align-items:center;justify-content:space-between;margin-bottom:10px}
 .staffv3 .list-head .lt b{font-size:13.5px;font-weight:800;display:flex;align-items:center;gap:8px;color:var(--ink)}
@@ -39,7 +39,7 @@ export const STAFF_V3_CSS = `
 .staffv3 .searchbox{display:flex;align-items:center;gap:9px;background:var(--surface);border:1px solid var(--line);border-radius:11px;padding:9px 12px;color:var(--muted)}
 .staffv3 .searchbox input{border:none;outline:none;background:none;font-size:13px;color:var(--ink);width:100%}
 .staffv3 .searchbox svg{width:15px;height:15px;flex:none;fill:none;stroke:currentColor;stroke-width:2}
-.staffv3 .staff-list{padding:7px;display:flex;flex-direction:column;gap:3px;flex:1;overflow:auto;max-height:calc(100vh - 260px)}
+.staffv3 .staff-list{padding:7px;display:flex;flex-direction:column;gap:3px;flex:1;overflow:auto;min-height:0}
 .staffv3 .sgroup{border-radius:12px;transition:.14s}
 .staffv3 .sgroup.on{background:var(--primary-050);border:1px solid var(--primary-100)}
 .staffv3 .sc{display:flex;align-items:center;gap:11px;padding:10px 11px;cursor:pointer;border-radius:12px;transition:.14s}

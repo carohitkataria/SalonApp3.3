@@ -440,8 +440,8 @@ export const HOME_V2_CSS = `
    fixed backgrounds and full-viewport wrappers so the shell layout owns the
    space between rail (left) and ribbon (right). */
 .shv2 .shv2-tabhost{padding:0;min-height:calc(100vh - 68px);background:var(--bg);position:relative;overflow-x:hidden}
-.tab-pad-legacy{padding:16px 44px 40px}
-.shv2 .shv2-tabhost > .tab-pad-legacy{padding:16px 44px 40px}
+.tab-pad-legacy{padding:16px 20px 40px}
+.shv2 .shv2-tabhost > .tab-pad-legacy{padding:16px 20px 40px}
 .shv2 .shv2-tabhost > .tab-pad-legacy > .min-h-screen{background:transparent !important}
 .shv2 .shv2-tabhost > .min-h-screen{min-height:auto !important;background:transparent !important;overflow:visible !important}
 /* Kill the legacy fixed background/gradient overlay (first child of min-h-screen). */
