@@ -295,11 +295,41 @@ export default function AppointmentDrawer({
             <div className="field full" style={{ marginBottom: 14 }}>
               <label>
                 <span>Guest <span className="req">*</span></span>
-                <button className="inline-add" onClick={() => setSubOpen(true)}>+ New guest</button>
+                <button className="inline-add" onClick={() => {
+                  // Duplicate-detection guard: if the user typed a phone that
+                  // matches an existing guest, auto-select instead of showing
+                  // "New Guest". This spares walk-in staff the New-Guest step
+                  // for a returning customer.
+                  const digits = (custSearch || '').replace(/\D/g, '');
+                  if (digits.length >= 10) {
+                    const key = digits.slice(-10);
+                    const match = customers.find(c => (c.phone || '').replace(/\D/g, '').endsWith(key));
+                    if (match) { chooseCustomer(match); return; }
+                  }
+                  setSubOpen(true);
+                }}>+ New guest</button>
               </label>
               <input className={errors.customer ? 'err' : ''}
                      value={custSearch}
-                     onChange={(e) => { setCustSearch(e.target.value); setShowSug(true); setCustomer(null); setCustProfile(null); }}
+                     onChange={(e) => {
+                       const v = e.target.value;
+                       setCustSearch(v);
+                       setShowSug(true);
+                       setCustomer(null);
+                       setCustProfile(null);
+                       // Duplicate-detection: when the user types (or pastes) a
+                       // full 10-digit phone number and it matches EXACTLY one
+                       // existing guest, auto-select them so the New-Guest step
+                       // is skipped and their name auto-fills.
+                       const digits = (v || '').replace(/\D/g, '');
+                       if (digits.length >= 10) {
+                         const key = digits.slice(-10);
+                         const match = customers.find(c => (c.phone || '').replace(/\D/g, '').endsWith(key));
+                         if (match) {
+                           chooseCustomer(match);
+                         }
+                       }
+                     }}
                      onFocus={() => setShowSug(true)}
                      placeholder="Search by name or phone" />
               {showSug && custSuggestions.length > 0 && (

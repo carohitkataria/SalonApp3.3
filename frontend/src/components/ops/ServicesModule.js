@@ -26,6 +26,14 @@ const BLANK = {
   images: [],
 };
 
+function fmtCompactINR(n) {
+  const v = Number(n || 0);
+  if (v >= 10000000) return '₹' + (v / 10000000).toFixed(2).replace(/\.00$/, '') + ' Cr';
+  if (v >= 100000) return '₹' + (v / 100000).toFixed(2).replace(/\.00$/, '') + ' L';
+  if (v >= 1000) return '₹' + (v / 1000).toFixed(1).replace(/\.0$/, '') + 'k';
+  return '₹' + v.toLocaleString('en-IN');
+}
+
 export default function ServicesModule({ salonId, getAuthHeaders }) {
   useEffect(() => { injectZenCss(); }, []);
   const [services, setServices] = useState([]);
@@ -33,15 +41,30 @@ export default function ServicesModule({ salonId, getAuthHeaders }) {
   const [selCat, setSelCat] = useState('Services');
   const [selSub, setSelSub] = useState(null); // null = all
   const [search, setSearch] = useState('');
+  const [subFilter, setSubFilter] = useState('');   // filter chips in left rail
   const [openCats, setOpenCats] = useState({ Services: true, Packages: true });
   const [showAdd, setShowAdd] = useState(false);
   const [editing, setEditing] = useState(null); // service being edited
   const [addingSubFor, setAddingSubFor] = useState(null); // category being added-to
   const [newSubName, setNewSubName] = useState('');
-  const [uploading, setUploading] = useState(false);
+  // Toolbar (right pane)
+  const [genderTab, setGenderTab] = useState('all'); // all | Men | Women
+  const [sortMode, setSortMode] = useState('default'); // default | price_asc | price_desc | bookings_desc
+
+  // Upload drawer state
   const [uploadOpen, setUploadOpen] = useState(false);
+  const [uploading, setUploading] = useState(false);
   const [batches, setBatches] = useState([]);
   const [batchesLoading, setBatchesLoading] = useState(false);
+
+  // Metrics
+  const [overview, setOverview] = useState(null);
+  const [metByServiceId, setMetByServiceId] = useState({});
+  // Metrics detail drawer
+  const [metricsFor, setMetricsFor] = useState(null); // service being viewed
+
+  const authHeadersRef = useRef(getAuthHeaders);
+  useEffect(() => { authHeadersRef.current = getAuthHeaders; }, [getAuthHeaders]);
 
   const fetchBatches = async () => {
     if (!salonId) return;
@@ -49,7 +72,7 @@ export default function ServicesModule({ salonId, getAuthHeaders }) {
     try {
       const res = await axios.get(
         `${API}/salons/${salonId}/services/upload-batches`,
-        { headers: getAuthHeaders() },
+        { headers: authHeadersRef.current() },
       );
       setBatches(Array.isArray(res.data?.batches) ? res.data.batches : []);
     } catch (_) { /* keep prior list */ }
@@ -58,9 +81,7 @@ export default function ServicesModule({ salonId, getAuthHeaders }) {
 
   const openUploadDrawer = () => { setUploadOpen(true); fetchBatches(); };
 
-  const handleUploadCsv = async (e) => {
-    const file = e.target?.files?.[0];
-    e.target.value = ''; // reset so same file can be re-picked
+  const handleUploadCsv = async (file) => {
     if (!file || !salonId) return;
     setUploading(true);
     try {
@@ -69,12 +90,13 @@ export default function ServicesModule({ salonId, getAuthHeaders }) {
       const res = await axios.post(
         `${API}/salons/${salonId}/services/upload-csv`,
         fd,
-        { headers: { ...getAuthHeaders(), 'Content-Type': 'multipart/form-data' } },
+        { headers: { ...authHeadersRef.current(), 'Content-Type': 'multipart/form-data' } },
       );
       const added = res.data?.created ?? 0;
       const skipped = res.data?.skipped_duplicates ?? 0;
-      toast.success(`Uploaded — added ${added}${skipped ? `, skipped ${skipped}` : ''}`);
-      await Promise.all([load(), fetchBatches()]);
+      const errs = Array.isArray(res.data?.errors) ? res.data.errors.length : 0;
+      toast.success(`Uploaded — added ${added}${skipped ? `, skipped ${skipped}` : ''}${errs ? `, ${errs} error(s)` : ''}`);
+      await Promise.all([load(), fetchBatches(), loadMetrics()]);
     } catch (err) {
       const msg = err?.response?.data?.detail || 'Upload failed';
       toast.error(typeof msg === 'string' ? msg : 'Upload failed');
@@ -89,11 +111,11 @@ export default function ServicesModule({ salonId, getAuthHeaders }) {
     try {
       const res = await axios.delete(
         `${API}/salons/${salonId}/services/upload-batches/${batchId}`,
-        { headers: getAuthHeaders() },
+        { headers: authHeadersRef.current() },
       );
       const removed = res.data?.removed ?? 0;
       toast.success(`Rolled back — removed ${removed} service(s)`);
-      await Promise.all([load(), fetchBatches()]);
+      await Promise.all([load(), fetchBatches(), loadMetrics()]);
     } catch (err) {
       toast.error(err?.response?.data?.detail || 'Rollback failed');
     }
@@ -105,10 +127,9 @@ export default function ServicesModule({ salonId, getAuthHeaders }) {
     if (!salonId) return;
     try {
       const [svc, sub] = await Promise.all([
-        axios.get(`${API}/salons/${salonId}/services/all`, { headers: getAuthHeaders() }),
+        axios.get(`${API}/salons/${salonId}/services/all`, { headers: authHeadersRef.current() }),
         axios.get(`${API}/salons/${salonId}/services/subcategories`),
       ]);
-      // /services/all can return { services: [...] } or an array
       const raw = svc.data;
       const list = Array.isArray(raw) ? raw : (raw?.services || raw?.data || []);
       setServices(list);
@@ -122,10 +143,34 @@ export default function ServicesModule({ salonId, getAuthHeaders }) {
     }
   };
 
-  useEffect(() => { load(); }, [salonId]); // eslint-disable-line
+  const loadMetrics = async () => {
+    if (!salonId) return;
+    try {
+      const res = await axios.get(
+        `${API}/salons/${salonId}/services/metrics-overview`,
+        { headers: authHeadersRef.current() },
+      );
+      setOverview(res.data?.overview || null);
+      const map = {};
+      for (const r of (res.data?.per_service || [])) {
+        map[r.service_id] = r;
+      }
+      setMetByServiceId(map);
+    } catch (e) {
+      // Metrics are best-effort; don't spam a toast on failure.
+    }
+  };
+
+  useEffect(() => { load(); loadMetrics(); /* eslint-disable-line */ }, [salonId]);
 
   const filtered = useMemo(() => {
-    let list = services.filter((s) => (s.category || 'Services') === selCat);
+    // "Services" (default) is a catch-all: any service NOT explicitly tagged
+    // as a "Packages" category belongs here. This preserves legacy rows
+    // that used generic category names like "General".
+    let list = services.filter((s) => {
+      const c = s.category || 'Services';
+      return selCat === 'Packages' ? c === 'Packages' : c !== 'Packages';
+    });
     if (selSub) list = list.filter((s) => (s.sub_category || '') === selSub);
     if (search.trim()) {
       const q = search.trim().toLowerCase();
@@ -135,8 +180,20 @@ export default function ServicesModule({ salonId, getAuthHeaders }) {
                (s.sub_category || '').toLowerCase().includes(q)
       );
     }
+    if (genderTab !== 'all') {
+      list = list.filter((s) => {
+        const t = (s.gender_tag || 'Unisex');
+        return t === genderTab || t === 'Unisex';
+      });
+    }
+    // Sort
+    if (sortMode === 'price_asc') list = [...list].sort((a, b) => (a.base_price || 0) - (b.base_price || 0));
+    else if (sortMode === 'price_desc') list = [...list].sort((a, b) => (b.base_price || 0) - (a.base_price || 0));
+    else if (sortMode === 'bookings_desc') {
+      list = [...list].sort((a, b) => (metByServiceId[b.id]?.bookings_30d || 0) - (metByServiceId[a.id]?.bookings_30d || 0));
+    }
     return list;
-  }, [services, selCat, selSub, search]);
+  }, [services, selCat, selSub, search, genderTab, sortMode, metByServiceId]);
 
   const grouped = useMemo(() => {
     if (selSub) return { [selSub]: filtered };
@@ -149,12 +206,24 @@ export default function ServicesModule({ salonId, getAuthHeaders }) {
     return g;
   }, [filtered, selSub]);
 
-  const countInCat = (cat) => services.filter((s) => (s.category || 'Services') === cat).length;
-  const countInSub = (cat, sub) => services.filter(
-    (s) => (s.category || 'Services') === cat && (s.sub_category || '') === sub
-  ).length;
+  const countInCat = (cat) => services.filter((s) => {
+    const c = s.category || 'Services';
+    return cat === 'Packages' ? c === 'Packages' : c !== 'Packages';
+  }).length;
+  const countInSub = (cat, sub) => services.filter((s) => {
+    const c = s.category || 'Services';
+    const inCat = cat === 'Packages' ? c === 'Packages' : c !== 'Packages';
+    return inCat && (s.sub_category || '') === sub;
+  }).length;
 
-  const openNew = () => { setEditing({ ...BLANK, category: selCat, sub_category: selSub || '' }); setShowAdd(true); };
+  const openNew = () => {
+    const chosenCat = selCat || 'Services';
+    const chosenSub = selSub || '';
+    // If user is filtered to a sub-category, prefill BOTH category + sub-category
+    // so it saves correctly on first click.
+    setEditing({ ...BLANK, category: chosenCat, sub_category: chosenSub });
+    setShowAdd(true);
+  };
   const openEdit = (svc) => { setEditing({ ...BLANK, ...svc }); setShowAdd(true); };
 
   const saveSubcat = async (category) => {
@@ -164,7 +233,7 @@ export default function ServicesModule({ salonId, getAuthHeaders }) {
       await axios.post(
         `${API}/salons/${salonId}/services/subcategories`,
         { category, name },
-        { headers: getAuthHeaders() }
+        { headers: authHeadersRef.current() }
       );
       setSubs((s) => ({ ...s, [category]: Array.from(new Set([...(s[category] || []), name])).sort() }));
       setNewSubName('');
@@ -180,13 +249,12 @@ export default function ServicesModule({ salonId, getAuthHeaders }) {
       await axios.put(
         `${API}/services/${svc.id}/favorite`,
         { is_favorite: !svc.is_favorite },
-        { headers: getAuthHeaders() }
+        { headers: authHeadersRef.current() }
       );
       setServices((s) => s.map((x) => (x.id === svc.id ? { ...x, is_favorite: !svc.is_favorite } : x)));
     } catch (e) {
-      // Some deployments expect no body — try query param
       try {
-        await axios.put(`${API}/services/${svc.id}/favorite?is_favorite=${!svc.is_favorite}`, null, { headers: getAuthHeaders() });
+        await axios.put(`${API}/services/${svc.id}/favorite?is_favorite=${!svc.is_favorite}`, null, { headers: authHeadersRef.current() });
         setServices((s) => s.map((x) => (x.id === svc.id ? { ...x, is_favorite: !svc.is_favorite } : x)));
       } catch (_) {
         toast.error('Could not update favourite');
@@ -197,43 +265,95 @@ export default function ServicesModule({ salonId, getAuthHeaders }) {
   const deleteSvc = async (svc) => {
     if (!window.confirm(`Delete "${svc.service_name}"?`)) return;
     try {
-      await axios.delete(`${API}/services/${svc.id}`, { headers: getAuthHeaders() });
+      await axios.delete(`${API}/services/${svc.id}`, { headers: authHeadersRef.current() });
       setServices((s) => s.filter((x) => x.id !== svc.id));
+      loadMetrics();
       toast.success('Deleted');
     } catch (e) {
       toast.error('Failed to delete');
     }
   };
 
+  // ---- KPI cards ---------------------------------------------------------
+  const kpi = overview || {
+    total_menu: services.length,
+    services_count: services.filter((s) => (s.category || 'Services') !== 'Packages').length,
+    packages_count: services.filter((s) => (s.category || 'Services') === 'Packages').length,
+    revenue_30d: 0, bookings_30d: 0, avg_rating: 0, total_reviews: 0,
+    at_home_count: services.filter((s) => s.available_at_home).length,
+    favorites_count: services.filter((s) => s.is_favorite).length,
+  };
+
+  // ---- Search box context label (e.g., "within Hair Colour") ------------
+  const searchPlaceholder = selSub
+    ? `Search within ${selSub}...`
+    : `Search within ${selCat}...`;
+
+  const filteredSubs = (subs[selCat] || []).filter((s) => (
+    subFilter.trim() === '' || s.toLowerCase().includes(subFilter.trim().toLowerCase())
+  ));
+
   return (
     <div className="zen">
       <div className="z-wrap">
+        {/* ================= Page head ================= */}
         <div className="z-phead">
           <div>
-            <div className="eyebrow">Operations</div>
-            <h1>Services</h1>
+            <div className="eyebrow">Salon menu</div>
+            <h1>Menu &amp; Services</h1>
           </div>
           <div className="z-actions">
             <button
               className="z-btn z-btn--ghost"
               onClick={openUploadDrawer}
               data-testid="services-upload-btn"
-              title="Bulk-add services from a CSV / Excel file"
+              title="Bulk-add services from a CSV file"
             >
-              <Icon name="save" /> Upload
+              <Icon name="upload" /> Upload template
             </button>
-            <button className="z-btn z-btn--pri" onClick={openNew}>
-              <Icon name="plus" /> Add Service
+            <button className="z-btn z-btn--pri" onClick={openNew} data-testid="services-new-btn">
+              <Icon name="plus" /> New service
             </button>
           </div>
         </div>
 
+        {/* ================= KPI Metrics row ================= */}
+        <div className="z-metrics">
+          <div className="z-metric g-blue">
+            <div className="k"><Icon name="layers" size={12} /> Total Menu</div>
+            <div className="v">{kpi.total_menu}</div>
+            <div className="sub">{kpi.services_count} services · {kpi.packages_count} packages</div>
+          </div>
+          <div className="z-metric g-mint">
+            <div className="k"><Icon name="chart" size={12} /> Revenue (30D)</div>
+            <div className="v">{fmtCompactINR(kpi.revenue_30d)}</div>
+            <div className="sub">across all bookings</div>
+          </div>
+          <div className="z-metric g-amber">
+            <div className="k"><Icon name="star" size={12} /> Avg Rating</div>
+            <div className="v">{kpi.avg_rating ? Number(kpi.avg_rating).toFixed(2) : '—'}</div>
+            <div className="sub">{kpi.favorites_count} marked favourite</div>
+          </div>
+          <div className="z-metric g-rose">
+            <div className="k"><Icon name="home" size={12} /> At-Home</div>
+            <div className="v">{kpi.at_home_count}</div>
+            <div className="sub">services offered at home</div>
+          </div>
+        </div>
+
         <div className="z-split">
-          {/* Left rail — categories & sub-categories */}
+          {/* ============ Left rail — categories ============ */}
           <div className="z-cats z-card">
             <div className="z-cats-h">
-              <div className="z-search"><Icon name="search" />
-                <input placeholder="Search services..." value={search} onChange={(e) => setSearch(e.target.value)} />
+              <div className="cats-lbl">Categories</div>
+              <div className="z-cats-filter">
+                <Icon name="search" />
+                <input
+                  placeholder="Filter sub-categories..."
+                  value={subFilter}
+                  onChange={(e) => setSubFilter(e.target.value)}
+                  data-testid="filter-subcategories-input"
+                />
               </div>
             </div>
             <div className="z-cat-list">
@@ -245,6 +365,7 @@ export default function ServicesModule({ salonId, getAuthHeaders }) {
                       setSelCat(cat); setSelSub(null);
                       setOpenCats((o) => ({ ...o, [cat]: !o[cat] || selCat !== cat }));
                     }}
+                    data-testid={`cat-row-${cat.toLowerCase()}`}
                   >
                     <Icon name="chevR" className="chev" size={14} />
                     <div className="z-cat-ico"><Icon name={cat === 'Services' ? 'scissors' : 'gift'} /></div>
@@ -259,15 +380,21 @@ export default function ServicesModule({ salonId, getAuthHeaders }) {
                       >
                         All <span className="cnt">{countInCat(cat)}</span>
                       </div>
-                      {(subs[cat] || []).map((sub) => (
+                      {filteredSubs.map((sub) => (
                         <div
                           key={sub}
                           className={`z-sub-row ${selCat === cat && selSub === sub ? 'sel' : ''}`}
                           onClick={() => { setSelCat(cat); setSelSub(sub); }}
+                          data-testid={`sub-row-${sub.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`}
                         >
                           {sub} <span className="cnt">{countInSub(cat, sub)}</span>
                         </div>
                       ))}
+                      {(subs[cat] || []).length === 0 && !subFilter && (
+                        <div style={{ fontSize: 11.5, color: 'var(--z-muted-2)', padding: '4px 10px' }}>
+                          No sub-categories yet.
+                        </div>
+                      )}
                       {addingSubFor === cat ? (
                         <div className="z-sub-add-field">
                           <input
@@ -293,8 +420,48 @@ export default function ServicesModule({ salonId, getAuthHeaders }) {
             </div>
           </div>
 
-          {/* Right — services list */}
+          {/* ============ Right — services list ============ */}
           <div>
+            {/* Sticky-style toolbar */}
+            <div className="z-toolbar-2">
+              <div className="z-search grow">
+                <Icon name="search" />
+                <input
+                  placeholder={searchPlaceholder}
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                  data-testid="services-search-input"
+                />
+              </div>
+              <div className="z-seg" role="tablist" aria-label="Filter by gender">
+                {[
+                  { id: 'all', label: 'All' },
+                  { id: 'Men', label: 'Men' },
+                  { id: 'Women', label: 'Women' },
+                ].map((t) => (
+                  <button
+                    key={t.id}
+                    className={genderTab === t.id ? 'on' : ''}
+                    onClick={() => setGenderTab(t.id)}
+                    data-testid={`gender-tab-${t.id.toLowerCase()}`}
+                  >
+                    {t.label}
+                  </button>
+                ))}
+              </div>
+              <select
+                className="z-select"
+                value={sortMode}
+                onChange={(e) => setSortMode(e.target.value)}
+                data-testid="services-sort-select"
+              >
+                <option value="default">Sort: Default</option>
+                <option value="price_asc">Price: Low → High</option>
+                <option value="price_desc">Price: High → Low</option>
+                <option value="bookings_desc">Most booked (30D)</option>
+              </select>
+            </div>
+
             {Object.keys(grouped).length === 0 ? (
               <div className="z-empty z-card">
                 <Icon name="scissors" size={40} /><br />
@@ -314,9 +481,11 @@ export default function ServicesModule({ salonId, getAuthHeaders }) {
                     <ServiceCard
                       key={svc.id}
                       svc={svc}
-                      onEdit={() => openEdit(svc)}
-                      onDelete={() => deleteSvc(svc)}
-                      onToggleFav={() => toggleFav(svc)}
+                      metrics={metByServiceId[svc.id] || null}
+                      onEdit={(e) => { e.stopPropagation(); openEdit(svc); }}
+                      onDelete={(e) => { e.stopPropagation(); deleteSvc(svc); }}
+                      onToggleFav={(e) => { e.stopPropagation(); toggleFav(svc); }}
+                      onClick={() => setMetricsFor(svc)}
                     />
                   ))}
                 </div>
@@ -326,11 +495,12 @@ export default function ServicesModule({ salonId, getAuthHeaders }) {
         </div>
       </div>
 
+      {/* Add / Edit drawer */}
       {showAdd && (
         <ServiceDrawer
           initial={editing}
           salonId={salonId}
-          getAuthHeaders={getAuthHeaders}
+          getAuthHeaders={authHeadersRef.current}
           subs={subs[editing?.category] || []}
           onSubCategoryCreate={(name) => saveSubcatForDrawer(editing?.category, name)}
           onClose={() => { setShowAdd(false); setEditing(null); }}
@@ -341,6 +511,7 @@ export default function ServicesModule({ salonId, getAuthHeaders }) {
             });
             setShowAdd(false);
             setEditing(null);
+            loadMetrics();
             toast.success(isNew ? 'Service added' : 'Service updated');
           }}
         />
@@ -357,6 +528,18 @@ export default function ServicesModule({ salonId, getAuthHeaders }) {
         loading={batchesLoading}
         onRollback={handleRollbackBatch}
       />
+
+      {/* Service metrics detail drawer */}
+      {metricsFor && (
+        <ServiceMetricsDrawer
+          salonId={salonId}
+          getAuthHeaders={authHeadersRef.current}
+          svc={metricsFor}
+          summaryMetrics={metByServiceId[metricsFor.id] || null}
+          onEdit={() => { openEdit(metricsFor); setMetricsFor(null); }}
+          onClose={() => setMetricsFor(null)}
+        />
+      )}
     </div>
   );
 
@@ -366,7 +549,7 @@ export default function ServicesModule({ salonId, getAuthHeaders }) {
       await axios.post(
         `${API}/salons/${salonId}/services/subcategories`,
         { category, name },
-        { headers: getAuthHeaders() }
+        { headers: authHeadersRef.current() }
       );
       setSubs((s) => ({ ...s, [category]: Array.from(new Set([...(s[category] || []), name])).sort() }));
       return name;
@@ -377,10 +560,22 @@ export default function ServicesModule({ salonId, getAuthHeaders }) {
   }
 }
 
-function ServiceCard({ svc, onEdit, onDelete, onToggleFav }) {
+function TrendPill({ pct }) {
+  if (pct == null || Number.isNaN(pct)) return <span className="tr flat">—</span>;
+  const p = Number(pct);
+  if (Math.abs(p) < 0.05) return <span className="tr flat">0%</span>;
+  const up = p > 0;
+  return (
+    <span className={`tr ${up ? '' : 'dn'}`}>
+      <Icon name={up ? 'trendUp' : 'trendDn'} size={11} /> {up ? '+' : ''}{p}%
+    </span>
+  );
+}
+
+function ServiceCard({ svc, metrics, onEdit, onDelete, onToggleFav, onClick }) {
   const emoji = (svc.category === 'Packages') ? '🎁' : '✂️';
   return (
-    <div className="z-svc-card">
+    <div className="z-svc-card" onClick={onClick} data-testid={`service-card-${svc.id}`}>
       <div className="z-svc-main">
         <div className="z-svc-thumb">
           {svc.thumbnail_url ? <img src={svc.thumbnail_url} alt="" /> : <span>{emoji}</span>}
@@ -395,30 +590,62 @@ function ServiceCard({ svc, onEdit, onDelete, onToggleFav }) {
           </div>
           {svc.description && <p className="z-svc-desc">{svc.description}</p>}
           <div className="z-svc-tags">
-            <span className="z-pill z-pill--blue">{svc.default_duration || 30} min</span>
-            <span className="z-pill">{svc.gender_tag || 'Unisex'}</span>
+            <span className="z-pill z-pill--blue">{svc.gender_tag || 'Unisex'}</span>
+            <span className="z-pill"><Icon name="clock" size={12} /> {svc.default_duration || 30} min</span>
             {svc.sub_category && <span className="z-pill">{svc.sub_category}</span>}
             {svc.available_at_home && <span className="z-pill z-pill--ok">At-home</span>}
           </div>
         </div>
       </div>
+
+      {/* Metrics strip */}
+      <div className="z-svc-mets">
+        <div className="z-svc-met">
+          <div className="k">Bookings 30D</div>
+          <div className="v">{metrics?.bookings_30d ?? 0}</div>
+        </div>
+        <div className="z-svc-met">
+          <div className="k">Revenue</div>
+          <div className="v">{fmtCompactINR(metrics?.revenue_30d || 0)}</div>
+        </div>
+        <div className="z-svc-met">
+          <div className="k">Rating</div>
+          <div className="v">
+            {metrics?.rating ? Number(metrics.rating).toFixed(1) : '—'}
+            {metrics?.rating ? <small style={{ marginLeft: 4 }}>★</small> : null}
+          </div>
+        </div>
+        <div className="z-svc-met">
+          <div className="k">Trend</div>
+          <div className="v" style={{ fontFamily: 'inherit', fontSize: 12 }}>
+            <TrendPill pct={metrics?.trend_pct} />
+          </div>
+        </div>
+      </div>
+
       <div className="z-svc-actions">
         <button className={`z-link fav ${svc.is_favorite ? 'on' : ''}`} onClick={onToggleFav}>
           <Icon name="star" /> {svc.is_favorite ? 'Favourited' : 'Favourite'}
         </button>
         <div className="sp" />
         <button className="z-link" onClick={onEdit}><Icon name="edit" /> Edit</button>
-        <button className="z-link danger" onClick={onDelete}><Icon name="trash" /> Delete</button>
+        <button className="z-link danger" onClick={onDelete}><Icon name="trash" /> Remove</button>
       </div>
     </div>
   );
 }
 
 function ServiceDrawer({ initial, salonId, getAuthHeaders, subs, onSubCategoryCreate, onClose, onSaved }) {
+  // IMPORTANT: keep drawer's sub_category coherent with its category.
+  // - If parent passes `initial.sub_category` that doesn't belong to the current
+  //   category's subs list, allow the "New sub-category" flow to add it.
   const [form, setForm] = useState(initial);
+  const [subsForCat, setSubsForCat] = useState(subs);
   const fileRef = useRef(null);
   const [saving, setSaving] = useState(false);
   const isEdit = !!initial?.id;
+
+  useEffect(() => { setSubsForCat(subs); }, [subs]);
 
   const upd = (k, v) => setForm((f) => ({ ...f, [k]: v }));
 
@@ -435,19 +662,29 @@ function ServiceDrawer({ initial, salonId, getAuthHeaders, subs, onSubCategoryCr
   const handleAddSub = async () => {
     const name = window.prompt('Sub-category name:');
     if (!name) return;
-    const added = await onSubCategoryCreate(name.trim());
-    if (added) upd('sub_category', name.trim());
+    const trimmed = name.trim();
+    const added = await onSubCategoryCreate(trimmed);
+    if (added) {
+      // Keep drawer's local subs list in sync so the just-added option shows up.
+      setSubsForCat((arr) => Array.from(new Set([...(arr || []), trimmed])).sort());
+      upd('sub_category', trimmed);
+    }
   };
 
   const save = async () => {
     if (!form.service_name.trim()) return toast.error('Service name required');
     setSaving(true);
     try {
+      // BUG FIX: on create, we send an EMPTY-STRING sub_category as null so the
+      // backend doesn't store a blank string. When the user has explicitly
+      // selected a sub-category (via the dropdown / auto-prefill), we forward
+      // it verbatim so the create endpoint persists it correctly.
+      const cleanSub = (form.sub_category || '').trim();
       const payload = {
         service_name: form.service_name.trim(),
         description: form.description || '',
         category: form.category,
-        sub_category: form.sub_category || null,
+        sub_category: cleanSub || null,
         gender_tag: form.gender_tag,
         default_duration: parseInt(form.default_duration || 30, 10),
         base_price: parseFloat(form.base_price || 0),
@@ -465,7 +702,7 @@ function ServiceDrawer({ initial, salonId, getAuthHeaders, subs, onSubCategoryCr
       } else {
         const res = await axios.post(`${API}/services`, payload, { headers: getAuthHeaders() });
         saved = res.data;
-        // Also enable for salon
+        // Also enable for salon (idempotent).
         try {
           await axios.put(
             `${API}/salons/${salonId}/services/${saved.id}/toggle?is_enabled=true`,
@@ -474,6 +711,10 @@ function ServiceDrawer({ initial, salonId, getAuthHeaders, subs, onSubCategoryCr
           );
         } catch (_) { /* non-fatal */ }
       }
+      // Merge back sub_category from our payload so the parent's `saved` shows
+      // the sub-category immediately even if the backend response omitted it
+      // (defensive; the backend does persist + return it).
+      saved = { ...saved, sub_category: payload.sub_category };
       onSaved(saved, !isEdit);
     } catch (e) {
       console.error(e);
@@ -532,15 +773,37 @@ function ServiceDrawer({ initial, salonId, getAuthHeaders, subs, onSubCategoryCr
           <div className="z-grid2">
             <div className="z-field">
               <label>Category</label>
-              <select value={form.category} onChange={(e) => upd('category', e.target.value)}>
+              <select
+                value={form.category}
+                onChange={(e) => {
+                  // BUG FIX: when the category is switched, clear the stale
+                  // sub_category so the sub-category dropdown reflects the new
+                  // category's list and doesn't silently drop a mismatched
+                  // sub-category on the save call.
+                  const nextCat = e.target.value;
+                  upd('category', nextCat);
+                  upd('sub_category', '');
+                }}
+              >
                 {CATEGORIES.map((c) => <option key={c} value={c}>{c}</option>)}
               </select>
             </div>
             <div className="z-field">
               <label>Sub-category</label>
-              <select value={form.sub_category || ''} onChange={(e) => { if (e.target.value === '__new__') handleAddSub(); else upd('sub_category', e.target.value); }}>
+              <select
+                value={form.sub_category || ''}
+                onChange={(e) => {
+                  if (e.target.value === '__new__') handleAddSub();
+                  else upd('sub_category', e.target.value);
+                }}
+              >
                 <option value="">— none —</option>
-                {(subs || []).map((s) => <option key={s} value={s}>{s}</option>)}
+                {(subsForCat || []).map((s) => <option key={s} value={s}>{s}</option>)}
+                {/* If the pre-filled sub_category isn't in subs (e.g., legacy or newly
+                    added), still render it so it's kept + editable. */}
+                {form.sub_category && !((subsForCat || []).includes(form.sub_category)) && (
+                  <option value={form.sub_category}>{form.sub_category}</option>
+                )}
                 <option value="__new__">+ New sub-category…</option>
               </select>
             </div>
@@ -596,6 +859,271 @@ function ServiceDrawer({ initial, salonId, getAuthHeaders, subs, onSubCategoryCr
           <button className="z-btn z-btn--ghost" style={{ flex: 1 }} onClick={onClose}>Cancel</button>
           <button className="z-btn z-btn--pri" style={{ flex: 2 }} onClick={save} disabled={saving}>
             <Icon name="save" /> {saving ? 'Saving…' : (isEdit ? 'Save changes' : 'Create service')}
+          </button>
+        </div>
+      </aside>
+    </>
+  );
+}
+
+// -----------------------------------------------------------------------------
+// UploadServicesDrawer — dropzone + sample template + upload history + rollback
+// -----------------------------------------------------------------------------
+function UploadServicesDrawer({ open, onClose, uploading, onFilePicked, templateHref, batches, loading, onRollback }) {
+  const fileRef = useRef(null);
+  const [dragOver, setDragOver] = useState(false);
+
+  if (!open) return null;
+
+  const pickFile = () => fileRef.current?.click();
+  const onFile = (e) => {
+    const file = e.target?.files?.[0];
+    e.target.value = '';
+    if (file) onFilePicked(file);
+  };
+  const onDrop = (e) => {
+    e.preventDefault();
+    setDragOver(false);
+    const file = e.dataTransfer?.files?.[0];
+    if (file) onFilePicked(file);
+  };
+
+  return (
+    <>
+      <div className="z-overlay" onClick={onClose} />
+      <aside className="z-drawer wide" data-testid="upload-services-drawer">
+        <div className="z-drawer-h">
+          <div className="dico"><Icon name="upload" size={20} /></div>
+          <div>
+            <div className="eyebrow">Bulk add</div>
+            <h3>Upload Services</h3>
+            <p>Fill our CSV template so it works first-try — no column guessing.</p>
+          </div>
+          <button className="z-drawer-close" onClick={onClose}><Icon name="x" /></button>
+        </div>
+
+        <div className="z-drawer-body">
+          {/* Template + rules */}
+          <div className="z-up-card">
+            <h4>1. Download the sample template</h4>
+            <p>Only <code>service_name</code> is required. Duplicates (by name) are skipped automatically — existing services are never overwritten.</p>
+            <a href={templateHref} download="services-upload-template.csv" className="z-btn z-btn--ghost" data-testid="download-services-template-btn">
+              <Icon name="download" /> Download CSV template
+            </a>
+          </div>
+
+          {/* Dropzone */}
+          <div className="z-up-card">
+            <h4>2. Upload your file</h4>
+            <p>Supported: .csv, .xlsx, .xls · up to 5 MB. Every row is <b>added</b> — nothing is replaced.</p>
+            <div
+              className="z-drop"
+              onClick={pickFile}
+              onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
+              onDragLeave={() => setDragOver(false)}
+              onDrop={onDrop}
+              style={dragOver ? { background: 'var(--z-primary-050)', borderColor: 'var(--z-primary)' } : undefined}
+              data-testid="upload-dropzone"
+            >
+              <Icon name="upload" size={26} />
+              <div style={{ marginTop: 6 }}>{uploading ? 'Uploading…' : (<span>Drag & drop, or <b>browse</b> to select a file</span>)}</div>
+              <div style={{ fontSize: 11, marginTop: 4, color: 'var(--z-muted-2)' }}>Columns: service_name, description, category, sub_category, gender_tag, default_duration, base_price, price_type, is_favorite, available_at_home, thumbnail_url, images</div>
+            </div>
+            <input ref={fileRef} type="file" accept=".csv,.xlsx,.xls,text/csv" style={{ display: 'none' }} onChange={onFile} />
+          </div>
+
+          {/* History w/ rollback */}
+          <div className="z-up-card">
+            <h4>Recent uploads</h4>
+            <p>Made a mistake? Roll back any batch to remove the services it created (existing services are untouched).</p>
+            {loading ? (
+              <div style={{ fontSize: 12, color: 'var(--z-muted)' }}>Loading history…</div>
+            ) : (batches || []).length === 0 ? (
+              <div style={{ fontSize: 12, color: 'var(--z-muted)' }}>No uploads yet.</div>
+            ) : (
+              <div>
+                {batches.map((b) => {
+                  const rolled = b.status === 'rolled_back';
+                  const when = b.uploaded_at ? new Date(b.uploaded_at).toLocaleString('en-IN', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '—';
+                  return (
+                    <div key={b.id} className="z-hist-row" data-testid={`upload-batch-${b.id}`}>
+                      <div>
+                        <div className="nm">
+                          {b.filename || 'services.csv'}
+                          <span className={`badge ${rolled ? 'rb' : ''}`}>{rolled ? 'Rolled back' : `+${b.created_count || 0} added`}</span>
+                        </div>
+                        <div className="sub">{when} · by {b.uploaded_by || 'salon_admin'}{b.skipped_count ? ` · ${b.skipped_count} skipped` : ''}{b.error_count ? ` · ${b.error_count} errors` : ''}</div>
+                      </div>
+                      <button
+                        className="z-btn z-btn--ghost z-btn--sm"
+                        onClick={() => onRollback(b.id)}
+                        disabled={rolled || (b.created_count || 0) === 0}
+                        title={rolled ? 'Already rolled back' : 'Undo this upload'}
+                        data-testid={`upload-rollback-${b.id}`}
+                      >
+                        <Icon name="undo" /> Rollback
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        </div>
+
+        <div className="z-drawer-foot" style={{ display: 'flex', gap: 10 }}>
+          <button className="z-btn z-btn--ghost" style={{ flex: 1 }} onClick={onClose}>Close</button>
+        </div>
+      </aside>
+    </>
+  );
+}
+
+// -----------------------------------------------------------------------------
+// ServiceMetricsDrawer — deep metrics view for a clicked service
+// -----------------------------------------------------------------------------
+function ServiceMetricsDrawer({ salonId, getAuthHeaders, svc, summaryMetrics, onEdit, onClose }) {
+  const [data, setData] = useState(null);
+  const [err, setErr] = useState(null);
+
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      try {
+        const res = await axios.get(
+          `${API}/salons/${salonId}/services/${svc.id}/metrics`,
+          { headers: getAuthHeaders() },
+        );
+        if (alive) setData(res.data);
+      } catch (e) {
+        if (alive) setErr(e?.response?.data?.detail || 'Failed to load metrics');
+      }
+    })();
+    return () => { alive = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [svc?.id, salonId]);
+
+  const s = data?.service || svc;
+  const m = data?.metrics || {
+    bookings_30d: summaryMetrics?.bookings_30d || 0,
+    revenue_30d: summaryMetrics?.revenue_30d || 0,
+    bookings_90d: 0, revenue_90d: 0, avg_ticket_30d: 0,
+    rating: summaryMetrics?.rating || 0, total_reviews: 0,
+  };
+  const timeline = data?.timeline_30d || [];
+  const topBarbers = data?.top_barbers || [];
+  const maxDay = timeline.reduce((mx, d) => Math.max(mx, Number(d.revenue || 0)), 0) || 1;
+
+  return (
+    <>
+      <div className="z-overlay" onClick={onClose} />
+      <aside className="z-drawer wide" data-testid="service-metrics-drawer">
+        <div className="z-drawer-h">
+          <div className="dico"><Icon name={s.category === 'Packages' ? 'gift' : 'scissors'} size={20} /></div>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div className="eyebrow">Service metrics</div>
+            <h3 style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{s.service_name}</h3>
+            <p>
+              {(s.sub_category || '—')} · {s.gender_tag || 'Unisex'} · {s.default_duration || 30} min · {rupee(s.base_price)}
+              {s.price_type === 'onwards' && ' onwards'}
+            </p>
+          </div>
+          <button className="z-drawer-close" onClick={onClose}><Icon name="x" /></button>
+        </div>
+
+        <div className="z-drawer-body">
+          {err && <div className="z-empty" style={{ color: 'var(--z-bad)' }}>{err}</div>}
+
+          <div className="z-metgrid">
+            <div className="z-metbox">
+              <div className="k">Bookings · 30D</div>
+              <div className="v">{m.bookings_30d} <small>bookings</small></div>
+            </div>
+            <div className="z-metbox">
+              <div className="k">Revenue · 30D</div>
+              <div className="v">{fmtCompactINR(m.revenue_30d)}</div>
+            </div>
+            <div className="z-metbox">
+              <div className="k">Bookings · 90D</div>
+              <div className="v">{m.bookings_90d} <small>total</small></div>
+            </div>
+            <div className="z-metbox">
+              <div className="k">Revenue · 90D</div>
+              <div className="v">{fmtCompactINR(m.revenue_90d)}</div>
+            </div>
+            <div className="z-metbox">
+              <div className="k">Avg Ticket (30D)</div>
+              <div className="v">{fmtCompactINR(m.avg_ticket_30d)}</div>
+            </div>
+            <div className="z-metbox">
+              <div className="k">Rating</div>
+              <div className="v">
+                {m.rating ? Number(m.rating).toFixed(2) : '—'}
+                <small style={{ marginLeft: 4 }}>· {m.total_reviews || 0} reviews</small>
+              </div>
+            </div>
+          </div>
+
+          {/* Timeline mini-bars */}
+          <div style={{ marginTop: 18 }}>
+            <div className="z-dsec">Revenue trend · last 30 days</div>
+            <div className="z-metbox">
+              <div className="z-spark" title="Daily revenue (last 30 days)">
+                {timeline.map((d, i) => (
+                  <div
+                    key={i}
+                    className="b"
+                    style={{ height: `${Math.max(2, Math.round((Number(d.revenue) / maxDay) * 100))}%` }}
+                    title={`${d.date}: ${fmtCompactINR(d.revenue)} · ${d.bookings} bookings`}
+                  />
+                ))}
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 10.5, color: 'var(--z-muted-2)', marginTop: 2 }}>
+                <span>{timeline[0]?.date || ''}</span>
+                <span>{timeline[timeline.length - 1]?.date || ''}</span>
+              </div>
+            </div>
+          </div>
+
+          {/* Top barbers */}
+          <div style={{ marginTop: 18 }}>
+            <div className="z-dsec">Top stylists · last 30 days</div>
+            {topBarbers.length === 0 ? (
+              <div style={{ fontSize: 12.5, color: 'var(--z-muted)' }}>No bookings yet for this service.</div>
+            ) : (
+              <div>
+                {topBarbers.map((b) => (
+                  <div key={b.barber_id} className="z-cline">
+                    <div className="ci"><Icon name="user" /></div>
+                    <div className="cn">
+                      <div className="t">{b.barber_name}</div>
+                      <div className="s">{b.bookings} booking{b.bookings === 1 ? '' : 's'}</div>
+                    </div>
+                    <div className="cp">{fmtCompactINR(b.revenue)}</div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* Facts */}
+          <div style={{ marginTop: 18 }}>
+            <div className="z-dsec">At a glance</div>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+              {s.is_favorite && <span className="z-pill z-pill--warn"><Icon name="star" size={11} /> Favourite</span>}
+              {s.available_at_home && <span className="z-pill z-pill--ok"><Icon name="home" size={11} /> At-home {s.home_price ? `· ${rupee(s.home_price)}` : ''}</span>}
+              <span className="z-pill z-pill--blue">{s.category || 'Services'}</span>
+              {s.sub_category && <span className="z-pill">{s.sub_category}</span>}
+              <span className="z-pill">{s.gender_tag || 'Unisex'}</span>
+              <span className="z-pill"><Icon name="clock" size={11} /> {s.default_duration || 30} min</span>
+            </div>
+          </div>
+        </div>
+
+        <div className="z-drawer-foot" style={{ display: 'flex', gap: 10 }}>
+          <button className="z-btn z-btn--ghost" style={{ flex: 1 }} onClick={onClose}>Close</button>
+          <button className="z-btn z-btn--pri" style={{ flex: 1 }} onClick={onEdit} data-testid="drawer-edit-service-btn">
+            <Icon name="edit" /> Edit service
           </button>
         </div>
       </aside>

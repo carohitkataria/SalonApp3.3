@@ -105,6 +105,36 @@
 user_problem_statement: "Implement multi-user role-based access system for salon with Admin and Staff roles. Add staff management with employee fields (department, designation, emergency contact, Aadhar, DOJ, DOB, compensation, documents). Create hamburger menu navigation with role-based access control. Add 'Manage Staff Access' section, Financials and Customer Master placeholders. Add notification rules with toggles for both salon and customer sides, including WhatsApp toggles for customer. Add Reschedule/Cancel action links to WhatsApp messages with link-based cancel flow. Fix notification bell overlapping the Map view button on customer search page."
 
 backend:
+  - task: "Menu & Services — services metrics-overview endpoint (KPIs + per-service 30d rollups)"
+    implemented: true
+    working: true
+    file: "/app/backend/server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+        - working: "NA"
+          agent: "main"
+          comment: "NEW: Added GET /api/salons/{salon_id}/services/metrics-overview (requires salon-user auth). Returns { overview: { total_menu, services_count, packages_count, revenue_30d, bookings_30d, avg_rating, total_reviews, at_home_count, favorites_count }, per_service: [{ service_id, bookings_30d, revenue_30d, rating, trend_pct }] }. Uses attribute_token_revenue_to_services() to attribute revenue per-service, compares current 30d vs prior 30d window for trend_pct. Please test: (1) Admin can hit it and receives both objects. (2) overview.total_menu === services_count + packages_count. (3) per_service length equals number of active services for the salon. (4) trend_pct is a number (or 0.0). (5) Unauth → 403. Auth: admin +917503070727 / salon123 · salon_id: 3c753efb-215c-4c1f-a7da-df5b4b0ff779."
+        - working: true
+          agent: "testing"
+          comment: "✅ METRICS-OVERVIEW ENDPOINT FULLY TESTED AND WORKING: Comprehensive testing completed successfully with ALL 7 checks passed. AUTHENTICATION: Admin login working perfectly with identifier='admin', password='salon123', salon_id: 3c753efb-215c-4c1f-a7da-df5b4b0ff779. TEST RESULTS: A1) ADMIN ACCESS - ✅ WORKING (GET /api/salons/{salon_id}/services/metrics-overview returns HTTP 200 with admin Bearer token), A2) RESPONSE STRUCTURE - ✅ WORKING (response has exactly two top-level keys: 'overview' and 'per_service' as required), A3) OVERVIEW FIELDS - ✅ WORKING (all 9 required fields present: total_menu=7, services_count=7, packages_count=0, revenue_30d=300.0, bookings_30d=1, avg_rating=0.0, total_reviews=0, at_home_count=0, favorites_count=0), A4) TOTAL_MENU CALCULATION - ✅ WORKING (total_menu (7) === services_count (7) + packages_count (0) verified), A5) PER_SERVICE STRUCTURE - ✅ WORKING (per_service is array with 7 items, each item has all required keys: service_id, bookings_30d, revenue_30d, rating, trend_pct), A6) PER_SERVICE LENGTH - ✅ WORKING (per_service length (7) matches active services count (7) from GET /services/all), A7) UNAUTHORIZED ACCESS - ✅ WORKING (request without Authorization header correctly returns HTTP 403 Forbidden). SAMPLE DATA VERIFIED: per_service item example: {service_id: '77348658-3fa6-457e-8478-f8e3cf8cd848', bookings_30d: 1, revenue_30d: 300.0, rating: null, trend_pct: 100.0}. The metrics-overview endpoint is production-ready and meets all requirements."
+
+  - task: "Menu & Services — per-service deep metrics endpoint"
+    implemented: true
+    working: true
+    file: "/app/backend/server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+        - working: "NA"
+          agent: "main"
+          comment: "NEW: Added GET /api/salons/{salon_id}/services/{service_id}/metrics (auth). Returns { service, metrics: { bookings_30d, revenue_30d, bookings_90d, revenue_90d, avg_ticket_30d, rating, total_reviews }, top_barbers: [...], timeline_30d: [{date, bookings, revenue} x30] }. Backing the new click-through drawer on the redesigned Services tab. Test: valid service returns 200 with those keys; timeline has exactly 30 items ending today; unknown service → 404; unauth → 403."
+        - working: true
+          agent: "testing"
+          comment: "✅ PER-SERVICE DEEP METRICS ENDPOINT FULLY TESTED AND WORKING: Comprehensive testing completed successfully with ALL 8 checks passed. AUTHENTICATION: Admin login working perfectly with identifier='admin', password='salon123', salon_id: 3c753efb-215c-4c1f-a7da-df5b4b0ff779. TEST RESULTS: B1) SERVICE SELECTION - ✅ WORKING (using first service 'Men's Haircut' with ID: 77348658-3fa6-457e-8478-f8e3cf8cd848), B2) ADMIN ACCESS - ✅ WORKING (GET /api/salons/{salon_id}/services/{service_id}/metrics returns HTTP 200 with admin Bearer token), B3) RESPONSE STRUCTURE - ✅ WORKING (response has all 4 required keys: 'service', 'metrics', 'top_barbers', 'timeline_30d'), B4) METRICS FIELDS - ✅ WORKING (all 7 required fields present: bookings_30d=1, revenue_30d=300.0, bookings_90d=1, revenue_90d=300.0, avg_ticket_30d=300.0, rating=0.0, total_reviews=0), B5) TIMELINE_30D STRUCTURE - ✅ WORKING (timeline_30d is array with exactly 30 items, each item has {date, bookings, revenue}, dates are strictly increasing from 2026-06-20 to 2026-07-19), B6) TOP_BARBERS STRUCTURE - ✅ WORKING (top_barbers is array with 1 item, each item has all required keys: barber_id, barber_name, bookings, revenue. Sample: {barber_id: 'f4d13448-6779-46fa-a839-d8fb140c7f4a', barber_name: 'Imran', bookings: 1, revenue: 300.0}), B7) UNKNOWN SERVICE_ID - ✅ WORKING (request with unknown service_id 'no-such-svc' correctly returns HTTP 404), B8) UNAUTHORIZED ACCESS - ✅ WORKING (request without Authorization header correctly returns HTTP 403 Forbidden). The per-service deep metrics endpoint is production-ready and meets all requirements."
+
   - task: "Customers CSV template download endpoint"
     implemented: true
     working: true
@@ -1197,19 +1227,29 @@ frontend:
 metadata:
   created_by: "main_agent"
   version: "1.0"
-  test_sequence: 2
+  test_sequence: 3
   run_ui: true
 
 test_plan:
   current_focus:
-    - "Reports module — merged Financials + Analytics (snapshot cards, prefs, targets, section endpoints)"
-    - "Services rebuild — categories Services/Packages only, free-form sub-categories, add/edit drawer"
-    - "Inventory rebuild — status pills, Sell/Restock/Assign drawer, supplier & expiry on restock"
-    - "Shop rebuild — Zenoti-blue grid + PDP drawer + Review-order drawer (COD/Cashfree)"
-    - "Orders — separate overlay page, cancel + return/replacement/concern flow, ribbon icon + Shop-page icon"
+    - "Menu & Services — services metrics-overview endpoint (KPIs + per-service 30d rollups)"
+    - "Menu & Services — per-service deep metrics endpoint"
   stuck_tasks: []
   test_all: false
   test_priority: "high_first"
+
+agent_communication:
+    - agent: "main"
+      message: "MENU & SERVICES REBUILD — Added two new backend endpoints (both under salon-user auth) that back the redesigned Services tab: (A) GET /api/salons/{salon_id}/services/metrics-overview returns { overview, per_service[] } — used for the 4 KPI cards (Total Menu, Revenue 30D, Avg Rating, At-Home) and the tiny per-card metric strip (Bookings 30D, Revenue, Rating, Trend %). (B) GET /api/salons/{salon_id}/services/{service_id}/metrics returns { service, metrics, top_barbers[], timeline_30d[] } — used by the click-through drawer that opens when the owner taps a service chip. Please backend-test both. Admin creds: identifier=admin, password=salon123, salon_id=3c753efb-215c-4c1f-a7da-df5b4b0ff779. Test cases for (A): 1) 200 with both keys, 2) per_service.length === services in salon, 3) overview.total_menu === services_count + packages_count, 4) trend_pct is a number, 5) unauth → 403. Test cases for (B): 1) 200 with `service`, `metrics`, `top_barbers`, `timeline_30d`, 2) timeline_30d.length === 30, 3) unknown service_id → 404, 4) unauth → 403."
+    - agent: "testing"
+      message: "✅ MENU & SERVICES METRICS ENDPOINTS TESTING COMPLETE: Both NEW endpoints fully tested and working perfectly. ENDPOINT A (metrics-overview): All 7 checks passed - admin access (200), response structure (exactly 'overview' and 'per_service' keys), all 9 overview fields present, total_menu calculation correct (7 = 7 + 0), per_service array structure correct with all required keys, per_service length matches active services count (7), unauthorized access correctly blocked (403). ENDPOINT B (per-service deep metrics): All 8 checks passed - service selection working, admin access (200), all 4 response keys present ('service', 'metrics', 'top_barbers', 'timeline_30d'), all 7 metrics fields present, timeline_30d has exactly 30 items with strictly increasing dates (2026-06-20 to 2026-07-19), top_barbers array structure correct, unknown service_id returns 404, unauthorized access correctly blocked (403). Both endpoints are production-ready. Test credentials used: identifier='admin', password='salon123', salon_id: 3c753efb-215c-4c1f-a7da-df5b4b0ff779. NO ISSUES FOUND."
+
+
+metadata_legacy:
+  created_by: "main_agent"
+  version: "1.0"
+  test_sequence: 2
+  run_ui: true
 
 agent_communication:
     - agent: "main"
@@ -1416,7 +1456,7 @@ agent_communication:
       message: "✅ PHASE 1.5 FRONTEND UI TESTING COMPLETED (2026-04-30): Successfully tested salon admin login and all Phase 1.5 UI features. LOGIN: Working perfectly with credentials (identifier='admin', password='salon123'), redirects to /salon/dashboard. DASHBOARD: Quick Actions section present with all cards (Token Queue, Customers, Services, Staff, Financials, Analytics, Gallery, Settings). STAFF MANAGEMENT: Clicking Staff Quick Action navigates to staff list showing 2 staff members (Imran, Abdul) with 'View Profile' buttons. STAFF PROFILE PAGE: ✅ Tabs verified - Profile, Attendance, Services, Access tabs present. ✅ NO Rewards tab (correctly removed as per Phase 1 Task 2c). LAST WORKING DAY FIELD: ✅ Present in Profile tab edit mode (Phase 1.5 feature), successfully saves and persists value (verified by page reload showing '2026-12-31'). ATTENDANCE TAB: ✅ All required buttons present and working: 'Mark All Present', 'Leave Mode: OFF/ON' (toggles correctly), 'Auto Calculate'. ✅ Leave Mode functionality tested: turned ON, clicked future date (25), leave marked with toast notification, clicked again to remove leave, turned Leave Mode back OFF. ✅ Calendar displays with proper legend (P=Present, H=Half Day, A=Absent, Holiday, L=On Leave). ✅ Salary Summary section visible with all fields. All Phase 1.5 frontend features are working correctly and ready for production."
 
     - agent: "testing"
-      message: "❌ CRITICAL BLOCKER - PHASE 1 + 1.5 FRONTEND TESTING FAILED: Unable to complete frontend testing due to login failure. ISSUE: Salon admin login with credentials (identifier='admin', password='salon123') is NOT WORKING on the production URL (https://reporting-hub-19.preview.emergentagent.com/salon/login). SYMPTOMS: (1) Login form accepts credentials and button is clickable, (2) After clicking 'Login with Password' button, page stays on /salon/login URL, (3) Form fields are cleared but no navigation occurs, (4) No POST request to login API detected in network logs, (5) No error messages displayed on UI, (6) No Quick Actions dashboard elements appear. EVIDENCE: Multiple test attempts with proper wait times all resulted in staying on login page. Backend logs show salon ID b742cd5f-e3f8-4b63-872b-b83d84841d2c is active with API calls, suggesting the backend is working but frontend login flow is broken. IMPACT: Cannot test ANY of the requested Phase 1/1.5 features: (A) Manual booking dialog with customer search, (B) Skipped tokens Cancel button, (C) Gallery limits, (D) Staff clickable cards + Rewards tab removal + Last Working Day field, (E) Attendance tab Mark All Present + Leave Mode, (F) Customer booking All services + auto-latest-slot. ROOT CAUSE HYPOTHESIS: Login form submission is not triggering the API call - possible JavaScript error, form validation issue, or event handler not attached. URGENT ACTION REQUIRED: Main agent must investigate and fix the salon login flow before frontend testing can proceed."
+      message: "❌ CRITICAL BLOCKER - PHASE 1 + 1.5 FRONTEND TESTING FAILED: Unable to complete frontend testing due to login failure. ISSUE: Salon admin login with credentials (identifier='admin', password='salon123') is NOT WORKING on the production URL (https://csv-template-manager.preview.emergentagent.com/salon/login). SYMPTOMS: (1) Login form accepts credentials and button is clickable, (2) After clicking 'Login with Password' button, page stays on /salon/login URL, (3) Form fields are cleared but no navigation occurs, (4) No POST request to login API detected in network logs, (5) No error messages displayed on UI, (6) No Quick Actions dashboard elements appear. EVIDENCE: Multiple test attempts with proper wait times all resulted in staying on login page. Backend logs show salon ID b742cd5f-e3f8-4b63-872b-b83d84841d2c is active with API calls, suggesting the backend is working but frontend login flow is broken. IMPACT: Cannot test ANY of the requested Phase 1/1.5 features: (A) Manual booking dialog with customer search, (B) Skipped tokens Cancel button, (C) Gallery limits, (D) Staff clickable cards + Rewards tab removal + Last Working Day field, (E) Attendance tab Mark All Present + Leave Mode, (F) Customer booking All services + auto-latest-slot. ROOT CAUSE HYPOTHESIS: Login form submission is not triggering the API call - possible JavaScript error, form validation issue, or event handler not attached. URGENT ACTION REQUIRED: Main agent must investigate and fix the salon login flow before frontend testing can proceed."
 
     - agent: "main"
       message: "Bug-fix + enhancement round (post Phase 1.5):
@@ -4999,7 +5039,7 @@ agent_communication:
         ═══════════════════════════════════════════════════════════════════
         
         TESTED: Staff Access / Access Control UI on Staff Profile page (per-staff, under "Access" tab)
-        URL: https://reporting-hub-19.preview.emergentagent.com/salon/staff/e580d816-f0aa-4ce6-a12d-0cdf2de45d0f
+        URL: https://csv-template-manager.preview.emergentagent.com/salon/staff/e580d816-f0aa-4ce6-a12d-0cdf2de45d0f
         Staff: Imran (master)
         
         ✅ PASSED TESTS (8):
@@ -6082,7 +6122,7 @@ agent_communication:
     - agent: "main"
       message: "Completed the WhatsApp template example-values feature end-to-end. Backend: TemplateCreateIn enforces one example per {{N}}; Twilio submit sends `variables`, Meta sends components[].example.body_text. Frontend: per-placeholder inputs + preview in composer, values shown in view mode. .env files were missing on session resume — restored from git (backend/.env with Twilio keys, frontend/.env with REACT_APP_BACKEND_URL). Installed missing python packages (python-socketio, APScheduler). Backend + frontend now running clean. Please test the backend flow described in the task status_history: draft validation, draft persistence, submit-shape, and no-placeholder passthrough."
     - agent: "testing"
-      message: "✅ WHATSAPP TEMPLATE EXAMPLE_VALUES TESTING COMPLETE - ALL TESTS PASSED (6/6): Comprehensive backend testing completed successfully with 100% pass rate. All test cases from the review request have been verified: (A) Draft validation with missing example_values returns 422 mentioning both placeholders, (B) Partial example_values returns 422 mentioning missing placeholder, (C) Full example_values returns 200 with correct persistence, (D) No-placeholder templates correctly ignore/strip example_values, (E) Twilio submit successfully sends variables field and returns 200 with sid and approval_status, (G) Duplicate name detection returns 409. All 4 test templates cleaned up successfully. The feature is production-ready and working exactly as specified. NOTE: External URL (https://reporting-hub-19.preview.emergentagent.com/api) returns 404 for all endpoints - this appears to be a Kubernetes ingress routing issue, not a code issue. Testing was performed using localhost:8001 which works perfectly."
+      message: "✅ WHATSAPP TEMPLATE EXAMPLE_VALUES TESTING COMPLETE - ALL TESTS PASSED (6/6): Comprehensive backend testing completed successfully with 100% pass rate. All test cases from the review request have been verified: (A) Draft validation with missing example_values returns 422 mentioning both placeholders, (B) Partial example_values returns 422 mentioning missing placeholder, (C) Full example_values returns 200 with correct persistence, (D) No-placeholder templates correctly ignore/strip example_values, (E) Twilio submit successfully sends variables field and returns 200 with sid and approval_status, (G) Duplicate name detection returns 409. All 4 test templates cleaned up successfully. The feature is production-ready and working exactly as specified. NOTE: External URL (https://csv-template-manager.preview.emergentagent.com/api) returns 404 for all endpoints - this appears to be a Kubernetes ingress routing issue, not a code issue. Testing was performed using localhost:8001 which works perfectly."
 
 backend:
   - task: "Home v2 — new KPI endpoints (customer_count, staff_attendance, marketing_perf, booking_links) + send-booking-link + staff attendance toggle"
@@ -6483,7 +6523,7 @@ Files touched:
 NO backend endpoint changes needed — existing `/api/notifications/*` and `PUT /api/salons/{id}` endpoints handle everything. Credentials unchanged: admin / salon123 (salon_id = c896b84b-f34a-4a23-a27b-a47909f8f834)."
 
     - agent: "testing"
-      message: "✅ ALL 4 BUG FIXES VERIFIED AND WORKING (Jul 14 2026): Comprehensive UI testing completed successfully for all four bug fixes/feature changes on the salon-side app. Test credentials: identifier='admin', password='salon123', salon_id: c896b84b-f34a-4a23-a27b-a47909f8f834. Base URL: https://reporting-hub-19.preview.emergentagent.com
+      message: "✅ ALL 4 BUG FIXES VERIFIED AND WORKING (Jul 14 2026): Comprehensive UI testing completed successfully for all four bug fixes/feature changes on the salon-side app. Test credentials: identifier='admin', password='salon123', salon_id: c896b84b-f34a-4a23-a27b-a47909f8f834. Base URL: https://csv-template-manager.preview.emergentagent.com
 
 TEST RESULTS SUMMARY:
 
@@ -6784,7 +6824,7 @@ agent_communication:
         7. ✅ USER CREATION WORKING: New staff user created successfully with granular module permissions
         
         TECHNICAL DETAILS:
-        - Frontend URL: https://reporting-hub-19.preview.emergentagent.com
+        - Frontend URL: https://csv-template-manager.preview.emergentagent.com
         - Login route: /salon/login (Password Login tab)
         - Home page: SalonHomeV2 component (default landing after login)
         - Settings navigation: /salon/dashboard?tab=salon → Staff Settings tab → Manage Staff Access tab
@@ -7180,7 +7220,7 @@ agent_communication:
   - agent: main
     message: |
       Four targeted UI fixes went in. Please verify against the running preview
-      (https://reporting-hub-19.preview.emergentagent.com) using admin/salon123:
+      (https://csv-template-manager.preview.emergentagent.com) using admin/salon123:
 
       1. Settings tab → sidebar under Staff & attendance now shows THREE sub-items:
          "Attendance method & rules", "Leave & holidays", "Payroll & incentives"
@@ -7538,7 +7578,7 @@ agent_communication:
             ❌ REPORTS MODULE UI VERIFICATION - CRITICAL OVERLAY BUG FOUND
             
             UI verification testing completed for 9 checks (A-I) as specified in review request.
-            Test URL: https://a189b6aa-f4e5-4bf1-b0e3-4cd4e1dd39f0.preview.emergentagent.com
+            Test URL: https://csv-template-manager.preview.emergentagent.com
             Test date: 2026-07-18
             Login credentials: identifier='admin', password='salon123'
             
@@ -7723,7 +7763,7 @@ agent_communication:
           comment: |
             ⚠️ REPORTS MODULE UI RE-VERIFICATION AFTER POINTER-EVENTS FIX
             
-            Re-tested Reports module UI at https://a189b6aa-f4e5-4bf1-b0e3-4cd4e1dd39f0.preview.emergentagent.com
+            Re-tested Reports module UI at https://csv-template-manager.preview.emergentagent.com
             after main agent claimed to fix the z-overlay pointer-events bug.
             
             Test date: 2026-07-18
@@ -8014,7 +8054,7 @@ agent_communication:
         Executed comprehensive UI testing for 4 enhancements on salon dashboard.
         Test date: 2026-07-18
         Login: admin / salon123
-        URL: https://a189b6aa-f4e5-4bf1-b0e3-4cd4e1dd39f0.preview.emergentagent.com
+        URL: https://csv-template-manager.preview.emergentagent.com
         
         ═══════════════════════════════════════════════════════════════════
         SUMMARY
@@ -8087,7 +8127,7 @@ agent_communication:
             TESTED: Content positioning on Queue, Guests (Customer Master), and Marketing tabs
             Test date: 2026-07-18
             Login: admin / salon123
-            URL: https://a189b6aa-f4e5-4bf1-b0e3-4cd4e1dd39f0.preview.emergentagent.com
+            URL: https://csv-template-manager.preview.emergentagent.com
             
             REQUIREMENT: First child of .tab-pad-legacy must have x >= 120px
             EXPECTED: Rail (84px) + Padding (44px) = 128px content start position

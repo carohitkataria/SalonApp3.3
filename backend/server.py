@@ -7958,6 +7958,207 @@ async def rollback_service_upload_batch(
     return {"success": True, "removed": removed, "batch_id": batch_id}
 
 
+@api_router.get("/salons/{salon_id}/services/metrics-overview")
+async def services_metrics_overview(
+    salon_id: str,
+    current_user=Depends(get_current_salon_user),
+):
+    """Menu & Services header KPIs + per-service rollups for the last 30 days.
+
+    Returns:
+      overview: { total_menu, services_count, packages_count, revenue_30d,
+                  bookings_30d, avg_rating, total_reviews, at_home_count,
+                  favorites_count }
+      per_service: [{ service_id, bookings_30d, revenue_30d, rating,
+                      trend_pct }]  # trend_pct compares current 30d window
+                                      against the prior 30d window.
+    """
+    salon = await db.salons.find_one({"id": salon_id}, {"_id": 0})
+    if not salon:
+        raise HTTPException(status_code=404, detail="Salon not found")
+
+    services = await db.services.find(
+        {"salon_id": salon_id, "is_active": True},
+        {"_id": 0}
+    ).to_list(5000)
+
+    services_count = sum(1 for s in services if (s.get("category") or "Services") != "Packages")
+    packages_count = sum(1 for s in services if (s.get("category") or "Services") == "Packages")
+    at_home_count = sum(1 for s in services if s.get("available_at_home"))
+    favorites_count = sum(1 for s in services if s.get("is_favorite"))
+
+    today = datetime.now(timezone.utc).date()
+    d0 = (today - timedelta(days=29)).isoformat()
+    d1 = today.isoformat()
+    d_prev0 = (today - timedelta(days=59)).isoformat()
+    d_prev1 = (today - timedelta(days=30)).isoformat()
+
+    # Current 30d bucket
+    tokens_current = await db.tokens.find({
+        "salon_id": salon_id,
+        "date": {"$gte": d0, "$lte": d1},
+        "status": "completed",
+    }, {"_id": 0}).to_list(20000)
+    tokens_prev = await db.tokens.find({
+        "salon_id": salon_id,
+        "date": {"$gte": d_prev0, "$lte": d_prev1},
+        "status": "completed",
+    }, {"_id": 0}).to_list(20000)
+
+    def _bucket_from(tokens: List[dict]) -> Dict[str, Dict[str, float]]:
+        bucket: Dict[str, Dict[str, float]] = {}
+        for tok in tokens:
+            rows = attribute_token_revenue_to_services(tok)
+            for r in rows:
+                sid = r.get("service_id")
+                if not sid:
+                    continue
+                b = bucket.setdefault(sid, {"bookings": 0, "revenue": 0.0})
+                b["bookings"] += 1
+                b["revenue"] += float(r.get("line_total") or 0)
+        return bucket
+
+    curr = _bucket_from(tokens_current)
+    prev = _bucket_from(tokens_prev)
+
+    # Salon-wide rating summary (for header + fallback per-service rating).
+    avg_rating = float(salon.get("rating") or 0)
+    total_reviews = int(salon.get("total_reviews") or 0)
+
+    per_service = []
+    total_rev = 0.0
+    total_bookings = 0
+    for s in services:
+        sid = s.get("id")
+        cur_b = curr.get(sid, {}).get("bookings", 0)
+        cur_r = curr.get(sid, {}).get("revenue", 0.0)
+        prv_r = prev.get(sid, {}).get("revenue", 0.0)
+        trend_pct = None
+        if prv_r > 0:
+            trend_pct = round(((cur_r - prv_r) / prv_r) * 100, 1)
+        elif cur_r > 0:
+            trend_pct = 100.0
+        else:
+            trend_pct = 0.0
+        total_rev += cur_r
+        total_bookings += int(cur_b)
+        per_service.append({
+            "service_id": sid,
+            "bookings_30d": int(cur_b),
+            "revenue_30d": round(cur_r, 2),
+            "rating": round(avg_rating, 2) if avg_rating > 0 else None,
+            "trend_pct": trend_pct,
+        })
+
+    overview = {
+        "total_menu": len(services),
+        "services_count": services_count,
+        "packages_count": packages_count,
+        "revenue_30d": round(total_rev, 2),
+        "bookings_30d": int(total_bookings),
+        "avg_rating": round(avg_rating, 2),
+        "total_reviews": total_reviews,
+        "at_home_count": at_home_count,
+        "favorites_count": favorites_count,
+    }
+    return {"overview": overview, "per_service": per_service}
+
+
+@api_router.get("/salons/{salon_id}/services/{service_id}/metrics")
+async def service_detail_metrics(
+    salon_id: str,
+    service_id: str,
+    current_user=Depends(get_current_salon_user),
+):
+    """Deep metrics for one service used in the click-through drawer."""
+    svc = await db.services.find_one({"id": service_id, "salon_id": salon_id}, {"_id": 0})
+    if not svc:
+        raise HTTPException(status_code=404, detail="Service not found")
+
+    today = datetime.now(timezone.utc).date()
+    d30_start = (today - timedelta(days=29)).isoformat()
+    d90_start = (today - timedelta(days=89)).isoformat()
+    d1 = today.isoformat()
+
+    tokens_90 = await db.tokens.find({
+        "salon_id": salon_id,
+        "date": {"$gte": d90_start, "$lte": d1},
+        "status": "completed",
+    }, {"_id": 0}).to_list(20000)
+
+    bookings_30, revenue_30 = 0, 0.0
+    bookings_90, revenue_90 = 0, 0.0
+    top_barbers: Dict[str, Dict[str, Any]] = {}
+
+    # 30-day per-day trend (for a mini chart in drawer)
+    day_bucket: Dict[str, Dict[str, float]] = {}
+
+    for tok in tokens_90:
+        rows = attribute_token_revenue_to_services(tok)
+        for r in rows:
+            if r.get("service_id") != service_id:
+                continue
+            revenue_90 += float(r.get("line_total") or 0)
+            bookings_90 += 1
+            if tok.get("date", "") >= d30_start:
+                bookings_30 += 1
+                revenue_30 += float(r.get("line_total") or 0)
+                bid = tok.get("barber_id") or "unassigned"
+                bname = tok.get("barber_name") or "—"
+                row = top_barbers.setdefault(bid, {"barber_id": bid, "barber_name": bname, "bookings": 0, "revenue": 0.0})
+                row["bookings"] += 1
+                row["revenue"] += float(r.get("line_total") or 0)
+                dkey = tok.get("date") or ""
+                if dkey:
+                    dd = day_bucket.setdefault(dkey, {"bookings": 0, "revenue": 0.0})
+                    dd["bookings"] += 1
+                    dd["revenue"] += float(r.get("line_total") or 0)
+
+    # Build ordered 30d timeline (fill missing days with zero).
+    timeline = []
+    for i in range(30):
+        d = (today - timedelta(days=29 - i)).isoformat()
+        v = day_bucket.get(d, {"bookings": 0, "revenue": 0.0})
+        timeline.append({"date": d, "bookings": int(v["bookings"]), "revenue": round(v["revenue"], 2)})
+
+    top_barbers_list = sorted(
+        [{"barber_id": v["barber_id"], "barber_name": v["barber_name"],
+          "bookings": int(v["bookings"]), "revenue": round(v["revenue"], 2)}
+         for v in top_barbers.values()],
+        key=lambda r: r["revenue"], reverse=True,
+    )[:5]
+
+    salon = await db.salons.find_one({"id": salon_id}, {"_id": 0, "rating": 1, "total_reviews": 1}) or {}
+
+    return {
+        "service": {
+            "id": svc.get("id"),
+            "service_name": svc.get("service_name"),
+            "description": svc.get("description"),
+            "category": svc.get("category") or "Services",
+            "sub_category": svc.get("sub_category"),
+            "gender_tag": svc.get("gender_tag") or "Unisex",
+            "default_duration": int(svc.get("default_duration") or 30),
+            "base_price": float(svc.get("base_price") or 0),
+            "price_type": svc.get("price_type") or "fixed",
+            "is_favorite": bool(svc.get("is_favorite")),
+            "available_at_home": bool(svc.get("available_at_home")),
+            "home_price": svc.get("home_price"),
+            "thumbnail_url": svc.get("thumbnail_url"),
+        },
+        "metrics": {
+            "bookings_30d": bookings_30,
+            "revenue_30d": round(revenue_30, 2),
+            "bookings_90d": bookings_90,
+            "revenue_90d": round(revenue_90, 2),
+            "avg_ticket_30d": round((revenue_30 / bookings_30) if bookings_30 else 0.0, 2),
+            "rating": round(float(salon.get("rating") or 0), 2),
+            "total_reviews": int(salon.get("total_reviews") or 0),
+        },
+        "top_barbers": top_barbers_list,
+        "timeline_30d": timeline,
+    }
+
 
 @api_router.post("/salons/{salon_id}/salon-booking")
 async def create_salon_booking(salon_id: str, body: dict, current_user=Depends(get_current_salon_user)):

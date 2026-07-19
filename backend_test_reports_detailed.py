@@ -6,7 +6,7 @@ Detailed verification test for specific Reports module requirements from review 
 import requests
 import json
 
-BASE_URL = "https://reporting-hub-19.preview.emergentagent.com/api"
+BASE_URL = "https://csv-template-manager.preview.emergentagent.com/api"
 SALON_ID = "c1ab42d2-dca7-4d8b-9ce9-8dff1942a393"
 ADMIN_IDENTIFIER = "admin"
 ADMIN_PASSWORD = "salon123"

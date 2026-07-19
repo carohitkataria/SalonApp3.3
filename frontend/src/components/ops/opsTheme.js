@@ -232,6 +232,45 @@ export const ZEN_CSS = `
 @media(max-width:1080px){.zen .z-split{grid-template-columns:1fr}.zen .z-cats{position:static}.zen .z-metrics{grid-template-columns:repeat(2,1fr)}}
 @media(max-width:760px){.zen .z-metrics{grid-template-columns:1fr 1fr}.zen .z-inv-head{display:none}.zen .z-inv-row{grid-template-columns:1fr;gap:8px}.zen .z-drawer{width:100vw}}
 
+/* ---------- Menu & Services v2 additions ---------- */
+.zen .z-cats-filter{position:relative;margin-top:8px}
+.zen .z-cats-filter svg{position:absolute;left:10px;top:50%;transform:translateY(-50%);width:14px;height:14px;color:var(--z-muted-2)}
+.zen .z-cats-filter input{width:100%;padding:7px 11px 7px 30px;border:1px solid var(--z-line);border-radius:9px;background:#fff;font-size:12.5px}
+.zen .z-cats-filter input:focus{outline:none;border-color:var(--z-primary-200)}
+.zen .z-cats-h .cats-lbl{font-size:10.5px;font-weight:800;letter-spacing:.14em;text-transform:uppercase;color:var(--z-muted-2)}
+.zen .z-toolbar-2{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:14px}
+.zen .z-toolbar-2 .grow{flex:1;min-width:210px}
+.zen .z-select{display:inline-flex;align-items:center;gap:6px;padding:8px 12px;border:1px solid var(--z-line);border-radius:10px;background:#fff;font-weight:700;font-size:12.5px;color:var(--z-ink-soft);cursor:pointer}
+.zen .z-svc-card{position:relative;cursor:pointer}
+.zen .z-svc-mets{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;padding:11px 16px 4px;border-top:1px solid var(--z-line-2)}
+.zen .z-svc-met{display:flex;flex-direction:column;gap:2px}
+.zen .z-svc-met .k{font-size:9.5px;font-weight:800;letter-spacing:.09em;text-transform:uppercase;color:var(--z-muted-2)}
+.zen .z-svc-met .v{font-family:'Bebas Neue',sans-serif;font-size:20px;color:var(--z-ink);line-height:1;letter-spacing:.2px}
+.zen .z-svc-met .v small{font-family:'Manrope';font-size:11px;color:var(--z-muted);font-weight:700}
+.zen .z-svc-met .tr{display:inline-flex;gap:3px;align-items:center;font-size:11px;font-weight:800;padding:2px 7px;border-radius:20px;background:var(--z-ok-bg);color:var(--z-ok)}
+.zen .z-svc-met .tr.dn{background:var(--z-bad-bg);color:var(--z-bad)}
+.zen .z-svc-met .tr.flat{background:var(--z-line-2);color:var(--z-muted)}
+/* Upload drawer specifics */
+.zen .z-up-card{border:1px solid var(--z-line);border-radius:12px;padding:14px;background:var(--z-surface-2);margin-bottom:14px}
+.zen .z-up-card h4{font-size:13.5px;color:var(--z-ink);margin-bottom:5px}
+.zen .z-up-card p{font-size:12px;color:var(--z-muted);margin-bottom:10px}
+.zen .z-drop{border:2px dashed var(--z-primary-200);border-radius:12px;padding:22px 16px;text-align:center;color:var(--z-muted);background:#fff;cursor:pointer;transition:.12s}
+.zen .z-drop:hover{background:var(--z-primary-050);border-color:var(--z-primary)}
+.zen .z-drop b{color:var(--z-primary);font-weight:800}
+.zen .z-hist-row{display:grid;grid-template-columns:1fr auto;gap:8px;padding:10px 12px;border:1px solid var(--z-line);border-radius:11px;background:#fff;margin-bottom:8px;align-items:center}
+.zen .z-hist-row .nm{font-weight:700;font-size:13px;color:var(--z-ink)}
+.zen .z-hist-row .sub{font-size:11.5px;color:var(--z-muted);margin-top:2px}
+.zen .z-hist-row .badge{display:inline-block;font-size:10px;font-weight:800;padding:2px 7px;border-radius:20px;background:var(--z-ok-bg);color:var(--z-ok);margin-left:6px}
+.zen .z-hist-row .badge.rb{background:var(--z-line-2);color:var(--z-muted)}
+/* Service metrics drawer */
+.zen .z-metgrid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.zen .z-metbox{border:1px solid var(--z-line);border-radius:12px;padding:12px 13px;background:var(--z-surface-2)}
+.zen .z-metbox .k{font-size:10.5px;color:var(--z-muted);font-weight:800;letter-spacing:.08em;text-transform:uppercase;margin-bottom:4px}
+.zen .z-metbox .v{font-family:'Bebas Neue';font-size:26px;color:var(--z-ink);line-height:1}
+.zen .z-metbox .v small{font-family:'Manrope';font-size:12px;font-weight:700;color:var(--z-muted)}
+.zen .z-spark{display:flex;align-items:flex-end;gap:3px;height:60px;padding:8px 0}
+.zen .z-spark .b{flex:1;background:linear-gradient(180deg,var(--z-primary) 0,var(--z-primary-600) 100%);border-radius:3px 3px 0 0;min-height:2px}
+
 /* ============ REPORTS SNAPSHOT (Zenoti-style split) ============ */
 .zen .z-snap{display:grid;grid-template-columns:340px 1fr;background:var(--z-surface);border:1px solid var(--z-line);border-radius:var(--z-r);box-shadow:var(--z-shadow);overflow:hidden;min-height:560px}
 .zen .z-snap-l{border-right:1px solid var(--z-line);background:#FBFBFE;padding:12px;overflow:auto;max-height:calc(100vh - 210px)}
@@ -341,6 +380,13 @@ export const Icon = ({ name, className = '', size = 16 }) => {
     money: <><rect x="2" y="6" width="20" height="12" rx="2" /><path d="M2 10h20" /><circle cx="12" cy="12" r="2" /></>,
     layers: <><path d="M12 3 2 8l10 5 10-5-10-5ZM2 13l10 5 10-5M2 18l10 5 10-5" /></>,
     gift: <><rect x="3" y="9" width="18" height="12" rx="1.5" /><path d="M3 9V7h18v2M12 9v12" /></>,
+    download: <><path d="M12 3v13" /><path d="m6 11 6 6 6-6" /><path d="M4 21h16" /></>,
+    upload: <><path d="M12 21V8" /><path d="m6 13 6-6 6 6" /><path d="M4 3h16" /></>,
+    undo: <><path d="M9 14 4 9l5-5" /><path d="M4 9h11a5 5 0 0 1 5 5v1" /></>,
+    trendUp: <><path d="m3 17 6-6 4 4 8-8" /><path d="M17 7h4v4" /></>,
+    trendDn: <><path d="m3 7 6 6 4-4 8 8" /><path d="M17 17h4v-4" /></>,
+    file: <><path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z" /><path d="M14 3v6h6" /></>,
+    users2: <><circle cx="9" cy="8" r="3.5" /><path d="M2 21c0-3.5 3-5 7-5s7 1.5 7 5" /><circle cx="17" cy="8" r="3" /><path d="M22 21c0-3-1.5-4.5-3-5" /></>,
   };
   return (
     <svg className={className} width={size} height={size} viewBox="0 0 24 24" fill="none"
