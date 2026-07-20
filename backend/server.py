@@ -223,6 +223,9 @@ class ServiceCreate(BaseModel):
     home_min_items: Optional[int] = None       # Minimum number of services for at-home
     home_travel_fee: Optional[float] = None    # ₹ flat travel fee added at checkout
     home_service_radius_km: Optional[float] = None  # Service area radius
+    # GST — per-service override. When None the invoice falls back to salon.gst_rate.
+    gst_rate: Optional[float] = None
+    hsn_code: Optional[str] = None
 
 class ServiceUpdate(BaseModel):
     service_name: Optional[str] = None
@@ -244,6 +247,9 @@ class ServiceUpdate(BaseModel):
     home_min_items: Optional[int] = None
     home_travel_fee: Optional[float] = None
     home_service_radius_km: Optional[float] = None
+    # GST — per-service override
+    gst_rate: Optional[float] = None
+    hsn_code: Optional[str] = None
 
 class Service(BaseModel):
     model_config = ConfigDict(extra="ignore")
@@ -15638,6 +15644,235 @@ async def get_staff_payment_history(
         )
 
     return {"barber_id": barber_id, "payments": payments}
+
+
+# ============================================================================
+# PHASE 2 — Staff stats (date-range), credentials, login history, branch xfer
+# ============================================================================
+
+@api_router.get("/salons/{salon_id}/barbers/{barber_id}/stats")
+async def get_barber_stats(
+    salon_id: str,
+    barber_id: str,
+    from_date: Optional[str] = None,  # YYYY-MM-DD
+    to_date: Optional[str] = None,    # YYYY-MM-DD
+    current_user=Depends(get_current_salon_user),
+):
+    """Live stats for one staff member in a date range.
+    Aggregates over `tokens` (completed / paid bookings) between from_date and
+    to_date (inclusive). Returns { revenue, incentives, customers_served,
+    bookings, avg_ticket, from, to }.
+    Defaults to the current month when no range is given.
+    """
+    today = datetime.now(timezone.utc).date()
+    if not from_date:
+        from_date = today.replace(day=1).isoformat()
+    if not to_date:
+        to_date = today.isoformat()
+    if from_date > to_date:
+        raise HTTPException(status_code=400, detail="from_date must be on or before to_date")
+
+    # Match completed bookings for this barber via any of the common shapes
+    # used across the codebase (barber_id vs stylist_id / assigned_barber_id).
+    q_or = [
+        {"barber_id": barber_id},
+        {"stylist_id": barber_id},
+        {"assigned_barber_id": barber_id},
+    ]
+    match = {
+        "salon_id": salon_id,
+        "$or": q_or,
+        "$and": [
+            {"$or": [{"booking_date": {"$gte": from_date}}, {"date": {"$gte": from_date}}]},
+            {"$or": [{"booking_date": {"$lte": to_date}}, {"date": {"$lte": to_date}}]},
+        ],
+    }
+    tokens = await db.tokens.find(match, {"_id": 0}).to_list(5000)
+
+    revenue = 0.0
+    customers = set()
+    bookings = 0
+    for t in tokens:
+        status = (t.get("status") or "").lower()
+        if status in ("cancelled", "no_show", "pending", "in_service"):
+            continue
+        revenue += float(t.get("total_amount") or t.get("grand_total") or 0)
+        bookings += 1
+        phone = (t.get("customer_phone") or t.get("phone") or "").strip()
+        if phone:
+            customers.add(phone)
+
+    # Incentives from salary_records for months fully covered by the range.
+    incentives = 0.0
+    try:
+        # find any salary rows whose "month" falls within [from,to)
+        cursor = db.salary_records.find(
+            {"salon_id": salon_id, "barber_id": barber_id},
+            {"_id": 0, "month": 1, "incentive_amount": 1},
+        )
+        async for row in cursor:
+            m = (row.get("month") or "")  # YYYY-MM
+            if m and (m + "-01") >= from_date and (m + "-01") <= to_date:
+                incentives += float(row.get("incentive_amount") or 0)
+    except Exception:
+        pass
+
+    return {
+        "barber_id": barber_id,
+        "from": from_date,
+        "to": to_date,
+        "revenue": round(revenue, 2),
+        "incentives": round(incentives, 2),
+        "customers_served": len(customers),
+        "bookings": bookings,
+        "avg_ticket": round(revenue / bookings, 2) if bookings else 0.0,
+    }
+
+
+# ---------- Staff login credentials (Access sub-tab) ----------
+
+class StaffCredentialsUpdate(BaseModel):
+    login_id: Optional[str] = None
+    password: Optional[str] = None
+
+
+@api_router.put("/salons/{salon_id}/barbers/{barber_id}/credentials")
+async def update_staff_credentials(
+    salon_id: str,
+    barber_id: str,
+    body: StaffCredentialsUpdate,
+    current_user=Depends(get_current_salon_user),
+):
+    """Set / update the staff's login_id + password (admin-only).
+    * login_id must be at least 6 chars and unique platform-wide (across
+      salons_users.login_id AND barbers.login_id).
+    * password must be at least 8 chars; only the salon admin may set it.
+    """
+    if current_user.get("role") not in ("admin", "salon_admin", "salon"):
+        raise HTTPException(status_code=403, detail="Only salon admin can update staff credentials")
+
+    barber = await db.barbers.find_one({"id": barber_id, "salon_id": salon_id}, {"_id": 0})
+    if not barber:
+        raise HTTPException(status_code=404, detail="Staff not found")
+
+    updates: Dict[str, Any] = {"updated_at": datetime.now(timezone.utc).isoformat()}
+
+    if body.login_id is not None:
+        lid = (body.login_id or "").strip()
+        if len(lid) < 6:
+            raise HTTPException(status_code=400, detail="login_id must be at least 6 characters")
+        # Uniqueness — case-insensitive
+        rx = f"^{re.escape(lid)}$"
+        collide = await db.barbers.find_one(
+            {"login_id": {"$regex": rx, "$options": "i"}, "id": {"$ne": barber_id}},
+            {"_id": 0, "id": 1},
+        )
+        if not collide:
+            collide = await db.salon_users.find_one(
+                {"login_id": {"$regex": rx, "$options": "i"}}, {"_id": 0, "id": 1}
+            )
+        if collide:
+            raise HTTPException(status_code=400, detail=f"login_id '{lid}' is already taken")
+        updates["login_id"] = lid
+
+    if body.password is not None:
+        pwd = body.password or ""
+        if len(pwd) < 8:
+            raise HTTPException(status_code=400, detail="password must be at least 8 characters")
+        updates["login_password_hash"] = pwd_context.hash(pwd)
+        updates["password_updated_at"] = datetime.now(timezone.utc).isoformat()
+
+    if len(updates) <= 1:
+        raise HTTPException(status_code=400, detail="Nothing to update")
+
+    await db.barbers.update_one({"id": barber_id, "salon_id": salon_id}, {"$set": updates})
+    fresh = await db.barbers.find_one({"id": barber_id, "salon_id": salon_id}, {"_id": 0})
+    return {
+        "success": True,
+        "login_id": fresh.get("login_id") or None,
+        "has_password": bool(fresh.get("login_password_hash")),
+        "password_updated_at": fresh.get("password_updated_at"),
+    }
+
+
+# ---------- Staff login history + active devices ----------
+
+@api_router.get("/salons/{salon_id}/barbers/{barber_id}/login-history")
+async def get_staff_login_history(
+    salon_id: str,
+    barber_id: str,
+    limit: int = 25,
+    current_user=Depends(get_current_salon_user),
+):
+    """Recent login/logout events for the staff. Reads from
+    staff_login_events (structured) with a graceful fallback to `staff_sessions`
+    if only sessions are available."""
+    if not has_module_permission(current_user, "staff", "view"):
+        # Fall back — admins always allowed
+        if current_user.get("role") not in ("admin", "salon_admin", "salon"):
+            raise HTTPException(status_code=403, detail="Permission denied")
+
+    events = []
+    try:
+        cur = db.staff_login_events.find(
+            {"salon_id": salon_id, "barber_id": barber_id},
+            {"_id": 0},
+        ).sort("timestamp", -1)
+        events = await cur.to_list(int(limit))
+    except Exception:
+        events = []
+
+    # Active sessions (best-effort — collection may not exist yet).
+    active_devices = []
+    try:
+        cur = db.staff_sessions.find(
+            {"salon_id": salon_id, "barber_id": barber_id, "revoked": {"$ne": True}},
+            {"_id": 0},
+        ).sort("last_seen", -1)
+        active_devices = await cur.to_list(20)
+    except Exception:
+        pass
+
+    return {
+        "barber_id": barber_id,
+        "history": events,
+        "active_devices": active_devices,
+    }
+
+
+class RevokeSessionReq(BaseModel):
+    session_id: str
+
+
+@api_router.post("/salons/{salon_id}/barbers/{barber_id}/revoke-session")
+async def revoke_staff_session(
+    salon_id: str,
+    barber_id: str,
+    body: RevokeSessionReq,
+    current_user=Depends(get_current_salon_user),
+):
+    """Revoke an active session/device for the staff (admin-only)."""
+    if current_user.get("role") not in ("admin", "salon_admin", "salon"):
+        raise HTTPException(status_code=403, detail="Only salon admin can revoke sessions")
+    now = datetime.now(timezone.utc).isoformat()
+    res = await db.staff_sessions.update_one(
+        {"id": body.session_id, "salon_id": salon_id, "barber_id": barber_id},
+        {"$set": {"revoked": True, "revoked_at": now}},
+    )
+    # Also log a revoke event so history reflects it.
+    try:
+        await db.staff_login_events.insert_one({
+            "id": str(uuid.uuid4()),
+            "salon_id": salon_id,
+            "barber_id": barber_id,
+            "event": "revoked",
+            "session_id": body.session_id,
+            "timestamp": now,
+            "by": current_user.get("id") or current_user.get("sub"),
+        })
+    except Exception:
+        pass
+    return {"success": True, "matched": res.matched_count, "modified": res.modified_count}
 
 
 @api_router.get("/salons/{salon_id}/staff-holidays")

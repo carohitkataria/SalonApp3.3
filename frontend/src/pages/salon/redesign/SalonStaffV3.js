@@ -147,6 +147,29 @@ export default function SalonStaffV3({ salonId, getAuthHeaders }) {
   const fileInputRef = React.useRef(null);
   const [pendingDocType, setPendingDocType] = useState(null);
 
+  // ---------- PHASE 2: date-range filter for metrics, live stats ----------
+  const [statsRange, setStatsRange] = useState(() => {
+    const today = new Date();
+    const first = today.toISOString().slice(0, 8) + '01';
+    return { from: first, to: today.toISOString().slice(0, 10), preset: 'this_month' };
+  });
+  const [statsLive, setStatsLive] = useState(null); // {revenue, incentives, customers_served, bookings, avg_ticket}
+  const [statsLoading, setStatsLoading] = useState(false);
+
+  // ---------- PHASE 2: branch switch ----------
+  const [transferOpen, setTransferOpen] = useState(false);
+  const [transferBranchId, setTransferBranchId] = useState('');
+  const [transferDate, setTransferDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [transferRemarks, setTransferRemarks] = useState('');
+  const [branchesList, setBranchesList] = useState([]);
+  const [transferBusy, setTransferBusy] = useState(false);
+
+  // ---------- PHASE 2: Access — login credentials + history ----------
+  const [accessDraft, setAccessDraft] = useState({ login_id: '', password: '' });
+  const [accessBusy, setAccessBusy] = useState(false);
+  const [loginHistory, setLoginHistory] = useState({ history: [], active_devices: [] });
+  const [loginHistoryLoading, setLoginHistoryLoading] = useState(false);
+
   // Scoped CSS injection
   useEffect(() => {
     const id = 'staff-v3-styles';
