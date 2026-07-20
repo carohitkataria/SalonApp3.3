@@ -289,4 +289,12 @@ export const STAFF_V3_CSS = `
 .staffv3 .pay-badge.pay-salary{background:var(--green-bg);color:var(--green)}
 .staffv3 .pay-badge.pay-advance{background:var(--amber-bg);color:var(--amber)}
 .staffv3 .pay-badge.pay-ff{background:var(--violet-bg);color:var(--violet)}
+/* Profile photo upload */
+.staffv3 .profile-photo-row{display:flex;align-items:center;gap:14px;padding:12px 14px;background:#FDFAFC;border:1px solid var(--line);border-radius:12px;margin:6px 0 14px}
+.staffv3 .pp-thumb{width:64px;height:64px;border-radius:50%;background:#F0E7EF center/cover no-repeat;display:flex;align-items:center;justify-content:center;flex:none;overflow:hidden;color:#C6389E;font-family:'Plus Jakarta Sans';font-size:22px;font-weight:800}
+.staffv3 .pp-title{font-size:13px;font-weight:800;color:var(--ink)}
+.staffv3 .pp-sub{font-size:11.5px;color:var(--muted);margin:2px 0 8px}
+/* Clickable phone number */
+.staffv3 .tel-link{display:inline-flex;align-items:center;text-decoration:none;font-size:13px;font-weight:700;color:#C6389E;padding:9px 12px;border:1px solid #EFE1EB;border-radius:8px;background:#FDF7FB;height:38px;box-sizing:border-box}
+.staffv3 .tel-link:hover{background:#F8ECF3;text-decoration:none}
 `;

@@ -8411,3 +8411,222 @@ agent_communication:
         All three backend surfaces are production-ready. NO ISSUES FOUND.
 
 
+
+
+##====================================================================================================
+## Final Testing July — Phase 1 Fixes (Attached doc, 20-Jul-2026)
+##====================================================================================================
+
+backend:
+  - task: "SalonUpdate schema accepts booking-pause + lunch-time extras (extra='allow', no new endpoints)"
+    implemented: true
+    working: "NA"
+    file: "/app/backend/server.py"
+    stuck_count: 0
+    priority: "low"
+    needs_retesting: false
+    status_history:
+        - working: "NA"
+          agent: "main"
+          comment: |
+            No backend code changes. SalonUpdate already has model_config
+            ConfigDict(extra='allow'), so the settings PUT accepts:
+              online_booking_paused, online_paused_message, lunch_start,
+              lunch_end. `is_gst_registered` is a real declared field. No
+              regression risk expected.
+
+frontend:
+  - task: "Attendance mark bulk save — only send changed rows + clear locked-month error breakdown"
+    implemented: true
+    working: "NA"
+    file: "/app/frontend/src/pages/salon/redesign/SalonStaffV3.js"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+        - working: "NA"
+          agent: "main"
+          comment: |
+            BUG FIX for the reported "marking attendance is not working —
+            0 saved, 20 failed" issue. ROOT CAUSE: the drawer was PUT-ing
+            EVERY loaded row regardless of change — so on a month whose
+            salary was already paid (HTTP 423 locked), all 20 rows failed.
+            FIX:
+              1) buildAttRows now snapshots initialStatus / initialIn / initialOut.
+              2) saveAttendance only sends the rows whose status actually
+                 changed vs the snapshot.
+              3) Errors are classified — 423/locked vs other — and the toast
+                 says: "Saved X. Y locked (salary already paid). Z failed — <detail>".
+              4) When no rows changed, an early "No changes to save" success.
+
+  - task: "Staff profile edit — Photo upload + Date of birth + Date of joining + clickable phone"
+    implemented: true
+    working: "NA"
+    file: "/app/frontend/src/pages/salon/redesign/SalonStaffV3.js"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+        - working: "NA"
+          agent: "main"
+          comment: |
+            BUG FIX for "Staff edit — profile photo cannot be uploaded, DOJ
+            and DOB not available to edit":
+              • Profile draft now includes dob/doj/photo_url.
+              • Blank dob/doj are normalised to null on save so the backend
+                doesn't reject empty date strings.
+              • New photo widget (3 MB max, base-64 data-URL) PUTs directly
+                to /api/barbers/{id} on pick; also live-previews.
+              • Phone number now renders as <a href='tel:...'> with a phone
+                icon so desktop/mobile OS dials the staff. data-testid:
+                staff-phone-dial / staff-photo-upload / staff-dob / staff-doj.
+
+  - task: "Move Mark Salary Paid button from Profile → Attendance tab"
+    implemented: true
+    working: "NA"
+    file: "/app/frontend/src/pages/salon/redesign/SalonStaffV3.js"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+        - working: "NA"
+          agent: "main"
+          comment: |
+            Per doc: "Move the Mark Salary paid button to attendance
+            section." The CTA now sits next to "Mark attendance" in the
+            Attendance sub-section header. The old CTA in Profile is
+            replaced with a small legend "Payments are recorded under
+            Attendance." Existing salary drawer (with the Salary/Advance/F&F
+            selector added in the previous cycle) opens unchanged.
+
+  - task: "Services module — remove Rating tiles + sticky (non-scrolling) category rail"
+    implemented: true
+    working: "NA"
+    file: "/app/frontend/src/components/ops/ServicesModule.js, /app/frontend/src/components/ops/opsTheme.js"
+    stuck_count: 0
+    priority: "medium"
+    needs_retesting: false
+    status_history:
+        - working: "NA"
+          agent: "main"
+          comment: |
+            (a) Removed the 'Avg Rating' KPI tile — replaced with a
+                'Favourites' tile that shows favourites_count. Removed the
+                'Rating' cell from every service card and inside the drawer.
+            (b) Removed max-height + overflow:auto on .z-cat-list so the
+                whole category list is fully visible (the page scrolls, the
+                sticky rail does not scroll internally).
+
+  - task: "Settings — Salon is GST registered toggle + GSTIN required when on"
+    implemented: true
+    working: "NA"
+    file: "/app/frontend/src/pages/salon/redesign/SalonSettingsV3.js"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+        - working: "NA"
+          agent: "main"
+          comment: |
+            BUG FIX for "Even when GST is not enabled, the report shows GST
+            amount". Settings → Services & pricing → Taxes & invoicing now:
+              • Has a "Salon is GST registered" toggle at the top (default
+                inferred from whether a GSTIN was previously set).
+              • Hides GSTIN + GST rate + "Prices include tax" fields when
+                the toggle is off.
+              • Blocks Save with a red inline error "GSTIN is required when
+                the salon is GST-registered" when the toggle is on and GSTIN
+                is blank. Payload includes is_gst_registered.
+
+  - task: "Settings — Online booking pause switch + editable walk-in message"
+    implemented: true
+    working: "NA"
+    file: "/app/frontend/src/pages/salon/redesign/SalonSettingsV3.js"
+    stuck_count: 0
+    priority: "medium"
+    needs_retesting: false
+    status_history:
+        - working: "NA"
+          agent: "main"
+          comment: |
+            Per doc: "Setting should have an online close switch button…"
+            Settings → Booking & queue → Online booking shows a new "Pause
+            online booking (walk-in only)" switch. When on, an editable
+            message field ('online_paused_message') appears. Persisted via
+            PUT /api/salons/{id} (SalonUpdate accepts extras).
+
+  - task: "Settings — Lunch break time fields in Staff & Attendance rules"
+    implemented: true
+    working: "NA"
+    file: "/app/frontend/src/pages/salon/redesign/SalonSettingsV3.js"
+    stuck_count: 0
+    priority: "medium"
+    needs_retesting: false
+    status_history:
+        - working: "NA"
+          agent: "main"
+          comment: |
+            Per doc: "Add fields to add lunch time." Settings → Staff &
+            attendance → Attendance method & rules — below the Shift & timing
+            grid there's a new Lunch break block with lunch_start / lunch_end
+            time inputs and a read-only Duration preview.
+
+  - task: "Settings — Inline Add Branch form (replaces classic-screen toast)"
+    implemented: true
+    working: "NA"
+    file: "/app/frontend/src/pages/salon/redesign/SalonSettingsV3.js"
+    stuck_count: 0
+    priority: "medium"
+    needs_retesting: false
+    status_history:
+        - working: "NA"
+          agent: "main"
+          comment: |
+            BUG FIX for "While adding branch, getting this notification:
+            Use the classic Branches screen for now". Removed. The Branches
+            section now has an inline "Create new branch" form (name /
+            code / address / city / phone / email) that POSTs to
+            /api/salons/{id}/branches and appends the new branch to the
+            list. Uses data-testids: setg-add-branch-btn, setg-new-branch-name,
+            setg-create-branch-save.
+
+  - task: "Settings — Subscription badge in the top header (plan + expiry)"
+    implemented: true
+    working: "NA"
+    file: "/app/frontend/src/pages/salon/redesign/SalonSettingsV3.js, /app/frontend/src/pages/salon/redesign/SettingsV3Styles.js"
+    stuck_count: 0
+    priority: "medium"
+    needs_retesting: false
+    status_history:
+        - working: "NA"
+          agent: "main"
+          comment: |
+            Per doc: "A subscription badge should be visible with expiry
+            date." A new <SubscriptionBadge/> sits in the settings phead.
+            Handles multiple possible expiry keys (subscription_expiry,
+            plan_expiry, subscription.expiry, .expires_at, .end_date).
+            Shows a colour-coded pill: green (active), amber (renews in
+            <= 15 days), red (expired), gold (free plan).
+
+test_plan:
+  current_focus: []
+  stuck_tasks: []
+  test_all: false
+  test_priority: high_first
+  frontend_testing_deferred: true  # user explicitly said "Don't run auto testing."
+
+agent_communication:
+    - agent: main
+      message: |
+        Phase 1 of the July doc is done — attendance bug fix, staff profile
+        photo/DOB/DOJ, phone-dial link, Mark Salary Paid moved to
+        Attendance, service Ratings removed, sticky non-scrolling category
+        rail, GST-registered toggle + validation, Online pause switch,
+        Lunch time fields, inline Add Branch form, and Subscription badge.
+        User asked not to run auto testing for these; they'll smoke-test
+        themselves and come back with Phase 2 (staff ID/password login
+        system, login history + active devices, branch switch on staff
+        profile, per-staff date filter, package form redesign + bulk
+        upload for packages, staff-report Attendance + Incentive pages,
+        Leave & holidays UI, per-service GST rates, and the rest of the
+        classic-page migration).

@@ -17,6 +17,20 @@ export const SETTINGS_V3_CSS = `
 .setv3 .phead h2 .hic{width:34px;height:34px;border-radius:10px;background:var(--primary-050);color:var(--primary);display:grid;place-items:center}
 .setv3 .phead h2 .hic svg{width:19px;height:19px;fill:none;stroke:currentColor;stroke-width:2}
 .setv3 .phead p{font-size:13px;color:var(--muted);margin-top:3px}
+/* Subscription badge in phead */
+.setv3 .sub-badge{display:inline-flex;align-items:center;gap:10px;padding:9px 14px;border-radius:10px;border:1px solid var(--line);background:#fff;box-shadow:0 1px 2px rgba(40,26,44,.03)}
+.setv3 .sub-badge-ic{width:32px;height:32px;border-radius:9px;display:grid;place-items:center;flex:none}
+.setv3 .sub-badge-ic svg{width:16px;height:16px;fill:currentColor;stroke:currentColor;stroke-width:0}
+.setv3 .sub-badge-t{font-size:12.5px;font-weight:800;letter-spacing:.2px}
+.setv3 .sub-badge-s{font-size:11px;color:var(--muted);margin-top:1px}
+.setv3 .sub-badge.sub-free{border-color:#EDE4EE;background:#FAF6EE}
+.setv3 .sub-badge.sub-free .sub-badge-ic{background:#F1EBDF;color:#B98A2C}
+.setv3 .sub-badge.sub-active{border-color:#DCEBE1;background:#F0F8F3}
+.setv3 .sub-badge.sub-active .sub-badge-ic{background:#D1EAD9;color:#1F7A48}
+.setv3 .sub-badge.sub-warn{border-color:#F0D9B6;background:#FDF7E9}
+.setv3 .sub-badge.sub-warn .sub-badge-ic{background:#F5DFA9;color:#8A6019}
+.setv3 .sub-badge.sub-expired{border-color:#F0C5C5;background:#FCEDEE}
+.setv3 .sub-badge.sub-expired .sub-badge-ic{background:#F1B7B7;color:#9A2323}
 .setv3 .btn-primary{background:var(--primary);color:#fff;font-size:13px;font-weight:700;padding:11px 17px;border-radius:11px;display:inline-flex;align-items:center;gap:8px;border:none;cursor:pointer;transition:.15s}
 .setv3 .btn-primary:hover{background:var(--primary-600)}
 .setv3 .btn-primary svg{width:15px;height:15px;fill:none;stroke:currentColor;stroke-width:2}

@@ -330,9 +330,9 @@ export default function ServicesModule({ salonId, getAuthHeaders }) {
             <div className="sub">across all bookings</div>
           </div>
           <div className="z-metric g-amber">
-            <div className="k"><Icon name="star" size={12} /> Avg Rating</div>
-            <div className="v">{kpi.avg_rating ? Number(kpi.avg_rating).toFixed(2) : '—'}</div>
-            <div className="sub">{kpi.favorites_count} marked favourite</div>
+            <div className="k"><Icon name="star" size={12} /> Favourites</div>
+            <div className="v">{kpi.favorites_count || 0}</div>
+            <div className="sub">marked as favourite</div>
           </div>
           <div className="z-metric g-rose">
             <div className="k"><Icon name="home" size={12} /> At-Home</div>
@@ -607,13 +607,6 @@ function ServiceCard({ svc, metrics, onEdit, onDelete, onToggleFav, onClick }) {
         <div className="z-svc-met">
           <div className="k">Revenue</div>
           <div className="v">{fmtCompactINR(metrics?.revenue_30d || 0)}</div>
-        </div>
-        <div className="z-svc-met">
-          <div className="k">Rating</div>
-          <div className="v">
-            {metrics?.rating ? Number(metrics.rating).toFixed(1) : '—'}
-            {metrics?.rating ? <small style={{ marginLeft: 4 }}>★</small> : null}
-          </div>
         </div>
         <div className="z-svc-met">
           <div className="k">Trend</div>
@@ -1054,13 +1047,6 @@ function ServiceMetricsDrawer({ salonId, getAuthHeaders, svc, summaryMetrics, on
             <div className="z-metbox">
               <div className="k">Avg Ticket (30D)</div>
               <div className="v">{fmtCompactINR(m.avg_ticket_30d)}</div>
-            </div>
-            <div className="z-metbox">
-              <div className="k">Rating</div>
-              <div className="v">
-                {m.rating ? Number(m.rating).toFixed(2) : '—'}
-                <small style={{ marginLeft: 4 }}>· {m.total_reviews || 0} reviews</small>
-              </div>
             </div>
           </div>
 

@@ -65,9 +65,9 @@ export const ZEN_CSS = `
 .zen .z-grid3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px}
 .zen .z-card{background:var(--z-surface);border:1px solid var(--z-line);border-radius:var(--z-r);box-shadow:var(--z-shadow);overflow:hidden}
 .zen .z-split{display:grid;grid-template-columns:290px 1fr;gap:18px;align-items:start}
-.zen .z-cats{position:sticky;top:80px;align-self:start;max-height:calc(100vh - 100px);display:flex;flex-direction:column}
+.zen .z-cats{position:sticky;top:80px;align-self:start;display:flex;flex-direction:column}
 .zen .z-cats-h{padding:14px 15px 10px;border-bottom:1px solid var(--z-line-2);flex:none}
-.zen .z-cat-list{padding:6px 8px;flex:1;min-height:0;overflow:auto}
+.zen .z-cat-list{padding:6px 8px}
 .zen .z-cat-row{display:flex;align-items:center;gap:9px;padding:9px 10px;border-radius:9px;cursor:pointer;font-weight:700;margin-bottom:2px;transition:.12s}
 .zen .z-cat-row:hover{background:var(--z-primary-050)}
 .zen .z-cat-row.sel{background:var(--z-primary);color:#fff}

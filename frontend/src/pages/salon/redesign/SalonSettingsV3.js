@@ -85,6 +85,44 @@ const NAV = [
 const DAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
 
 // ------- Small reusable UI atoms scoped to `.setv3` -------
+function SubscriptionBadge({ salon }) {
+  if (!salon) return null;
+  const plan = salon.subscription_plan || salon.plan || 'free';
+  const expiryRaw =
+    salon.subscription_expiry ||
+    salon.plan_expiry ||
+    salon.subscription?.expiry ||
+    salon.subscription?.expires_at ||
+    salon.subscription?.end_date ||
+    null;
+  const expiryDate = expiryRaw ? new Date(expiryRaw) : null;
+  const days = expiryDate ? Math.ceil((expiryDate.getTime() - Date.now()) / (1000 * 60 * 60 * 24)) : null;
+
+  const isPaid = String(plan).toLowerCase() !== 'free' && String(plan).toLowerCase() !== 'trial';
+  const tone = !isPaid ? 'sub-free' : days == null ? 'sub-active' : days < 0 ? 'sub-expired' : days <= 15 ? 'sub-warn' : 'sub-active';
+
+  let human;
+  if (!isPaid) human = 'Free plan';
+  else if (!expiryDate) human = `${plan.toUpperCase()} · Active`;
+  else if (days < 0) human = `${plan.toUpperCase()} · Expired ${Math.abs(days)}d ago`;
+  else human = `${plan.toUpperCase()} · Renews in ${days}d`;
+
+  const expiryLabel = expiryDate
+    ? expiryDate.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })
+    : null;
+
+  return (
+    <div className={`sub-badge ${tone}`} data-testid="settings-sub-badge">
+      <div className="sub-badge-ic">
+        <svg viewBox="0 0 24 24"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
+      </div>
+      <div>
+        <div className="sub-badge-t">{human}</div>
+        {expiryLabel && <div className="sub-badge-s">Expires · {expiryLabel}</div>}
+      </div>
+    </div>
+  );
+}
 function OptRow({ label, hint, on, onChange, testid }) {
   return (
     <div className="opt-row">
@@ -204,6 +242,7 @@ export default function SalonSettingsV3({ salonId, salon, setSalon, getAuthHeade
       show_barber_price_on_booking: salon.show_barber_price_on_booking ?? true,
       category_based_pricing: salon.category_based_pricing ?? false,
       // Tax
+      is_gst_registered: salon.is_gst_registered ?? !!(salon.gstin && salon.gstin.trim()),
       gstin: salon.gstin || '',
       gst_rate: salon.gst_rate ?? 18,
       invoice_prefix: salon.invoice_prefix || 'INV-',
@@ -211,8 +250,13 @@ export default function SalonSettingsV3({ salonId, salon, setSalon, getAuthHeade
       invoice_footer: salon.invoice_footer || '',
       prices_include_tax: salon.prices_include_tax ?? true,
       round_off_invoice: salon.round_off_invoice ?? true,
+      // Lunch (backend already accepts these)
+      lunch_start: salon.lunch_start || '',
+      lunch_end: salon.lunch_end || '',
       // Booking
       online_booking_enabled: salon.online_booking_enabled ?? true,
+      online_booking_paused: salon.online_booking_paused ?? false,
+      online_paused_message: salon.online_paused_message || 'Salon is open — walk-ins welcome. Online booking is paused.',
       allow_guest_choose_barber: salon.allow_guest_choose_barber ?? true,
       require_advance_payment: salon.require_advance_payment ?? false,
       slot_duration_min: salon.slot_duration_min ?? 30,
@@ -268,6 +312,39 @@ export default function SalonSettingsV3({ salonId, salon, setSalon, getAuthHeade
       } catch (_) {}
     })();
   }, [salonId, sec, sub]);
+
+  const [addBranchOpen, setAddBranchOpen] = useState(false);
+  const [newBranch, setNewBranch] = useState({ branch_name: '', branch_code: '', address: '', city: '', phone: '', email: '' });
+  const [creatingBranch, setCreatingBranch] = useState(false);
+
+  const createBranch = async () => {
+    const name = (newBranch.branch_name || '').trim();
+    if (!name) return toast.error('Branch name is required');
+    setCreatingBranch(true);
+    try {
+      const res = await axios.post(
+        `${API}/salons/${salonId}/branches`,
+        {
+          branch_name: name,
+          branch_code: (newBranch.branch_code || '').trim() || null,
+          address: newBranch.address || null,
+          city: newBranch.city || null,
+          phone: newBranch.phone || null,
+          email: newBranch.email || null,
+        },
+        { headers: getAuthHeaders?.() || {} },
+      );
+      const b = res.data || {};
+      setBranches((prev) => [...(prev || []), b]);
+      setNewBranch({ branch_name: '', branch_code: '', address: '', city: '', phone: '', email: '' });
+      setAddBranchOpen(false);
+      toast.success('Branch created');
+    } catch (err) {
+      toast.error(err?.response?.data?.detail || 'Could not create branch');
+    } finally {
+      setCreatingBranch(false);
+    }
+  };
 
   const set = (patch) => setForm((prev) => ({ ...prev, ...patch }));
   const toggle = (k) => set({ [k]: !form[k] });
@@ -373,11 +450,54 @@ export default function SalonSettingsV3({ salonId, salon, setSalon, getAuthHeade
         <SectionHeader title="Branches" sub="Staff, stock and reports are tracked per branch." />
         <div className="block">
           <h4 className="row-btn">Locations
-            <button className="btn-ghost" onClick={() => toast.info('Use the classic Branches screen for now')}>
-              <svg viewBox="0 0 24 24"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>Add branch
+            <button className="btn-primary" onClick={() => setAddBranchOpen((v) => !v)} data-testid="setg-add-branch-btn">
+              <svg viewBox="0 0 24 24"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+              {addBranchOpen ? 'Close' : 'Add branch'}
             </button>
           </h4>
           <p className="bs">Manage all salon locations.</p>
+
+          {addBranchOpen && (
+            <div className="block" style={{ marginTop: 10, background: '#FDFAFC' }}>
+              <h4>Create new branch</h4>
+              <div className="grid2">
+                <div className="field"><label>Branch name <span className="req">*</span></label>
+                  <input
+                    value={newBranch.branch_name}
+                    placeholder="e.g. Trimmy's — Whitefield"
+                    onChange={(e) => setNewBranch({ ...newBranch, branch_name: e.target.value })}
+                    data-testid="setg-new-branch-name"
+                  />
+                </div>
+                <div className="field"><label>Branch code</label>
+                  <input
+                    value={newBranch.branch_code}
+                    placeholder="e.g. BLR-02"
+                    onChange={(e) => setNewBranch({ ...newBranch, branch_code: e.target.value.toUpperCase() })}
+                  />
+                </div>
+                <div className="field full"><label>Address</label>
+                  <input value={newBranch.address} onChange={(e) => setNewBranch({ ...newBranch, address: e.target.value })} />
+                </div>
+                <div className="field"><label>City</label>
+                  <input value={newBranch.city} onChange={(e) => setNewBranch({ ...newBranch, city: e.target.value })} />
+                </div>
+                <div className="field"><label>Phone</label>
+                  <input value={newBranch.phone} onChange={(e) => setNewBranch({ ...newBranch, phone: e.target.value })} />
+                </div>
+                <div className="field"><label>Email</label>
+                  <input value={newBranch.email} type="email" onChange={(e) => setNewBranch({ ...newBranch, email: e.target.value })} />
+                </div>
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 12 }}>
+                <button className="btn-ghost" onClick={() => setAddBranchOpen(false)} disabled={creatingBranch}>Cancel</button>
+                <button className="btn-primary" onClick={createBranch} disabled={creatingBranch} data-testid="setg-create-branch-save">
+                  {creatingBranch ? 'Creating…' : 'Create branch'}
+                </button>
+              </div>
+            </div>
+          )}
+
           {branches.length === 0 && (
             <div className="list-row">
               <div className="li"><svg viewBox="0 0 24 24"><path d="M9 22V12h6v10"/><path d="M2 10.6L12 2l10 8.6"/></svg></div>
@@ -386,10 +506,10 @@ export default function SalonSettingsV3({ salonId, salon, setSalon, getAuthHeade
             </div>
           )}
           {branches.map((b) => (
-            <div className="list-row" key={b.id || b.branch_id || b.name}>
+            <div className="list-row" key={b.id || b.branch_id || b.name || b.branch_name}>
               <div className="li"><svg viewBox="0 0 24 24"><path d="M9 22V12h6v10"/><path d="M2 10.6L12 2l10 8.6"/></svg></div>
-              <div className="ld"><b>{b.name || 'Branch'}</b><span>{b.address || b.city || ''}{b.staff_count != null ? ` · ${b.staff_count} staff` : ''}</span></div>
-              <span className={`status-pill ${b.is_active === false ? '' : 'ok'}`}>{b.is_active === false ? 'Inactive' : 'Active'}</span>
+              <div className="ld"><b>{b.branch_name || b.name || 'Branch'}</b><span>{b.address || b.city || ''}{b.staff_count != null ? ` · ${b.staff_count} staff` : ''}{b.branch_code ? ` · ${b.branch_code}` : ''}</span></div>
+              <span className={`status-pill ${b.status === 'inactive' || b.is_active === false ? '' : 'ok'}`}>{b.status === 'inactive' || b.is_active === false ? 'Inactive' : 'Active'}</span>
             </div>
           ))}
         </div>
@@ -466,6 +586,24 @@ export default function SalonSettingsV3({ salonId, salon, setSalon, getAuthHeade
             <div className="field"><label>Half-day if under (hrs)</label><input type="number" value={form.half_day_max_hours ?? 0} disabled={!ci} onChange={(e) => set({ half_day_max_hours: Number(e.target.value) || 0 })} /></div>
             <div className="field"><label>Full day minimum (hrs)</label><input type="number" value={form.min_hours_full_day ?? 0} disabled={!ci} onChange={(e) => set({ min_hours_full_day: Number(e.target.value) || 0 })} /></div>
             <div className="field"><label>Overtime after (hrs)</label><input type="number" value={form.overtime_after_hours ?? 0} disabled={!ci} onChange={(e) => set({ overtime_after_hours: Number(e.target.value) || 0 })} /></div>
+          </div>
+          <h4 style={{ marginTop: 20 }}>Lunch break</h4>
+          <p className="bs">Deducted from worked hours when computing full-day / half-day.</p>
+          <div className="grid3">
+            <div className="field"><label>Lunch start</label>
+              <input type="time" value={form.lunch_start || ''} onChange={(e) => set({ lunch_start: e.target.value })} data-testid="setg-lunch-start" /></div>
+            <div className="field"><label>Lunch end</label>
+              <input type="time" value={form.lunch_end || ''} onChange={(e) => set({ lunch_end: e.target.value })} data-testid="setg-lunch-end" /></div>
+            <div className="field"><label>Duration</label>
+              <input value={(() => {
+                if (!form.lunch_start || !form.lunch_end) return '—';
+                const [a, b] = [form.lunch_start, form.lunch_end].map((t) => {
+                  const [h, m] = t.split(':').map(Number); return h * 60 + m;
+                });
+                const mins = b - a;
+                if (mins <= 0) return '—';
+                return `${mins} min`;
+              })()} disabled /></div>
           </div>
         </div>
         <div className="block" style={disabledStyle}>
@@ -618,22 +756,62 @@ export default function SalonSettingsV3({ salonId, salon, setSalon, getAuthHeade
       <>
         <SectionHeader title="Taxes & invoicing" sub="GST-ready invoices for India." />
         <div className="block">
-          <div className="grid2">
-            <div className="field"><label>GSTIN</label><input value={form.gstin || ''} onChange={(e) => set({ gstin: e.target.value })} /></div>
-            <div className="field"><label>Default GST rate</label>
-              <select value={form.gst_rate ?? 18} onChange={(e) => set({ gst_rate: Number(e.target.value) })}>
-                <option value={18}>18%</option><option value={12}>12%</option><option value={5}>5%</option><option value={0}>0%</option>
-              </select></div>
+          <OptRow
+            label="Salon is GST registered"
+            hint="Turn off to hide GST from invoices, reports, and totals"
+            on={!!form.is_gst_registered}
+            onChange={() => toggle('is_gst_registered')}
+            testid="setg-gst-registered"
+          />
+          {form.is_gst_registered && (
+            <div className="grid2" style={{ marginTop: 12 }}>
+              <div className="field"><label>GSTIN <span className="req">*</span></label>
+                <input
+                  value={form.gstin || ''}
+                  placeholder="15-digit GSTIN"
+                  onChange={(e) => set({ gstin: e.target.value.toUpperCase() })}
+                  data-testid="setg-gstin"
+                />
+                {form.is_gst_registered && !((form.gstin || '').trim()) && (
+                  <span className="idnote" style={{ color: 'var(--red)' }}>
+                    <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></svg>
+                    GSTIN is required when the salon is GST-registered
+                  </span>
+                )}
+              </div>
+              <div className="field"><label>Default GST rate</label>
+                <select value={form.gst_rate ?? 18} onChange={(e) => set({ gst_rate: Number(e.target.value) })}>
+                  <option value={28}>28%</option>
+                  <option value={18}>18%</option>
+                  <option value={12}>12%</option>
+                  <option value={5}>5%</option>
+                  <option value={0}>0%</option>
+                </select></div>
+            </div>
+          )}
+          <div className="grid2" style={{ marginTop: 12 }}>
             <div className="field"><label>Invoice prefix</label><input value={form.invoice_prefix || ''} onChange={(e) => set({ invoice_prefix: e.target.value })} /></div>
             <div className="field"><label>Next invoice no.</label><input type="number" value={form.next_invoice_no ?? 1000} onChange={(e) => set({ next_invoice_no: Number(e.target.value) || 0 })} /></div>
             <div className="field full"><label>Invoice footer / terms</label><textarea value={form.invoice_footer || ''} onChange={(e) => set({ invoice_footer: e.target.value })} /></div>
           </div>
           <div style={{ marginTop: 8 }}>
-            <OptRow label="Prices include tax" hint="Show tax-inclusive pricing" on={!!form.prices_include_tax} onChange={() => toggle('prices_include_tax')} />
+            {form.is_gst_registered && (
+              <OptRow label="Prices include tax" hint="Show tax-inclusive pricing" on={!!form.prices_include_tax} onChange={() => toggle('prices_include_tax')} />
+            )}
             <OptRow label="Round off invoice total" hint="Round to nearest rupee" on={!!form.round_off_invoice} onChange={() => toggle('round_off_invoice')} />
           </div>
         </div>
-        <SaveRow onClick={() => save()} disabled={saving || !dirty} testid="setg-tax-save" />
+        <SaveRow
+          onClick={() => {
+            if (form.is_gst_registered && !((form.gstin || '').trim())) {
+              toast.error('GSTIN is required when GST-registered');
+              return;
+            }
+            save();
+          }}
+          disabled={saving || !dirty}
+          testid="setg-tax-save"
+        />
       </>
     ),
 
@@ -642,6 +820,24 @@ export default function SalonSettingsV3({ salonId, salon, setSalon, getAuthHeade
         <SectionHeader title="Online booking" sub="Booking link, QR and slot rules." />
         <div className="block">
           <OptRow label="Online booking" hint="Guests can book via link / QR" on={!!form.online_booking_enabled} onChange={() => toggle('online_booking_enabled')} testid="setg-online-booking" />
+          <OptRow
+            label="Pause online booking (walk-in only)"
+            hint="Salon stays visible online but online booking is stopped and guests see a walk-in message"
+            on={!!form.online_booking_paused}
+            onChange={() => toggle('online_booking_paused')}
+            testid="setg-online-paused"
+          />
+          {form.online_booking_paused && (
+            <div className="field" style={{ marginTop: 10 }}>
+              <label>Message shown to guests while paused</label>
+              <input
+                value={form.online_paused_message || ''}
+                placeholder="Salon is open — walk-ins welcome…"
+                onChange={(e) => set({ online_paused_message: e.target.value })}
+                data-testid="setg-online-paused-msg"
+              />
+            </div>
+          )}
           <OptRow label="Allow guest to choose barber" hint="Show barber selection on booking" on={!!form.allow_guest_choose_barber} onChange={() => toggle('allow_guest_choose_barber')} />
           <OptRow label="Require advance payment" hint="Collect payment at booking" on={!!form.require_advance_payment} onChange={() => toggle('require_advance_payment')} />
           <div className="grid2" style={{ marginTop: 14 }}>
@@ -796,13 +992,18 @@ export default function SalonSettingsV3({ salonId, salon, setSalon, getAuthHeade
   return (
     <div className="setv3">
       <div className="phead">
-        <h2>
-          <span className="hic">
-            <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
-          </span>
-          Settings
-        </h2>
-        <p>Single source for every salon configuration.</p>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 16, flexWrap: 'wrap' }}>
+          <div>
+            <h2>
+              <span className="hic">
+                <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+              </span>
+              Settings
+            </h2>
+            <p>Single source for every salon configuration.</p>
+          </div>
+          <SubscriptionBadge salon={salon} />
+        </div>
       </div>
 
       <div className="workspace">

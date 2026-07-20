@@ -414,11 +414,17 @@ export default function SalonStaffV3({ salonId, getAuthHeaders }) {
       const st = rec?.status || '';
       const inT = rec?.check_in_time || (st === 'present' || st === 'half_day' ? (salonSettings.shift_start || '10:00') : '');
       const outT = rec?.check_out_time || (st === 'present' ? (salonSettings.shift_end || '20:00') : '');
+      const statusCode = st === 'half_day' ? 'H' : st === 'absent' ? 'A' : st === 'holiday' ? 'HO' : st === 'leave' || st === 'on_leave' ? 'L' : st === 'present' ? 'P' : '';
       rows.push({
         date: dstr,
         in: inT,
         out: outT,
-        status: st === 'half_day' ? 'H' : st === 'absent' ? 'A' : st === 'holiday' ? 'HO' : st === 'leave' || st === 'on_leave' ? 'L' : st === 'present' ? 'P' : '',
+        status: statusCode,
+        // Snapshot of what's already saved on the server for this date so
+        // saveAttendance can skip unchanged rows (fixes "0 saved, N failed").
+        initialStatus: statusCode,
+        initialIn: inT,
+        initialOut: outT,
         sel: false,
       });
     }
@@ -445,10 +451,21 @@ export default function SalonStaffV3({ salonId, getAuthHeaders }) {
     if (attRows.length === 0) return toast.error('Load dates first');
     setAttBusy(true);
     const statusMap = { P: 'present', A: 'absent', H: 'half_day', HO: 'holiday', L: 'on_leave' };
+    // Only rows whose status actually changed vs the loaded snapshot are sent.
+    const changed = attRows.filter(
+      (r) => (r.status || '') !== (r.initialStatus || ''),
+    );
+    if (changed.length === 0) {
+      setAttBusy(false);
+      toast.success('No changes to save');
+      setAttOpen(false);
+      return;
+    }
     let ok = 0;
     let fail = 0;
-    // Sequential to avoid overwhelming the backend
-    for (const row of attRows) {
+    let locked = 0;
+    const errors = [];
+    for (const row of changed) {
       try {
         if (!row.status) {
           await axios.delete(`${API}/salons/${salonId}/staff-attendance/override/${selectedId}/${row.date}`, {
@@ -462,11 +479,30 @@ export default function SalonStaffV3({ salonId, getAuthHeaders }) {
           );
         }
         ok += 1;
-      } catch (_) { fail += 1; }
+      } catch (err) {
+        const code = err?.response?.status;
+        const detail = err?.response?.data?.detail || err?.message || 'Save failed';
+        if (code === 423 || /already paid|locked/i.test(String(detail))) {
+          locked += 1;
+        } else {
+          fail += 1;
+          errors.push(`${row.date}: ${detail}`);
+        }
+      }
     }
     setAttBusy(false);
-    if (fail === 0) toast.success(`Saved ${ok} day${ok === 1 ? '' : 's'}`);
-    else toast.error(`Saved ${ok}, ${fail} failed`);
+    if (ok > 0 && fail === 0 && locked === 0) {
+      toast.success(`Saved ${ok} day${ok === 1 ? '' : 's'}`);
+    } else if (fail === 0 && locked > 0) {
+      toast.error(`Saved ${ok}. ${locked} day${locked === 1 ? '' : 's'} skipped — salary already paid for that month (attendance is locked).`);
+    } else {
+      const msg = [
+        `Saved ${ok}`,
+        locked ? `${locked} locked (salary already paid)` : null,
+        fail ? `${fail} failed${errors[0] ? ` — ${errors[0]}` : ''}` : null,
+      ].filter(Boolean).join(' · ');
+      toast.error(msg);
+    }
     setAttOpen(false);
     // Refresh grid + summary
     setAttMonth((m) => m);
@@ -728,6 +764,9 @@ export default function SalonStaffV3({ salonId, getAuthHeaders }) {
       aadhar_number: selected?.aadhar_number || '',
       compensation: selected?.compensation ?? 0,
       visible_to_customers: selected?.visible_to_customers ?? true,
+      dob: selected?.dob || '',
+      doj: selected?.doj || '',
+      photo_url: selected?.photo_url || '',
     });
     setEditingProfile(true);
   };
@@ -735,13 +774,43 @@ export default function SalonStaffV3({ salonId, getAuthHeaders }) {
   const saveProfile = async () => {
     if (!selected) return;
     try {
-      await axios.put(`${API}/barbers/${selected.id}`, profileDraft, { headers: getAuthHeaders?.() || {} });
+      const payload = { ...profileDraft };
+      // Normalise blanks so the backend doesn't reject empty date strings.
+      if (!payload.dob) payload.dob = null;
+      if (!payload.doj) payload.doj = null;
+      await axios.put(`${API}/barbers/${selected.id}`, payload, { headers: getAuthHeaders?.() || {} });
       toast.success('Profile saved');
       setEditingProfile(false);
       fetchAll();
     } catch (err) {
       toast.error(formatApiError(err, 'Could not save profile'));
     }
+  };
+
+  const onProfilePhotoPick = async (file) => {
+    if (!file) return;
+    if (file.size > 3 * 1024 * 1024) {
+      toast.error('Please pick an image under 3 MB');
+      return;
+    }
+    // Preview immediately as base64, upload to backend
+    const reader = new FileReader();
+    reader.onload = async () => {
+      const dataUrl = String(reader.result || '');
+      setProfileDraft((prev) => ({ ...prev, photo_url: dataUrl }));
+      try {
+        await axios.put(
+          `${API}/barbers/${selected.id}`,
+          { photo_url: dataUrl },
+          { headers: getAuthHeaders?.() || {} },
+        );
+        toast.success('Photo updated');
+        fetchAll();
+      } catch (err) {
+        toast.error(formatApiError(err, 'Could not update photo'));
+      }
+    };
+    reader.readAsDataURL(file);
   };
 
   const toggleService = async (svcId) => {
@@ -833,11 +902,7 @@ export default function SalonStaffV3({ salonId, getAuthHeaders }) {
         {canSalaryView && (
           <div className="payline">
             <div className="pl"><b>{rupee(base + inc)}</b><span>Base {rupee(base)} + incentives {rupee(inc)}</span></div>
-            {canSalaryPay && (
-              <button className="btn-primary" onClick={openSalDrawer} data-testid="staff-mark-salary-btn">
-                <svg viewBox="0 0 24 24"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>Mark salary paid
-              </button>
-            )}
+            <span style={{ fontSize: 11, color: 'var(--muted)' }}>Payments are recorded under <b>Attendance</b>.</span>
           </div>
         )}
         <div className="secttl">
@@ -854,13 +919,63 @@ export default function SalonStaffV3({ salonId, getAuthHeaders }) {
             </div>
           )}
         </div>
+
+        {/* Photo — visible always, clickable in edit mode */}
+        <div className="profile-photo-row">
+          <div className="pp-thumb" style={{ backgroundImage: (editingProfile ? profileDraft.photo_url : s.photo_url) ? `url(${editingProfile ? profileDraft.photo_url : s.photo_url})` : 'none' }}>
+            {!((editingProfile ? profileDraft.photo_url : s.photo_url)) && (
+              <span>{(s.name || '?').charAt(0).toUpperCase()}</span>
+            )}
+          </div>
+          <div className="pp-meta">
+            <div className="pp-title">Profile photo</div>
+            <div className="pp-sub">JPG / PNG, up to 3 MB</div>
+            {canEdit && (
+              <label className="btn-ghost" style={{ padding: '7px 12px', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                <svg viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+                {(editingProfile ? profileDraft.photo_url : s.photo_url) ? 'Change photo' : 'Upload photo'}
+                <input type="file" accept="image/*" hidden onChange={(e) => onProfilePhotoPick(e.target.files?.[0])} data-testid="staff-photo-upload" />
+              </label>
+            )}
+          </div>
+        </div>
+
         <div className="grid2">
           <div className="field"><label>Full name <span className="req">*</span></label>
             <input value={editingProfile ? profileDraft.name : (s.name || '')} disabled={!editingProfile}
               onChange={(e) => setProfileDraft({ ...profileDraft, name: e.target.value })} /></div>
           <div className="field"><label>Mobile number <span className="req">*</span> (login ID)</label>
-            <input value={s.phone || s.mobile || '—'} disabled />
+            {(s.phone || s.mobile) ? (
+              <a
+                href={`tel:${(s.phone || s.mobile).replace(/\s+/g, '')}`}
+                className="tel-link"
+                data-testid="staff-phone-dial"
+              >
+                {s.phone || s.mobile}
+                <svg viewBox="0 0 24 24" style={{ width: 14, height: 14, marginLeft: 6 }}><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.13 1.05.37 2.08.72 3.06a2 2 0 0 1-.45 2.11L8.09 10.28a16 16 0 0 0 6 6l1.39-1.39a2 2 0 0 1 2.11-.45c.98.35 2.01.59 3.06.72A2 2 0 0 1 22 16.92z"/></svg>
+              </a>
+            ) : (
+              <input value="—" disabled />
+            )}
             <span className="idnote"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></svg>Mobile number is the login ID · mandatory &amp; unique</span></div>
+          <div className="field"><label>Date of birth</label>
+            <input
+              type="date"
+              value={editingProfile ? (profileDraft.dob || '') : (s.dob || '')}
+              disabled={!editingProfile}
+              max={new Date().toISOString().slice(0, 10)}
+              onChange={(e) => setProfileDraft({ ...profileDraft, dob: e.target.value })}
+              data-testid="staff-dob"
+            /></div>
+          <div className="field"><label>Date of joining</label>
+            <input
+              type="date"
+              value={editingProfile ? (profileDraft.doj || '') : (s.doj || '')}
+              disabled={!editingProfile}
+              max={new Date().toISOString().slice(0, 10)}
+              onChange={(e) => setProfileDraft({ ...profileDraft, doj: e.target.value })}
+              data-testid="staff-doj"
+            /></div>
           <div className="field"><label>Experience (years)</label>
             <input type="number" value={editingProfile ? profileDraft.experience : (s.experience ?? 0)} disabled={!editingProfile}
               onChange={(e) => setProfileDraft({ ...profileDraft, experience: e.target.value })} /></div>
@@ -930,11 +1045,18 @@ export default function SalonStaffV3({ salonId, getAuthHeaders }) {
             </div>
           </>
         )}
-        <div className="secttl" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+        <div className="secttl" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap' }}>
           <span>This month</span>
-          <button className="btn-primary" style={{ padding: '9px 14px' }} onClick={openAttDrawer} data-testid="staff-mark-attendance-btn">
-            <svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/><path d="M9 16l2 2 4-4"/></svg>Mark attendance
-          </button>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+            <button className="btn-ghost" style={{ padding: '9px 14px' }} onClick={openAttDrawer} data-testid="staff-mark-attendance-btn">
+              <svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/><path d="M9 16l2 2 4-4"/></svg>Mark attendance
+            </button>
+            {canSalaryPay && (
+              <button className="btn-primary" style={{ padding: '9px 14px' }} onClick={openSalDrawer} data-testid="staff-mark-salary-btn">
+                <svg viewBox="0 0 24 24"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>Mark salary paid
+              </button>
+            )}
+          </div>
         </div>
         <div className="att-summary">
           <div className="att-s"><b style={{ color: 'var(--green)' }}>{att.P}</b><span>Present</span></div>
