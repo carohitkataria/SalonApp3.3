@@ -10,7 +10,7 @@ import json
 from datetime import datetime, timedelta, timezone
 
 # Configuration
-BASE_URL = "https://staff-form-fix.preview.emergentagent.com/api"
+BASE_URL = "https://payroll-tracker-273.preview.emergentagent.com/api"
 ADMIN_CREDENTIALS = {
     "identifier": "admin",
     "password": "salon123"

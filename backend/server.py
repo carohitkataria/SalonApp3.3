@@ -12,6 +12,7 @@ from pydantic import BaseModel, Field, ConfigDict
 from typing import List, Optional, Dict, Any
 from enum import Enum
 import uuid
+import re
 from datetime import datetime, timezone, time, timedelta, date
 import calendar
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
@@ -15474,18 +15475,24 @@ async def mark_salary_paid(
     
     # Create financial transaction
     transaction_id = str(uuid.uuid4())
+    today_iso = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     transaction = {
         "id": transaction_id,
         "salon_id": salon_id,
         "type": "expense",
         "category": "staff_salary",
+        "payment_type": "salary",
         "amount": salary_record["total_payable"],
         "payment_method": body.payment_method,
         "description": f"Salary payment for {barber_name} - {month}",
         "narration": f"Monthly salary paid to {barber_name} for {month}. Base: ₹{salary_record['calculated_salary']}, Incentive: ₹{salary_record['incentive_amount']}",
         "linked_salary_id": salary_id,
+        "barber_id": barber_id,
+        "barber_name": barber_name,
+        "month": month,
+        "date": today_iso,
         "created_at": now,
-        "updated_at": now
+        "updated_at": now,
     }
     await db.financial_transactions.insert_one(transaction)
     transaction.pop("_id", None)  # avoid leaking BSON ObjectId in JSON response
@@ -15507,6 +15514,130 @@ async def mark_salary_paid(
     updated["transaction"] = transaction
     
     return updated
+
+
+class OneOffPaymentRequest(BaseModel):
+    payment_type: str  # 'advance' | 'ff'
+    amount: float
+    payment_method: str  # cash/upi/bank
+    note: Optional[str] = None
+    month: Optional[str] = None  # YYYY-MM, informational only
+
+
+@api_router.post("/salons/{salon_id}/barbers/{barber_id}/one-off-payment")
+async def create_one_off_staff_payment(
+    salon_id: str,
+    barber_id: str,
+    body: OneOffPaymentRequest,
+    current_user=Depends(get_current_salon_user),
+):
+    """Record a one-off staff payment (advance or full & final).
+    Writes ONLY to `financial_transactions` — does NOT touch salary_records
+    (advance/F&F are month-independent).
+    """
+    # RBAC: staff.salary_pay (same as regular salary payout)
+    if not has_module_permission(current_user, "staff", "salary_pay"):
+        raise HTTPException(status_code=403, detail="Permission denied: staff.salary_pay")
+
+    ptype = (body.payment_type or "").lower().strip()
+    if ptype not in ("advance", "ff"):
+        raise HTTPException(status_code=400, detail="payment_type must be 'advance' or 'ff'")
+    if body.payment_method not in ("cash", "upi", "bank"):
+        raise HTTPException(status_code=400, detail="Invalid payment method. Use: cash, upi, bank")
+    if not body.amount or float(body.amount) <= 0:
+        raise HTTPException(status_code=400, detail="Amount must be greater than zero")
+
+    barber = await db.barbers.find_one({"id": barber_id, "salon_id": salon_id}, {"_id": 0, "name": 1})
+    if not barber:
+        raise HTTPException(status_code=404, detail="Staff not found")
+    barber_name = barber.get("name") or "Staff"
+
+    category = "staff_advance" if ptype == "advance" else "staff_ff"
+    human = "Advance" if ptype == "advance" else "Full & Final"
+
+    now = datetime.now(timezone.utc).isoformat()
+    today_iso = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    txn_id = str(uuid.uuid4())
+    txn = {
+        "id": txn_id,
+        "salon_id": salon_id,
+        "type": "expense",
+        "category": category,
+        "payment_type": ptype,
+        "amount": float(body.amount),
+        "payment_method": body.payment_method,
+        "description": f"{human} paid to {barber_name}"
+        + (f" ({body.month})" if body.month else ""),
+        "narration": body.note or f"{human} payment to {barber_name}",
+        "barber_id": barber_id,
+        "barber_name": barber_name,
+        "month": body.month or "",
+        "date": today_iso,
+        "created_at": now,
+        "updated_at": now,
+    }
+    await db.financial_transactions.insert_one(txn)
+    txn.pop("_id", None)
+    return {"success": True, "transaction": txn}
+
+
+@api_router.get("/salons/{salon_id}/barbers/{barber_id}/payment-history")
+async def get_staff_payment_history(
+    salon_id: str,
+    barber_id: str,
+    limit: int = 50,
+    current_user=Depends(get_current_salon_user),
+):
+    """List recent staff payments (salary + advance + F&F) for one staff.
+    Merges `financial_transactions` rows that either carry `barber_id`
+    directly OR are linked to a salary record via `linked_salary_id`
+    prefixed with `{salon_id}_{barber_id}_`.
+    """
+    # RBAC: at least salary_view
+    if not has_module_permission(current_user, "staff", "salary_view"):
+        raise HTTPException(status_code=403, detail="Permission denied: staff.salary_view")
+
+    prefix = f"{salon_id}_{barber_id}_"
+    query = {
+        "salon_id": salon_id,
+        "category": {"$in": ["staff_salary", "staff_advance", "staff_ff"]},
+        "$or": [
+            {"barber_id": barber_id},
+            {"linked_salary_id": {"$regex": f"^{re.escape(prefix)}"}},
+        ],
+    }
+    cur = db.financial_transactions.find(query, {"_id": 0}).sort("created_at", -1)
+    rows = await cur.to_list(int(limit))
+
+    def _label(cat: str) -> str:
+        return {
+            "staff_salary": "Salary",
+            "staff_advance": "Advance",
+            "staff_ff": "Full & Final",
+        }.get(cat, cat)
+
+    payments = []
+    for r in rows:
+        payments.append(
+            {
+                "id": r.get("id"),
+                "date": r.get("date")
+                or (r.get("created_at", "")[:10] if r.get("created_at") else ""),
+                "created_at": r.get("created_at"),
+                "type": r.get("payment_type")
+                or ("salary" if r.get("category") == "staff_salary" else r.get("category", "").replace("staff_", "")),
+                "type_label": _label(r.get("category", "")),
+                "category": r.get("category"),
+                "amount": float(r.get("amount") or 0),
+                "payment_method": r.get("payment_method"),
+                "month": r.get("month") or "",
+                "description": r.get("description") or "",
+                "narration": r.get("narration") or "",
+                "linked_salary_id": r.get("linked_salary_id") or None,
+            }
+        )
+
+    return {"barber_id": barber_id, "payments": payments}
 
 
 @api_router.get("/salons/{salon_id}/staff-holidays")

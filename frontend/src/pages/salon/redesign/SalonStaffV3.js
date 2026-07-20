@@ -128,6 +128,17 @@ export default function SalonStaffV3({ salonId, getAuthHeaders }) {
   const [salDed, setSalDed] = useState(0);
   const [salAdv, setSalAdv] = useState(0);
   const [salRecord, setSalRecord] = useState(null);
+  // Payment type: 'salary' | 'advance' | 'ff'
+  const [payType, setPayType] = useState('salary');
+  // One-off (Advance / F&F) fields
+  const [salAmount, setSalAmount] = useState(0);
+  const [salNote, setSalNote] = useState('');
+  const [salBusy, setSalBusy] = useState(false);
+  // Displayed amount payable — starts from backend calc, refreshes on Recalculate
+  const [salDisplayedNet, setSalDisplayedNet] = useState(0);
+  // Payment history for the currently-selected staff (Salary + Advance + F&F)
+  const [payHistory, setPayHistory] = useState([]);
+  const [payHistoryLoading, setPayHistoryLoading] = useState(false);
   // Documents
   const [docs, setDocs] = useState({});
   const [docBusy, setDocBusy] = useState(false);
@@ -474,22 +485,38 @@ export default function SalonStaffV3({ salonId, getAuthHeaders }) {
       const r = (res.data?.barbers || []).find((x) => x.barber_id === selectedId) || res.data;
       const record = r?.salary || r || null;
       setSalRecord(record);
-      setSalBase(Number(record?.calculated_salary ?? record?.base_salary ?? selected.compensation ?? 0));
-      setSalInc(Number(record?.incentive_amount ?? 0));
-      setSalDed(Number(record?.lop_deduction ?? 0));
-      setSalAdv(Number(record?.advance_deducted ?? 0));
+      const backendBase = Number(record?.calculated_salary ?? record?.base_salary ?? selected.compensation ?? 0);
+      const backendInc = Number(record?.incentive_amount ?? 0);
+      const backendDed = Number(record?.lop_deduction ?? 0);
+      const backendAdv = Number(record?.advance_deducted ?? 0);
+      setSalBase(backendBase);
+      setSalInc(backendInc);
+      setSalDed(backendDed);
+      setSalAdv(backendAdv);
+      // Backend-calculated net = final_payable (already accounts for lop / earned days + incentives)
+      // Fall back to a manual computation if backend didn't return one.
+      const backendNet = Number(
+        record?.final_payable ?? record?.total_payable ??
+        Math.max(0, backendBase + backendInc - backendDed - backendAdv),
+      );
+      setSalDisplayedNet(backendNet);
     } catch (err) {
       // Fallback to profile base
       setSalRecord(null);
-      setSalBase(Number(selected?.compensation ?? 0));
+      const fallbackBase = Number(selected?.compensation ?? 0);
+      setSalBase(fallbackBase);
       setSalInc(0);
       setSalDed(0);
       setSalAdv(0);
+      setSalDisplayedNet(fallbackBase);
     }
   };
 
   const openSalDrawer = async () => {
     if (!canSalaryPay) return toast.error("You don't have permission");
+    setPayType('salary');
+    setSalAmount(0);
+    setSalNote('');
     setSalMonth(new Date().toISOString().slice(0, 7));
     setSalMethod('upi');
     await bindSalary(new Date().toISOString().slice(0, 7));
@@ -501,22 +528,88 @@ export default function SalonStaffV3({ salonId, getAuthHeaders }) {
     await bindSalary(m);
   };
 
-  const salNet = Math.max(0, Number(salBase || 0) + Number(salInc || 0) - Number(salDed || 0) - Number(salAdv || 0));
+  // Live-computed net (from the currently-typed inputs). Shown only after
+  // "Recalculate" is pressed — otherwise the drawer keeps showing the
+  // backend-calculated value in `salDisplayedNet`.
+  const salNet = Math.max(
+    0,
+    Number(salBase || 0) + Number(salInc || 0) - Number(salDed || 0) - Number(salAdv || 0),
+  );
+
+  const recalcNet = () => {
+    if (payType === 'salary') {
+      setSalDisplayedNet(salNet);
+      toast.success('Amount payable recalculated');
+    } else {
+      setSalDisplayedNet(Number(salAmount || 0));
+    }
+  };
+
+  // Fetch recent payments (salary + advance + F&F) for the currently-selected staff.
+  const loadPayHistory = useCallback(async () => {
+    if (!salonId || !selectedId || !canSalaryView) {
+      setPayHistory([]);
+      return;
+    }
+    setPayHistoryLoading(true);
+    try {
+      const res = await axios.get(
+        `${API}/salons/${salonId}/barbers/${selectedId}/payment-history?limit=25`,
+        { headers: getAuthHeaders?.() || {} },
+      );
+      setPayHistory(Array.isArray(res.data?.payments) ? res.data.payments : []);
+    } catch (err) {
+      setPayHistory([]);
+    } finally {
+      setPayHistoryLoading(false);
+    }
+  }, [salonId, selectedId, canSalaryView, getAuthHeaders]);
+
+  useEffect(() => {
+    loadPayHistory();
+  }, [loadPayHistory]);
 
   const markSalaryPaid = async () => {
     if (!canSalaryPay || !selected) return;
-    if (salRecord?.is_paid) return toast.error('Already paid for this month');
+    // For a regular monthly salary, block if already paid.
+    if (payType === 'salary' && salRecord?.is_paid) return toast.error('Already paid for this month');
+
+    setSalBusy(true);
     try {
-      await axios.post(
-        `${API}/salons/${salonId}/staff-salary/pay/${selectedId}/${salMonth}`,
-        { payment_method: salMethod, note: `Net ₹${salNet}` },
-        { headers: getAuthHeaders?.() || {} },
-      );
-      toast.success('Salary marked as paid');
+      if (payType === 'salary') {
+        await axios.post(
+          `${API}/salons/${salonId}/staff-salary/pay/${selectedId}/${salMonth}`,
+          { payment_method: salMethod, note: `Net ₹${salDisplayedNet}` },
+          { headers: getAuthHeaders?.() || {} },
+        );
+        toast.success('Salary marked as paid');
+      } else {
+        const amt = Number(salAmount || 0);
+        if (amt <= 0) {
+          toast.error('Enter a valid amount');
+          setSalBusy(false);
+          return;
+        }
+        await axios.post(
+          `${API}/salons/${salonId}/barbers/${selectedId}/one-off-payment`,
+          {
+            payment_type: payType, // 'advance' | 'ff'
+            amount: amt,
+            payment_method: salMethod,
+            note: salNote || null,
+            month: salMonth || null,
+          },
+          { headers: getAuthHeaders?.() || {} },
+        );
+        toast.success(payType === 'advance' ? 'Advance recorded' : 'Full & Final recorded');
+      }
       setSalOpen(false);
+      loadPayHistory();
       fetchAll();
     } catch (err) {
-      toast.error(formatApiError(err, 'Could not mark as paid'));
+      toast.error(formatApiError(err, 'Could not record payment'));
+    } finally {
+      setSalBusy(false);
     }
   };
 
@@ -856,6 +949,59 @@ export default function SalonStaffV3({ salonId, getAuthHeaders }) {
           </svg>
           Home-page admin check-in/out writes this same record — always in sync.
         </p>
+
+        {canSalaryView && (
+          <>
+            <div className="secttl" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 22 }}>
+              <span>Payment history</span>
+              <button
+                className="btn-ghost"
+                style={{ padding: '7px 12px' }}
+                onClick={loadPayHistory}
+                disabled={payHistoryLoading}
+                data-testid="pay-history-refresh"
+              >
+                <svg viewBox="0 0 24 24"><path d="M23 4v6h-6"/><path d="M1 20v-6h6"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10"/><path d="M20.49 15a9 9 0 0 1-14.85 3.36L1 14"/></svg>
+                {payHistoryLoading ? 'Loading…' : 'Refresh'}
+              </button>
+            </div>
+            {payHistory.length === 0 ? (
+              <div style={{ padding: '18px 12px', color: 'var(--muted)', fontSize: 12.5, textAlign: 'center', background: 'var(--paper-2, #FAF6EE)', borderRadius: 10 }}>
+                No payments recorded yet for {selected.name}.
+              </div>
+            ) : (
+              <div className="pay-history" data-testid="pay-history-list">
+                <table className="svc-tbl pay-tbl">
+                  <thead>
+                    <tr>
+                      <th>Date</th>
+                      <th>Type</th>
+                      <th>Method</th>
+                      <th style={{ textAlign: 'right' }}>Amount</th>
+                      <th>Note</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {payHistory.map((p) => (
+                      <tr key={p.id}>
+                        <td style={{ whiteSpace: 'nowrap', fontSize: 12.5 }}>{p.date || '—'}</td>
+                        <td>
+                          <span className={`pay-badge pay-${p.type || 'salary'}`}>
+                            {p.type_label || (p.category || '').replace('staff_', '')}
+                            {p.month ? ` · ${p.month}` : ''}
+                          </span>
+                        </td>
+                        <td style={{ textTransform: 'uppercase', fontSize: 11, letterSpacing: '.4px' }}>{p.payment_method || '—'}</td>
+                        <td style={{ textAlign: 'right', fontWeight: 700 }}>{rupee(p.amount)}</td>
+                        <td style={{ color: 'var(--muted)', fontSize: 12.5 }}>{p.narration || p.description || ''}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </>
+        )}
       </>
     );
   };
@@ -1211,7 +1357,7 @@ export default function SalonStaffV3({ salonId, getAuthHeaders }) {
       </aside>
 
       {/* Mark Salary Paid drawer */}
-      <div className={`staffv3-ov ${salOpen ? 'open' : ''}`} onClick={() => setSalOpen(false)} />
+      <div className={`staffv3-ov ${salOpen ? 'open' : ''}`} onClick={() => !salBusy && setSalOpen(false)} />
       <aside className={`staffv3-drawer ${salOpen ? 'open' : ''}`}>
         <div className="dh">
           <div className="tt">
@@ -1219,19 +1365,47 @@ export default function SalonStaffV3({ salonId, getAuthHeaders }) {
               <svg viewBox="0 0 24 24"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
             </div>
             <div>
-              <h3>Mark Salary Paid {selected ? `— ${selected.name}` : ''}</h3>
-              <p>Payroll for this cycle</p>
+              <h3>
+                {payType === 'salary' ? 'Mark Salary Paid' : payType === 'advance' ? 'Record Advance' : 'Full & Final Settlement'}
+                {selected ? ` — ${selected.name}` : ''}
+              </h3>
+              <p>{payType === 'salary' ? 'Payroll for this cycle' : payType === 'advance' ? 'One-off advance payment' : 'One-off full & final payment'}</p>
             </div>
           </div>
-          <button className="close" onClick={() => setSalOpen(false)}>
+          <button className="close" onClick={() => !salBusy && setSalOpen(false)}>
             <svg viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
           </button>
         </div>
         <div className="db">
+          {/* Payment type selector */}
+          <div className="paytype-row" data-testid="sal-drawer-paytype">
+            {[
+              { k: 'salary', label: 'Salary' },
+              { k: 'advance', label: 'Advance' },
+              { k: 'ff', label: 'Full & Final' },
+            ].map((opt) => (
+              <button
+                key={opt.k}
+                type="button"
+                className={`paytype-pill ${payType === opt.k ? 'on' : ''}`}
+                onClick={() => setPayType(opt.k)}
+                data-testid={`sal-paytype-${opt.k}`}
+              >
+                {opt.label}
+              </button>
+            ))}
+          </div>
+
           <div className="grid2">
             <div className="field">
-              <label>Month</label>
-              <input type="month" value={salMonth} max={new Date().toISOString().slice(0, 7)} onChange={(e) => changeSalMonth(e.target.value)} data-testid="sal-drawer-month" />
+              <label>{payType === 'salary' ? 'Month' : 'Month (optional)'}</label>
+              <input
+                type="month"
+                value={salMonth}
+                max={new Date().toISOString().slice(0, 7)}
+                onChange={(e) => (payType === 'salary' ? changeSalMonth(e.target.value) : setSalMonth(e.target.value))}
+                data-testid="sal-drawer-month"
+              />
             </div>
             <div className="field">
               <label>Payment method</label>
@@ -1241,39 +1415,92 @@ export default function SalonStaffV3({ salonId, getAuthHeaders }) {
                 <option value="cash">Cash</option>
               </select>
             </div>
-            <div className="field">
-              <label>Base salary (₹)</label>
-              <input type="number" value={salBase} onChange={(e) => setSalBase(e.target.value)} />
-            </div>
-            <div className="field">
-              <label>Incentives (₹)</label>
-              <input type="number" value={salInc} onChange={(e) => setSalInc(e.target.value)} />
-            </div>
-            <div className="field">
-              <label>Deductions (₹)</label>
-              <input type="number" value={salDed} onChange={(e) => setSalDed(e.target.value)} />
-            </div>
-            <div className="field">
-              <label>Advance adjusted (₹)</label>
-              <input type="number" value={salAdv} onChange={(e) => setSalAdv(e.target.value)} />
-            </div>
+
+            {payType === 'salary' && (
+              <>
+                <div className="field">
+                  <label>Base salary (₹)</label>
+                  <input type="number" value={salBase} onChange={(e) => setSalBase(e.target.value)} />
+                </div>
+                <div className="field">
+                  <label>Incentives (₹)</label>
+                  <input type="number" value={salInc} onChange={(e) => setSalInc(e.target.value)} />
+                </div>
+                <div className="field">
+                  <label>Deductions (₹)</label>
+                  <input type="number" value={salDed} onChange={(e) => setSalDed(e.target.value)} />
+                </div>
+                <div className="field">
+                  <label>Advance adjusted (₹)</label>
+                  <input type="number" value={salAdv} onChange={(e) => setSalAdv(e.target.value)} />
+                </div>
+              </>
+            )}
+
+            {payType !== 'salary' && (
+              <>
+                <div className="field">
+                  <label>Amount (₹) <span className="req">*</span></label>
+                  <input
+                    type="number"
+                    min="0"
+                    value={salAmount}
+                    onChange={(e) => setSalAmount(e.target.value)}
+                    data-testid="sal-drawer-amount"
+                  />
+                </div>
+                <div className="field" style={{ gridColumn: '1 / span 2' }}>
+                  <label>Note (optional)</label>
+                  <input
+                    value={salNote}
+                    placeholder={payType === 'advance' ? 'Reason for advance…' : 'F&F remarks…'}
+                    onChange={(e) => setSalNote(e.target.value)}
+                    data-testid="sal-drawer-note"
+                  />
+                </div>
+              </>
+            )}
           </div>
+
           <div className="payline">
-            <div className="pl"><span>Net payable</span><b data-testid="sal-net">{rupee(salNet)}</b></div>
-            {salRecord?.is_paid && (
+            <div className="pl">
+              <span>Amount payable</span>
+              <b data-testid="sal-net">
+                {rupee(payType === 'salary' ? salDisplayedNet : Number(salAmount || 0))}
+              </b>
+            </div>
+            <button className="btn-ghost" onClick={recalcNet} data-testid="sal-drawer-recalc">
+              <svg viewBox="0 0 24 24"><path d="M23 4v6h-6"/><path d="M1 20v-6h6"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10"/><path d="M20.49 15a9 9 0 0 1-14.85 3.36L1 14"/></svg>
+              Recalculate
+            </button>
+            {payType === 'salary' && salRecord?.is_paid && (
               <span style={{ fontSize: 11, fontWeight: 800, color: 'var(--green)', textTransform: 'uppercase', letterSpacing: '.4px' }}>
                 Already paid
               </span>
             )}
           </div>
-          <p style={{ fontSize: 11.5, color: '#8A7F90', marginTop: 10, lineHeight: 1.5 }}>
-            Values above default to the calculated salary for {salMonth}. Editing base / incentives here does not change the ledger — deductions & advance are stored on the payment receipt.
-          </p>
+          {payType === 'salary' ? (
+            <p style={{ fontSize: 11.5, color: '#8A7F90', marginTop: 10, lineHeight: 1.5 }}>
+              Amount payable reflects the backend-calculated salary for {salMonth}. Edit inputs and click <b>Recalculate</b> to preview a new figure before saving.
+            </p>
+          ) : (
+            <p style={{ fontSize: 11.5, color: '#8A7F90', marginTop: 10, lineHeight: 1.5 }}>
+              {payType === 'advance'
+                ? 'Advance is recorded as a one-off expense against this staff and shows in Payment history — it is not tied to any month.'
+                : 'Full & Final is recorded as a one-off expense against this staff and shows in Payment history.'}
+            </p>
+          )}
         </div>
         <div className="df" style={{ justifyContent: 'flex-end' }}>
-          <button className="btn-ghost" onClick={() => setSalOpen(false)}>Cancel</button>
-          <button className="btn-primary" onClick={markSalaryPaid} disabled={salRecord?.is_paid} data-testid="sal-drawer-save">
-            <svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg>Mark as paid
+          <button className="btn-ghost" onClick={() => setSalOpen(false)} disabled={salBusy}>Cancel</button>
+          <button
+            className="btn-primary"
+            onClick={markSalaryPaid}
+            disabled={salBusy || (payType === 'salary' && salRecord?.is_paid) || (payType !== 'salary' && !(Number(salAmount) > 0))}
+            data-testid="sal-drawer-save"
+          >
+            <svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg>
+            {salBusy ? 'Saving…' : payType === 'salary' ? 'Mark as paid' : payType === 'advance' ? 'Record advance' : 'Record F&F'}
           </button>
         </div>
       </aside>

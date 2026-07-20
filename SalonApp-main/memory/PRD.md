@@ -104,7 +104,7 @@ A token-based queue management system for "The Looks Unisex Salon" supporting da
 - **User Login**: Any name + 10-digit phone
 
 ## Preview URL
-https://staff-form-fix.preview.emergentagent.com
+https://payroll-tracker-273.preview.emergentagent.com
 
 ## Key Files
 - `/app/backend/server.py` - Main API (50+ endpoints)

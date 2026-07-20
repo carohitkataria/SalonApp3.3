@@ -274,4 +274,19 @@ export const STAFF_V3_CSS = `
   .staffv3 .shift-grid{grid-template-columns:1fr 1fr}
   .staffv3 .att-summary{grid-template-columns:repeat(3,1fr)}
 }
+/* Payment type pills inside the salary drawer */
+.staffv3-drawer .paytype-row{display:flex;gap:8px;background:#F6F1F6;border:1px solid #EFE8EF;padding:5px;border-radius:12px;margin-bottom:16px}
+.staffv3-drawer .paytype-pill{flex:1;padding:9px 12px;border-radius:9px;background:transparent;border:none;font-size:13px;font-weight:700;color:#8A7F90;cursor:pointer;transition:.15s;letter-spacing:.2px}
+.staffv3-drawer .paytype-pill:hover{color:#4A4150}
+.staffv3-drawer .paytype-pill.on{background:#fff;color:#C6389E;box-shadow:0 1px 2px rgba(40,26,44,.04),0 3px 10px rgba(40,26,44,.05)}
+/* Payment history table inside Attendance body */
+.staffv3 .pay-history{border:1px solid var(--line);border-radius:12px;overflow:hidden;background:#fff;margin-top:6px}
+.staffv3 .pay-history .pay-tbl{width:100%;border-collapse:collapse}
+.staffv3 .pay-history .pay-tbl th{background:#FDFAFC;padding:9px 12px;font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;color:var(--muted-2);text-align:left;border-bottom:1px solid var(--line)}
+.staffv3 .pay-history .pay-tbl td{padding:10px 12px;border-top:1px solid var(--line-2);font-size:12.5px;color:var(--ink)}
+.staffv3 .pay-history .pay-tbl tr:first-child td{border-top:none}
+.staffv3 .pay-badge{display:inline-block;font-size:10.5px;font-weight:800;padding:3px 8px;border-radius:6px;text-transform:uppercase;letter-spacing:.3px}
+.staffv3 .pay-badge.pay-salary{background:var(--green-bg);color:var(--green)}
+.staffv3 .pay-badge.pay-advance{background:var(--amber-bg);color:var(--amber)}
+.staffv3 .pay-badge.pay-ff{background:var(--violet-bg);color:var(--violet)}
 `;

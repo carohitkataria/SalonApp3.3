@@ -2,7 +2,7 @@
 import requests
 from datetime import datetime
 
-BASE_URL = "https://staff-form-fix.preview.emergentagent.com/api"
+BASE_URL = "https://payroll-tracker-273.preview.emergentagent.com/api"
 
 # Login
 response = requests.post(f"{BASE_URL}/salon/users/login", json={"identifier": "admin", "password": "salon123"})

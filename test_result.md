@@ -1469,7 +1469,7 @@ agent_communication:
       message: "✅ PHASE 1.5 FRONTEND UI TESTING COMPLETED (2026-04-30): Successfully tested salon admin login and all Phase 1.5 UI features. LOGIN: Working perfectly with credentials (identifier='admin', password='salon123'), redirects to /salon/dashboard. DASHBOARD: Quick Actions section present with all cards (Token Queue, Customers, Services, Staff, Financials, Analytics, Gallery, Settings). STAFF MANAGEMENT: Clicking Staff Quick Action navigates to staff list showing 2 staff members (Imran, Abdul) with 'View Profile' buttons. STAFF PROFILE PAGE: ✅ Tabs verified - Profile, Attendance, Services, Access tabs present. ✅ NO Rewards tab (correctly removed as per Phase 1 Task 2c). LAST WORKING DAY FIELD: ✅ Present in Profile tab edit mode (Phase 1.5 feature), successfully saves and persists value (verified by page reload showing '2026-12-31'). ATTENDANCE TAB: ✅ All required buttons present and working: 'Mark All Present', 'Leave Mode: OFF/ON' (toggles correctly), 'Auto Calculate'. ✅ Leave Mode functionality tested: turned ON, clicked future date (25), leave marked with toast notification, clicked again to remove leave, turned Leave Mode back OFF. ✅ Calendar displays with proper legend (P=Present, H=Half Day, A=Absent, Holiday, L=On Leave). ✅ Salary Summary section visible with all fields. All Phase 1.5 frontend features are working correctly and ready for production."
 
     - agent: "testing"
-      message: "❌ CRITICAL BLOCKER - PHASE 1 + 1.5 FRONTEND TESTING FAILED: Unable to complete frontend testing due to login failure. ISSUE: Salon admin login with credentials (identifier='admin', password='salon123') is NOT WORKING on the production URL (https://staff-form-fix.preview.emergentagent.com/salon/login). SYMPTOMS: (1) Login form accepts credentials and button is clickable, (2) After clicking 'Login with Password' button, page stays on /salon/login URL, (3) Form fields are cleared but no navigation occurs, (4) No POST request to login API detected in network logs, (5) No error messages displayed on UI, (6) No Quick Actions dashboard elements appear. EVIDENCE: Multiple test attempts with proper wait times all resulted in staying on login page. Backend logs show salon ID b742cd5f-e3f8-4b63-872b-b83d84841d2c is active with API calls, suggesting the backend is working but frontend login flow is broken. IMPACT: Cannot test ANY of the requested Phase 1/1.5 features: (A) Manual booking dialog with customer search, (B) Skipped tokens Cancel button, (C) Gallery limits, (D) Staff clickable cards + Rewards tab removal + Last Working Day field, (E) Attendance tab Mark All Present + Leave Mode, (F) Customer booking All services + auto-latest-slot. ROOT CAUSE HYPOTHESIS: Login form submission is not triggering the API call - possible JavaScript error, form validation issue, or event handler not attached. URGENT ACTION REQUIRED: Main agent must investigate and fix the salon login flow before frontend testing can proceed."
+      message: "❌ CRITICAL BLOCKER - PHASE 1 + 1.5 FRONTEND TESTING FAILED: Unable to complete frontend testing due to login failure. ISSUE: Salon admin login with credentials (identifier='admin', password='salon123') is NOT WORKING on the production URL (https://payroll-tracker-273.preview.emergentagent.com/salon/login). SYMPTOMS: (1) Login form accepts credentials and button is clickable, (2) After clicking 'Login with Password' button, page stays on /salon/login URL, (3) Form fields are cleared but no navigation occurs, (4) No POST request to login API detected in network logs, (5) No error messages displayed on UI, (6) No Quick Actions dashboard elements appear. EVIDENCE: Multiple test attempts with proper wait times all resulted in staying on login page. Backend logs show salon ID b742cd5f-e3f8-4b63-872b-b83d84841d2c is active with API calls, suggesting the backend is working but frontend login flow is broken. IMPACT: Cannot test ANY of the requested Phase 1/1.5 features: (A) Manual booking dialog with customer search, (B) Skipped tokens Cancel button, (C) Gallery limits, (D) Staff clickable cards + Rewards tab removal + Last Working Day field, (E) Attendance tab Mark All Present + Leave Mode, (F) Customer booking All services + auto-latest-slot. ROOT CAUSE HYPOTHESIS: Login form submission is not triggering the API call - possible JavaScript error, form validation issue, or event handler not attached. URGENT ACTION REQUIRED: Main agent must investigate and fix the salon login flow before frontend testing can proceed."
 
     - agent: "main"
       message: "Bug-fix + enhancement round (post Phase 1.5):
@@ -5052,7 +5052,7 @@ agent_communication:
         ═══════════════════════════════════════════════════════════════════
         
         TESTED: Staff Access / Access Control UI on Staff Profile page (per-staff, under "Access" tab)
-        URL: https://staff-form-fix.preview.emergentagent.com/salon/staff/e580d816-f0aa-4ce6-a12d-0cdf2de45d0f
+        URL: https://payroll-tracker-273.preview.emergentagent.com/salon/staff/e580d816-f0aa-4ce6-a12d-0cdf2de45d0f
         Staff: Imran (master)
         
         ✅ PASSED TESTS (8):
@@ -6135,7 +6135,7 @@ agent_communication:
     - agent: "main"
       message: "Completed the WhatsApp template example-values feature end-to-end. Backend: TemplateCreateIn enforces one example per {{N}}; Twilio submit sends `variables`, Meta sends components[].example.body_text. Frontend: per-placeholder inputs + preview in composer, values shown in view mode. .env files were missing on session resume — restored from git (backend/.env with Twilio keys, frontend/.env with REACT_APP_BACKEND_URL). Installed missing python packages (python-socketio, APScheduler). Backend + frontend now running clean. Please test the backend flow described in the task status_history: draft validation, draft persistence, submit-shape, and no-placeholder passthrough."
     - agent: "testing"
-      message: "✅ WHATSAPP TEMPLATE EXAMPLE_VALUES TESTING COMPLETE - ALL TESTS PASSED (6/6): Comprehensive backend testing completed successfully with 100% pass rate. All test cases from the review request have been verified: (A) Draft validation with missing example_values returns 422 mentioning both placeholders, (B) Partial example_values returns 422 mentioning missing placeholder, (C) Full example_values returns 200 with correct persistence, (D) No-placeholder templates correctly ignore/strip example_values, (E) Twilio submit successfully sends variables field and returns 200 with sid and approval_status, (G) Duplicate name detection returns 409. All 4 test templates cleaned up successfully. The feature is production-ready and working exactly as specified. NOTE: External URL (https://staff-form-fix.preview.emergentagent.com/api) returns 404 for all endpoints - this appears to be a Kubernetes ingress routing issue, not a code issue. Testing was performed using localhost:8001 which works perfectly."
+      message: "✅ WHATSAPP TEMPLATE EXAMPLE_VALUES TESTING COMPLETE - ALL TESTS PASSED (6/6): Comprehensive backend testing completed successfully with 100% pass rate. All test cases from the review request have been verified: (A) Draft validation with missing example_values returns 422 mentioning both placeholders, (B) Partial example_values returns 422 mentioning missing placeholder, (C) Full example_values returns 200 with correct persistence, (D) No-placeholder templates correctly ignore/strip example_values, (E) Twilio submit successfully sends variables field and returns 200 with sid and approval_status, (G) Duplicate name detection returns 409. All 4 test templates cleaned up successfully. The feature is production-ready and working exactly as specified. NOTE: External URL (https://payroll-tracker-273.preview.emergentagent.com/api) returns 404 for all endpoints - this appears to be a Kubernetes ingress routing issue, not a code issue. Testing was performed using localhost:8001 which works perfectly."
 
 backend:
   - task: "Home v2 — new KPI endpoints (customer_count, staff_attendance, marketing_perf, booking_links) + send-booking-link + staff attendance toggle"
@@ -6536,7 +6536,7 @@ Files touched:
 NO backend endpoint changes needed — existing `/api/notifications/*` and `PUT /api/salons/{id}` endpoints handle everything. Credentials unchanged: admin / salon123 (salon_id = c896b84b-f34a-4a23-a27b-a47909f8f834)."
 
     - agent: "testing"
-      message: "✅ ALL 4 BUG FIXES VERIFIED AND WORKING (Jul 14 2026): Comprehensive UI testing completed successfully for all four bug fixes/feature changes on the salon-side app. Test credentials: identifier='admin', password='salon123', salon_id: c896b84b-f34a-4a23-a27b-a47909f8f834. Base URL: https://staff-form-fix.preview.emergentagent.com
+      message: "✅ ALL 4 BUG FIXES VERIFIED AND WORKING (Jul 14 2026): Comprehensive UI testing completed successfully for all four bug fixes/feature changes on the salon-side app. Test credentials: identifier='admin', password='salon123', salon_id: c896b84b-f34a-4a23-a27b-a47909f8f834. Base URL: https://payroll-tracker-273.preview.emergentagent.com
 
 TEST RESULTS SUMMARY:
 
@@ -6837,7 +6837,7 @@ agent_communication:
         7. ✅ USER CREATION WORKING: New staff user created successfully with granular module permissions
         
         TECHNICAL DETAILS:
-        - Frontend URL: https://staff-form-fix.preview.emergentagent.com
+        - Frontend URL: https://payroll-tracker-273.preview.emergentagent.com
         - Login route: /salon/login (Password Login tab)
         - Home page: SalonHomeV2 component (default landing after login)
         - Settings navigation: /salon/dashboard?tab=salon → Staff Settings tab → Manage Staff Access tab
@@ -7233,7 +7233,7 @@ agent_communication:
   - agent: main
     message: |
       Four targeted UI fixes went in. Please verify against the running preview
-      (https://staff-form-fix.preview.emergentagent.com) using admin/salon123:
+      (https://payroll-tracker-273.preview.emergentagent.com) using admin/salon123:
 
       1. Settings tab → sidebar under Staff & attendance now shows THREE sub-items:
          "Attendance method & rules", "Leave & holidays", "Payroll & incentives"
@@ -7591,7 +7591,7 @@ agent_communication:
             ❌ REPORTS MODULE UI VERIFICATION - CRITICAL OVERLAY BUG FOUND
             
             UI verification testing completed for 9 checks (A-I) as specified in review request.
-            Test URL: https://staff-form-fix.preview.emergentagent.com
+            Test URL: https://payroll-tracker-273.preview.emergentagent.com
             Test date: 2026-07-18
             Login credentials: identifier='admin', password='salon123'
             
@@ -7776,7 +7776,7 @@ agent_communication:
           comment: |
             ⚠️ REPORTS MODULE UI RE-VERIFICATION AFTER POINTER-EVENTS FIX
             
-            Re-tested Reports module UI at https://staff-form-fix.preview.emergentagent.com
+            Re-tested Reports module UI at https://payroll-tracker-273.preview.emergentagent.com
             after main agent claimed to fix the z-overlay pointer-events bug.
             
             Test date: 2026-07-18
@@ -8067,7 +8067,7 @@ agent_communication:
         Executed comprehensive UI testing for 4 enhancements on salon dashboard.
         Test date: 2026-07-18
         Login: admin / salon123
-        URL: https://staff-form-fix.preview.emergentagent.com
+        URL: https://payroll-tracker-273.preview.emergentagent.com
         
         ═══════════════════════════════════════════════════════════════════
         SUMMARY
@@ -8140,7 +8140,7 @@ agent_communication:
             TESTED: Content positioning on Queue, Guests (Customer Master), and Marketing tabs
             Test date: 2026-07-18
             Login: admin / salon123
-            URL: https://staff-form-fix.preview.emergentagent.com
+            URL: https://payroll-tracker-273.preview.emergentagent.com
             
             REQUIREMENT: First child of .tab-pad-legacy must have x >= 120px
             EXPECTED: Rail (84px) + Padding (44px) = 128px content start position
@@ -8227,4 +8227,187 @@ agent_communication:
 agent_communication:
     - agent: "testing"
       message: "✅ COMPREHENSIVE DEMO DATASET SEED TESTING COMPLETE: All 3 steps (Guards, Data Checks, Idempotency) passed successfully. The seed_demo_dataset.py script is production-safe, fully idempotent, and ready for deployment. Guards working correctly (skips without env, refuses in production, runs in development). All data seeded correctly: 10 services, 5 barbers, 10 tokens (including 1 wallet-paid), 10 inventory items (3 assigned), 2 orders, 2 memberships, 2 wallets, 5 salary records, loyalty program enabled. Idempotency verified - second run produced NO duplicates, all counts remained identical. Admin credentials working: identifier='admin', password='salon123', salon_id: 3c753efb-215c-4c1f-a7da-df5b4b0ff779. NO ACTION REQUIRED - feature is production-ready."
+
+
+##====================================================================================================
+## Staff Payment Enhancements — July 20, 2026
+##====================================================================================================
+
+backend:
+  - task: "Salary payment financial-transaction now carries barber_id/name/month/date for payment-history queries"
+    implemented: true
+    working: true
+    file: "/app/backend/server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+        - working: "NA"
+          agent: "main"
+          comment: |
+            Existing POST /api/salons/{salon_id}/staff-salary/pay/{barber_id}/{month} now
+            enriches the created `financial_transactions` row with `barber_id`,
+            `barber_name`, `month`, `date` (today, YYYY-MM-DD) and `payment_type='salary'`.
+            Please regression-test that paying salary still returns 200 with a valid
+            transaction, and that the new fields are set. Admin login: admin / salon123.
+        - working: true
+          agent: "testing"
+          comment: |
+            ✅ SALARY PAYMENT ENRICHMENT FULLY TESTED AND WORKING: Comprehensive regression testing completed successfully. TESTED: POST /api/salons/{salon_id}/staff-salary/pay/{barber_id}/2026-07 with payment_method='upi'. RESULTS: HTTP 200 OK, transaction object returned with ALL enriched fields correctly set: category='staff_salary' ✓, payment_type='salary' ✓, barber_id matches test barber ✓, barber_name='Imran' ✓, month='2026-07' ✓, date='2026-07-20' (today, YYYY-MM-DD format) ✓. Transaction ID: 34c7e723-10b6-42c0-90e3-3a835a388705. The salary payment endpoint correctly creates financial_transactions with all required fields for payment-history queries. Verified in payment-history endpoint that salary row appears with type_label='Salary' and linked_salary_id in correct format '{salon_id}_{barber_id}_{month}'. The enrichment feature is production-ready.
+
+  - task: "One-off staff payment endpoint — Advance & Full & Final"
+    implemented: true
+    working: true
+    file: "/app/backend/server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+        - working: "NA"
+          agent: "main"
+          comment: |
+            NEW: POST /api/salons/{salon_id}/barbers/{barber_id}/one-off-payment
+            (auth: get_current_salon_user + has_module_permission staff.salary_pay).
+            Body: OneOffPaymentRequest { payment_type: 'advance'|'ff', amount: float>0,
+            payment_method: cash|upi|bank, note?: str, month?: str }.
+            Creates ONE row in `financial_transactions` (category='staff_advance' or
+            'staff_ff', type='expense') and does NOT touch salary_records. Response:
+            { success: true, transaction: {...} }. Please test:
+              1) Valid advance {amount:500, payment_method:'cash'} → 200, transaction
+                 has category='staff_advance', payment_type='advance', barber_id set.
+              2) Valid F&F {amount:2500, payment_method:'upi'} → 200, category='staff_ff'.
+              3) Missing/zero amount → 400 'Amount must be greater than zero'.
+              4) Bad payment_type='xxx' → 400.
+              5) Bad payment_method='paypal' → 400.
+              6) Unknown barber_id → 404.
+              7) No Authorization → 403 (staff.salary_pay guard).
+        - working: true
+          agent: "testing"
+          comment: |
+            ✅ ONE-OFF STAFF PAYMENT ENDPOINT FULLY TESTED AND WORKING: Comprehensive testing completed successfully with ALL 7 test scenarios passing. HAPPY PATHS: A1) Advance payment (amount=500, payment_method='cash', month='2026-07') → HTTP 200 ✓, transaction.category='staff_advance' ✓, payment_type='advance' ✓, barber_id set ✓, barber_name set ✓, month='2026-07' ✓, date='2026-07-20' (today YYYY-MM-DD) ✓. Transaction ID: e25ffd71-0877-44b7-8fb5-096ab8527eeb. A2) F&F payment (amount=2500, payment_method='upi') → HTTP 200 ✓, category='staff_ff' ✓, payment_type='ff' ✓. Transaction ID: 790c2023-da03-4e3f-84b2-3cf3dc62b8e0. GUARDS: A3) amount=0 → HTTP 400 ✓ with error "Amount must be greater than zero" ✓. A4) payment_type='xxx' → HTTP 400 ✓ with error "payment_type must be 'advance' or 'ff'" ✓. A5) payment_method='paypal' → HTTP 400 ✓ with error "Invalid payment method. Use: cash, upi, bank" ✓. A6) Unknown barber_id → HTTP 404 ✓ with error "Staff not found" ✓. A7) No Authorization header → HTTP 403 ✓. All validations working correctly, all required fields populated, endpoint is production-ready.
+
+  - task: "Staff payment-history endpoint (Salary + Advance + F&F merged)"
+    implemented: true
+    working: true
+    file: "/app/backend/server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+        - working: "NA"
+          agent: "main"
+          comment: |
+            NEW: GET /api/salons/{salon_id}/barbers/{barber_id}/payment-history?limit=50
+            (auth: get_current_salon_user + has_module_permission staff.salary_view).
+            Returns { barber_id, payments: [{id, date, created_at, type, type_label,
+            category, amount, payment_method, month, description, narration,
+            linked_salary_id}] } sorted by created_at desc. Merges financial_transactions
+            rows where category ∈ {staff_salary, staff_advance, staff_ff} AND
+            (barber_id=<id> OR linked_salary_id starts with `{salon_id}_{barber_id}_`).
+            The `re` module is now imported at module top so the $regex startswith
+            works safely. Please test:
+              1) After creating a fresh Advance and F&F for a barber + paying one month
+                 salary, GET returns 3 payments with correct type_labels
+                 (Salary/Advance/Full & Final) and amounts.
+              2) type_label 'Salary' for legacy rows without payment_type=salary is
+                 derived from category.
+              3) Unauth (no header) → 403.
+              4) Unknown barber_id but no rows → 200 with payments=[].
+              5) Payments are sorted by created_at descending.
+        - working: true
+          agent: "testing"
+          comment: |
+            ✅ STAFF PAYMENT-HISTORY ENDPOINT FULLY TESTED AND WORKING: Comprehensive testing completed successfully with ALL requirements verified. TESTED: GET /api/salons/{salon_id}/barbers/{barber_id}/payment-history?limit=25 after creating 2 Advance payments, 2 F&F payments, and 1 Salary payment. RESULTS: B1) HTTP 200 ✓, returns payments array with 5 total payments (1 Salary + 2 Advance + 2 F&F) ✓. Response structure correct with barber_id and payments array ✓. Each payment has all required fields: id, date, created_at, type, type_label, category, amount, payment_method, month, description, narration, linked_salary_id ✓. B2) TYPE_LABEL MAPPING VERIFIED: staff_salary → "Salary" ✓, staff_advance → "Advance" ✓, staff_ff → "Full & Final" ✓. All mappings correct across all 5 payments. B3) SORT ORDER VERIFIED: Payments sorted by created_at descending ✓ (newest first). Salary payment appears at position 0 as expected. B4) Unknown barber_id → HTTP 200 ✓ with empty payments array [] ✓. B5) No Authorization header → HTTP 403 ✓. LINKED_SALARY_ID FORMAT VERIFIED: Salary payment has linked_salary_id='8adb7ee3-abc8-4fbd-b5d7-6467753f1f3e_4ba7196f-4e9b-418d-8382-a1df9188bf74_2026-07' matching expected format '{salon_id}_{barber_id}_{month}' ✓. The payment-history endpoint correctly merges all three payment types and is production-ready.
+
+frontend:
+  - task: "Mark Salary Paid drawer — Payment type selector (Salary / Advance / F&F) + Recalculate button + Payment history"
+    implemented: true
+    working: "NA"
+    file: "/app/frontend/src/pages/salon/redesign/SalonStaffV3.js, /app/frontend/src/pages/salon/redesign/StaffV3Styles.js"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: true
+    status_history:
+        - working: "NA"
+          agent: "main"
+          comment: |
+            REDESIGNED Mark Salary Paid drawer to support three payment types:
+              • Salary  → existing flow (writes salary_records + financial_transactions
+                for the picked month).
+              • Advance → one-off payment (writes only financial_transactions).
+              • F&F     → one-off payment (writes only financial_transactions).
+            Payment type pills at the top switch between the modes. Salary mode shows
+            Month + Base/Incentives/Deductions/Advance-adjusted inputs. Advance/F&F
+            modes show Amount (required) + Note. Payment method is common to all.
+            AMOUNT PAYABLE now defaults to the backend-calculated `final_payable` /
+            `total_payable` and only updates when the admin presses the new
+            'Recalculate' button (per user's choice #3). For Advance/F&F it mirrors
+            the entered Amount live.
+            NEW: 'Payment history' section on the Attendance tab of the selected staff
+            (visible when the user has staff.salary_view). Table columns: Date, Type
+            (Salary / Advance / Full & Final badge, colour-coded), Method, Amount,
+            Note. Refresh button in the section header. Also refreshes automatically
+            after a successful drawer save. Data source:
+            GET /api/salons/{salon_id}/barbers/{barber_id}/payment-history.
+            data-testids added: sal-drawer-paytype, sal-paytype-salary/advance/ff,
+            sal-drawer-amount, sal-drawer-note, sal-drawer-recalc, pay-history-list,
+            pay-history-refresh.
+            IMPORTANT — restored /app/backend/.env and /app/frontend/.env from the
+            last known-good commit (they had been deleted). Frontend
+            REACT_APP_BACKEND_URL is now pointing at the current preview URL.
+
+metadata:
+  test_credentials_file: /app/memory/test_credentials.md
+  main_credentials: "admin / salon123"
+
+test_plan:
+  current_focus:
+    - "Salary payment financial-transaction now carries barber_id/name/month/date for payment-history queries"
+    - "One-off staff payment endpoint — Advance & Full & Final"
+    - "Staff payment-history endpoint (Salary + Advance + F&F merged)"
+  stuck_tasks: []
+  test_all: false
+  test_priority: high_first
+
+agent_communication:
+    - agent: main
+      message: |
+        Three new backend surfaces went in for the Staff Payment feature — please
+        exercise them end-to-end for one salon:
+          1) POST /api/salons/{salon_id}/barbers/{barber_id}/one-off-payment
+             (advance + ff variants + all guards)
+          2) GET  /api/salons/{salon_id}/barbers/{barber_id}/payment-history
+             (should return the freshly-created advance/F&F + any already-paid
+             salary rows, sorted by created_at desc)
+          3) POST /api/salons/{salon_id}/staff-salary/pay/{barber_id}/{month}
+             regression — the returned transaction now carries `barber_id`,
+             `barber_name`, `month`, `date`, `payment_type='salary'`.
+        Admin: identifier=admin / salon123. Use any barber returned by
+        GET /api/salons/{salon_id}/barbers. No env-key setup required.
+    - agent: testing
+      message: |
+        ✅ STAFF PAYMENT ENHANCEMENTS COMPREHENSIVE TESTING COMPLETE — ALL 3 BACKEND SURFACES WORKING PERFECTLY
+        
+        Executed comprehensive end-to-end testing for all three staff payment features with 14/14 tests passing:
+        
+        1️⃣ ONE-OFF PAYMENT ENDPOINT (7/7 PASSED):
+           • Advance payment with all enriched fields (barber_id, barber_name, month, date) ✓
+           • F&F payment with correct category ✓
+           • All 5 validation guards working (amount>0, payment_type, payment_method, barber exists, auth) ✓
+        
+        2️⃣ PAYMENT-HISTORY ENDPOINT (4/4 PASSED):
+           • Returns merged payments (Salary + Advance + F&F) sorted by created_at desc ✓
+           • Type_label mapping correct (staff_salary→"Salary", staff_advance→"Advance", staff_ff→"Full & Final") ✓
+           • Unknown barber returns empty array ✓
+           • Auth protection working ✓
+        
+        3️⃣ SALARY PAYMENT ENRICHMENT (3/3 PASSED):
+           • Transaction enriched with barber_id, barber_name, month='2026-07', date='2026-07-20', payment_type='salary' ✓
+           • Salary payment appears in payment-history with correct type_label and linked_salary_id format ✓
+           • All fields correctly populated ✓
+        
+        TESTED WITH: Admin (identifier='admin', password='salon123'), Salon ID: 8adb7ee3-abc8-4fbd-b5d7-6467753f1f3e, Barber: Imran (ID: 4ba7196f-4e9b-418d-8382-a1df9188bf74).
+        
+        All three backend surfaces are production-ready. NO ISSUES FOUND.
+
 

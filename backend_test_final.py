@@ -9,7 +9,7 @@ import json
 from datetime import datetime
 import random
 
-BASE_URL = "https://staff-form-fix.preview.emergentagent.com"
+BASE_URL = "https://payroll-tracker-273.preview.emergentagent.com"
 ADMIN_IDENTIFIER = "admin"
 ADMIN_PASSWORD = "salon123"
 
