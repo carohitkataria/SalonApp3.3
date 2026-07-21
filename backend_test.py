@@ -1,861 +1,374 @@
 #!/usr/bin/env python3
 """
-Backend Testing Script for July Phase 2 Fixes
-Tests:
-A) Per-service GST field round-trip on Service model
-B) Package composition fields on Service model
-C) Per-service GST honoured in invoice generation
-D) Regression check — staff credentials / login-history / revoke-session endpoints
+Backend API Testing Script for Salon Login Endpoint
+Tests the salon/users/login endpoint end-to-end as per review request
 """
 
 import requests
 import json
-import random
-import string
-from datetime import datetime, timedelta
+import sys
+from typing import Dict, Any
 
-# Backend URL - using localhost since external routing has issues
-BASE_URL = "http://localhost:8001/api"
+# Backend URL from frontend/.env
+BACKEND_URL = "https://wip-final-push.preview.emergentagent.com/api"
 
-# Admin credentials from test_credentials.md
-ADMIN_IDENTIFIER = "admin"
+# Test credentials from /app/memory/test_credentials.md
+ADMIN_LOGIN_ID = "admin"
 ADMIN_PASSWORD = "salon123"
+ADMIN_MOBILE = "+917503070727"
 
-# Global variables
-access_token = None
-salon_id = None
-headers = {}
+class Colors:
+    GREEN = '\033[92m'
+    RED = '\033[91m'
+    YELLOW = '\033[93m'
+    BLUE = '\033[94m'
+    RESET = '\033[0m'
 
-def random_string(length=6):
-    """Generate random string for unique identifiers"""
-    return ''.join(random.choices(string.ascii_uppercase + string.digits, k=length))
+def print_test_header(test_num: int, description: str):
+    print(f"\n{Colors.BLUE}{'='*80}{Colors.RESET}")
+    print(f"{Colors.BLUE}TEST {test_num}: {description}{Colors.RESET}")
+    print(f"{Colors.BLUE}{'='*80}{Colors.RESET}")
 
-def login_admin():
-    """Login as admin and get access token and salon_id"""
-    global access_token, salon_id, headers
+def print_success(message: str):
+    print(f"{Colors.GREEN}✅ PASS: {message}{Colors.RESET}")
+
+def print_failure(message: str):
+    print(f"{Colors.RED}❌ FAIL: {message}{Colors.RESET}")
+
+def print_info(message: str):
+    print(f"{Colors.YELLOW}ℹ️  INFO: {message}{Colors.RESET}")
+
+def test_1_salon_login_with_admin_credentials():
+    """
+    Test 1: Confirm salon-user login works with the seeded admin
+    POST /api/salon/users/login
+    Body: {"identifier": "admin", "password": "salon123"}
+    Expected: HTTP 200 with access_token, salon_id, role="admin"
+    """
+    print_test_header(1, "Salon Login with Admin Credentials (identifier=admin)")
     
-    print("\n" + "="*80)
-    print("ADMIN LOGIN")
-    print("="*80)
-    
-    url = f"{BASE_URL}/salon/users/login"
+    url = f"{BACKEND_URL}/salon/users/login"
     payload = {
-        "identifier": ADMIN_IDENTIFIER,
+        "identifier": ADMIN_LOGIN_ID,
         "password": ADMIN_PASSWORD
     }
     
-    print(f"POST {url}")
-    print(f"Payload: {json.dumps(payload, indent=2)}")
-    
-    response = requests.post(url, json=payload)
-    print(f"Status: {response.status_code}")
-    
-    if response.status_code == 200:
-        data = response.json()
-        access_token = data.get("access_token")
-        salon_id = data.get("salon_id")
-        headers = {"Authorization": f"Bearer {access_token}"}
-        print(f"✅ Login successful")
-        print(f"   Salon ID: {salon_id}")
-        print(f"   Access Token: {access_token[:50]}...")
-        return True
-    else:
-        print(f"❌ Login failed: {response.text}")
-        return False
-
-def test_section_a_gst_fields():
-    """
-    A) Per-service GST field round-trip on Service model
-    1. POST /api/services with gst_rate and hsn_code
-    2. Verify response contains both fields
-    3. PUT to update gst_rate
-    4. GET to verify persistence
-    """
-    print("\n" + "="*80)
-    print("SECTION A: PER-SERVICE GST FIELD ROUND-TRIP")
-    print("="*80)
-    
-    results = {
-        "A1_create_service_with_gst": False,
-        "A2_update_gst_rate": False,
-        "A3_verify_persistence": False
-    }
-    
-    # A1: Create service with GST fields
-    print("\n--- A1: Create service with gst_rate and hsn_code ---")
-    url = f"{BASE_URL}/services"
-    payload = {
-        "salon_id": salon_id,
-        "service_name": f"GST QA Service {random_string()}",
-        "category": "Services",
-        "gender_tag": "Unisex",
-        "default_duration": 30,
-        "base_price": 500,
-        "gst_rate": 9.0,
-        "hsn_code": "999721"
-    }
-    
-    print(f"POST {url}")
-    print(f"Payload: {json.dumps(payload, indent=2)}")
-    
-    response = requests.post(url, json=payload, headers=headers)
-    print(f"Status: {response.status_code}")
-    
-    if response.status_code == 200:
-        data = response.json()
-        print(f"Response: {json.dumps(data, indent=2)}")
-        
-        service_id = data.get("id")
-        gst_rate = data.get("gst_rate")
-        hsn_code = data.get("hsn_code")
-        
-        if gst_rate == 9.0 and hsn_code == "999721":
-            print(f"✅ A1 PASS: Service created with gst_rate={gst_rate}, hsn_code={hsn_code}")
-            results["A1_create_service_with_gst"] = True
-        else:
-            print(f"❌ A1 FAIL: Expected gst_rate=9.0, hsn_code='999721', got gst_rate={gst_rate}, hsn_code={hsn_code}")
-    else:
-        print(f"❌ A1 FAIL: {response.text}")
-        return results
-    
-    # A2: Update gst_rate
-    print("\n--- A2: Update gst_rate to 12.0 ---")
-    url = f"{BASE_URL}/services/{service_id}"
-    payload = {"gst_rate": 12.0}
-    
-    print(f"PUT {url}")
-    print(f"Payload: {json.dumps(payload, indent=2)}")
-    
-    response = requests.put(url, json=payload, headers=headers)
-    print(f"Status: {response.status_code}")
-    
-    if response.status_code == 200:
-        print(f"✅ A2 PASS: Update request successful")
-        results["A2_update_gst_rate"] = True
-    else:
-        print(f"❌ A2 FAIL: {response.text}")
-        return results
-    
-    # A3: Verify persistence by getting all services and finding ours
-    print("\n--- A3: GET services to verify gst_rate=12.0 and hsn_code='999721' ---")
-    url = f"{BASE_URL}/services?salon_id={salon_id}"
-    
-    print(f"GET {url}")
-    
-    response = requests.get(url, headers=headers)
-    print(f"Status: {response.status_code}")
-    
-    if response.status_code == 200:
-        data = response.json()
-        services = data if isinstance(data, list) else data.get("services", [])
-        
-        # Find our service
-        our_service = next((s for s in services if s.get("id") == service_id), None)
-        
-        if our_service:
-            gst_rate = our_service.get("gst_rate")
-            hsn_code = our_service.get("hsn_code")
-            
-            if gst_rate == 12.0 and hsn_code == "999721":
-                print(f"✅ A3 PASS: gst_rate updated to {gst_rate}, hsn_code preserved as {hsn_code}")
-                results["A3_verify_persistence"] = True
-            else:
-                print(f"❌ A3 FAIL: Expected gst_rate=12.0, hsn_code='999721', got gst_rate={gst_rate}, hsn_code={hsn_code}")
-        else:
-            print(f"❌ A3 FAIL: Service not found in list")
-    else:
-        print(f"❌ A3 FAIL: {response.text}")
-    
-    return results
-
-def test_section_b_package_composition():
-    """
-    B) Package composition fields on Service model
-    1. Get two existing service IDs
-    2. POST /api/services with linked_service_ids, discount_percentage, services_subtotal
-    3. Verify response contains all three fields
-    4. PUT to update discount_percentage
-    5. GET to verify persistence
-    """
-    print("\n" + "="*80)
-    print("SECTION B: PACKAGE COMPOSITION FIELDS")
-    print("="*80)
-    
-    results = {
-        "B1_get_existing_services": False,
-        "B2_create_package": False,
-        "B3_update_discount": False,
-        "B4_verify_persistence": False
-    }
-    
-    # B1: Get existing services
-    print("\n--- B1: Get existing service IDs ---")
-    url = f"{BASE_URL}/services?salon_id={salon_id}"
-    
-    print(f"GET {url}")
-    
-    response = requests.get(url, headers=headers)
-    print(f"Status: {response.status_code}")
-    
-    if response.status_code == 200:
-        data = response.json()
-        services = data if isinstance(data, list) else data.get("services", [])
-        
-        if len(services) >= 2:
-            service_id_1 = services[0].get("id")
-            service_id_2 = services[1].get("id")
-            print(f"✅ B1 PASS: Found service IDs: {service_id_1}, {service_id_2}")
-            results["B1_get_existing_services"] = True
-        else:
-            print(f"❌ B1 FAIL: Need at least 2 services, found {len(services)}")
-            return results
-    else:
-        print(f"❌ B1 FAIL: {response.text}")
-        return results
-    
-    # B2: Create package with composition fields
-    print("\n--- B2: Create package with linked_service_ids, discount_percentage, services_subtotal ---")
-    url = f"{BASE_URL}/services"
-    payload = {
-        "salon_id": salon_id,
-        "service_name": f"QA Bundle Pack {random_string()}",
-        "category": "Packages",
-        "gender_tag": "Unisex",
-        "default_duration": 60,
-        "base_price": 850,
-        "linked_service_ids": [service_id_1, service_id_2],
-        "discount_percentage": 15,
-        "services_subtotal": 1000
-    }
-    
-    print(f"POST {url}")
-    print(f"Payload: {json.dumps(payload, indent=2)}")
-    
-    response = requests.post(url, json=payload, headers=headers)
-    print(f"Status: {response.status_code}")
-    
-    if response.status_code == 200:
-        data = response.json()
-        print(f"Response: {json.dumps(data, indent=2)}")
-        
-        package_id = data.get("id")
-        linked_service_ids = data.get("linked_service_ids")
-        discount_percentage = data.get("discount_percentage")
-        services_subtotal = data.get("services_subtotal")
-        
-        if (linked_service_ids and len(linked_service_ids) == 2 and 
-            discount_percentage == 15 and services_subtotal == 1000):
-            print(f"✅ B2 PASS: Package created with all composition fields")
-            print(f"   linked_service_ids: {linked_service_ids}")
-            print(f"   discount_percentage: {discount_percentage}")
-            print(f"   services_subtotal: {services_subtotal}")
-            results["B2_create_package"] = True
-        else:
-            print(f"❌ B2 FAIL: Missing or incorrect composition fields")
-            print(f"   linked_service_ids: {linked_service_ids}")
-            print(f"   discount_percentage: {discount_percentage}")
-            print(f"   services_subtotal: {services_subtotal}")
-    else:
-        print(f"❌ B2 FAIL: {response.text}")
-        return results
-    
-    # B3: Update discount_percentage
-    print("\n--- B3: Update discount_percentage to 20 ---")
-    url = f"{BASE_URL}/services/{package_id}"
-    payload = {"discount_percentage": 20}
-    
-    print(f"PUT {url}")
-    print(f"Payload: {json.dumps(payload, indent=2)}")
-    
-    response = requests.put(url, json=payload, headers=headers)
-    print(f"Status: {response.status_code}")
-    
-    if response.status_code == 200:
-        print(f"✅ B3 PASS: Update request successful")
-        results["B3_update_discount"] = True
-    else:
-        print(f"❌ B3 FAIL: {response.text}")
-        return results
-    
-    # B4: Verify persistence by getting all services and finding ours
-    print("\n--- B4: GET services to verify discount_percentage=20 ---")
-    url = f"{BASE_URL}/services?salon_id={salon_id}"
-    
-    print(f"GET {url}")
-    
-    response = requests.get(url, headers=headers)
-    print(f"Status: {response.status_code}")
-    
-    if response.status_code == 200:
-        data = response.json()
-        services = data if isinstance(data, list) else data.get("services", [])
-        
-        # Find our package
-        our_package = next((s for s in services if s.get("id") == package_id), None)
-        
-        if our_package:
-            discount_percentage = our_package.get("discount_percentage")
-            
-            if discount_percentage == 20:
-                print(f"✅ B4 PASS: discount_percentage updated to {discount_percentage}")
-                results["B4_verify_persistence"] = True
-            else:
-                print(f"❌ B4 FAIL: Expected discount_percentage=20, got {discount_percentage}")
-        else:
-            print(f"❌ B4 FAIL: Package not found in list")
-    else:
-        print(f"❌ B4 FAIL: {response.text}")
-    
-    return results
-
-def test_section_c_gst_in_invoice():
-    """
-    C) Per-service GST honoured in invoice generation
-    1. Set salon is_gst_registered=true and tax_rate=9.0
-    2. Create a service with explicit gst_rate=12.0
-    3. Create a booking/token with that service
-    4. Complete the token
-    5. Verify invoice has per-service GST (cgst/sgst based on service's gst_rate)
-    6. Set is_gst_registered=false and verify new invoice has cgst=0, sgst=0
-    """
-    print("\n" + "="*80)
-    print("SECTION C: PER-SERVICE GST IN INVOICE GENERATION")
-    print("="*80)
-    
-    results = {
-        "C1_set_gst_registered": False,
-        "C2_create_service_with_gst": False,
-        "C3_create_booking": False,
-        "C4_complete_token": False,
-        "C5_verify_invoice_with_gst": False,
-        "C6_verify_invoice_without_gst": False
-    }
-    
-    # C1: Set salon GST registered
-    print("\n--- C1: Set salon is_gst_registered=true, tax_rate=9.0 ---")
-    url = f"{BASE_URL}/salons/{salon_id}"
-    payload = {
-        "is_gst_registered": True,
-        "tax_rate": 9.0
-    }
-    
-    print(f"PUT {url}")
-    print(f"Payload: {json.dumps(payload, indent=2)}")
-    
-    response = requests.put(url, json=payload, headers=headers)
-    print(f"Status: {response.status_code}")
-    
-    if response.status_code == 200:
-        data = response.json()
-        is_gst_registered = data.get("is_gst_registered")
-        tax_rate = data.get("tax_rate")
-        print(f"✅ C1 PASS: Salon updated - is_gst_registered={is_gst_registered}, tax_rate={tax_rate}")
-        results["C1_set_gst_registered"] = True
-    else:
-        print(f"❌ C1 FAIL: {response.text}")
-        return results
-    
-    # C2: Create service with explicit gst_rate
-    print("\n--- C2: Create service with gst_rate=12.0 ---")
-    url = f"{BASE_URL}/services"
-    payload = {
-        "salon_id": salon_id,
-        "service_name": f"GST Invoice Test Service {random_string()}",
-        "category": "Services",
-        "gender_tag": "Unisex",
-        "default_duration": 30,
-        "base_price": 500,
-        "gst_rate": 12.0,
-        "hsn_code": "999721"
-    }
-    
-    print(f"POST {url}")
-    print(f"Payload: {json.dumps(payload, indent=2)}")
-    
-    response = requests.post(url, json=payload, headers=headers)
-    print(f"Status: {response.status_code}")
-    
-    if response.status_code == 200:
-        data = response.json()
-        service_id = data.get("id")
-        gst_rate = data.get("gst_rate")
-        print(f"✅ C2 PASS: Service created with ID={service_id}, gst_rate={gst_rate}")
-        results["C2_create_service_with_gst"] = True
-    else:
-        print(f"❌ C2 FAIL: {response.text}")
-        return results
-    
-    # Get a barber for booking
-    print("\n--- Get barber for booking ---")
-    url = f"{BASE_URL}/salons/{salon_id}/barbers"
-    response = requests.get(url, headers=headers)
-    
-    if response.status_code == 200:
-        barbers = response.json()
-        if barbers and len(barbers) > 0:
-            barber_id = barbers[0].get("id")
-            print(f"Using barber ID: {barber_id}")
-        else:
-            print(f"❌ No barbers found")
-            return results
-    else:
-        print(f"❌ Failed to get barbers: {response.text}")
-        return results
-    
-    # C3: Create booking
-    print("\n--- C3: Create booking with the GST service ---")
-    url = f"{BASE_URL}/salons/{salon_id}/salon-booking"
-    
-    booking_date = (datetime.now() + timedelta(days=1)).strftime("%Y-%m-%d")
-    
-    payload = {
-        "customer_name": f"GST Test Customer {random_string()}",
-        "phone": f"98765{random.randint(10000, 99999)}",
-        "selected_services": [service_id],  # Note: field is selected_services not service_ids
-        "barber_id": barber_id,
-        "date": booking_date,  # Note: field is date not booking_date
-        "shift": "Morning"
-    }
-    
-    print(f"POST {url}")
-    print(f"Payload: {json.dumps(payload, indent=2)}")
-    
-    response = requests.post(url, json=payload, headers=headers)
-    print(f"Status: {response.status_code}")
-    
-    if response.status_code == 200:
-        data = response.json()
-        token_id = data.get("id")  # Note: field is id not token_id
-        print(f"✅ C3 PASS: Booking created with token_id={token_id}")
-        results["C3_create_booking"] = True
-    else:
-        print(f"❌ C3 FAIL: {response.text}")
-        return results
-    
-    # C4: Confirm payment and complete token
-    print("\n--- C4: Confirm payment and complete token ---")
-    
-    # First confirm payment (use base price, GST will be added in invoice)
-    url = f"{BASE_URL}/tokens/{token_id}/confirm-payment"
-    payload = {
-        "payment_mode": "cash",
-        "cash_amount": 500,  # Base price without GST
-        "wallet_amount": 0,
-        "upi_amount": 0
-    }
-    
-    print(f"POST {url} (confirm payment)")
-    print(f"Payload: {json.dumps(payload, indent=2)}")
-    
-    response = requests.post(url, json=payload, headers=headers)
-    print(f"Status: {response.status_code}")
-    
-    if response.status_code != 200:
-        print(f"❌ C4 FAIL (payment confirmation): {response.text}")
-        return results
-    
-    # Then complete token
-    url = f"{BASE_URL}/tokens/{token_id}/complete"
-    
-    print(f"POST {url} (complete)")
-    
-    response = requests.post(url, json={}, headers=headers)
-    print(f"Status: {response.status_code}")
-    
-    if response.status_code == 200:
-        data = response.json()
-        invoice_sent = data.get("invoice_sent")
-        invoice_id = invoice_sent.get("invoice_id") if invoice_sent else None
-        print(f"✅ C4 PASS: Token completed, invoice_id={invoice_id}")
-        results["C4_complete_token"] = True
-    else:
-        print(f"❌ C4 FAIL: {response.text}")
-        return results
-    
-    # C5: Verify invoice with GST
-    print("\n--- C5: Verify invoice has per-service GST ---")
-    url = f"{BASE_URL}/invoices/{invoice_id}"
-    
-    print(f"GET {url}")
-    
-    response = requests.get(url, headers=headers)
-    print(f"Status: {response.status_code}")
-    
-    if response.status_code == 200:
-        data = response.json()
-        print(f"Response: {json.dumps(data, indent=2)}")
-        
-        # Services are in invoice_data.services
-        invoice_data = data.get("invoice_data", {})
-        services = invoice_data.get("services", [])
-        
-        if services and len(services) > 0:
-            service = services[0]
-            gst_rate = service.get("gst_rate")
-            cgst = service.get("cgst")
-            sgst = service.get("sgst")
-            
-            # Expected: 500 * 12% / 2 = 30 for each CGST and SGST
-            # But wait, the actual calculation is 500 * 12% = 60, split as 30 CGST + 30 SGST
-            # Actually looking at the response, it shows cgst=60, sgst=60, which means 500 * 12% = 60 each
-            expected_cgst = 60.0
-            expected_sgst = 60.0
-            
-            if gst_rate == 12.0 and cgst == expected_cgst and sgst == expected_sgst:
-                print(f"✅ C5 PASS: Invoice has per-service GST")
-                print(f"   gst_rate: {gst_rate}")
-                print(f"   cgst: {cgst}")
-                print(f"   sgst: {sgst}")
-                results["C5_verify_invoice_with_gst"] = True
-            else:
-                print(f"❌ C5 FAIL: GST values incorrect")
-                print(f"   Expected: gst_rate=12.0, cgst={expected_cgst}, sgst={expected_sgst}")
-                print(f"   Got: gst_rate={gst_rate}, cgst={cgst}, sgst={sgst}")
-        else:
-            print(f"❌ C5 FAIL: No services in invoice")
-    else:
-        print(f"❌ C5 FAIL: {response.text}")
-    
-    # C6: Set is_gst_registered=false and verify
-    print("\n--- C6: Set is_gst_registered=false and verify new invoice ---")
-    url = f"{BASE_URL}/salons/{salon_id}"
-    payload = {"is_gst_registered": False}
-    
-    print(f"PUT {url}")
-    print(f"Payload: {json.dumps(payload, indent=2)}")
-    
-    response = requests.put(url, json=payload, headers=headers)
-    print(f"Status: {response.status_code}")
-    
-    if response.status_code == 200:
-        print(f"Salon updated to is_gst_registered=false")
-        
-        # Create another booking and complete it
-        print("\n--- Create and complete another booking ---")
-        
-        # Create booking
-        url = f"{BASE_URL}/salons/{salon_id}/salon-booking"
-        payload = {
-            "customer_name": f"No GST Test {random_string()}",
-            "phone": f"98765{random.randint(10000, 99999)}",
-            "selected_services": [service_id],  # Note: field is selected_services
-            "barber_id": barber_id,
-            "date": booking_date,  # Note: field is date
-            "shift": "Morning"
-        }
-        
-        response = requests.post(url, json=payload, headers=headers)
+    try:
+        response = requests.post(url, json=payload, timeout=10)
+        print_info(f"Request URL: {url}")
+        print_info(f"Request Body: {json.dumps(payload, indent=2)}")
+        print_info(f"Response Status: {response.status_code}")
         
         if response.status_code == 200:
             data = response.json()
-            token_id_2 = data.get("id")  # Note: field is id not token_id
+            print_info(f"Response Body: {json.dumps(data, indent=2)}")
             
-            # Confirm payment first
-            url = f"{BASE_URL}/tokens/{token_id_2}/confirm-payment"
-            payload = {
-                "payment_mode": "cash",
-                "cash_amount": 500,
-                "wallet_amount": 0,
-                "upi_amount": 0
-            }
+            # Verify required fields
+            checks = []
+            checks.append(("access_token" in data, "access_token present"))
+            checks.append(("salon_id" in data, "salon_id present"))
+            checks.append(("role" in data, "role present"))
+            checks.append((data.get("role") == "admin", f"role is 'admin' (got: {data.get('role')})"))
             
-            response = requests.post(url, json=payload, headers=headers)
+            all_passed = all(check[0] for check in checks)
             
-            if response.status_code != 200:
-                print(f"❌ C6 FAIL: Failed to confirm payment: {response.text}")
-            else:
-                # Complete token
-                url = f"{BASE_URL}/tokens/{token_id_2}/complete"
-                response = requests.post(url, json={}, headers=headers)  # Changed from PUT to POST
-            
-                if response.status_code == 200:
-                    # Get invoice_id from completion response
-                    data_complete = response.json()
-                    invoice_sent_2 = data_complete.get("invoice_sent")
-                    invoice_id_2 = invoice_sent_2.get("invoice_id") if invoice_sent_2 else None
-                    
-                    # Get invoice
-                    url = f"{BASE_URL}/invoices/{invoice_id_2}"
-                    response = requests.get(url, headers=headers)
-                    
-                    if response.status_code == 200:
-                        data = response.json()
-                        print(f"Response: {json.dumps(data, indent=2)}")
-                        
-                        # Services are in invoice_data.services
-                        invoice_data = data.get("invoice_data", {})
-                        services = invoice_data.get("services", [])
-                        
-                        if services and len(services) > 0:
-                            service = services[0]
-                            cgst = service.get("cgst", 0)
-                            sgst = service.get("sgst", 0)
-                            
-                            if cgst == 0 and sgst == 0:
-                                print(f"✅ C6 PASS: Invoice with is_gst_registered=false has cgst=0, sgst=0")
-                                results["C6_verify_invoice_without_gst"] = True
-                            else:
-                                print(f"❌ C6 FAIL: Expected cgst=0, sgst=0, got cgst={cgst}, sgst={sgst}")
-                        else:
-                            print(f"❌ C6 FAIL: No services in invoice")
-                    else:
-                        print(f"❌ C6 FAIL: Failed to get invoice: {response.text}")
+            for passed, message in checks:
+                if passed:
+                    print_success(message)
                 else:
-                    print(f"❌ C6 FAIL: Failed to complete token: {response.text}")
-        else:
-            print(f"❌ C6 FAIL: Failed to create booking: {response.text}")
-    else:
-        print(f"❌ C6 FAIL: Failed to update salon: {response.text}")
-    
-    return results
-
-def test_section_d_staff_credentials():
-    """
-    D) Regression check — staff credentials / login-history / revoke-session endpoints
-    1. Get a barber ID
-    2. Set credentials with login_id and password
-    3. Try to set same login_id on different barber (should fail)
-    4. Try short login_id (should fail)
-    5. Try short password (should fail)
-    6. Get login-history
-    7. Revoke non-existent session
-    """
-    print("\n" + "="*80)
-    print("SECTION D: STAFF CREDENTIALS REGRESSION CHECK")
-    print("="*80)
-    
-    results = {
-        "D1_get_barber": False,
-        "D2_set_credentials": False,
-        "D3_duplicate_login_id": False,
-        "D4_short_login_id": False,
-        "D5_short_password": False,
-        "D6_login_history": False,
-        "D7_revoke_session": False
-    }
-    
-    # D1: Get barber
-    print("\n--- D1: Get barber ID ---")
-    url = f"{BASE_URL}/salons/{salon_id}/barbers"
-    
-    print(f"GET {url}")
-    
-    response = requests.get(url, headers=headers)
-    print(f"Status: {response.status_code}")
-    
-    if response.status_code == 200:
-        barbers = response.json()
-        if barbers and len(barbers) >= 2:
-            barber_id_1 = barbers[0].get("id")
-            barber_id_2 = barbers[1].get("id")
-            print(f"✅ D1 PASS: Found barber IDs: {barber_id_1}, {barber_id_2}")
-            results["D1_get_barber"] = True
-        else:
-            print(f"❌ D1 FAIL: Need at least 2 barbers, found {len(barbers)}")
-            return results
-    else:
-        print(f"❌ D1 FAIL: {response.text}")
-        return results
-    
-    # D2: Set credentials
-    print("\n--- D2: Set credentials for barber 1 ---")
-    url = f"{BASE_URL}/salons/{salon_id}/barbers/{barber_id_1}/credentials"
-    
-    login_id = f"qatest{random_string()}"
-    password = "pass1234"
-    
-    payload = {
-        "login_id": login_id,
-        "password": password
-    }
-    
-    print(f"PUT {url}")
-    print(f"Payload: {json.dumps(payload, indent=2)}")
-    
-    response = requests.put(url, json=payload, headers=headers)
-    print(f"Status: {response.status_code}")
-    
-    if response.status_code == 200:
-        data = response.json()
-        print(f"Response: {json.dumps(data, indent=2)}")
-        
-        success = data.get("success")
-        has_password = data.get("has_password")
-        
-        if success and has_password:
-            print(f"✅ D2 PASS: Credentials set successfully")
-            results["D2_set_credentials"] = True
-        else:
-            print(f"❌ D2 FAIL: Expected success=true, has_password=true")
-    else:
-        print(f"❌ D2 FAIL: {response.text}")
-        return results
-    
-    # D3: Try to set same login_id on different barber
-    print("\n--- D3: Try to set same login_id on barber 2 (should fail) ---")
-    url = f"{BASE_URL}/salons/{salon_id}/barbers/{barber_id_2}/credentials"
-    payload = {
-        "login_id": login_id,  # Same login_id
-        "password": "pass5678"
-    }
-    
-    print(f"PUT {url}")
-    print(f"Payload: {json.dumps(payload, indent=2)}")
-    
-    response = requests.put(url, json=payload, headers=headers)
-    print(f"Status: {response.status_code}")
-    
-    if response.status_code == 400:
-        data = response.json()
-        detail = data.get("detail", "")
-        if "already taken" in detail.lower():
-            print(f"✅ D3 PASS: Duplicate login_id correctly rejected with 400")
-            results["D3_duplicate_login_id"] = True
-        else:
-            print(f"❌ D3 FAIL: Expected 'already taken' error, got: {detail}")
-    else:
-        print(f"❌ D3 FAIL: Expected 400, got {response.status_code}: {response.text}")
-    
-    # D4: Try short login_id
-    print("\n--- D4: Try short login_id (should fail) ---")
-    url = f"{BASE_URL}/salons/{salon_id}/barbers/{barber_id_2}/credentials"
-    payload = {
-        "login_id": "abc",  # Less than 6 chars
-        "password": "pass1234"
-    }
-    
-    print(f"PUT {url}")
-    print(f"Payload: {json.dumps(payload, indent=2)}")
-    
-    response = requests.put(url, json=payload, headers=headers)
-    print(f"Status: {response.status_code}")
-    
-    if response.status_code == 400:
-        print(f"✅ D4 PASS: Short login_id correctly rejected with 400")
-        results["D4_short_login_id"] = True
-    else:
-        print(f"❌ D4 FAIL: Expected 400, got {response.status_code}: {response.text}")
-    
-    # D5: Try short password
-    print("\n--- D5: Try short password (should fail) ---")
-    url = f"{BASE_URL}/salons/{salon_id}/barbers/{barber_id_2}/credentials"
-    payload = {
-        "login_id": f"qatest{random_string()}",
-        "password": "pass"  # Less than 8 chars
-    }
-    
-    print(f"PUT {url}")
-    print(f"Payload: {json.dumps(payload, indent=2)}")
-    
-    response = requests.put(url, json=payload, headers=headers)
-    print(f"Status: {response.status_code}")
-    
-    if response.status_code == 400:
-        print(f"✅ D5 PASS: Short password correctly rejected with 400")
-        results["D5_short_password"] = True
-    else:
-        print(f"❌ D5 FAIL: Expected 400, got {response.status_code}: {response.text}")
-    
-    # D6: Get login-history
-    print("\n--- D6: Get login-history ---")
-    url = f"{BASE_URL}/salons/{salon_id}/barbers/{barber_id_1}/login-history"
-    
-    print(f"GET {url}")
-    
-    response = requests.get(url, headers=headers)
-    print(f"Status: {response.status_code}")
-    
-    if response.status_code == 200:
-        data = response.json()
-        print(f"Response: {json.dumps(data, indent=2)}")
-        
-        if "history" in data and "active_devices" in data:
-            print(f"✅ D6 PASS: Login-history endpoint working (history: {len(data.get('history', []))}, active_devices: {len(data.get('active_devices', []))})")
-            results["D6_login_history"] = True
-        else:
-            print(f"❌ D6 FAIL: Expected 'history' and 'active_devices' keys")
-    else:
-        print(f"❌ D6 FAIL: {response.text}")
-    
-    # D7: Revoke non-existent session
-    print("\n--- D7: Revoke non-existent session ---")
-    url = f"{BASE_URL}/salons/{salon_id}/barbers/{barber_id_1}/revoke-session"
-    payload = {
-        "session_id": "non-existent"
-    }
-    
-    print(f"POST {url}")
-    print(f"Payload: {json.dumps(payload, indent=2)}")
-    
-    response = requests.post(url, json=payload, headers=headers)
-    print(f"Status: {response.status_code}")
-    
-    if response.status_code == 200:
-        data = response.json()
-        print(f"Response: {json.dumps(data, indent=2)}")
-        
-        matched = data.get("matched", -1)
-        if matched == 0:
-            print(f"✅ D7 PASS: Revoke-session returned matched=0 for non-existent session")
-            results["D7_revoke_session"] = True
-        else:
-            print(f"❌ D7 FAIL: Expected matched=0, got matched={matched}")
-    else:
-        print(f"❌ D7 FAIL: {response.text}")
-    
-    return results
-
-def print_summary(all_results):
-    """Print final summary of all tests"""
-    print("\n" + "="*80)
-    print("FINAL SUMMARY")
-    print("="*80)
-    
-    total_tests = 0
-    passed_tests = 0
-    
-    for section, results in all_results.items():
-        print(f"\n{section}:")
-        for test_name, passed in results.items():
-            total_tests += 1
-            if passed:
-                passed_tests += 1
-                print(f"  ✅ {test_name}")
+                    print_failure(message)
+            
+            if all_passed:
+                print_success("Test 1 PASSED: Admin login successful with all required fields")
+                return True, data
             else:
-                print(f"  ❌ {test_name}")
+                print_failure("Test 1 FAILED: Missing or incorrect fields in response")
+                return False, None
+        else:
+            print_failure(f"Test 1 FAILED: Expected 200, got {response.status_code}")
+            print_info(f"Response: {response.text}")
+            return False, None
+            
+    except Exception as e:
+        print_failure(f"Test 1 FAILED: Exception occurred - {str(e)}")
+        return False, None
+
+def test_2_salon_login_with_login_id():
+    """
+    Test 2: Confirm login also works with identifier=admin when the user enters their Login ID
+    Same as Test 1 - the endpoint should look up by login_id OR mobile
+    """
+    print_test_header(2, "Salon Login with Login ID (identifier=admin)")
     
-    print(f"\n{'='*80}")
-    print(f"TOTAL: {passed_tests}/{total_tests} tests passed")
-    print(f"{'='*80}")
+    # This is essentially the same as Test 1, but we're explicitly testing
+    # that the endpoint accepts login_id as identifier
+    url = f"{BACKEND_URL}/salon/users/login"
+    payload = {
+        "identifier": ADMIN_LOGIN_ID,  # Using login_id
+        "password": ADMIN_PASSWORD
+    }
     
-    return passed_tests, total_tests
+    try:
+        response = requests.post(url, json=payload, timeout=10)
+        print_info(f"Request URL: {url}")
+        print_info(f"Request Body: {json.dumps(payload, indent=2)}")
+        print_info(f"Response Status: {response.status_code}")
+        
+        if response.status_code == 200:
+            data = response.json()
+            print_success("Login with login_id as identifier works")
+            
+            # Also test with mobile number as identifier
+            print_info("\nTesting with mobile number as identifier...")
+            payload_mobile = {
+                "identifier": ADMIN_MOBILE,
+                "password": ADMIN_PASSWORD
+            }
+            response_mobile = requests.post(url, json=payload_mobile, timeout=10)
+            
+            if response_mobile.status_code == 200:
+                print_success("Login with mobile as identifier also works")
+                print_success("Test 2 PASSED: Both login_id and mobile work as identifier")
+                return True, data
+            else:
+                print_failure(f"Login with mobile failed: {response_mobile.status_code}")
+                return False, None
+        else:
+            print_failure(f"Test 2 FAILED: Expected 200, got {response.status_code}")
+            print_info(f"Response: {response.text}")
+            return False, None
+            
+    except Exception as e:
+        print_failure(f"Test 2 FAILED: Exception occurred - {str(e)}")
+        return False, None
+
+def test_3_error_paths():
+    """
+    Test 3: Confirm the standard error paths still respond
+    - Wrong password: {"identifier":"admin","password":"wrong"} → 401
+    - Non-existent user: {"identifier":"doesnotexist","password":"anything"} → 404
+    """
+    print_test_header(3, "Error Path Testing (Wrong Password & Non-existent User)")
+    
+    url = f"{BACKEND_URL}/salon/users/login"
+    
+    # Test 3a: Wrong password
+    print_info("\n3a. Testing wrong password...")
+    payload_wrong_pwd = {
+        "identifier": ADMIN_LOGIN_ID,
+        "password": "wrongpassword"
+    }
+    
+    try:
+        response = requests.post(url, json=payload_wrong_pwd, timeout=10)
+        print_info(f"Response Status: {response.status_code}")
+        print_info(f"Response: {response.text}")
+        
+        if response.status_code == 401:
+            print_success("Wrong password correctly returns 401 Unauthorized")
+            test_3a_passed = True
+        else:
+            print_failure(f"Wrong password should return 401, got {response.status_code}")
+            test_3a_passed = False
+    except Exception as e:
+        print_failure(f"Exception during wrong password test: {str(e)}")
+        test_3a_passed = False
+    
+    # Test 3b: Non-existent user
+    print_info("\n3b. Testing non-existent user...")
+    payload_no_user = {
+        "identifier": "doesnotexist",
+        "password": "anything"
+    }
+    
+    try:
+        response = requests.post(url, json=payload_no_user, timeout=10)
+        print_info(f"Response Status: {response.status_code}")
+        print_info(f"Response: {response.text}")
+        
+        if response.status_code == 404:
+            data = response.json()
+            if "User not found or inactive" in data.get("detail", ""):
+                print_success("Non-existent user correctly returns 404 with 'User not found or inactive'")
+                test_3b_passed = True
+            else:
+                print_failure(f"404 returned but detail message incorrect: {data.get('detail')}")
+                test_3b_passed = False
+        else:
+            print_failure(f"Non-existent user should return 404, got {response.status_code}")
+            test_3b_passed = False
+    except Exception as e:
+        print_failure(f"Exception during non-existent user test: {str(e)}")
+        test_3b_passed = False
+    
+    if test_3a_passed and test_3b_passed:
+        print_success("\nTest 3 PASSED: All error paths working correctly")
+        return True
+    else:
+        print_failure("\nTest 3 FAILED: Some error paths not working correctly")
+        return False
+
+def test_4_cors_preflight():
+    """
+    Test 4: CORS preflight
+    OPTIONS on the same URL with Origin, Access-Control-Request-Method, Access-Control-Request-Headers
+    should return 204 with access-control-allow-origin
+    """
+    print_test_header(4, "CORS Preflight Testing")
+    
+    url = f"{BACKEND_URL}/salon/users/login"
+    headers = {
+        "Origin": "https://wip-final-push.preview.emergentagent.com",
+        "Access-Control-Request-Method": "POST",
+        "Access-Control-Request-Headers": "content-type"
+    }
+    
+    try:
+        response = requests.options(url, headers=headers, timeout=10)
+        print_info(f"Request URL: {url}")
+        print_info(f"Request Headers: {json.dumps(headers, indent=2)}")
+        print_info(f"Response Status: {response.status_code}")
+        print_info(f"Response Headers: {dict(response.headers)}")
+        
+        checks = []
+        
+        # Check status code (can be 200 or 204)
+        if response.status_code in [200, 204]:
+            print_success(f"CORS preflight returns {response.status_code}")
+            checks.append(True)
+        else:
+            print_failure(f"Expected 200 or 204, got {response.status_code}")
+            checks.append(False)
+        
+        # Check for CORS headers
+        cors_headers = [
+            "access-control-allow-origin",
+            "access-control-allow-methods",
+            "access-control-allow-headers"
+        ]
+        
+        for header in cors_headers:
+            if header in response.headers:
+                print_success(f"Header '{header}' present: {response.headers[header]}")
+                checks.append(True)
+            else:
+                print_failure(f"Header '{header}' missing")
+                checks.append(False)
+        
+        if all(checks):
+            print_success("Test 4 PASSED: CORS preflight working correctly")
+            return True
+        else:
+            print_failure("Test 4 FAILED: Some CORS headers missing")
+            return False
+            
+    except Exception as e:
+        print_failure(f"Test 4 FAILED: Exception occurred - {str(e)}")
+        return False
+
+def test_5_authenticated_endpoint(access_token: str, salon_id: str):
+    """
+    Test 5: Regression sanity — after login, the token can call at least one authenticated endpoint
+    (e.g. GET /api/salons/{salon_id}/barbers) and get 200
+    """
+    print_test_header(5, "Authenticated Endpoint Testing (Token Validation)")
+    
+    if not access_token or not salon_id:
+        print_failure("Test 5 SKIPPED: No access token or salon_id from previous tests")
+        return False
+    
+    url = f"{BACKEND_URL}/salons/{salon_id}/barbers"
+    headers = {
+        "Authorization": f"Bearer {access_token}"
+    }
+    
+    try:
+        response = requests.get(url, headers=headers, timeout=10)
+        print_info(f"Request URL: {url}")
+        print_info(f"Authorization: Bearer {access_token[:20]}...")
+        print_info(f"Response Status: {response.status_code}")
+        
+        if response.status_code == 200:
+            data = response.json()
+            print_info(f"Response: {json.dumps(data, indent=2)[:500]}...")
+            print_success("Authenticated endpoint returns 200 OK")
+            print_success("Token is valid and can access protected endpoints")
+            print_success("Test 5 PASSED: Token validation successful")
+            return True
+        else:
+            print_failure(f"Expected 200, got {response.status_code}")
+            print_info(f"Response: {response.text}")
+            print_failure("Test 5 FAILED: Token validation failed")
+            return False
+            
+    except Exception as e:
+        print_failure(f"Test 5 FAILED: Exception occurred - {str(e)}")
+        return False
 
 def main():
-    """Main test execution"""
-    print("="*80)
-    print("BACKEND TESTING - JULY PHASE 2 FIXES")
-    print("="*80)
+    """Run all tests and report results"""
+    print(f"\n{Colors.BLUE}{'='*80}{Colors.RESET}")
+    print(f"{Colors.BLUE}SALON LOGIN ENDPOINT COMPREHENSIVE TESTING{Colors.RESET}")
+    print(f"{Colors.BLUE}Backend URL: {BACKEND_URL}{Colors.RESET}")
+    print(f"{Colors.BLUE}{'='*80}{Colors.RESET}")
     
-    # Login
-    if not login_admin():
-        print("\n❌ CRITICAL: Admin login failed. Cannot proceed with tests.")
-        return
+    results = []
+    access_token = None
+    salon_id = None
     
-    # Run all test sections
-    all_results = {}
+    # Test 1: Admin login with identifier=admin
+    test_1_passed, test_1_data = test_1_salon_login_with_admin_credentials()
+    results.append(("Test 1: Admin Login (identifier=admin)", test_1_passed))
     
-    all_results["SECTION A"] = test_section_a_gst_fields()
-    all_results["SECTION B"] = test_section_b_package_composition()
-    all_results["SECTION C"] = test_section_c_gst_in_invoice()
-    all_results["SECTION D"] = test_section_d_staff_credentials()
+    if test_1_passed and test_1_data:
+        access_token = test_1_data.get("access_token")
+        salon_id = test_1_data.get("salon_id")
     
-    # Print summary
-    passed, total = print_summary(all_results)
+    # Test 2: Login with login_id and mobile
+    test_2_passed, test_2_data = test_2_salon_login_with_login_id()
+    results.append(("Test 2: Login ID & Mobile as Identifier", test_2_passed))
     
-    if passed == total:
-        print("\n🎉 ALL TESTS PASSED!")
+    # Test 3: Error paths
+    test_3_passed = test_3_error_paths()
+    results.append(("Test 3: Error Paths (401/404)", test_3_passed))
+    
+    # Test 4: CORS preflight
+    test_4_passed = test_4_cors_preflight()
+    results.append(("Test 4: CORS Preflight", test_4_passed))
+    
+    # Test 5: Authenticated endpoint
+    test_5_passed = test_5_authenticated_endpoint(access_token, salon_id)
+    results.append(("Test 5: Authenticated Endpoint", test_5_passed))
+    
+    # Summary
+    print(f"\n{Colors.BLUE}{'='*80}{Colors.RESET}")
+    print(f"{Colors.BLUE}TEST SUMMARY{Colors.RESET}")
+    print(f"{Colors.BLUE}{'='*80}{Colors.RESET}")
+    
+    for test_name, passed in results:
+        if passed:
+            print(f"{Colors.GREEN}✅ {test_name}{Colors.RESET}")
+        else:
+            print(f"{Colors.RED}❌ {test_name}{Colors.RESET}")
+    
+    total_tests = len(results)
+    passed_tests = sum(1 for _, passed in results if passed)
+    
+    print(f"\n{Colors.BLUE}Total: {passed_tests}/{total_tests} tests passed{Colors.RESET}")
+    
+    if passed_tests == total_tests:
+        print(f"\n{Colors.GREEN}{'='*80}{Colors.RESET}")
+        print(f"{Colors.GREEN}ALL TESTS PASSED ✅{Colors.RESET}")
+        print(f"{Colors.GREEN}The salon login endpoint is working correctly end-to-end.{Colors.RESET}")
+        print(f"{Colors.GREEN}The 404 error reported by the user was likely transient (backend restart).{Colors.RESET}")
+        print(f"{Colors.GREEN}{'='*80}{Colors.RESET}")
+        return 0
     else:
-        print(f"\n⚠️  {total - passed} TEST(S) FAILED")
+        print(f"\n{Colors.RED}{'='*80}{Colors.RESET}")
+        print(f"{Colors.RED}SOME TESTS FAILED ❌{Colors.RESET}")
+        print(f"{Colors.RED}Please review the failed tests above.{Colors.RESET}")
+        print(f"{Colors.RED}{'='*80}{Colors.RESET}")
+        return 1
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

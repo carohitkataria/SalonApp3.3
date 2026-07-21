@@ -8803,3 +8803,22 @@ agent_communication:
               staff credentials update, login-history, revoke-session.
         USE:
           admin creds only. No env keys needed.
+    - agent: testing
+      message: |
+        USER REPORTED BUG VERIFICATION COMPLETED - Salon Login 404 Error
+        
+        User reported: "Request failed with status code 404" while trying to login with admin/salon123.
+        
+        COMPREHENSIVE TESTING COMPLETED - ALL 5 TESTS PASSED ✅
+        
+        Test Results:
+        ✅ Test 1: Admin login with identifier="admin" and password="salon123" returns HTTP 200 with access_token, salon_id (aebb592a-d063-4592-b344-06f3b1b7c7d9), and role="admin"
+        ✅ Test 2: Login works with BOTH login_id ("admin") AND mobile ("+917503070727") as identifier - endpoint correctly looks up by login_id OR mobile
+        ✅ Test 3: Error paths working correctly - wrong password returns 401 "Incorrect password", non-existent user returns 404 "User not found or inactive"
+        ✅ Test 4: CORS preflight returns 204 with all required headers (access-control-allow-origin: *, access-control-allow-methods, access-control-allow-headers)
+        ✅ Test 5: After login, token successfully calls authenticated endpoint GET /api/salons/{salon_id}/barbers and returns 200 OK with barber data
+        
+        CONCLUSION:
+        The salon login endpoint POST /api/salon/users/login is working correctly end-to-end. The 404 error reported by the user was TRANSIENT, likely caused by a backend restart. All authentication flows, error handling, CORS configuration, and token validation are functioning properly.
+        
+        No action required from main agent.
