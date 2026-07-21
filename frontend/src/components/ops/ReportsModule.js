@@ -750,6 +750,34 @@ function PnlTab({ salonId, view, date, branchId, getAuthHeaders, canManage, onAd
 
 /* ---------- STAFF ---------- */
 function StaffTab({ salonId, view, date, branchId, getAuthHeaders }) {
+  const [sub, setSub] = useState('performance');
+  return (
+    <div>
+      {/* Sub-tabs */}
+      <div className="z-seg" style={{ display: 'inline-flex', marginBottom: 12 }} data-testid="staff-report-subtabs">
+        {[
+          { id: 'performance', l: 'Performance', ico: 'trendup' },
+          { id: 'attendance', l: 'Attendance', ico: 'calendar' },
+          { id: 'incentives', l: 'Incentives', ico: 'money' },
+        ].map((t) => (
+          <button
+            key={t.id}
+            className={sub === t.id ? 'on' : ''}
+            onClick={() => setSub(t.id)}
+            data-testid={`staff-report-tab-${t.id}`}
+          >
+            <Icon name={t.ico} /> {t.l}
+          </button>
+        ))}
+      </div>
+      {sub === 'performance' && <StaffPerformanceSub salonId={salonId} view={view} date={date} branchId={branchId} getAuthHeaders={getAuthHeaders} />}
+      {sub === 'attendance' && <StaffAttendanceSub salonId={salonId} date={date} branchId={branchId} getAuthHeaders={getAuthHeaders} />}
+      {sub === 'incentives' && <StaffIncentiveSub salonId={salonId} date={date} branchId={branchId} getAuthHeaders={getAuthHeaders} />}
+    </div>
+  );
+}
+
+function StaffPerformanceSub({ salonId, view, date, branchId, getAuthHeaders }) {
   const [data, setData] = useState(null);
   useEffect(() => {
     // Reuse Sales endpoint's by_staff for a quick staff view.
@@ -766,6 +794,192 @@ function StaffTab({ salonId, view, date, branchId, getAuthHeaders }) {
     <div className="z-card" style={{ padding: 16 }}>
       <div className="z-dsec">Staff performance</div>
       <TopTable rows={(data.by_staff || []).map((r) => ({ name: r.name, value: rupee(r.revenue), sub: `${r.bookings} bookings · avg ${rupee(r.bookings ? r.revenue / r.bookings : 0)}` }))} />
+    </div>
+  );
+}
+
+function StaffAttendanceSub({ salonId, date, branchId, getAuthHeaders }) {
+  const month = (date || new Date().toISOString().slice(0, 10)).slice(0, 7);
+  const [rows, setRows] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [err, setErr] = useState(null);
+  useEffect(() => {
+    (async () => {
+      setLoading(true);
+      try {
+        const res = await axios.get(`${API}/salons/${salonId}/staff-attendance/month/${month}`, { headers: getAuthHeaders() });
+        setRows(res.data?.barbers || []);
+      } catch (e) {
+        setErr(e?.response?.data?.detail || 'Failed to load attendance');
+      } finally { setLoading(false); }
+    })();
+  }, [salonId, month]); // eslint-disable-line
+  if (loading) return <div className="z-empty">Loading attendance…</div>;
+  if (err) return <div className="z-empty">Could not load: {String(err)}</div>;
+  const summarise = (arr) => {
+    const s = { P: 0, A: 0, H: 0, HO: 0, L: 0 };
+    (arr || []).forEach((r) => {
+      const st = (r.status || '').toLowerCase();
+      if (st === 'present') s.P += 1;
+      else if (st === 'absent') s.A += 1;
+      else if (st === 'half_day' || st === 'half-day') s.H += 1;
+      else if (st === 'holiday') s.HO += 1;
+      else if (st === 'leave' || st === 'on_leave') s.L += 1;
+    });
+    return s;
+  };
+  const filtered = branchId ? rows.filter((r) => r.branch_id === branchId) : rows;
+  const exportCsv = () => {
+    const rowsCsv = [['Staff', 'Present', 'Half-day', 'Absent', 'Holiday', 'Leave', 'Total working']];
+    filtered.forEach((r) => {
+      const s = summarise(r.attendance);
+      rowsCsv.push([r.name || r.barber_name || '—', s.P, s.H, s.A, s.HO, s.L, s.P + 0.5 * s.H]);
+    });
+    const csv = rowsCsv.map((row) => row.join(',')).join('\n');
+    const blob = new Blob([csv], { type: 'text/csv' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = `staff-attendance-${month}.csv`;
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  };
+  return (
+    <div className="z-card" style={{ padding: 16 }} data-testid="staff-attendance-report">
+      <div className="z-dsec" style={{ display: 'flex', alignItems: 'center' }}>
+        Staff attendance — {month}
+        <button className="z-btn z-btn--ghost z-btn--sm" style={{ marginLeft: 'auto' }} onClick={exportCsv}>
+          <Icon name="download" /> Export CSV
+        </button>
+      </div>
+      {(filtered.length === 0) && <div className="z-empty" style={{ padding: 20 }}>No staff attendance for this month.</div>}
+      {filtered.length > 0 && (
+        <div style={{ overflowX: 'auto' }}>
+          <table className="z-table" style={{ width: '100%', borderCollapse: 'collapse' }}>
+            <thead>
+              <tr style={{ borderBottom: '1px solid var(--z-line, #E5DDE7)' }}>
+                <th style={{ textAlign: 'left', padding: '10px 8px', fontSize: 12 }}>Staff</th>
+                <th style={{ padding: '10px 8px', fontSize: 12 }}>Present</th>
+                <th style={{ padding: '10px 8px', fontSize: 12 }}>Half-day</th>
+                <th style={{ padding: '10px 8px', fontSize: 12 }}>Absent</th>
+                <th style={{ padding: '10px 8px', fontSize: 12 }}>Holiday</th>
+                <th style={{ padding: '10px 8px', fontSize: 12 }}>Leave</th>
+                <th style={{ padding: '10px 8px', fontSize: 12 }}>Working days</th>
+              </tr>
+            </thead>
+            <tbody>
+              {filtered.map((r) => {
+                const s = summarise(r.attendance);
+                return (
+                  <tr key={r.barber_id} style={{ borderBottom: '1px solid #F4EEF6' }}>
+                    <td style={{ padding: '9px 8px', fontWeight: 600 }}>{r.name || r.barber_name || '—'}</td>
+                    <td style={{ textAlign: 'center', padding: '9px 8px' }}><span className="z-pill z-pill--ok">{s.P}</span></td>
+                    <td style={{ textAlign: 'center', padding: '9px 8px' }}><span className="z-pill z-pill--warn">{s.H}</span></td>
+                    <td style={{ textAlign: 'center', padding: '9px 8px' }}><span className="z-pill">{s.A}</span></td>
+                    <td style={{ textAlign: 'center', padding: '9px 8px' }}>{s.HO}</td>
+                    <td style={{ textAlign: 'center', padding: '9px 8px' }}>{s.L}</td>
+                    <td style={{ textAlign: 'center', padding: '9px 8px', fontWeight: 700 }}>{(s.P + 0.5 * s.H).toFixed(1)}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function StaffIncentiveSub({ salonId, date, branchId, getAuthHeaders }) {
+  const month = (date || new Date().toISOString().slice(0, 10)).slice(0, 7);
+  const [rows, setRows] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [err, setErr] = useState(null);
+  useEffect(() => {
+    (async () => {
+      setLoading(true);
+      try {
+        const res = await axios.get(`${API}/salons/${salonId}/reward-plan/incentives?month=${month}`, { headers: getAuthHeaders() });
+        setRows(res.data?.records || res.data?.items || res.data || []);
+      } catch (e) {
+        setErr(e?.response?.data?.detail || 'Failed to load incentives');
+      } finally { setLoading(false); }
+    })();
+  }, [salonId, month]); // eslint-disable-line
+  if (loading) return <div className="z-empty">Loading incentives…</div>;
+  if (err) return <div className="z-empty">Could not load: {String(err)}</div>;
+  const totalIncentive = rows.reduce((a, r) => a + Number(r.incentive_amount || r.amount || 0), 0);
+  const totalSales = rows.reduce((a, r) => a + Number(r.actual_sales || r.total_sales || 0), 0);
+  const totalTarget = rows.reduce((a, r) => a + Number(r.target || r.target_amount || 0), 0);
+  const exportCsv = () => {
+    const rowsCsv = [['Staff', 'Target', 'Actual Sales', 'Achievement %', 'Incentive', 'Status']];
+    rows.forEach((r) => {
+      const actual = Number(r.actual_sales || r.total_sales || 0);
+      const target = Number(r.target || r.target_amount || 0);
+      const ach = target > 0 ? (actual / target) * 100 : 0;
+      rowsCsv.push([r.barber_name || r.name || '—', target, actual, ach.toFixed(1) + '%', r.incentive_amount || r.amount || 0, r.status || 'Pending']);
+    });
+    const csv = rowsCsv.map((row) => row.join(',')).join('\n');
+    const blob = new Blob([csv], { type: 'text/csv' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = `staff-incentives-${month}.csv`;
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  };
+  return (
+    <div data-testid="staff-incentive-report">
+      <div className="z-metrics" style={{ marginBottom: 12 }}>
+        <div className="z-metric g-mint"><div className="k"><Icon name="trendup" />Sales</div><div className="v">{rupee(totalSales)}</div></div>
+        <div className="z-metric g-blue"><div className="k"><Icon name="gauge" />Target</div><div className="v">{rupee(totalTarget)}</div></div>
+        <div className="z-metric g-amber"><div className="k"><Icon name="money" />Total incentives</div><div className="v">{rupee(totalIncentive)}</div></div>
+        <div className="z-metric g-rose"><div className="k"><Icon name="users" />Eligible staff</div><div className="v">{rows.length}</div></div>
+      </div>
+      <div className="z-card" style={{ padding: 16 }}>
+        <div className="z-dsec" style={{ display: 'flex', alignItems: 'center' }}>
+          Incentive breakup — {month}
+          <button className="z-btn z-btn--ghost z-btn--sm" style={{ marginLeft: 'auto' }} onClick={exportCsv}>
+            <Icon name="download" /> Export CSV
+          </button>
+        </div>
+        {rows.length === 0 && <div className="z-empty" style={{ padding: 20 }}>No incentive records for this month. Configure a reward plan first.</div>}
+        {rows.length > 0 && (
+          <div style={{ overflowX: 'auto' }}>
+            <table className="z-table" style={{ width: '100%', borderCollapse: 'collapse' }}>
+              <thead>
+                <tr style={{ borderBottom: '1px solid var(--z-line, #E5DDE7)' }}>
+                  <th style={{ textAlign: 'left', padding: '10px 8px', fontSize: 12 }}>Staff</th>
+                  <th style={{ padding: '10px 8px', fontSize: 12 }}>Target</th>
+                  <th style={{ padding: '10px 8px', fontSize: 12 }}>Actual Sales</th>
+                  <th style={{ padding: '10px 8px', fontSize: 12 }}>Achievement</th>
+                  <th style={{ padding: '10px 8px', fontSize: 12 }}>Incentive</th>
+                  <th style={{ padding: '10px 8px', fontSize: 12 }}>Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map((r, i) => {
+                  const actual = Number(r.actual_sales || r.total_sales || 0);
+                  const target = Number(r.target || r.target_amount || 0);
+                  const ach = target > 0 ? (actual / target) * 100 : 0;
+                  const st = String(r.status || 'Pending').toLowerCase();
+                  const stCls = st === 'paid' ? 'z-pill--ok' : (st === 'approved' ? '' : 'z-pill--warn');
+                  return (
+                    <tr key={r.barber_id || i} style={{ borderBottom: '1px solid #F4EEF6' }}>
+                      <td style={{ padding: '9px 8px', fontWeight: 600 }}>{r.barber_name || r.name || '—'}</td>
+                      <td style={{ textAlign: 'center', padding: '9px 8px' }}>{rupee(target)}</td>
+                      <td style={{ textAlign: 'center', padding: '9px 8px', fontWeight: 700 }}>{rupee(actual)}</td>
+                      <td style={{ textAlign: 'center', padding: '9px 8px' }}>{ach.toFixed(1)}%</td>
+                      <td style={{ textAlign: 'center', padding: '9px 8px', fontWeight: 700, color: 'var(--z-primary, #C6389E)' }}>{rupee(Number(r.incentive_amount || r.amount || 0))}</td>
+                      <td style={{ textAlign: 'center', padding: '9px 8px' }}>
+                        <span className={`z-pill ${stCls}`}>{r.status || 'Pending'}</span>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
     </div>
   );
 }

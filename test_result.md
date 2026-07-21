@@ -8608,25 +8608,220 @@ frontend:
             Shows a colour-coded pill: green (active), amber (renews in
             <= 15 days), red (expired), gold (free plan).
 
+##====================================================================================================
+## Final Testing July — Phase 2 Fixes (Attached doc, 20-Jul-2026)
+##====================================================================================================
+
+backend:
+  - task: "Per-service GST rate honoured in invoice generation"
+    implemented: true
+    working: "NA"
+    file: "/app/backend/server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: true
+    status_history:
+        - working: "NA"
+          agent: "main"
+          comment: |
+            BUG FIX (doc: "Currently even in case where GST is not enabled,
+            the report shows GST amount"). generate_and_send_invoice now:
+              • Reads each service's gst_rate — falls back to salon.tax_rate
+                if the service didn't set one.
+              • Computes per-item cgst/sgst and blends them into the invoice
+                totals.
+              • Only charges tax when salon.is_gst_registered is true —
+                otherwise cgst/sgst are zero regardless of per-service rate.
+              • Each services[] item on the invoice now carries gst_rate,
+                cgst, sgst (in addition to price/amount).
+            Please verify by:
+              (a) toggling is_gst_registered on the salon,
+              (b) setting different gst_rate on two services on the same token,
+              (c) confirming the invoice's cgst/sgst reflect the mix,
+              (d) confirming zero tax when is_gst_registered=false.
+
+  - task: "ServiceCreate/ServiceUpdate/Service accept + return package composition"
+    implemented: true
+    working: "NA"
+    file: "/app/backend/server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: true
+    status_history:
+        - working: "NA"
+          agent: "main"
+          comment: |
+            Added optional fields on ServiceCreate + ServiceUpdate + Service:
+              • linked_service_ids: List[str] | None — the services bundled
+                into a package.
+              • discount_percentage: float | None — % off the subtotal.
+              • services_subtotal: float | None — snapshot of the pre-
+                discount sum, kept for auditing.
+            Service now also exposes gst_rate + hsn_code in the response
+            (previously stored but not surfaced).
+            Please round-trip create + get + update to confirm each field
+            persists and returns.
+
+frontend:
+  - task: "Staff Access — login_id + password + login history + active devices UI"
+    implemented: true
+    working: "NA"
+    file: "/app/frontend/src/pages/salon/redesign/SalonStaffV3.js"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+        - working: "NA"
+          agent: "main"
+          comment: |
+            Replaces the old "mobile is your login ID" placeholder with
+            an editable Login ID (min 6 chars, unique platform-wide)
+            plus Password (min 8, admin-only) and a Save button. The
+            Access section now also lists Active devices (with Revoke)
+            and Login history — both fed by the existing
+            /api/salons/{salon_id}/barbers/{barber_id}/login-history
+            endpoint.
+
+  - task: "Staff Services tab — sub-category grouping + Select all / per-category bulk"
+    implemented: true
+    working: "NA"
+    file: "/app/frontend/src/pages/salon/redesign/SalonStaffV3.js"
+    stuck_count: 0
+    priority: "medium"
+    needs_retesting: false
+
+  - task: "Staff Profile — date-range presets for metrics + Switch branch drawer"
+    implemented: true
+    working: "NA"
+    file: "/app/frontend/src/pages/salon/redesign/SalonStaffV3.js"
+    stuck_count: 0
+    priority: "medium"
+    needs_retesting: false
+    status_history:
+        - working: "NA"
+          agent: "main"
+          comment: |
+            Adds Today / This week / This month / Last month / Last 30d
+            preset chips + custom from/to date pickers above the metrics
+            tiles. Live values come from
+            /api/analytics/detailed-report?barber_id=<id>. Switch-branch
+            button appears only for admins when the salon has 2+
+            branches; the drawer posts to
+            /api/salons/{id}/barbers/{id}/transfer (falls back to a plain
+            PUT on /api/barbers/{id} if the transfer endpoint is missing).
+
+  - task: "Services module — Add Package form (multi-service + discount + editable final)"
+    implemented: true
+    working: "NA"
+    file: "/app/frontend/src/components/ops/ServicesModule.js"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+        - working: "NA"
+          agent: "main"
+          comment: |
+            When the drawer's category is set to 'Packages', the form
+            swaps in a searchable checklist of eligible services with a
+            live subtotal, a discount-% mode and a manual-final-price
+            mode, a "You save" line and a highlighted final price. On
+            save it persists linked_service_ids + discount_percentage +
+            services_subtotal, sets base_price to the final and derives
+            duration from the linked services.
+            Also adds Base GST rate + HSN code fields to every service.
+
+  - task: "Reports → Staff → Attendance + Incentives sub-tabs (CSV export)"
+    implemented: true
+    working: "NA"
+    file: "/app/frontend/src/components/ops/ReportsModule.js"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+
+  - task: "Settings → Leave & holidays now embeds LeaveConfigTab"
+    implemented: true
+    working: "NA"
+    file: "/app/frontend/src/pages/salon/redesign/SalonSettingsV3.js"
+    stuck_count: 0
+    priority: "medium"
+    needs_retesting: false
+
 test_plan:
-  current_focus: []
+  current_focus:
+    - "Backend: Per-service GST rate honoured in invoice generation"
+    - "Backend: ServiceCreate/ServiceUpdate accept linked_service_ids + discount_percentage + services_subtotal for Packages"
+    - "Backend: Service model returns gst_rate + hsn_code + linked_service_ids in response"
   stuck_tasks: []
   test_all: false
   test_priority: high_first
-  frontend_testing_deferred: true  # user explicitly said "Don't run auto testing."
+  frontend_testing_deferred: true  # user explicitly said "Don't run auto testing." originally
 
 agent_communication:
     - agent: main
       message: |
-        Phase 1 of the July doc is done — attendance bug fix, staff profile
-        photo/DOB/DOJ, phone-dial link, Mark Salary Paid moved to
-        Attendance, service Ratings removed, sticky non-scrolling category
-        rail, GST-registered toggle + validation, Online pause switch,
-        Lunch time fields, inline Add Branch form, and Subscription badge.
-        User asked not to run auto testing for these; they'll smoke-test
-        themselves and come back with Phase 2 (staff ID/password login
-        system, login history + active devices, branch switch on staff
-        profile, per-staff date filter, package form redesign + bulk
-        upload for packages, staff-report Attendance + Incentive pages,
-        Leave & holidays UI, per-service GST rates, and the rest of the
-        classic-page migration).
+        Phase 2 shipped (July doc). Delta:
+          BACKEND
+            • generate_and_send_invoice now uses each Service's gst_rate
+              (per-service override; falls back to salon.tax_rate). Only
+              charges tax when salon.is_gst_registered is true. CGST/SGST
+              are per-item and blended at the invoice level.
+            • ServiceCreate + ServiceUpdate + Service now accept and
+              return `linked_service_ids`, `discount_percentage`,
+              `services_subtotal` (used by the new Package form).
+            • Service also exposes gst_rate + hsn_code in the response.
+          FRONTEND
+            • SalonStaffV3.js: Access section now edits login_id + password
+              (min 6 / 8 chars), lists Login history & Active devices with
+              Revoke buttons.
+            • SalonStaffV3.js: Services section groups by sub_category
+              with per-category and global Select-all / Deselect-all
+              buttons.
+            • SalonStaffV3.js: Profile shows date-range preset chips
+              (Today / Week / Month / Last month / Last 30d + custom
+              inputs) and pulls live metrics from
+              /api/analytics/detailed-report.
+            • SalonStaffV3.js: New Switch-branch button on Profile ->
+              opens a drawer that posts to
+              /api/salons/{salon_id}/barbers/{barber_id}/transfer
+              (falls back to PUT /api/barbers/{id} branch_id).
+            • ServicesModule.js: Add Service drawer detects
+              category === 'Packages' and swaps in a package form —
+              multi-service picker, live subtotal, discount % or manual
+              final price, "You save" line, GST rate + HSN inputs.
+            • ReportsModule.js: Staff tab now has sub-tabs
+              Performance / Attendance / Incentives, each with CSV
+              export.
+            • SalonSettingsV3.js: Leave & holidays section now embeds
+              the LeaveConfigTab (Code/Name/Paid/Accrual/Cap/Active
+              table).
+        PLEASE TEST BACKEND:
+          A) Per-service GST in invoice:
+             1. Login admin (identifier=admin, salon123)  → salon_id.
+             2. Create/update a service via POST /api/services with
+                gst_rate=9.0 and hsn_code='999721'. Verify the response
+                includes both fields.
+             3. Fetch it via GET /api/services/{id} — same fields present.
+             4. Update salon: PUT /api/salons/{salon_id} with
+                {is_gst_registered:true, tax_rate:9.0} to make the salon
+                GST-registered. Confirm the setting takes.
+             5. Create a token+booking for that service, complete it,
+                then trigger invoice generation (either by completing
+                the token or by calling the send-invoice flow). Read
+                the saved invoice back and confirm:
+                  • cgst / sgst reflect the SERVICE's 9% (not the salon
+                    default when they diverge).
+                  • services[] items each carry gst_rate/cgst/sgst.
+                  • When is_gst_registered=false, cgst/sgst are zero
+                    even if the service has a gst_rate.
+          B) Package fields round-trip:
+             1. POST /api/services with category='Packages',
+                service_name='QA Pack', linked_service_ids=[<two valid
+                service ids>], discount_percentage=15,
+                services_subtotal=1000, base_price=850.
+             2. GET the service back — every field must be present.
+             3. PUT /api/services/{id} to change discount_percentage=20
+                — verify persistence.
+          C) Verify pre-existing endpoints still respond:
+              staff credentials update, login-history, revoke-session.
+        USE:
+          admin creds only. No env keys needed.

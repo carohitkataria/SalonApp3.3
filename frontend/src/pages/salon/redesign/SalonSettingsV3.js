@@ -15,6 +15,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { SETTINGS_V3_CSS } from './SettingsV3Styles';
 import StaffAccessManagement from '@/components/StaffAccessManagement';
 import EmployeeRewardPlan from '@/components/EmployeeRewardPlan';
+import LeaveConfigTab from '@/components/leave/LeaveConfigTab';
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
 const API = `${BACKEND_URL}/api`;
@@ -646,6 +647,14 @@ export default function SalonSettingsV3({ salonId, salon, setSalon, getAuthHeade
           </div>
         </div>
         <SaveRow onClick={() => save()} disabled={saving || !dirty} testid="setg-leave-save" />
+
+        <div className="block" style={{ marginTop: 18 }}>
+          <h4>Leave types</h4>
+          <p className="bs">Add, edit or disable custom leave types (Casual, Sick, etc.) with accrual and year-end rules. These types show up on the staff attendance drawer.</p>
+          <div style={{ marginTop: 12 }}>
+            <LeaveConfigTab salonId={salonId} authHeaders={getAuthHeaders} />
+          </div>
+        </div>
       </>
     ),
 

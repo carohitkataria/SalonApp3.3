@@ -24,6 +24,8 @@ const BLANK = {
   home_price: 0,
   thumbnail_url: '',
   images: [],
+  gst_rate: null,
+  hsn_code: '',
 };
 
 function fmtCompactINR(n) {
@@ -502,6 +504,7 @@ export default function ServicesModule({ salonId, getAuthHeaders }) {
           salonId={salonId}
           getAuthHeaders={authHeadersRef.current}
           subs={subs[editing?.category] || []}
+          allServices={services}
           onSubCategoryCreate={(name) => saveSubcatForDrawer(editing?.category, name)}
           onClose={() => { setShowAdd(false); setEditing(null); }}
           onSaved={(saved, isNew) => {
@@ -628,7 +631,7 @@ function ServiceCard({ svc, metrics, onEdit, onDelete, onToggleFav, onClick }) {
   );
 }
 
-function ServiceDrawer({ initial, salonId, getAuthHeaders, subs, onSubCategoryCreate, onClose, onSaved }) {
+function ServiceDrawer({ initial, salonId, getAuthHeaders, subs, allServices, onSubCategoryCreate, onClose, onSaved }) {
   // IMPORTANT: keep drawer's sub_category coherent with its category.
   // - If parent passes `initial.sub_category` that doesn't belong to the current
   //   category's subs list, allow the "New sub-category" flow to add it.
@@ -637,8 +640,38 @@ function ServiceDrawer({ initial, salonId, getAuthHeaders, subs, onSubCategoryCr
   const fileRef = useRef(null);
   const [saving, setSaving] = useState(false);
   const isEdit = !!initial?.id;
+  const isPackage = (form.category || 'Services') === 'Packages';
+
+  // ---- Package composition state ----
+  const [linkedIds, setLinkedIds] = useState(Array.isArray(initial?.linked_service_ids) ? initial.linked_service_ids : []);
+  const [pkgSearch, setPkgSearch] = useState('');
+  const [pricingMode, setPricingMode] = useState(
+    initial?.discount_percentage && Number(initial.discount_percentage) > 0 ? 'discount' : 'manual'
+  );
+  const [discountPct, setDiscountPct] = useState(Number(initial?.discount_percentage || 0));
+  const [manualFinal, setManualFinal] = useState(Number(initial?.base_price || 0));
 
   useEffect(() => { setSubsForCat(subs); }, [subs]);
+
+  // Auto-compute subtotal + final for packages
+  const eligibleServices = useMemo(() => (allServices || []).filter((s) => (s.category || 'Services') !== 'Packages'), [allServices]);
+  const linkedSet = useMemo(() => new Set(linkedIds), [linkedIds]);
+  const subtotal = useMemo(() => {
+    return eligibleServices.reduce((acc, s) => linkedSet.has(s.id) ? acc + Number(s.base_price || 0) : acc, 0);
+  }, [eligibleServices, linkedSet]);
+  const computedFinal = useMemo(() => {
+    if (!isPackage) return Number(form.base_price || 0);
+    if (pricingMode === 'discount') {
+      const pct = Math.max(0, Math.min(100, Number(discountPct || 0)));
+      return Math.round(subtotal * (1 - pct / 100));
+    }
+    return Number(manualFinal || 0);
+  }, [isPackage, pricingMode, discountPct, subtotal, manualFinal, form.base_price]);
+  const impliedDiscountPct = subtotal > 0 ? Math.max(0, ((subtotal - computedFinal) / subtotal) * 100) : 0;
+
+  const toggleLinked = (svcId) => {
+    setLinkedIds((prev) => prev.includes(svcId) ? prev.filter((x) => x !== svcId) : [...prev, svcId]);
+  };
 
   const upd = (k, v) => setForm((f) => ({ ...f, [k]: v }));
 
@@ -665,29 +698,46 @@ function ServiceDrawer({ initial, salonId, getAuthHeaders, subs, onSubCategoryCr
   };
 
   const save = async () => {
-    if (!form.service_name.trim()) return toast.error('Service name required');
+    if (!form.service_name.trim()) return toast.error(isPackage ? 'Package name required' : 'Service name required');
+    if (isPackage && linkedIds.length === 0) {
+      return toast.error('Add at least one service to the package');
+    }
     setSaving(true);
     try {
-      // BUG FIX: on create, we send an EMPTY-STRING sub_category as null so the
-      // backend doesn't store a blank string. When the user has explicitly
-      // selected a sub-category (via the dropdown / auto-prefill), we forward
-      // it verbatim so the create endpoint persists it correctly.
       const cleanSub = (form.sub_category || '').trim();
+      // For packages: base_price = final computed (discount OR manual)
+      // Duration = sum of linked service durations (approx).
+      let effectivePrice = parseFloat(form.base_price || 0);
+      let effectiveDuration = parseInt(form.default_duration || 30, 10);
+      if (isPackage) {
+        effectivePrice = Math.max(0, Number(computedFinal || 0));
+        const totalMins = eligibleServices.reduce((acc, s) => linkedSet.has(s.id) ? acc + Number(s.default_duration || 30) : acc, 0);
+        effectiveDuration = totalMins || effectiveDuration;
+      }
       const payload = {
         service_name: form.service_name.trim(),
         description: form.description || '',
         category: form.category,
         sub_category: cleanSub || null,
         gender_tag: form.gender_tag,
-        default_duration: parseInt(form.default_duration || 30, 10),
-        base_price: parseFloat(form.base_price || 0),
+        default_duration: effectiveDuration,
+        base_price: effectivePrice,
         price_type: form.price_type || 'fixed',
         is_favorite: !!form.is_favorite,
         available_at_home: !!form.available_at_home,
         home_price: form.available_at_home ? parseFloat(form.home_price || 0) : null,
         thumbnail_url: form.thumbnail_url || null,
         images: form.images || [],
+        gst_rate: (form.gst_rate === '' || form.gst_rate === null || form.gst_rate === undefined) ? null : parseFloat(form.gst_rate),
+        hsn_code: (form.hsn_code || '').trim() || null,
       };
+      if (isPackage) {
+        payload.linked_service_ids = linkedIds;
+        payload.services_subtotal = Math.round(subtotal * 100) / 100;
+        payload.discount_percentage = pricingMode === 'discount'
+          ? Math.max(0, Math.min(100, Number(discountPct || 0)))
+          : Math.round(impliedDiscountPct * 100) / 100;
+      }
       let saved;
       if (isEdit) {
         const res = await axios.put(`${API}/services/${form.id}`, payload, { headers: getAuthHeaders() });
@@ -707,7 +757,7 @@ function ServiceDrawer({ initial, salonId, getAuthHeaders, subs, onSubCategoryCr
       // Merge back sub_category from our payload so the parent's `saved` shows
       // the sub-category immediately even if the backend response omitted it
       // (defensive; the backend does persist + return it).
-      saved = { ...saved, sub_category: payload.sub_category };
+      saved = { ...saved, sub_category: payload.sub_category, linked_service_ids: payload.linked_service_ids, discount_percentage: payload.discount_percentage };
       onSaved(saved, !isEdit);
     } catch (e) {
       console.error(e);
@@ -725,8 +775,8 @@ function ServiceDrawer({ initial, salonId, getAuthHeaders, subs, onSubCategoryCr
           <div className="dico"><Icon name={form.category === 'Packages' ? 'gift' : 'scissors'} size={20} /></div>
           <div>
             <div className="eyebrow">{isEdit ? 'Edit' : 'New'}</div>
-            <h3>{isEdit ? 'Edit Service' : 'Add Service'}</h3>
-            <p>Configure name, price, duration and availability.</p>
+            <h3>{isEdit ? (isPackage ? 'Edit Package' : 'Edit Service') : (isPackage ? 'Add Package' : 'Add Service')}</h3>
+            <p>{isPackage ? 'Bundle multiple services, apply a discount and set the final price.' : 'Configure name, price, duration and availability.'}</p>
           </div>
           <button className="z-drawer-close" onClick={onClose}><Icon name="x" /></button>
         </div>
@@ -754,8 +804,8 @@ function ServiceDrawer({ initial, salonId, getAuthHeaders, subs, onSubCategoryCr
           </div>
 
           <div className="z-field">
-            <label>Service name</label>
-            <input value={form.service_name} onChange={(e) => upd('service_name', e.target.value)} placeholder="e.g., Men's Haircut" />
+            <label>{isPackage ? 'Package name' : 'Service name'}</label>
+            <input value={form.service_name} onChange={(e) => upd('service_name', e.target.value)} placeholder={isPackage ? "e.g., Bridal Prep Bundle" : "e.g., Men's Haircut"} />
           </div>
 
           <div className="z-field">
@@ -802,6 +852,112 @@ function ServiceDrawer({ initial, salonId, getAuthHeaders, subs, onSubCategoryCr
             </div>
           </div>
 
+          {/* --- Package composition (only for Packages category) --- */}
+          {isPackage && (
+            <div className="z-field" style={{ background: 'var(--z-primary-050, #FDF4FF)', border: '1px solid var(--z-primary, #C6389E)', borderRadius: 12, padding: 14, marginTop: 4 }}>
+              <label style={{ fontWeight: 700, color: 'var(--z-primary, #C6389E)', display: 'flex', alignItems: 'center', gap: 6 }}>
+                <Icon name="gift" /> Services included in this package
+              </label>
+              <div style={{ fontSize: 11.5, color: 'var(--z-muted-2)', margin: '4px 0 10px' }}>
+                Tick every service that will be delivered as part of this package. The subtotal below auto-sums their prices.
+              </div>
+              <input
+                type="text"
+                placeholder="Search services…"
+                value={pkgSearch}
+                onChange={(e) => setPkgSearch(e.target.value)}
+                style={{ marginBottom: 8, width: '100%', padding: '8px 10px', borderRadius: 8, border: '1px solid var(--z-line, #E5DDE7)' }}
+                data-testid="pkg-svc-search"
+              />
+              <div style={{ maxHeight: 180, overflowY: 'auto', border: '1px solid var(--z-line, #E5DDE7)', borderRadius: 8, background: '#fff' }} data-testid="pkg-svc-list">
+                {eligibleServices.length === 0 && (
+                  <div style={{ padding: 12, fontSize: 12, color: 'var(--z-muted-2)' }}>No services yet. Create services first.</div>
+                )}
+                {eligibleServices
+                  .filter((s) => !pkgSearch || (s.service_name || '').toLowerCase().includes(pkgSearch.toLowerCase()))
+                  .map((s) => {
+                    const on = linkedSet.has(s.id);
+                    return (
+                      <label key={s.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '7px 10px', borderBottom: '1px solid #F4EEF6', cursor: 'pointer' }}>
+                        <input type="checkbox" checked={on} onChange={() => toggleLinked(s.id)} data-testid={`pkg-svc-check-${s.id}`} />
+                        <div style={{ flex: 1, fontSize: 12.5 }}>
+                          <b>{s.service_name || s.name}</b>
+                          <span style={{ color: 'var(--z-muted-2)', marginLeft: 8, fontSize: 11 }}>
+                            {s.default_duration || 30} min · {s.category || 'Services'}
+                            {s.sub_category ? ` · ${s.sub_category}` : ''}
+                          </span>
+                        </div>
+                        <div style={{ fontWeight: 700, fontSize: 12.5 }}>{rupee(Number(s.base_price || 0))}</div>
+                      </label>
+                    );
+                  })}
+              </div>
+
+              {/* Subtotal + discount + final */}
+              <div style={{ marginTop: 12, padding: 10, background: '#fff', borderRadius: 8, border: '1px solid var(--z-line, #E5DDE7)' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', padding: '3px 0', fontSize: 13 }}>
+                  <span style={{ color: 'var(--z-muted, #6B5E71)' }}>Sum of services ({linkedIds.length})</span>
+                  <span style={{ fontWeight: 700 }} data-testid="pkg-subtotal">{rupee(subtotal)}</span>
+                </div>
+
+                <div style={{ display: 'flex', gap: 12, alignItems: 'center', margin: '8px 0' }}>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 12 }}>
+                    <input type="radio" name="pkg-mode" checked={pricingMode === 'discount'} onChange={() => setPricingMode('discount')} data-testid="pkg-mode-discount" />
+                    Apply discount %
+                  </label>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 12 }}>
+                    <input type="radio" name="pkg-mode" checked={pricingMode === 'manual'} onChange={() => setPricingMode('manual')} data-testid="pkg-mode-manual" />
+                    Set final amount
+                  </label>
+                </div>
+
+                {pricingMode === 'discount' && (
+                  <div style={{ display: 'flex', justifyContent: 'space-between', padding: '3px 0', fontSize: 13, alignItems: 'center' }}>
+                    <span style={{ color: 'var(--z-muted, #6B5E71)' }}>Discount</span>
+                    <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
+                      <input
+                        type="number"
+                        min="0" max="100" step="0.1"
+                        value={discountPct}
+                        onChange={(e) => setDiscountPct(parseFloat(e.target.value) || 0)}
+                        style={{ width: 80, padding: '4px 8px', borderRadius: 6, border: '1px solid var(--z-line, #E5DDE7)', textAlign: 'right' }}
+                        data-testid="pkg-discount-pct"
+                      />
+                      <span style={{ fontWeight: 700 }}>%</span>
+                    </div>
+                  </div>
+                )}
+
+                {pricingMode === 'manual' && (
+                  <div style={{ display: 'flex', justifyContent: 'space-between', padding: '3px 0', fontSize: 13, alignItems: 'center' }}>
+                    <span style={{ color: 'var(--z-muted, #6B5E71)' }}>Final price (₹)</span>
+                    <input
+                      type="number"
+                      min="0"
+                      value={manualFinal}
+                      onChange={(e) => setManualFinal(parseFloat(e.target.value) || 0)}
+                      style={{ width: 120, padding: '4px 8px', borderRadius: 6, border: '1px solid var(--z-line, #E5DDE7)', textAlign: 'right', fontWeight: 700 }}
+                      data-testid="pkg-manual-final"
+                    />
+                  </div>
+                )}
+
+                {subtotal > 0 && computedFinal < subtotal && (
+                  <div style={{ display: 'flex', justifyContent: 'space-between', padding: '3px 0', fontSize: 12, color: 'var(--z-green, #12A594)' }}>
+                    <span>You save</span>
+                    <span style={{ fontWeight: 700 }}>{rupee(subtotal - computedFinal)} ({impliedDiscountPct.toFixed(1)}%)</span>
+                  </div>
+                )}
+
+                <hr style={{ margin: '8px 0', border: 'none', borderTop: '1px dashed var(--z-line, #E5DDE7)' }} />
+                <div style={{ display: 'flex', justifyContent: 'space-between', padding: '3px 0', fontSize: 15, alignItems: 'center' }}>
+                  <span style={{ fontWeight: 700 }}>Package price</span>
+                  <span style={{ fontSize: 20, fontWeight: 800, color: 'var(--z-primary, #C6389E)' }} data-testid="pkg-final">{rupee(computedFinal)}</span>
+                </div>
+              </div>
+            </div>
+          )}
+
           <div className="z-grid2">
             <div className="z-field">
               <label>Gender</label>
@@ -810,11 +966,12 @@ function ServiceDrawer({ initial, salonId, getAuthHeaders, subs, onSubCategoryCr
               </select>
             </div>
             <div className="z-field">
-              <label>Duration (mins)</label>
-              <input type="number" min="0" value={form.default_duration} onChange={(e) => upd('default_duration', e.target.value)} />
+              <label>{isPackage ? 'Duration (auto)' : 'Duration (mins)'}</label>
+              <input type="number" min="0" value={isPackage ? (eligibleServices.reduce((a, s) => linkedSet.has(s.id) ? a + Number(s.default_duration || 30) : a, 0) || form.default_duration) : form.default_duration} onChange={(e) => upd('default_duration', e.target.value)} disabled={isPackage} />
             </div>
           </div>
 
+          {!isPackage && (
           <div className="z-grid2">
             <div className="z-field">
               <label>Base price (₹)</label>
@@ -826,6 +983,26 @@ function ServiceDrawer({ initial, salonId, getAuthHeaders, subs, onSubCategoryCr
                 <option value="fixed">Fixed</option>
                 <option value="onwards">Onwards</option>
               </select>
+            </div>
+          </div>
+          )}
+
+          {/* Tax fields — only relevant when the salon is GST registered.
+              Kept optional; empty => the salon-default rate is applied. */}
+          <div className="z-grid2">
+            <div className="z-field">
+              <label>GST rate (%) <span style={{ fontWeight: 400, color: 'var(--z-muted-2)' }}>optional · overrides salon default</span></label>
+              <input
+                type="number" min="0" max="100" step="0.1"
+                value={form.gst_rate ?? ''}
+                onChange={(e) => upd('gst_rate', e.target.value === '' ? null : parseFloat(e.target.value))}
+                placeholder="e.g., 9 (each half of CGST/SGST)"
+                data-testid="svc-gst-rate"
+              />
+            </div>
+            <div className="z-field">
+              <label>HSN / SAC code <span style={{ fontWeight: 400, color: 'var(--z-muted-2)' }}>optional</span></label>
+              <input value={form.hsn_code || ''} onChange={(e) => upd('hsn_code', e.target.value)} placeholder="e.g., 999721" data-testid="svc-hsn-code" />
             </div>
           </div>
 
@@ -851,7 +1028,7 @@ function ServiceDrawer({ initial, salonId, getAuthHeaders, subs, onSubCategoryCr
         <div className="z-drawer-foot" style={{ display: 'flex', gap: 10 }}>
           <button className="z-btn z-btn--ghost" style={{ flex: 1 }} onClick={onClose}>Cancel</button>
           <button className="z-btn z-btn--pri" style={{ flex: 2 }} onClick={save} disabled={saving}>
-            <Icon name="save" /> {saving ? 'Saving…' : (isEdit ? 'Save changes' : 'Create service')}
+            <Icon name="save" /> {saving ? 'Saving…' : (isEdit ? 'Save changes' : (isPackage ? 'Create package' : 'Create service'))}
           </button>
         </div>
       </aside>

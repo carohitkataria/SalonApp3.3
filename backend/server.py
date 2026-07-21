@@ -226,6 +226,10 @@ class ServiceCreate(BaseModel):
     # GST — per-service override. When None the invoice falls back to salon.gst_rate.
     gst_rate: Optional[float] = None
     hsn_code: Optional[str] = None
+    # Package composition (only meaningful when category == 'Packages')
+    linked_service_ids: Optional[List[str]] = None
+    discount_percentage: Optional[float] = None
+    services_subtotal: Optional[float] = None  # snapshot of the sum-of-services at save time
 
 class ServiceUpdate(BaseModel):
     service_name: Optional[str] = None
@@ -250,6 +254,10 @@ class ServiceUpdate(BaseModel):
     # GST — per-service override
     gst_rate: Optional[float] = None
     hsn_code: Optional[str] = None
+    # Package composition (only meaningful when category == 'Packages')
+    linked_service_ids: Optional[List[str]] = None
+    discount_percentage: Optional[float] = None
+    services_subtotal: Optional[float] = None
 
 class Service(BaseModel):
     model_config = ConfigDict(extra="ignore")
@@ -274,6 +282,13 @@ class Service(BaseModel):
     home_min_items: Optional[int] = None
     home_travel_fee: Optional[float] = None
     home_service_radius_km: Optional[float] = None
+    # GST — per-service override
+    gst_rate: Optional[float] = None
+    hsn_code: Optional[str] = None
+    # Package composition (only meaningful when category == 'Packages')
+    linked_service_ids: Optional[List[str]] = None
+    discount_percentage: Optional[float] = None
+    services_subtotal: Optional[float] = None
 
 # Package Models
 class PackageService(BaseModel):
@@ -2649,37 +2664,46 @@ async def generate_and_send_invoice(token_id: str):
         if not salon:
             raise Exception("Salon not found")
         
-        # Get services details
+        # Get services details (with per-service GST rate)
         services_data = []
         total_amount = 0
-        
+        # Salon-level GST config
+        is_tax_invoice = bool(salon.get('is_gst_registered', False))
+        salon_tax_rate = float(salon.get('tax_rate', 9.0) or 0.0)
+        # Accumulate per-item tax so we can present a correct blended CGST/SGST.
+        cgst_total = 0.0
+        sgst_total = 0.0
+
         for service_id in token.get('selected_services', []):
             service = await db.services.find_one({"id": service_id}, {"_id": 0})
             if service:
-                # For simplicity, no discount here - can be added later
-                price = service.get('base_price', 0)
+                price = float(service.get('base_price', 0) or 0)
+                # Per-service GST rate (each half — CGST / SGST). Falls back to
+                # salon-level rate. Only honoured when the salon is GST-registered.
+                svc_gst = service.get('gst_rate')
+                item_rate = float(svc_gst if svc_gst is not None else salon_tax_rate)
+                item_cgst = (price * item_rate / 100.0) if is_tax_invoice else 0.0
+                item_sgst = (price * item_rate / 100.0) if is_tax_invoice else 0.0
                 services_data.append({
                     "name": service.get('service_name'),
                     "price": price,
                     "discount": 0,
-                    "amount": price
+                    "amount": price,
+                    "gst_rate": item_rate,
+                    "cgst": round(item_cgst, 2),
+                    "sgst": round(item_sgst, 2),
                 })
                 total_amount += price
-        
-        # Calculate tax if GST registered
-        is_tax_invoice = salon.get('is_gst_registered', False)
-        tax_rate = salon.get('tax_rate', 9.0)
-        
-        if is_tax_invoice:
-            subtotal = total_amount
-            cgst = subtotal * (tax_rate / 100)
-            sgst = subtotal * (tax_rate / 100)
-            total = subtotal + cgst + sgst
-        else:
-            subtotal = total_amount
-            cgst = 0
-            sgst = 0
-            total = subtotal
+                cgst_total += item_cgst
+                sgst_total += item_sgst
+
+        subtotal = total_amount
+        cgst = round(cgst_total, 2)
+        sgst = round(sgst_total, 2)
+        total = subtotal + cgst + sgst if is_tax_invoice else subtotal
+        # Legacy `tax_rate` in payload = the salon default (kept for backwards
+        # compatibility with the PDF template).
+        tax_rate = salon_tax_rate
         
         # Generate invoice number using salon's prefix and counter
         invoice_prefix = salon.get('invoice_prefix', 'INV')

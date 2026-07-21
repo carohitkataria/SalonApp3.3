@@ -337,6 +337,209 @@ export default function SalonStaffV3({ salonId, getAuthHeaders }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedId, canDocuments]);
 
+  // ---------- PHASE 2: Branches list (once per salon) ----------
+  useEffect(() => {
+    (async () => {
+      if (!salonId) return;
+      try {
+        const res = await axios.get(`${API}/salons/${salonId}/branches`, {
+          headers: getAuthHeaders?.() || {},
+        });
+        setBranchesList(res.data?.branches || res.data || []);
+      } catch (_) { /* noop */ }
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [salonId]);
+
+  // ---------- PHASE 2: Login history & credentials ----------
+  const loadLoginHistory = useCallback(async () => {
+    if (!selectedId || !salonId || !canAccess) return;
+    setLoginHistoryLoading(true);
+    try {
+      const res = await axios.get(
+        `${API}/salons/${salonId}/barbers/${selectedId}/login-history?limit=25`,
+        { headers: getAuthHeaders?.() || {} },
+      );
+      setLoginHistory({
+        history: res.data?.history || [],
+        active_devices: res.data?.active_devices || [],
+      });
+    } catch (_) {
+      setLoginHistory({ history: [], active_devices: [] });
+    } finally {
+      setLoginHistoryLoading(false);
+    }
+  }, [selectedId, salonId, canAccess, getAuthHeaders]);
+
+  useEffect(() => {
+    if (section === 'access' && selectedId) {
+      // Prefill login_id when opening access section
+      const cur = staff.find((x) => x.id === selectedId);
+      setAccessDraft({ login_id: cur?.login_id || '', password: '' });
+      loadLoginHistory();
+    }
+  }, [section, selectedId, staff, loadLoginHistory]);
+
+  const saveCredentials = async () => {
+    if (!selectedId) return;
+    const lid = (accessDraft.login_id || '').trim();
+    const pwd = accessDraft.password || '';
+    if (!lid && !pwd) return toast.error('Enter a Login ID or Password');
+    if (lid && lid.length < 6) return toast.error('Login ID must be at least 6 characters');
+    if (pwd && pwd.length < 8) return toast.error('Password must be at least 8 characters');
+    setAccessBusy(true);
+    try {
+      const body = {};
+      if (lid) body.login_id = lid;
+      if (pwd) body.password = pwd;
+      const res = await axios.put(
+        `${API}/salons/${salonId}/barbers/${selectedId}/credentials`,
+        body,
+        { headers: getAuthHeaders?.() || {} },
+      );
+      toast.success('Credentials updated');
+      // Update in-memory staff row
+      setStaff((prev) => prev.map((r) => r.id === selectedId ? { ...r, login_id: res.data?.login_id || lid || r.login_id } : r));
+      setAccessDraft({ login_id: res.data?.login_id || lid, password: '' });
+    } catch (err) {
+      toast.error(formatApiError(err, 'Could not save credentials'));
+    } finally {
+      setAccessBusy(false);
+    }
+  };
+
+  const revokeSession = async (sessionId) => {
+    if (!selectedId || !sessionId) return;
+    if (!window.confirm('Revoke this device? The staff will be logged out on it.')) return;
+    try {
+      await axios.post(
+        `${API}/salons/${salonId}/barbers/${selectedId}/revoke-session`,
+        { session_id: sessionId },
+        { headers: getAuthHeaders?.() || {} },
+      );
+      toast.success('Session revoked');
+      loadLoginHistory();
+    } catch (err) {
+      toast.error(formatApiError(err, 'Could not revoke session'));
+    }
+  };
+
+  // ---------- PHASE 2: Live stats with date filter ----------
+  const applyStatsPreset = (preset) => {
+    const today = new Date();
+    let from, to = today.toISOString().slice(0, 10);
+    if (preset === 'today') { from = to; }
+    else if (preset === 'this_week') {
+      const d = new Date(today);
+      const day = d.getDay() || 7;
+      d.setDate(d.getDate() - (day - 1));
+      from = d.toISOString().slice(0, 10);
+    } else if (preset === 'this_month') {
+      from = today.toISOString().slice(0, 8) + '01';
+    } else if (preset === 'last_month') {
+      const d = new Date(today.getFullYear(), today.getMonth() - 1, 1);
+      const end = new Date(today.getFullYear(), today.getMonth(), 0);
+      from = d.toISOString().slice(0, 10);
+      to = end.toISOString().slice(0, 10);
+    } else if (preset === 'last_30') {
+      const d = new Date(today); d.setDate(d.getDate() - 29);
+      from = d.toISOString().slice(0, 10);
+    } else { from = today.toISOString().slice(0, 8) + '01'; preset = 'this_month'; }
+    setStatsRange({ from, to, preset });
+  };
+
+  useEffect(() => {
+    (async () => {
+      if (!selectedId || !salonId) return;
+      setStatsLoading(true);
+      try {
+        const res = await axios.get(
+          `${API}/analytics/detailed-report?salon_id=${salonId}&start_date=${statsRange.from}&end_date=${statsRange.to}&barber_id=${selectedId}`,
+          { headers: getAuthHeaders?.() || {} },
+        ).catch(() => null);
+        if (res?.data) {
+          const d = res.data || {};
+          setStatsLive({
+            revenue: Number(d.total_revenue || d.revenue || 0),
+            incentives: Number(d.total_incentive || d.incentives || 0),
+            customers_served: Number(d.customers_served || d.total_customers || 0),
+            bookings: Number(d.total_bookings || d.bookings || 0),
+            avg_ticket: Number(d.avg_ticket || 0),
+          });
+        } else {
+          setStatsLive(null);
+        }
+      } catch (_) {
+        setStatsLive(null);
+      } finally {
+        setStatsLoading(false);
+      }
+    })();
+  }, [selectedId, salonId, statsRange.from, statsRange.to, getAuthHeaders]);
+
+  // ---------- PHASE 2: Branch transfer ----------
+  const openTransferDrawer = () => {
+    if (!selected) return;
+    setTransferBranchId(selected.branch_id || '');
+    setTransferDate(new Date().toISOString().slice(0, 10));
+    setTransferRemarks('');
+    setTransferOpen(true);
+  };
+
+  const saveTransfer = async () => {
+    if (!selectedId || !transferBranchId) return toast.error('Pick a destination branch');
+    if (transferBranchId === (selected?.branch_id || '')) return toast.error('Same as current branch');
+    setTransferBusy(true);
+    try {
+      // Try dedicated transfer endpoint; fall back to updating the barber's branch_id.
+      let ok = false;
+      try {
+        await axios.post(
+          `${API}/salons/${salonId}/barbers/${selectedId}/transfer`,
+          { to_branch_id: transferBranchId, transfer_date: transferDate, remarks: transferRemarks },
+          { headers: getAuthHeaders?.() || {} },
+        );
+        ok = true;
+      } catch (_) {
+        await axios.put(
+          `${API}/barbers/${selectedId}`,
+          { branch_id: transferBranchId },
+          { headers: getAuthHeaders?.() || {} },
+        );
+        ok = true;
+      }
+      if (ok) {
+        toast.success('Branch transfer recorded');
+        setStaff((prev) => prev.map((r) => r.id === selectedId ? { ...r, branch_id: transferBranchId } : r));
+        setTransferOpen(false);
+      }
+    } catch (err) {
+      toast.error(formatApiError(err, 'Could not transfer branch'));
+    } finally {
+      setTransferBusy(false);
+    }
+  };
+
+  // ---------- PHASE 2: Services grouping + bulk actions ----------
+  const setServicesBulk = async (svcIds, on) => {
+    if (!canEdit) return toast.error("You don't have permission");
+    if (!selectedId || !svcIds || svcIds.length === 0) return;
+    const map = { ...(barberServices[selectedId] || {}) };
+    svcIds.forEach((id) => { map[id] = { ...(map[id] || { price: null }), on }; });
+    setBarberServices((prev) => ({ ...prev, [selectedId]: map }));
+    let failed = 0;
+    await Promise.all(svcIds.map(async (id) => {
+      try {
+        await axios.put(
+          `${API}/barbers/${selectedId}/services/${id}/toggle?is_available=${on ? 'true' : 'false'}`,
+          {}, { headers: getAuthHeaders?.() || {} },
+        );
+      } catch (_) { failed += 1; }
+    }));
+    if (failed) toast.error(`${failed} service(s) failed to update`);
+    else toast.success(on ? 'All selected services enabled' : 'All selected services disabled');
+  };
+
   const uploadDoc = (docType) => {
     if (!canDocuments) return toast.error("You don't have permission");
     setPendingDocType(docType);
@@ -901,17 +1104,57 @@ export default function SalonStaffV3({ salonId, getAuthHeaders }) {
   const renderProfileBody = () => {
     const s = selected;
     const att = attendanceSummary[s.id] || { P: 0, A: 0, H: 0, HO: 0, L: 0 };
-    const rev = Number(s.month_revenue || 0);
-    const inc = Number(s.month_incentives || 0);
-    const cust = Number(s.customers_served || 0);
+    // Prefer live-stats from date filter; fall back to per-staff MTD fields.
+    const rev = statsLive ? statsLive.revenue : Number(s.month_revenue || 0);
+    const inc = statsLive ? statsLive.incentives : Number(s.month_incentives || 0);
+    const cust = statsLive ? statsLive.customers_served : Number(s.customers_served || 0);
     const rating = Number(s.average_rating || 0);
     const base = Number(s.compensation || 0);
+    const currentBranchName = (branchesList.find((b) => (b.id || b.branch_id) === s.branch_id) || {}).name || s.branch_name || '';
     return (
       <>
+        {/* Date range chip row */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginBottom: 12 }}>
+          <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--muted)', letterSpacing: 0.4, textTransform: 'uppercase' }}>Metrics for</span>
+          {[
+            { k: 'today', l: 'Today' },
+            { k: 'this_week', l: 'This week' },
+            { k: 'this_month', l: 'This month' },
+            { k: 'last_month', l: 'Last month' },
+            { k: 'last_30', l: 'Last 30d' },
+          ].map((p) => (
+            <button key={p.k} type="button"
+              className={`btn-ghost ${statsRange.preset === p.k ? 'on' : ''}`}
+              style={{
+                padding: '5px 11px', fontSize: 11,
+                background: statsRange.preset === p.k ? 'var(--primary-050)' : undefined,
+                color: statsRange.preset === p.k ? 'var(--primary)' : undefined,
+                borderColor: statsRange.preset === p.k ? 'var(--primary)' : undefined,
+              }}
+              onClick={() => applyStatsPreset(p.k)}
+              data-testid={`stats-preset-${p.k}`}>
+              {p.l}
+            </button>
+          ))}
+          <span style={{ marginLeft: 6, fontSize: 11, color: 'var(--muted)' }}>
+            {statsRange.from} → {statsRange.to}{statsLoading ? ' · loading…' : ''}
+          </span>
+          <div style={{ display: 'flex', gap: 6, marginLeft: 'auto' }}>
+            <input type="date" value={statsRange.from} max={statsRange.to}
+              onChange={(e) => setStatsRange({ ...statsRange, from: e.target.value, preset: 'custom' })}
+              style={{ fontSize: 11, padding: '5px 8px', borderRadius: 8, border: '1px solid var(--line)' }}
+              data-testid="stats-from" />
+            <input type="date" value={statsRange.to} min={statsRange.from} max={new Date().toISOString().slice(0, 10)}
+              onChange={(e) => setStatsRange({ ...statsRange, to: e.target.value, preset: 'custom' })}
+              style={{ fontSize: 11, padding: '5px 8px', borderRadius: 8, border: '1px solid var(--line)' }}
+              data-testid="stats-to" />
+          </div>
+        </div>
+
         <div className="metrics">
           <div className="metric"><div className="mi" style={{ background: 'var(--green-bg)', color: 'var(--green)' }}>
             <svg viewBox="0 0 24 24"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
-          </div><b>{rupee(rev)}</b><span>Revenue · MTD</span></div>
+          </div><b>{rupee(rev)}</b><span>Revenue</span></div>
           <div className="metric"><div className="mi" style={{ background: 'var(--amber-bg)', color: 'var(--amber)' }}>
             <svg viewBox="0 0 24 24"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
           </div><b>{rupee(inc)}</b><span>Incentives</span></div>
@@ -930,6 +1173,12 @@ export default function SalonStaffV3({ salonId, getAuthHeaders }) {
         )}
         <div className="secttl">
           Personal information
+          {isAdmin && branchesList.length > 1 && (
+            <button className="btn-ghost" style={{ padding: '7px 12px', marginLeft: 'auto' }} onClick={openTransferDrawer} data-testid="staff-branch-switch">
+              <svg viewBox="0 0 24 24"><path d="M17 3l4 4-4 4"/><path d="M3 7h18"/><path d="M7 21l-4-4 4-4"/><path d="M21 17H3"/></svg>
+              {currentBranchName ? `Switch branch (${currentBranchName})` : 'Switch branch'}
+            </button>
+          )}
           {canEdit && !editingProfile && (
             <button className="btn-ghost" style={{ padding: '7px 12px' }} onClick={startEditProfile}>
               <svg viewBox="0 0 24 24"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.12 2.12 0 0 1 3 3L12 15l-4 1 1-4z"/></svg>Edit
@@ -1156,6 +1405,17 @@ export default function SalonStaffV3({ salonId, getAuthHeaders }) {
       return <div className="rbac-lock"><svg viewBox="0 0 24 24"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>You don't have permission to manage services.</div>;
     }
     const map = barberServices[selectedId] || {};
+    // Group services by sub_category (fallback to category)
+    const groups = {};
+    (services || []).forEach((c) => {
+      const cat = c.sub_category || c.category || 'Other';
+      if (!groups[cat]) groups[cat] = [];
+      groups[cat].push(c);
+    });
+    const groupNames = Object.keys(groups).sort();
+    const allIds = (services || []).map((c) => c.id);
+    const allOn = allIds.length > 0 && allIds.every((id) => map[id]?.on);
+
     return (
       <>
         <div className="secttl">
@@ -1163,33 +1423,62 @@ export default function SalonStaffV3({ salonId, getAuthHeaders }) {
           <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--muted)', textTransform: 'none', letterSpacing: 0 }}>
             Only ticked services are bookable with this barber
           </span>
+          <div style={{ marginLeft: 'auto', display: 'flex', gap: 8 }}>
+            <button className="btn-ghost" style={{ padding: '7px 12px' }} onClick={() => setServicesBulk(allIds, !allOn)} data-testid="svc-select-all">
+              <svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg>
+              {allOn ? 'Deselect all' : 'Select all services'}
+            </button>
+          </div>
         </div>
-        <table className="svc-tbl">
-          <thead><tr>
-            <th style={{ width: 34 }}></th><th>Service</th><th>Salon price</th><th>{selected.name}'s price</th><th></th>
-          </tr></thead>
-          <tbody>
-            {services.map((c) => {
-              const st = map[c.id] || { on: false, price: null };
-              const base = Number(c.base_price || c.price || 0);
-              const ovr = st.on && st.price !== null && st.price !== base;
-              return (
-                <tr key={c.id} className={st.on ? '' : 'off'}>
-                  <td><div className={`cbx ${st.on ? 'on' : ''}`} onClick={() => toggleService(c.id)}>
-                    <svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg>
-                  </div></td>
-                  <td className="svc-n"><b>{c.service_name || c.name}</b><span>{c.default_duration || c.duration || 30} min</span></td>
-                  <td><span className="base-p">{rupee(base)}</span></td>
-                  <td>
-                    <input className="price-in" defaultValue={st.on ? (st.price ?? base) : ''}
-                      placeholder={String(base)} disabled={!st.on} />
-                  </td>
-                  <td style={{ textAlign: 'right' }}>{ovr && <span className="ovr">Custom</span>}</td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
+        {groupNames.map((cat) => {
+          const rows = groups[cat];
+          const catIds = rows.map((r) => r.id);
+          const catCount = catIds.filter((id) => map[id]?.on).length;
+          const catAllOn = catCount === catIds.length;
+          return (
+            <div key={cat} className="svc-cat-block" style={{ marginBottom: 18 }}>
+              <div className="svc-cat-head" style={{
+                display: 'flex', alignItems: 'center', gap: 10,
+                background: 'var(--soft)', padding: '10px 12px',
+                borderRadius: 10, marginBottom: 8,
+              }}>
+                <b style={{ fontSize: 13, letterSpacing: 0.2 }}>{cat}</b>
+                <span style={{ fontSize: 11, color: 'var(--muted)' }}>({catCount}/{catIds.length})</span>
+                <button className="btn-ghost" style={{ padding: '5px 10px', marginLeft: 'auto', fontSize: 11 }}
+                  onClick={() => setServicesBulk(catIds, !catAllOn)}
+                  data-testid={`svc-cat-toggle-${cat}`}>
+                  {catAllOn ? 'Deselect all' : 'Select all'}
+                </button>
+              </div>
+              <table className="svc-tbl">
+                <thead><tr>
+                  <th style={{ width: 34 }}></th><th>Service</th><th>Salon price</th><th>{selected.name}'s price</th><th></th>
+                </tr></thead>
+                <tbody>
+                  {rows.map((c) => {
+                    const st = map[c.id] || { on: false, price: null };
+                    const base = Number(c.base_price || c.price || 0);
+                    const ovr = st.on && st.price !== null && st.price !== base;
+                    return (
+                      <tr key={c.id} className={st.on ? '' : 'off'}>
+                        <td><div className={`cbx ${st.on ? 'on' : ''}`} onClick={() => toggleService(c.id)}>
+                          <svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg>
+                        </div></td>
+                        <td className="svc-n"><b>{c.service_name || c.name}</b><span>{c.default_duration || c.duration || 30} min</span></td>
+                        <td><span className="base-p">{rupee(base)}</span></td>
+                        <td>
+                          <input className="price-in" defaultValue={st.on ? (st.price ?? base) : ''}
+                            placeholder={String(base)} disabled={!st.on} />
+                        </td>
+                        <td style={{ textAlign: 'right' }}>{ovr && <span className="ovr">Custom</span>}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          );
+        })}
       </>
     );
   };
@@ -1325,21 +1614,122 @@ export default function SalonStaffV3({ salonId, getAuthHeaders }) {
     if (!canAccess) {
       return <div className="rbac-lock"><svg viewBox="0 0 24 24"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>You don't have permission to manage access. Ask your admin to open Settings → Roles &amp; Access.</div>;
     }
+    const fmtDT = (iso) => {
+      if (!iso) return '—';
+      try { return new Date(iso).toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short' }); }
+      catch (_) { return iso; }
+    };
     return (
       <>
-        <div className="secttl">Login &amp; access</div>
-        <div className="grid2" style={{ marginBottom: 16 }}>
-          <div className="field"><label>Login ID (mobile) <span className="req">*</span></label>
-            <input value={selected.phone || selected.mobile || '—'} disabled />
-            <span className="idnote"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></svg>Mobile number is the login ID — mandatory &amp; unique.</span>
+        <div className="secttl">Login credentials</div>
+        <div className="grid2" style={{ marginBottom: 8 }}>
+          <div className="field"><label>Login ID <span className="req">*</span> <span style={{ fontWeight: 400, color: 'var(--muted)' }}>(min 6 chars, unique platform-wide)</span></label>
+            <input
+              value={accessDraft.login_id}
+              onChange={(e) => setAccessDraft({ ...accessDraft, login_id: e.target.value })}
+              placeholder="e.g. imran.singh"
+              autoComplete="off"
+              data-testid="staff-login-id"
+            />
+          </div>
+          <div className="field"><label>Password <span style={{ fontWeight: 400, color: 'var(--muted)' }}>(min 8 chars — only admin can set)</span></label>
+            <input
+              type="password"
+              value={accessDraft.password}
+              onChange={(e) => setAccessDraft({ ...accessDraft, password: e.target.value })}
+              placeholder="Leave blank to keep unchanged"
+              autoComplete="new-password"
+              data-testid="staff-login-password"
+            />
           </div>
         </div>
-        <div className="note-box" style={{ background: 'var(--sky-bg)', border: '1px solid #CFE4FA', borderRadius: 11, padding: '10px 13px', color: 'var(--ink-soft)', fontSize: 12 }}>
+        <div className="grid2" style={{ marginBottom: 16 }}>
+          <div className="field"><label>Mobile number (contact)</label>
+            <input value={selected?.phone || selected?.mobile || '—'} disabled />
+            <span className="idnote"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></svg>Mobile is a data field only. Login uses the ID + Password above.</span>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'flex-end', gap: 8 }}>
+            <button className="btn-primary" onClick={saveCredentials} disabled={accessBusy} data-testid="staff-credentials-save">
+              <svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg>{accessBusy ? 'Saving…' : 'Save credentials'}
+            </button>
+          </div>
+        </div>
+
+        <div className="note-box" style={{ background: 'var(--sky-bg)', border: '1px solid #CFE4FA', borderRadius: 11, padding: '10px 13px', color: 'var(--ink-soft)', fontSize: 12, marginBottom: 18 }}>
           <svg viewBox="0 0 24 24" style={{ width: 15, height: 15, color: 'var(--sky)', marginRight: 8, verticalAlign: 'middle', fill: 'none', stroke: 'currentColor', strokeWidth: 2 }}>
             <circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/>
           </svg>
           Detailed module-level permissions are managed under <b>Settings → Roles &amp; Access → Manage Staff Access</b>.
         </div>
+
+        {/* Active devices */}
+        <div className="secttl">
+          Active devices
+          <button className="btn-ghost" style={{ marginLeft: 'auto', padding: '7px 12px' }} onClick={loadLoginHistory} disabled={loginHistoryLoading}>
+            <svg viewBox="0 0 24 24"><path d="M23 4v6h-6"/><path d="M1 20v-6h6"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
+            {loginHistoryLoading ? 'Loading…' : 'Refresh'}
+          </button>
+        </div>
+        {(!loginHistory.active_devices || loginHistory.active_devices.length === 0) && (
+          <div style={{ padding: 16, fontSize: 12, color: 'var(--muted)', textAlign: 'center', border: '1px dashed #E5DDE7', borderRadius: 10, marginBottom: 18 }}>
+            No active device sessions.
+          </div>
+        )}
+        {loginHistory.active_devices && loginHistory.active_devices.length > 0 && (
+          <table className="svc-tbl" data-testid="staff-active-devices" style={{ marginBottom: 18 }}>
+            <thead><tr>
+              <th>Device / Browser</th><th>Location / IP</th><th>Last seen</th><th></th>
+            </tr></thead>
+            <tbody>
+              {loginHistory.active_devices.map((d, i) => (
+                <tr key={d.id || i}>
+                  <td className="svc-n">
+                    <b>{d.device || d.user_agent || 'Unknown device'}</b>
+                    <span>{d.platform || d.os || ''}</span>
+                  </td>
+                  <td>{d.ip || d.location || '—'}</td>
+                  <td>{fmtDT(d.last_seen || d.created_at)}</td>
+                  <td style={{ textAlign: 'right' }}>
+                    <button className="btn-danger" style={{ padding: '5px 10px', fontSize: 11 }}
+                      onClick={() => revokeSession(d.id)} data-testid={`revoke-session-${d.id}`}>Revoke</button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+
+        {/* Login history */}
+        <div className="secttl">Login history</div>
+        {(!loginHistory.history || loginHistory.history.length === 0) && (
+          <div style={{ padding: 16, fontSize: 12, color: 'var(--muted)', textAlign: 'center', border: '1px dashed #E5DDE7', borderRadius: 10 }}>
+            No login events recorded yet.
+          </div>
+        )}
+        {loginHistory.history && loginHistory.history.length > 0 && (
+          <table className="svc-tbl" data-testid="staff-login-history">
+            <thead><tr>
+              <th>When</th><th>Event</th><th>Device / IP</th><th>Note</th>
+            </tr></thead>
+            <tbody>
+              {loginHistory.history.map((e, i) => (
+                <tr key={e.id || i}>
+                  <td>{fmtDT(e.timestamp || e.created_at)}</td>
+                  <td>
+                    <span className={`st-pill st-${e.event === 'login' ? 'P' : (e.event === 'revoked' ? 'A' : 'HO')}`}>
+                      {e.event || 'event'}
+                    </span>
+                  </td>
+                  <td className="svc-n">
+                    <b>{e.device || e.user_agent || 'Unknown'}</b>
+                    <span>{e.ip || ''}</span>
+                  </td>
+                  <td>{e.note || e.reason || ''}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
       </>
     );
   };
@@ -1786,6 +2176,56 @@ export default function SalonStaffV3({ salonId, getAuthHeaders }) {
           <button className="btn-ghost" disabled={addBusy} onClick={() => setAddOpen(false)}>Cancel</button>
           <button className="btn-primary" onClick={handleAddStaff} disabled={addBusy} data-testid="add-staff-submit">
             <svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg>{addBusy ? 'Adding…' : 'Add staff'}
+          </button>
+        </div>
+      </aside>
+
+      {/* Branch Transfer drawer */}
+      <div className={`staffv3-ov ${transferOpen ? 'open' : ''}`} onClick={() => !transferBusy && setTransferOpen(false)} />
+      <aside className={`staffv3-drawer ${transferOpen ? 'open' : ''}`} data-testid="branch-transfer-drawer">
+        <div className="dh">
+          <div className="tt">
+            <div className="ic">
+              <svg viewBox="0 0 24 24"><path d="M17 3l4 4-4 4"/><path d="M3 7h18"/><path d="M7 21l-4-4 4-4"/><path d="M21 17H3"/></svg>
+            </div>
+            <div>
+              <h3>Switch branch {selected ? `— ${selected.name}` : ''}</h3>
+              <p>Transfer the staff to another branch of the salon</p>
+            </div>
+          </div>
+          <button className="close" onClick={() => setTransferOpen(false)} disabled={transferBusy}>
+            <svg viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+          </button>
+        </div>
+        <div className="db-scroll">
+          <div className="grid2">
+            <div className="field">
+              <label>Current branch</label>
+              <input value={(branchesList.find((b) => (b.id || b.branch_id) === selected?.branch_id) || {}).name || '—'} disabled />
+            </div>
+            <div className="field">
+              <label>Move to <span className="req">*</span></label>
+              <select value={transferBranchId} onChange={(e) => setTransferBranchId(e.target.value)} data-testid="transfer-branch">
+                <option value="">Select branch…</option>
+                {branchesList.map((b) => (
+                  <option key={b.id || b.branch_id} value={b.id || b.branch_id}>{b.name || b.branch_name}</option>
+                ))}
+              </select>
+            </div>
+            <div className="field">
+              <label>Effective date</label>
+              <input type="date" value={transferDate} onChange={(e) => setTransferDate(e.target.value)} data-testid="transfer-date" />
+            </div>
+            <div className="field" style={{ gridColumn: '1 / span 2' }}>
+              <label>Remarks (optional)</label>
+              <input value={transferRemarks} onChange={(e) => setTransferRemarks(e.target.value)} placeholder="e.g. Requested by owner" data-testid="transfer-remarks" />
+            </div>
+          </div>
+        </div>
+        <div className="df">
+          <button className="btn-ghost" disabled={transferBusy} onClick={() => setTransferOpen(false)}>Cancel</button>
+          <button className="btn-primary" disabled={transferBusy || !transferBranchId} onClick={saveTransfer} data-testid="transfer-save">
+            <svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg>{transferBusy ? 'Saving…' : 'Confirm transfer'}
           </button>
         </div>
       </aside>
