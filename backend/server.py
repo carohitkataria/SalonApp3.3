@@ -7840,6 +7840,12 @@ async def upload_services_csv(
             "available_at_home": _truthy(_find(raw, "available_at_home", "athome", "home")),
             "thumbnail_url": (str(_find(raw, "thumbnail_url", "thumbnail", "thumb") or "").strip() or None),
             "images": _split_images(_find(raw, "images", "image_urls", "image")),
+            "gst_rate": (
+                _to_float(_find(raw, "gst_rate", "gst", "tax_rate"), 0.0)
+                if str(_find(raw, "gst_rate", "gst", "tax_rate") or "").strip() != ""
+                else None
+            ),
+            "hsn_code": (str(_find(raw, "hsn_code", "hsn", "sac", "sac_code") or "").strip() or None),
             "is_active": True,
             "is_enabled": True,
             "source": "csv_upload",
@@ -7905,12 +7911,12 @@ async def upload_services_csv(
 
 # ---- Upload template + history + rollback ------------------------------------
 SERVICES_CSV_TEMPLATE = (
-    "service_name,description,category,sub_category,gender_tag,default_duration,base_price,price_type,is_favorite,available_at_home,thumbnail_url,images\n"
-    "Men's Haircut,Classic scissor cut with styling,Services,Hair,Men,30,300,fixed,true,false,,\n"
-    "Beard Trim,Shape-up and hot towel,Services,Beard,Men,20,150,fixed,false,false,,\n"
-    "Women's Haircut,Wash + cut + blow-dry,Services,Hair,Women,45,600,fixed,true,false,,\n"
-    "Classic Manicure,Nail shaping + cuticle care,Services,Nails,Unisex,30,400,fixed,false,true,,\n"
-    "Bridal Glow Package,Facial + hair spa + mani-pedi,Packages,,Women,180,4999,onwards,true,false,,\n"
+    "service_name,description,category,sub_category,gender_tag,default_duration,base_price,price_type,is_favorite,available_at_home,thumbnail_url,images,gst_rate,hsn_code\n"
+    "Men's Haircut,Classic scissor cut with styling,Services,Hair,Men,30,300,fixed,true,false,,,9,999721\n"
+    "Beard Trim,Shape-up and hot towel,Services,Beard,Men,20,150,fixed,false,false,,,9,999721\n"
+    "Women's Haircut,Wash + cut + blow-dry,Services,Hair,Women,45,600,fixed,true,false,,,9,999721\n"
+    "Classic Manicure,Nail shaping + cuticle care,Services,Nails,Unisex,30,400,fixed,false,true,,,9,999721\n"
+    "Bridal Glow Package,Facial + hair spa + mani-pedi (bulk-upload packages leave category='Packages' and fill base_price for the bundle),Packages,,Women,180,4999,onwards,true,false,,,9,999721\n"
 )
 
 

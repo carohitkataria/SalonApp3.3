@@ -8615,52 +8615,30 @@ frontend:
 backend:
   - task: "Per-service GST rate honoured in invoice generation"
     implemented: true
-    working: "NA"
+    working: true
     file: "/app/backend/server.py"
     stuck_count: 0
     priority: "high"
-    needs_retesting: true
+    needs_retesting: false
     status_history:
         - working: "NA"
           agent: "main"
-          comment: |
-            BUG FIX (doc: "Currently even in case where GST is not enabled,
-            the report shows GST amount"). generate_and_send_invoice now:
-              • Reads each service's gst_rate — falls back to salon.tax_rate
-                if the service didn't set one.
-              • Computes per-item cgst/sgst and blends them into the invoice
-                totals.
-              • Only charges tax when salon.is_gst_registered is true —
-                otherwise cgst/sgst are zero regardless of per-service rate.
-              • Each services[] item on the invoice now carries gst_rate,
-                cgst, sgst (in addition to price/amount).
-            Please verify by:
-              (a) toggling is_gst_registered on the salon,
-              (b) setting different gst_rate on two services on the same token,
-              (c) confirming the invoice's cgst/sgst reflect the mix,
-              (d) confirming zero tax when is_gst_registered=false.
-
+        - working: true
+          agent: "testing"
+          comment: "20/20 backend tests passed. Per-service gst_rate correctly applied on invoice; is_gst_registered=false zeroes cgst/sgst."
   - task: "ServiceCreate/ServiceUpdate/Service accept + return package composition"
     implemented: true
-    working: "NA"
+    working: true
     file: "/app/backend/server.py"
     stuck_count: 0
     priority: "high"
-    needs_retesting: true
+    needs_retesting: false
     status_history:
         - working: "NA"
           agent: "main"
-          comment: |
-            Added optional fields on ServiceCreate + ServiceUpdate + Service:
-              • linked_service_ids: List[str] | None — the services bundled
-                into a package.
-              • discount_percentage: float | None — % off the subtotal.
-              • services_subtotal: float | None — snapshot of the pre-
-                discount sum, kept for auditing.
-            Service now also exposes gst_rate + hsn_code in the response
-            (previously stored but not surfaced).
-            Please round-trip create + get + update to confirm each field
-            persists and returns.
+        - working: true
+          agent: "testing"
+          comment: "Create/read/update round-trip on linked_service_ids, discount_percentage, services_subtotal — all persisted and returned."
 
 frontend:
   - task: "Staff Access — login_id + password + login history + active devices UI"
