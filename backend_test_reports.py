@@ -9,7 +9,7 @@ import json
 from datetime import datetime
 
 # Configuration
-BASE_URL = "https://payroll-tracker-273.preview.emergentagent.com/api"
+BASE_URL = "https://wip-final-push.preview.emergentagent.com/api"
 SALON_ID = "c1ab42d2-dca7-4d8b-9ce9-8dff1942a393"
 ADMIN_IDENTIFIER = "admin"
 ADMIN_PASSWORD = "salon123"

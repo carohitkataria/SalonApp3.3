@@ -17,7 +17,7 @@ import sys
 from typing import Dict, Optional
 
 # Backend URL
-BASE_URL = "https://payroll-tracker-273.preview.emergentagent.com/api"
+BASE_URL = "https://wip-final-push.preview.emergentagent.com/api"
 
 # Test credentials
 ADMIN_IDENTIFIER = "admin"

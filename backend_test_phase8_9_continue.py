@@ -5,7 +5,7 @@ Phase 8 + Phase 9 Backend Testing — Continue from existing suppliers
 import requests
 import json
 
-BASE_URL = "https://payroll-tracker-273.preview.emergentagent.com/api"
+BASE_URL = "https://wip-final-push.preview.emergentagent.com/api"
 PLATFORM_OWNER_MOBILE = "7503070727"
 
 # Test supplier IDs (from previous run)
